@@ -127,21 +127,20 @@ export function FrontDesk() {
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
         <div className="mr-auto"><h1 className="text-[30px] leading-tight font-semibold">Front desk</h1>
           <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
-        
+        {tab === 'history'
+          ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab('waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
+          : <div className="flex items-center gap-1.5 no-print"><button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button><button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button></div>}
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
-        <div className="anim-fade-up flex flex-wrap items-center gap-x-9 gap-y-4 mb-5">
-          <Stat label="Appointments" value={d.appointments.filter((a: any) => a.status !== 'cancelled').length} sub={scheduled.length ? `· ${scheduled.length} to come` : ''} />
-          <Sep /><Stat label="Waiting" value={waiting.length} tone="clay" sub={waiting.length ? `· longest ${longest} min` : ''} />
-          <Sep /><Stat label="With doctor" value={inConsult.length} />
-          <Sep /><Stat label="Completed" value={completed.filter((v) => v.status === 'done').length} />
-          <Sep /><Stat label="Collected" value={<Num value={collected} format={money} />} tone="sage" sub={(d.payments ?? []).length ? '· ' + d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : ''} />
-        </div>
-
-        <div className="anim-fade-up flex flex-wrap items-center gap-1.5 mb-3" style={{ animationDelay: '40ms' }}>
-          <Segmented value={tab} onChange={setTab} options={tabs.map(([k, label, n]) => ({ value: k, label, count: n >= 0 ? n : undefined, tone: k === 'needs' && n > 0 ? ('rose' as const) : undefined }))} />
-          {tab === 'history' ? <div ref={setSlot} className="ml-auto flex flex-wrap items-center gap-2 no-print" /> : <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button></div>}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7 mb-4 stagger">
+          <FilterCard i={0} label="Waiting" value={waiting.length} sub={waiting.length ? `longest ${longest} min` : 'nobody waiting'} tone="clay" on={tab === 'waiting'} onClick={() => setTab('waiting')} />
+          <FilterCard i={1} label="Not yet arrived" value={scheduled.length} sub={late.length ? `${late.length} late` : 'booked'} on={tab === 'scheduled'} onClick={() => setTab('scheduled')} />
+          <FilterCard i={2} label="With doctor" value={inConsult.length} sub="in consultation" on={tab === 'doctor'} onClick={() => setTab('doctor')} />
+          <FilterCard i={3} label="Completed" value={completed.length + noShows.length} sub={`${completed.filter((v) => v.status === 'done').length} seen`} on={tab === 'completed'} onClick={() => setTab('completed')} />
+          <FilterCard i={4} label="All" value={visits.length + scheduled.length + noShows.length} sub="everyone today" on={tab === 'all'} onClick={() => setTab('all')} />
+          <FilterCard i={5} label="Needs you" value={needsCount} sub={dueTotal ? `${money(dueTotal)} due` : needsCount ? 'late arrivals' : 'all clear'} tone="rose" on={tab === 'needs'} onClick={() => setTab('needs')} />
+          {(can(perms, 'report.daily') || can(perms, 'finance.read')) && <div style={{ ['--i' as any]: 6 }} className="rounded-[22px] border border-white/80 bg-white/35 px-4 py-3.5"><div className="text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Collected</div><div className="mt-1 text-[28px] font-semibold leading-none tracking-tight text-sage"><Num value={collected} format={money} /></div><div className="mt-1.5 text-xs text-muted truncate">{(d.payments ?? []).length ? d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : 'nothing yet'}</div></div>}
         </div>
 
         {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={() => nav('/booking')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
@@ -156,6 +155,20 @@ export function FrontDesk() {
       </>)}
       {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visits.filter((v) => ['waiting', 'intake'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); refresh(); }} />}
     </div>
+  );
+}
+
+/** A stat that is also a filter: click it to show exactly those patients. */
+function FilterCard({ i, label, value, sub, tone, on, onClick }: { i: number; label: string; value: number; sub?: string; tone?: 'clay' | 'rose'; on: boolean; onClick: () => void }) {
+  const alert = tone === 'rose' && value > 0;
+  return (
+    <button type="button" onClick={onClick} aria-pressed={on}
+      className={`rounded-[22px] border px-4 py-3.5 text-left transition-[background-color,box-shadow,transform,border-color,color] duration-300 ease-[var(--ease)] hover:-translate-y-0.5 ${on ? 'border-ink bg-ink text-white' : alert ? 'border-rose/25 bg-rose-soft text-rose' : 'border-white/80 bg-white/55 hover:bg-white'}`}
+      style={on ? { boxShadow: '0 22px 40px -22px rgba(23,25,26,.7)', ['--i' as any]: i } : { boxShadow: 'var(--shadow-soft)', ['--i' as any]: i }}>
+      <div className={`text-[11px] font-bold uppercase tracking-[0.09em] ${on ? 'text-white/70' : alert ? 'text-rose' : 'text-muted'}`}>{label}</div>
+      <div className={`mt-1 text-[28px] font-semibold leading-none tracking-tight ${!on && tone === 'clay' && value > 0 ? 'text-clay' : ''}`}><Num value={value} /></div>
+      {sub && <div className={`mt-1.5 truncate text-xs ${on ? 'text-white/70' : alert ? 'text-rose/80' : 'text-muted'}`}>{sub}</div>}
+    </button>
   );
 }
 
