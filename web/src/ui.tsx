@@ -36,7 +36,7 @@ export const Chip = ({ tone = '', children, className = '' }: { tone?: '' | 'cla
 );
 
 export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?: string }) {
-  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('');
+  const initials = name.split(/\s+/).filter((s) => /^\p{L}/u.test(s)).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('');
   const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
   return <div className={`${size} shrink-0 rounded-full grid place-items-center font-semibold text-white`} style={{ background: `linear-gradient(135deg, hsl(${hue} 32% 48%), hsl(${(hue + 30) % 360} 36% 38%))` }}>{initials}</div>;
 }
