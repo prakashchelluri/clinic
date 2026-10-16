@@ -109,8 +109,8 @@ h1, h2, .serif { font-family: var(--font-serif); letter-spacing: -0.01em; }
 
   .kbd { @apply inline-block rounded-md border border-line bg-paper px-1.5 py-0.5 text-[10px] font-mono text-muted; }
   .table { @apply w-full text-sm; }
-  .table th { @apply text-left text-[11px] font-semibold uppercase tracking-wider text-muted pb-2 border-b border-line; }
-  .table td { @apply py-2.5 border-b border-line/70 align-middle; }
+  .table th { @apply text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted px-4 py-3.5 border-b border-line bg-paper/50 whitespace-nowrap; }
+  .table td { @apply px-4 py-3.5 border-b border-line/70 align-middle; }
   .table tr:last-child td { @apply border-b-0; }
 }
 
