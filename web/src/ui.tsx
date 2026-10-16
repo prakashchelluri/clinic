@@ -141,7 +141,7 @@ export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?:
   if (!shown.length) return null;
   return (
     <div className="relative inline-block" ref={ref}>
-      <button type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" /></button>
+      <button type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" className="h-5 w-5" /></button>
       {open && <div className="menu anim-menu" role="menu">{shown.map((i) => i.href
         ? <a key={i.label} href={i.href} role="menuitem" className={i.danger ? 'danger' : ''}>{i.label}</a>
         : <button key={i.label} type="button" role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => { setOpen(false); i.onClick?.(); }}>{i.label}</button>)}</div>}
