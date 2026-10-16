@@ -57,7 +57,7 @@ export function Calendar() {
                   const tone = w.free <= 0 ? 'rose' : w.free <= 2 ? 'amber' : 'sage';
                   return (
                     <div key={w.id} className="absolute left-0 right-[42%] rounded-xl border bg-surface px-3 py-2 anim-fade-up overflow-hidden" style={{ top: top(w.startTime), height: height(w.startTime, w.endTime), borderColor: 'var(--color-line)' }}>
-                      <div className="flex items-center gap-2 text-sm"><span className="font-medium">{w.startTime}–{w.endTime}</span><span className="text-xs text-muted">OP window</span><Chip tone={tone as any} className="ml-auto">{w.allocated}/{w.effectiveCapacity}{w.effectiveCapacity !== w.capacity && <span className="line-through opacity-60 ml-1">{w.capacity}</span>}</Chip></div>
+                      <div className="flex items-center gap-2 text-sm"><span className="font-medium whitespace-nowrap">{w.startTime}–{w.endTime}</span><span className="text-xs text-muted whitespace-nowrap">OP window</span><Chip tone={tone as any} className="ml-auto">{w.allocated}/{w.effectiveCapacity}{w.effectiveCapacity !== w.capacity && <span className="line-through opacity-60 ml-1">{w.capacity}</span>}</Chip></div>
                       {w.reductions.length > 0 && <div className="text-[11px] text-amber mt-1">capacity reduced: {w.reductions.map((r: any) => `${r.note ?? r.kind} (${r.minutes} min)`).join(', ')}</div>}
                     </div>
                   );

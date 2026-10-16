@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, api, qc } from '../api';
-import { Chip, Icon, Modal, PageHeader, Section, money, toast } from '../ui';
+import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast } from '../ui';
 
 type Tab = 'clinic' | 'people' | 'forms' | 'fees' | 'medicines' | 'procedures' | 'rooms';
 const TABS: [Tab, string, string, string][] = [
@@ -23,6 +23,7 @@ export function Settings() {
   const [tab, setTab] = useState<Tab>('clinic');
   const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); };
   const cur = TABS.find((t) => t[0] === tab)!;
+  if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
   return (
     <div>
       <PageHeader title="Settings" subtitle="Everything the clinic runs on, editable by the owner. Changes apply immediately." />
