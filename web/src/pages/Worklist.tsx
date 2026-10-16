@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, patch, post, qc, today } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast } from '../ui';
 
 const OUTCOMES = ['Will come', 'Wants another date', 'No answer', 'Wrong number', 'Declined', 'Done elsewhere'];
 type Kind = 'procedure' | 'followup' | 'investigation';
@@ -63,13 +63,11 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule }: { r: any; 
           {r.contactLog.length > 0 && <div className="text-[11px] text-muted mt-1">{r.contactLog.slice(-2).map((c: any, k: number) => <span key={k} className="mr-3">{fmtDate(c.at)} · {c.by.split(' ')[0]}: {c.outcome}{c.note ? ` — ${c.note}` : ''}</span>)}</div>}
         </div>
         {canWrite && (
-          <div className="flex items-center gap-1 flex-wrap">
-            <a className="btn btn-sm" href={`tel:${r.patient.phone ?? ''}`}><Icon name="phone" className="h-3.5 w-3.5" />Call</a>
-            {isTest ? <button className={`btn btn-sm btn-primary ${open ? 'opacity-70' : ''}`} onClick={() => setOpen(!open)}><Icon name="check" className="h-3.5 w-3.5" />Result received</button>
-              : <><button className={`btn btn-sm ${open ? 'bg-paper' : ''}`} onClick={() => setOpen(!open)}>Log call</button>
-                {r.kind === 'procedure' && <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />Schedule</button>}
-                {r.kind === 'followup' && <button className="btn btn-sm btn-primary" onClick={() => onUpdate({ status: 'scheduled' })}>Booked</button>}
-                <button className="btn btn-ghost btn-icon" title="Mark done" onClick={() => onUpdate({ status: 'done' })}><Icon name="check" /></button></>}
+          <div className="flex items-center gap-1.5">
+            {isTest ? <button className="btn btn-sm btn-primary" onClick={() => setOpen(!open)}><Icon name="check" className="h-3.5 w-3.5" />Result received</button>
+              : r.kind === 'procedure' ? <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />Schedule</button>
+              : <button className="btn btn-sm btn-primary" onClick={() => onUpdate({ status: 'scheduled' })}>Booked</button>}
+            <MoreMenu items={[{ label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }, { label: 'Log a call', hidden: isTest, onClick: () => setOpen(!open) }, { label: 'Mark done', hidden: isTest, onClick: () => onUpdate({ status: 'done' }) }]} />
           </div>
         )}
       </div>

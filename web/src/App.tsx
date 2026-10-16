@@ -1,65 +1,118 @@
-import { NavLink, Outlet, useNavigate, useLocation, Navigate } from 'react-router';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useConfig, post, qc } from './api';
 import { Avatar, Icon, ToastHost } from './ui';
-
-const NAV = [
-  ['/queue', 'Front desk', 'queue', 'visit.read'],
-  ['/booking', 'Booking', 'calendar', 'appointment.read'],
-  ['/calendar', 'Calendar', 'clock', 'appointment.read'],
-  ['/patients', 'Patients', 'users', 'patient.read'],
-  ['/worklist', 'Procedures', 'stetho', 'worklist.read'],
-  ['/pharmacy', 'Pharmacy', 'pill', 'pharmacy.read'],
-  ['/reports', 'Reports', 'chart', 'report.daily'],
-  ['/settings', 'Settings', 'edit', 'config.write'],
-  ['/platform', 'Clinics', 'door', 'platform.read'],
-] as const;
+import { CommandPalette } from './palette';
 
 export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
 }
 
-const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
+type NavItem = { to: string; label: string; show: (c: (p: string) => boolean) => boolean };
+const NAV: NavItem[] = [
+  { to: '/overview', label: 'Overview', show: (c) => c('finance.read') },
+  { to: '/today', label: 'Today', show: (c) => c('encounter.complete') },
+  { to: '/queue', label: 'Front desk', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
+  { to: '/booking', label: 'Booking', show: (c) => c('visit.write') && c('appointment.read') },
+  { to: '/calendar', label: 'Calendar', show: (c) => c('appointment.read') },
+  { to: '/patients', label: 'Patients', show: (c) => c('patient.read') },
+  { to: '/worklist', label: 'Procedures', show: (c) => c('worklist.read') },
+  { to: '/pharmacy', label: 'Pharmacy', show: (c) => c('pharmacy.read') },
+  { to: '/reports', label: 'Reports', show: (c) => c('report.daily') || c('finance.read') },
+  { to: '/settings', label: 'Settings', show: (c) => c('config.write') },
+  { to: '/platform', label: 'Clinics', show: (c) => c('platform.read') },
+];
+
+/** Where each role lands: the page that answers their first question of the day. */
+export function homeFor(c: (p: string) => boolean, platform = false) {
+  if (platform) return '/platform';
+  if (c('finance.read')) return '/overview';
+  if (c('encounter.complete')) return '/today';
+  if (c('visit.write')) return '/queue';
+  if (c('encounter.intake')) return '/queue';
+  if (c('worklist.write')) return '/worklist';
+  if (c('pharmacy.read')) return '/pharmacy';
+  return '/patients';
+}
+
+export function Home() {
+  const me = useMe();
+  if (me.isLoading) return null;
+  const c = (p: string) => can(me.data?.perms, p);
+  return <Navigate to={homeFor(c, me.data?.tenantKind === 'platform')} replace />;
+}
 
 export function App() {
   const me = useMe(); const cfg = useConfig(); const nav = useNavigate(); const loc = useLocation();
+  const [palette, setPalette] = useState(false);
+  const [userMenu, setUserMenu] = useState(false);
+  const pills = useRef<HTMLDivElement>(null);
+  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
+  const perms: string[] = me.data?.perms ?? [];
+  const c = (p: string) => can(perms, p);
+  const platform = me.data?.tenantKind === 'platform';
+  const items = NAV.filter((n) => (n.to === '/platform' ? platform : !platform) && n.show(c));
+  const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
+
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
+  }, []);
+  useLayoutEffect(() => {
+    const measure = () => { const el = pills.current?.querySelector<HTMLElement>('a.on'); setPill(el ? { left: el.offsetLeft, width: el.offsetWidth } : null); };
+    measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [active?.to, items.length, me.data?.id]);
+
   if (me.isLoading) return <div className="min-h-dvh grid place-items-center text-muted text-sm anim-fade-in">Opening clinic…</div>;
   if (me.isError) { location.href = '/login'; return null; }
-  const perms: string[] = me.data.perms;
-  const items = NAV.filter(([to, , , p]) => can(perms, p) && (to === '/platform' ? me.data.tenantKind === 'platform' : me.data.tenantKind !== 'platform'));
-  if (loc.pathname === '/queue' && !can(perms, 'visit.read') && items[0]) return <Navigate to={items[0][0]} replace />;
+  const signOut = async () => { await post('/auth/logout'); qc.clear(); nav('/login'); };
+  const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
+  const roles: string[] = me.data.roles ?? [me.data.role];
+
+  const rail: { icon: string; tip: string; on?: () => void; to?: string; show: boolean }[] = [
+    { icon: 'search', tip: 'Search  ⌘K', on: () => setPalette(true), show: !platform },
+    { icon: 'plus', tip: 'Create', on: () => setPalette(true), show: !platform },
+    { icon: 'calendar', tip: 'Calendar', to: '/calendar', show: c('appointment.read') && !platform },
+    { icon: 'print', tip: 'Print this page', on: () => window.print(), show: true },
+    { icon: 'edit', tip: 'Settings', to: '/settings', show: c('config.write') },
+  ];
+
   return (
-    <div className="min-h-dvh md:grid md:grid-cols-[232px_1fr]">
-      <aside className="no-print hidden md:flex flex-col gap-1 p-4 sticky top-0 h-dvh border-r border-line/70">
-        <div className="px-3 pt-2 pb-5">
-          <div className="serif text-[22px] leading-none text-ink">{cfg.data?.tenant.name ?? 'CUBOTT'}</div>
-          <div className="text-[11px] uppercase tracking-wider text-muted mt-1.5">{(me.data.roles ?? [me.data.role]).join(' · ')}</div>
-        </div>
-        {items.map(([to, label, icon]) => (
-          <NavLink key={to} to={to} viewTransition className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
-            {({ isActive }) => (<><span className={`transition-colors ${isActive ? 'text-clay' : 'text-muted'}`}><Icon name={icon} className="h-[18px] w-[18px]" /></span>{label}</>)}
-          </NavLink>
-        ))}
-        <div className="mt-auto card !p-3 flex items-center gap-3">
-          <Avatar name={me.data.name} />
-          <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{me.data.name}</div><div className="text-[11px] text-muted capitalize">{me.data.role}</div></div>
-          <button className="btn btn-ghost btn-icon" title="Sign out" onClick={async () => { await post('/auth/logout'); qc.clear(); nav('/login'); }}><Icon name="logout" /></button>
-        </div>
+    <div className="min-h-dvh">
+      <aside className="no-print fixed left-6 top-40 z-20 hidden md:flex w-12 flex-col items-center gap-1.5 rounded-full bg-ink py-3.5 text-[#cfcac0]" style={{ boxShadow: '0 24px 40px -18px rgba(23,25,26,.6)' }} aria-label="Quick actions">
+        {rail.filter((r) => r.show).map((r) => r.to
+          ? <Link key={r.tip} to={r.to} viewTransition aria-label={r.tip} data-tip={r.tip} className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name={r.icon} /></Link>
+          : <button key={r.tip} onClick={r.on} aria-label={r.tip} data-tip={r.tip} className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name={r.icon} /></button>)}
+        <i className="my-1 h-px w-5 bg-white/15" />
+        <button onClick={signOut} aria-label="Sign out" data-tip="Sign out" className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name="logout" /></button>
       </aside>
-      <div className="min-w-0">
-        <header className="no-print md:hidden flex items-center gap-3 px-4 py-3 border-b border-line/70 bg-paper/80 backdrop-blur sticky top-0 z-10">
-          <div className="serif text-lg">{cfg.data?.tenant.name}</div>
-          <button className="btn btn-ghost btn-icon ml-auto" onClick={async () => { await post('/auth/logout'); qc.clear(); nav('/login'); }}><Icon name="logout" /></button>
+
+      <div className="mx-auto max-w-[1440px] px-4 pb-16 pt-5 md:pl-[108px] md:pr-10 md:pt-7">
+        <header className="no-print flex items-center gap-3 md:gap-5">
+          <Link to="/" className="flex items-center gap-3 min-w-0"><span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-xl bg-ink text-xl font-bold text-white">{clinic.slice(0, 1)}</span><span className="truncate text-[19px] font-semibold">{clinic}</span></Link>
+          <span className="ml-auto" />
+          {!platform && <button onClick={() => setPalette(true)} className="hidden lg:flex h-10 min-w-[260px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white">
+            <Icon name="search" className="h-4 w-4" />Search patients<span className="kbd ml-auto">⌘K</span></button>}
+          {!platform && <button onClick={() => setPalette(true)} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>}
+          <div className="relative">
+            <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-[42px] w-[42px] text-sm" /></button>
+            {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
+          </div>
         </header>
-        <main className="p-4 md:p-8 max-w-[1280px] mx-auto pb-24 md:pb-8">
-          <div className="hidden md:block text-sm text-muted mb-1 anim-fade-in">{greeting()}, {me.data.name.split(' ')[0]}</div>
-          <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />
-        </main>
-        <nav className="no-print md:hidden fixed bottom-0 inset-x-0 z-20 flex justify-around border-t border-line bg-surface/90 backdrop-blur px-2 py-2">
-          {items.map(([to, label, icon]) => (
-            <NavLink key={to} to={to} viewTransition className={({ isActive }) => `flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-medium ${isActive ? 'text-clay' : 'text-muted'}`}><Icon name={icon} className="h-5 w-5" />{label}</NavLink>
-          ))}
+
+        <nav className="no-print no-scrollbar mt-5 mb-6 -mx-1 overflow-x-auto px-1 pb-1" aria-label="Sections">
+          <div ref={pills} className="relative inline-flex gap-1 rounded-full border border-white/75 bg-white/50 p-1">
+            {pill && <span className="absolute top-1 bottom-1 rounded-full bg-ink" style={{ left: pill.left, width: pill.width, transition: 'left .45s var(--ease), width .45s var(--ease)' }} />}
+            {items.map((n) => (
+              <Link key={n.to} to={n.to} viewTransition className={`relative z-[1] whitespace-nowrap rounded-full px-[18px] py-2.5 text-sm font-medium transition-colors duration-300 ${active?.to === n.to ? 'on text-white' : 'text-ink-2 hover:text-ink'}`}>{n.label}</Link>
+            ))}
+          </div>
         </nav>
+
+        <main key={loc.pathname.split('/')[1]} className="page"><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></main>
       </div>
+      <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />
     </div>
   );

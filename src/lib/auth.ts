@@ -16,7 +16,7 @@ export type Ctx = { tenantId: string; userId: string; role: string; roles: strin
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {
   owner: ['*'],
-  admin: ['config.*', 'user.*', 'report.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'document.read'],
+  admin: ['config.*', 'user.*', 'report.*', 'finance.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'document.read'],
   doctor: ['patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
   receptionist: ['patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.write', 'document.*'],

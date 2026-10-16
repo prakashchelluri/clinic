@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 
 /* ---------- Icons (inline, stroke) ---------- */
 const PATHS: Record<string, string> = {
@@ -23,6 +23,10 @@ const PATHS: Record<string, string> = {
   rupee: 'M6 3h12M6 8h12M6 13h3a5 5 0 0 0 5-5V3M6 13l9 8',
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
   chevL: 'm15 18-6-6 6-6', chevR: 'm9 18 6-6-6-6',
+  dots: 'M12 5v.01M12 12v.01M12 19v.01',
+  export: 'M12 15V4M8 8l4-4 4 4M5 14v5h14v-5',
+  moon: 'M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z',
+  home: 'M3 11 12 3l9 8M5 10v10h14V10',
   wallet: 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2zM16 14h.01',
   stetho: 'M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4M20 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
 };
@@ -44,7 +48,7 @@ export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
     <div className="anim-fade-up flex flex-wrap items-end gap-3 mb-5">
-      <div className="mr-auto"><h1 className="text-[28px] leading-tight font-medium text-ink">{title}</h1>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div>
+      <div className="mr-auto"><h1 className="text-[30px] leading-[1.05] font-semibold text-ink">{title}</h1>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div>
       {children}
     </div>
   );
@@ -53,7 +57,7 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 export function Section({ title, aside, children, className = '', delay = 0 }: { title?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string; delay?: number }) {
   return (
     <section className={`card-flat anim-fade-up overflow-hidden ${className}`} style={{ animationDelay: `${delay}ms` }}>
-      {title && <div className="flex items-center gap-2 px-4 py-3 border-b border-line"><div className="text-sm font-semibold text-ink">{title}</div><div className="ml-auto flex items-center gap-2">{aside}</div></div>}
+      {title && <div className="flex items-center gap-2 px-5 py-4 border-b border-ink/8"><div className="text-[15px] font-semibold text-ink">{title}</div><div className="ml-auto flex items-center gap-2">{aside}</div></div>}
       {children}
     </section>
   );
@@ -82,14 +86,65 @@ export function Stat({ label, value, sub, tone = '', delay = 0 }: { label: strin
   );
 }
 
-export function Segmented<T extends string>({ options, value, onChange }: { options: { value: T; label: string; count?: number }[]; value: T; onChange: (v: T) => void }) {
+/** Segmented control with one dark pill that glides to the chosen option. */
+export function Segmented<T extends string>({ options, value, onChange }: { options: { value: T; label: string; count?: number; tone?: 'rose' }[]; value: T; onChange: (v: T) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => { const el = box.current?.querySelector<HTMLElement>('button.on'); if (el) setPos({ left: el.offsetLeft, width: el.offsetWidth }); };
+    measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [value, options.length, options.map((o) => o.count).join(',')]);
   return (
-    <div className="inline-flex rounded-full bg-paper-2 p-1 gap-0.5">
+    <div className="seg" ref={box}>
+      {pos && <span className="seg-pill" style={{ left: pos.left, width: pos.width }} />}
       {options.map((o) => (
-        <button key={o.value} onClick={() => onChange(o.value)} className={`relative rounded-full px-3.5 py-1.5 text-xs font-medium transition-all duration-200 ${value === o.value ? 'bg-surface text-ink shadow-sm' : 'text-muted hover:text-ink'}`}>
-          {o.label}{o.count !== undefined && <span className={`ml-1.5 ${value === o.value ? 'text-clay' : ''}`}>{o.count}</span>}
+        <button key={o.value} type="button" onClick={() => onChange(o.value)} className={value === o.value ? 'on' : ''} style={o.tone === 'rose' && value !== o.value ? { color: 'var(--color-rose)' } : undefined}>
+          {o.label}{o.count !== undefined && <span className="ml-1.5 opacity-60 font-medium">{o.count}</span>}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Number that counts up on first show and flashes when it changes. */
+export function Num({ value, format = (n: number) => String(n) }: { value: number; format?: (n: number) => string }) {
+  const [shown, setShown] = useState(0);
+  const [flash, setFlash] = useState(0);
+  const prev = useRef<number | null>(null);
+  useEffect(() => {
+    const from = prev.current === null ? 0 : prev.current; const first = prev.current === null;
+    prev.current = value;
+    if (!first) setFlash((f) => f + 1);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || from === value) { setShown(value); return; }
+    let raf = 0; const t0 = performance.now(); const dur = first ? 700 : 450;
+    const tick = (t: number) => { const p = Math.min(1, (t - t0) / dur); const e = 1 - Math.pow(1 - p, 3); setShown(Math.round(from + (value - from) * e)); if (p < 1) raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <span key={flash} className={flash ? 'is-flash' : ''}>{format(shown)}</span>;
+}
+
+/** The ⋯ menu: secondary actions live here so a row shows one clear button. */
+export type MenuItem = { label: string; onClick?: () => void; href?: string; danger?: boolean; hidden?: boolean };
+export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [open]);
+  const shown = items.filter((i) => !i.hidden);
+  if (!shown.length) return null;
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" /></button>
+      {open && <div className="menu anim-menu" role="menu">{shown.map((i) => i.href
+        ? <a key={i.label} href={i.href} role="menuitem" className={i.danger ? 'danger' : ''}>{i.label}</a>
+        : <button key={i.label} type="button" role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => { setOpen(false); i.onClick?.(); }}>{i.label}</button>)}</div>}
     </div>
   );
 }

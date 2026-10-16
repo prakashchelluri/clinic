@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useNavigate, useOutletContext } from 'react-router';
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, qc, uuid, ApiError, today } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Icon, Modal, Skeleton, money, toast, fmtDate } from '../ui';
+import { Avatar, Chip, Icon, Modal, MoreMenu, Num, Segmented, Skeleton, money, toast, fmtDate } from '../ui';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -31,6 +31,8 @@ export function FrontDesk() {
   const [tab, setTab] = useState<Tab>('waiting');
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null);
   const [find, setFind] = useState('');
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => { if (sp.get('arrive')) { setArrive({}); setSp({}, { replace: true }); } }, [sp]);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['frontdesk'] }); qc.invalidateQueries({ queryKey: ['queue'] }); };
   const upVisit = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/visits/${id}`, b), onSuccess: refresh });
   const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: () => { refresh(); toast('Updated', 'info'); } });
@@ -83,7 +85,7 @@ export function FrontDesk() {
         <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">waited {minsSince(v.arrivedAt)} min</div></td>
         <td>{v.status === 'intake' ? <Chip tone="sky">intake</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : <Chip>waiting</Chip>}</td>
         <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
-        <td className="text-right pr-4 whitespace-nowrap">{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>{me.role === 'assistant' ? 'Intake' : 'Call in'}</button>} {canDesk && <><button className="btn btn-sm btn-ghost" disabled={i === 0} title="Move up" onClick={() => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null })}><Icon name="up" className="h-3.5 w-3.5" /></button><button className="btn btn-sm btn-ghost" onClick={() => upVisit.mutate({ id: v.id, status: 'left' })}>Left</button></>}</td></tr>); }
+        <td className="text-right pr-4 whitespace-nowrap">{isClinical && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>{me.role === 'assistant' ? 'Intake' : 'Call in'}</button>} {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}` }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}</td></tr>); }
     if (r.type === 'doctor') { const v = r.v; return (
       <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
         <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></td>
@@ -94,7 +96,7 @@ export function FrontDesk() {
       <tr key={a.id} className={`anim-fade-up ${isLate ? 'bg-rose-soft/40' : ''}`}><td className={`pl-4 font-semibold ${isLate ? 'text-rose' : ''}`}>{a.window.startTime}{isLate && <div className="text-[11px] font-normal">late</div>}</td>
         <td><b>{a.patient.fullName}</b> <span className="text-muted">{a.patient.ageYears ?? ''} {a.patient.sex ?? ''}</span><div className="text-xs text-muted">{[a.patient.phone, a.patient.locality].filter(Boolean).join(' · ')}</div></td>
         <td>{isLate ? <Chip tone="rose">not arrived</Chip> : <Chip>booked</Chip>}</td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">{a.note ?? ''}</td>
-        <td className="text-right pr-4 whitespace-nowrap">{canDesk && isToday && <button className="btn btn-sm !bg-ink !text-paper !border-ink" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Arrived</button>} {isLate && canDesk && <><a className="btn btn-sm" href={`tel:${a.patient.phone ?? ''}`}>Call</a> <button className="btn btn-sm btn-ghost" onClick={() => upAppt.mutate({ id: a.id, status: 'no_show' })}>No-show</button></>}</td></tr>); }
+        <td className="text-right pr-4 whitespace-nowrap">{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Arrived</button>} {canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}` }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</td></tr>); }
     if (r.type === 'noshow') { const a = r.a; return (
       <tr key={a.id} className="anim-fade-up opacity-70"><td className="pl-4 font-semibold">{a.window.startTime}</td>
         <td><b>{a.patient.fullName}</b><div className="text-xs text-muted">{a.patient.phone ?? ''}</div></td>
@@ -107,35 +109,39 @@ export function FrontDesk() {
         <td>{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : <Chip tone="sage">completed</Chip>}</td><td>{v.doctor ?? '—'}</td>
         <td className="text-xs">{left ? <span className="text-muted">Did not see the doctor</span> : v.recommendations.length ? <div className="flex flex-wrap gap-1">{v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` · ${rc.sittings} sittings` : ''} → coordinator` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</div> : <span className="text-muted">Medicines only · pharmacy has the Rx</span>}</td>
         <td className="text-right pr-4 whitespace-nowrap">
-          {canDesk && v.due.map((c: any) => <span key={c.id}><button className="btn btn-sm btn-primary" onClick={() => collect.mutate({ c, method: 'cash' })}>Collect {money(c.amountPaise)}</button> <button className="btn btn-sm" onClick={() => collect.mutate({ c, method: 'upi' })}>UPI</button> </span>)}
-          {v.encounterId && !left && <button className="btn btn-sm" onClick={() => window.open(`/print/${v.encounterId}?auto=0`, '_blank')}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
-          {canDesk && !left && !handled && v.recommendations.length > 0 && <> <button className="btn btn-sm !bg-ink !text-paper !border-ink" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button></>}
-          {left && canDesk && <a className="btn btn-sm" href={`tel:${v.patient.phone ?? ''}`}>Call</a>}
+          {canDesk && v.due[0] && <button className="btn btn-sm btn-primary" onClick={() => collect.mutate({ c: v.due[0], method: 'cash' })}>Collect {money(v.due[0].amountPaise)}</button>}
+          {canDesk && !left && !handled && !v.due.length && v.recommendations.length > 0 && <button className="btn btn-sm btn-primary" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button>}
+          {' '}<MoreMenu items={[
+            { label: 'Collect by UPI', hidden: !(canDesk && v.due[0]), onClick: () => collect.mutate({ c: v.due[0], method: 'upi' }) },
+            { label: 'Print prescription', hidden: !(v.encounterId && !left), onClick: () => window.open(`/print/${v.encounterId}?auto=0`, '_blank') },
+            { label: 'Mark as explained', hidden: !(canDesk && !left && !handled && v.recommendations.length > 0 && v.due.length > 0), onClick: () => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } }) },
+            { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}` },
+          ]} />
         </td></tr>);
   };
 
   return (
     <div>
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
-        <div className="mr-auto"><h1 className="text-[28px] leading-tight font-medium">Front desk</h1>
+        <div className="mr-auto"><h1 className="text-[30px] leading-tight font-semibold">Front desk</h1>
           <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
         <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-72 !rounded-full" placeholder="Phone, name or token" value={find} onChange={(e) => setFind(e.target.value)} /></div>
         {canDesk && isToday && <button className="btn btn-primary !py-2.5" onClick={() => setArrive({})}><Icon name="plus" />Patient arrived</button>}
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
-        <div className="card anim-fade-up !py-3.5 flex flex-wrap items-center gap-x-7 gap-y-3 mb-4">
+        <div className="anim-fade-up flex flex-wrap items-center gap-x-9 gap-y-4 mb-5">
           <Stat label="Appointments" value={d.appointments.filter((a: any) => a.status !== 'cancelled').length} sub={scheduled.length ? `· ${scheduled.length} to come` : ''} />
           <Sep /><Stat label="Waiting" value={waiting.length} tone="clay" sub={waiting.length ? `· longest ${longest} min` : ''} />
           <Sep /><Stat label="With doctor" value={inConsult.length} />
           <Sep /><Stat label="Completed" value={completed.filter((v) => v.status === 'done').length} />
-          <Sep /><Stat label="Collected" value={money(collected)} tone="sage" sub={(d.payments ?? []).length ? '· ' + d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : ''} />
+          <Sep /><Stat label="Collected" value={<Num value={collected} format={money} />} tone="sage" sub={(d.payments ?? []).length ? '· ' + d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : ''} />
           {needsCount > 0 && <button className="ml-auto chip chip-rose !py-2 !px-3.5 !text-xs" onClick={() => setTab('needs')}>{needsCount} need you{dueTotal ? ` · ${money(dueTotal)} due` : ''}</button>}
         </div>
 
         <div className="anim-fade-up flex flex-wrap items-center gap-1.5 mb-3" style={{ animationDelay: '40ms' }}>
-          {tabs.map(([k, label, n]) => <button key={k} className={`toggle-opt !py-2 ${tab === k ? 'on' : ''} ${k === 'needs' && tab !== k && n > 0 ? '!text-rose !border-rose/30' : ''}`} onClick={() => setTab(k)}>{label}{n >= 0 && <span className={tab === k ? 'opacity-70' : 'text-muted'}> · {n}</span>}</button>)}
-          {tab !== 'history' && <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-sm" onClick={() => window.print()}><Icon name="print" className="h-3.5 w-3.5" />Print</button><button className="btn btn-sm" onClick={exportRows}>Export to Excel</button></div>}
+          <Segmented value={tab} onChange={setTab} options={tabs.map(([k, label, n]) => ({ value: k, label, count: n >= 0 ? n : undefined, tone: k === 'needs' && n > 0 ? ('rose' as const) : undefined }))} />
+          {tab !== 'history' && <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button></div>}
         </div>
 
         {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} onBook={() => nav('/booking')} /> : <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
@@ -153,9 +159,9 @@ export function FrontDesk() {
   );
 }
 
-const Sep = () => <span className="w-px h-9 bg-line hidden sm:block" />;
+const Sep = () => <span className="w-px h-9 bg-ink/10 hidden sm:block" />;
 function Stat({ label, value, sub, tone = '' }: { label: string; value: any; sub?: string; tone?: '' | 'clay' | 'sage' }) {
-  return <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div><div className={`serif text-2xl leading-tight ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : ''}`}>{value} {sub && <span className="font-sans text-[13px] text-muted">{sub}</span>}</div></div>;
+  return <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div><div className={`serif text-2xl leading-tight ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : ''}`}>{typeof value === 'number' ? <Num value={value} /> : value} {sub && <span className="font-sans text-[13px] font-normal text-muted">{sub}</span>}</div></div>;
 }
 function GroupRows({ showGroup, group, children }: { showGroup: boolean; group: string; children: React.ReactNode }) {
   return <>{showGroup && <tr><td colSpan={6} className="!py-2 !bg-paper text-[11px] font-semibold uppercase tracking-wider text-muted">{group}</td></tr>}{children}</>;
@@ -184,18 +190,18 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
   const Chipbtn = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button className={`toggle-opt ${on ? 'on' : ''}`} onClick={onClick}>{children}</button>;
   return (
     <div className="space-y-3 anim-fade-up">
-      <div className="card !p-4 flex flex-wrap items-center gap-2 no-print">
-        <span className="label !mb-0 mr-1">Period</span>
-        {([['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']] as const).map(([k, l]) => <Chipbtn key={k} on={period === k} onClick={() => setPeriod(k)}>{l}</Chipbtn>)}
+      <div className="flex flex-wrap items-center gap-3 no-print">
+        
+        <Segmented value={period} onChange={setPeriod} options={[{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: 'custom', label: 'Pick dates' }]} />
         {period === 'custom' && <><input type="date" className="input !w-auto !py-1.5" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} /><span className="text-muted">to</span><input type="date" className="input !w-auto !py-1.5" value={custom.to} min={custom.from} max={t0} onChange={(e) => setCustom({ ...custom, to: e.target.value })} /></>}
-        <span className="w-px h-7 bg-line mx-1.5" />
-        <span className="label !mb-0 mr-1">Show</span>
-        {([['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']] as const).map(([k, l]) => <Chipbtn key={k} on={filter === k} onClick={() => setFilter(k)}>{l}</Chipbtn>)}
+        
+        
+        <Segmented value={filter} onChange={setFilter} options={[{ value: 'all', label: 'Everything' }, { value: 'left', label: 'Left without consult' }, { value: 'noshow', label: 'No-shows' }, { value: 'adjusted', label: 'Fees waived or refunded' }]} />
         <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-72 !rounded-full" placeholder="Search all days: phone, name, token" value={term} onChange={(e) => setTerm(e.target.value)} /></div>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
         {s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : <span>Loading…</span>}
-        <span className="ml-auto flex gap-1.5 no-print"><button className="btn btn-sm" onClick={() => window.print()}><Icon name="print" className="h-3.5 w-3.5" />Print or save as PDF</button><button className="btn btn-sm" disabled={!rows.length} onClick={exportCsv}>Export to Excel</button></span>
+        <span className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print or save as PDF" aria-label="Print or save as PDF" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" disabled={!rows.length} onClick={exportCsv}><Icon name="export" /></button></span>
       </div>
       <div className="card-flat overflow-hidden"><div className="overflow-x-auto"><table className="table !text-sm min-w-[980px]">
         <thead><tr><th className="pl-4 w-28">Date</th><th className="w-24">Token</th><th>Patient</th><th className="w-36">Outcome</th><th className="w-36">Doctor</th><th>What happened</th><th className="text-right pr-4 w-60 no-print">Action</th></tr></thead>

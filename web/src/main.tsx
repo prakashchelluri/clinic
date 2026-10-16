@@ -1,10 +1,12 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
+import { BrowserRouter, Routes, Route } from 'react-router';
 import './index.css';
 import { qc } from './api';
-import { App } from './App';
+import { App, Home } from './App';
+import { Overview } from './pages/Overview';
+import { Today } from './pages/Today';
 import { Login } from './pages/Login';
 import { FrontDesk } from './pages/FrontDesk';
 import { Booking } from './pages/Booking';
@@ -26,7 +28,9 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/login" element={<Login />} />
           <Route path="/print/:id" element={<PrintRx />} />
           <Route element={<App />}>
-            <Route index element={<Navigate to="/queue" replace />} />
+            <Route index element={<Home />} />
+            <Route path="/overview" element={<Overview />} />
+            <Route path="/today" element={<Today />} />
             <Route path="/queue" element={<FrontDesk />} />
             <Route path="/booking" element={<Booking />} />
             <Route path="/patients" element={<Patients />} />

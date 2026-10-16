@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useOutletContext } from 'react-router';
+import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, fmtTime } from '../api';
 import { can } from '../App';
 import { Chip, Empty, Icon, PageHeader, Section, Skeleton, Stat, money, toast } from '../ui';
@@ -13,6 +13,8 @@ export function Reports() {
   const [exp, setExp] = useState({ description: '', amount: '', method: 'cash' });
   const addExp = useMutation({ mutationFn: () => post('/expenses', { day, description: exp.description, amountPaise: Math.round(Number(exp.amount) * 100), method: exp.method }), onSuccess: () => { setExp({ description: '', amount: '', method: 'cash' }); qc.invalidateQueries({ queryKey: ['daily'] }); toast('Expense added'); } });
   const d = r.data;
+  const [sp, setSp] = useSearchParams(); const expRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (d && sp.get('print')) { setSp({}, { replace: true }); setTimeout(() => window.print(), 400); } if (d && sp.get('expense')) { setSp({}, { replace: true }); setTimeout(() => expRef.current?.focus(), 300); } }, [d, sp]);
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return (
     <div>
@@ -40,7 +42,7 @@ export function Reports() {
           <Section title="Expenses" delay={200}>
             {d.expenses.length === 0 ? <div className="px-4 pt-4 text-sm text-muted">No expenses entered.</div> :
               <table className="table"><tbody>{d.expenses.map((e: any) => <tr key={e.id}><td className="pl-4">{e.description}</td><td><Chip>{e.method}</Chip></td><td className="text-right pr-4">{money(e.amountPaise)}</td></tr>)}</tbody></table>}
-            {can(perms, 'expense.write') && <div className="flex gap-2 p-4 no-print border-t border-line"><input className="input" placeholder="What was paid for" value={exp.description} onChange={(e) => setExp({ ...exp, description: e.target.value })} /><input className="input !w-24" placeholder="₹" inputMode="numeric" value={exp.amount} onChange={(e) => setExp({ ...exp, amount: e.target.value })} /><select className="input !w-auto" value={exp.method} onChange={(e) => setExp({ ...exp, method: e.target.value })}><option value="cash">cash</option><option value="upi">upi</option><option value="bank">bank</option></select><button className="btn btn-primary" disabled={!exp.description || !exp.amount} onClick={() => addExp.mutate()}><Icon name="plus" /></button></div>}
+            {can(perms, 'expense.write') && <div className="flex gap-2 p-4 no-print border-t border-line"><input ref={expRef} className="input" placeholder="What was paid for" value={exp.description} onChange={(e) => setExp({ ...exp, description: e.target.value })} /><input className="input !w-24" placeholder="₹" inputMode="numeric" value={exp.amount} onChange={(e) => setExp({ ...exp, amount: e.target.value })} /><select className="input !w-auto" value={exp.method} onChange={(e) => setExp({ ...exp, method: e.target.value })}><option value="cash">cash</option><option value="upi">upi</option><option value="bank">bank</option></select><button className="btn btn-primary" disabled={!exp.description || !exp.amount} onClick={() => addExp.mutate()}><Icon name="plus" /></button></div>}
           </Section>
         </div>
         <Section title={<>Payments <span className="text-muted font-normal">· {d.payments.length}</span></>} delay={240} className="mt-5">

@@ -21,6 +21,7 @@ import { pharmacyRoutes } from './modules/pharmacy.js';
 import { adminRoutes } from './modules/admin.js';
 import { procedureRoutes } from './modules/procedures.js';
 import { platformRoutes } from './modules/platform.js';
+import { overviewRoutes } from './modules/overview.js';
 
 declare module 'fastify' {
   interface FastifyRequest { ctx: Ctx; perms: string[] }
@@ -54,7 +55,7 @@ export async function buildApp() {
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api);
+    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

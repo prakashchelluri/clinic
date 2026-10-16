@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useNavigate, useParams, useOutletContext } from 'react-router';
+import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, money, toast } from '../ui';
@@ -11,6 +11,8 @@ export function Patients() {
   const [q, setQ] = useState('');
   const list = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`) });
   const [showNew, setShowNew] = useState(false);
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => { if (sp.get('new')) { setShowNew(true); setSp({}, { replace: true }); } }, [sp]);
   return (
     <div>
       <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">

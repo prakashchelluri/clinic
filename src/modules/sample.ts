@@ -9,6 +9,7 @@ import { HttpError } from '../lib/auth.js';
 /** Demo data for a dermatology OP day in Rajahmundry. Owner-only; refuses to run twice. */
 export function sampleRoutes(app: FastifyInstance) {
   route(app, 'post', '/dev/sample-data', 'config.*', async (req, tx) => loadSample(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
+  route(app, 'post', '/dev/sample-collections', 'config.*', async (req, tx) => backfillCollections(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
 }
 
 const PEOPLE: [string, string | null, 'M' | 'F', number, string][] = [
@@ -37,6 +38,27 @@ const CASES = [
   { c: 'Unwanted facial hair', dx: 'Hirsutism', sev: 'Mild', site: ['Face'], morph: [], rx: [], fu: 60, proc: 'Laser hair reduction' },
   { c: 'Thinning hair on crown', dx: 'Androgenetic alopecia', sev: 'Moderate', site: ['Scalp'], morph: [], rx: [], fu: 30, proc: 'PRP (hair)' },
 ];
+
+/** Demo only: 30 days of plausible daily collections so the Overview chart has a shape. Idempotent. */
+export async function backfillCollections(tx: Tx, t: string, userId: string, tz: string) {
+  const exists = await tx.select({ id: payment.id }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.reference, 'SAMPLE-HIST'))).limit(1);
+  if (exists.length) throw new HttpError(409, 'ALREADY_BACKFILLED');
+  const pts = await tx.select({ id: patient.id }).from(patient).where(eq(patient.tenantId, t)).limit(30);
+  if (!pts.length) throw new HttpError(400, 'NO_PATIENTS');
+  const today = todayIn(tz); const rows: any[] = [];
+  for (let back = 1; back <= 29; back++) {
+    const day = addDays(today, -back); const dow = new Date(day + 'T00:00:00Z').getUTCDay();
+    if (dow === 0) continue; // Sundays closed
+    const n = Math.round((dow === 1 || dow === 6 ? 62 : 46) * (0.8 + Math.random() * 0.4) * (back > 20 ? 0.9 : 1));
+    for (let i = 0; i < n; i++) {
+      const at = new Date(`${day}T${String(10 + (i % 9)).padStart(2, '0')}:${String((i * 7) % 60).padStart(2, '0')}:00+05:30`).toISOString();
+      const fee = i % 9 === 0 ? 50000 : i % 6 === 0 ? 20000 : i % 3 === 0 ? 0 : 30000; if (!fee) continue;
+      rows.push({ tenantId: t, patientId: pts[i % pts.length].id, amountPaise: fee, method: i % 2 ? 'upi' : 'cash', reference: 'SAMPLE-HIST', receivedBy: userId, receivedAt: at, createdAt: at });
+    }
+  }
+  for (let i = 0; i < rows.length; i += 200) await tx.insert(payment).values(rows.slice(i, i + 200));
+  return { payments: rows.length };
+}
 
 export async function loadSample(tx: Tx, t: string, userId: string, tz: string) {
   const already = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.legacyId, 'SAMPLE'))).limit(1);
@@ -176,6 +198,7 @@ export async function loadSample(tx: Tx, t: string, userId: string, tz: string) 
     { tenantId: t, day: addDays(today, -1), description: 'Printer paper & toner', amountPaise: 230000, method: 'cash', enteredBy: userId },
   ]);
 
+  await backfillCollections(tx, t, userId, tz);
   return { patients: pts.length, visits: visitCount, encounters: encCount, appointmentsToday: appts.length };
 }
 
