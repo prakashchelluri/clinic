@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, api, qc } from '../api';
 import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast } from '../ui';
+import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 
 type Tab = 'clinic' | 'people' | 'forms' | 'fees' | 'medicines' | 'procedures' | 'rooms';
 const TABS: [Tab, string, string, string][] = [
@@ -77,7 +78,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const users = useQuery({ queryKey: ['users'], queryFn: () => get('/users') });
   const [edit, setEdit] = useState<any>(null); const [doc, setDoc] = useState<any>(null);
   const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(e?.body?.code ?? 'Failed', 'err') });
-  const saveDoc = useMutation({ mutationFn: (p: any) => p.id ? patch(`/admin/practitioners/${p.id}`, p) : post('/admin/practitioners', p), onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); } });
+  const saveDoc = useMutation({ mutationFn: async ({ routine, ...p }: any) => { const row = p.id ? await patch(`/admin/practitioners/${p.id}`, p) : await post('/admin/practitioners', p); if (routine) await api('PUT', `/calendar/routine/${row.id}`, routine); return row; }, onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); } });
   const toggleRole = (r: string) => setEdit({ ...edit, roles: edit.roles.includes(r) ? edit.roles.filter((x: string) => x !== r) : [...edit.roles, r] });
   return (
     <div className="space-y-4">
@@ -91,7 +92,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         ))}
       </Section>
       <Section title="Doctors (practitioners)" aside={<button className="btn btn-sm" onClick={() => setDoc({ name: '', regNo: '', qualification: '', active: true })}><Icon name="plus" className="h-3.5 w-3.5" />Add doctor</button>}>
-        {cfg.practitioners.map((p: any) => <div key={p.id} className="row"><div className="flex-1"><div className="text-sm font-medium">{p.name}</div><div className="text-xs text-muted">{[p.qualification, p.regNo && `Reg. ${p.regNo}`].filter(Boolean).join(' · ')}</div></div><button className="btn btn-ghost btn-icon" onClick={() => setDoc({ ...p })}><Icon name="edit" /></button></div>)}
+        {cfg.practitioners.map((p: any) => <div key={p.id} className="row"><div className="flex-1"><div className="text-sm font-medium">{p.name}</div><div className="text-xs text-muted">{[p.qualification, p.regNo && `Reg. ${p.regNo}`].filter(Boolean).join(' · ')}</div></div><Chip tone={p.routine ? 'sage' : 'amber'}>{routineSummary(p.routine)}</Chip><button className="btn btn-ghost btn-icon" onClick={() => setDoc({ ...p, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" /></button></div>)}
         <div className="px-4 py-2 text-xs text-muted">A doctor who also signs in needs a user account linked to their practitioner record (People → user → "Signs prescriptions as").</div>
       </Section>
       {edit && (
@@ -108,12 +109,13 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         </Modal>
       )}
       {doc && (
-        <Modal title={doc.id ? 'Edit doctor' : 'New doctor'} onClose={() => setDoc(null)} width="max-w-md">
+        <Modal title={doc.id ? 'Edit doctor' : 'New doctor'} subtitle="Profile for the prescription, and the weekly routine that fills the calendar" onClose={() => setDoc(null)} width="max-w-xl">
           <div className="space-y-3">
             <div><label className="label">Name (as printed)</label><input className="input" value={doc.name} onChange={(e) => setDoc({ ...doc, name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="label">Registration no.</label><input className="input" value={doc.regNo ?? ''} onChange={(e) => setDoc({ ...doc, regNo: e.target.value })} /></div><div><label className="label">Qualification</label><input className="input" value={doc.qualification ?? ''} onChange={(e) => setDoc({ ...doc, qualification: e.target.value })} /></div></div>
+            <div className="pt-3 border-t border-line"><div className="text-[11px] uppercase tracking-wider text-muted mb-2">Weekly routine</div><RoutineEditor value={doc.routine ?? DEFAULT_ROUTINE} onChange={(r) => setDoc({ ...doc, routine: r })} /></div>
             {doc.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={doc.active} onChange={(e) => setDoc({ ...doc, active: e.target.checked })} /> Active</label>}
-            <div className="flex justify-end gap-2 pt-2"><button className="btn btn-ghost" onClick={() => setDoc(null)}>Cancel</button><button className="btn btn-primary" disabled={!doc.name} onClick={() => saveDoc.mutate({ id: doc.id, name: doc.name, regNo: doc.regNo || null, qualification: doc.qualification || null, active: doc.active })}>Save</button></div>
+            <div className="flex justify-end gap-2 pt-2"><button className="btn btn-ghost" onClick={() => setDoc(null)}>Cancel</button><button className="btn btn-primary" disabled={!doc.name} onClick={() => saveDoc.mutate({ id: doc.id, name: doc.name, regNo: doc.regNo || null, qualification: doc.qualification || null, active: doc.active, routine: doc.routine })}>Save</button></div>
           </div>
         </Modal>
       )}

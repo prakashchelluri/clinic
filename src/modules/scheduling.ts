@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc } from 'drizzle-orm';
-import { session, appointment, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner } from '../db/schema.js';
+import { session, appointment, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, type Routine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, nextNumber } from '../lib/core.js';
@@ -12,12 +12,38 @@ export const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(
 const overlapMin = (aS: number, aE: number, bS: number, bE: number) => Math.max(0, Math.min(aE, bE) - Math.max(aS, bS));
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
+/** 0=Sunday … 6=Saturday for a YYYY-MM-DD day. */
+const weekday = (day: string) => new Date(day + 'T00:00:00Z').getUTCDay();
+
+/**
+ * Lazy materialisation: the first time a day is looked at, every doctor with a weekly routine gets their OP windows
+ * for that day created from it. Doctors never fill a calendar; they only record exceptions.
+ */
+export async function ensureDaySessions(tx: Tx, t: string, day: string) {
+  const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
+  const withRoutine = docs.filter((d) => d.routine?.days?.[String(weekday(day))]?.length);
+  if (!withRoutine.length) return;
+  const existing = await tx.select({ p: session.practitionerId }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day)));
+  const have = new Set(existing.map((e) => e.p));
+  const todo = withRoutine.filter((d) => !have.has(d.id));
+  if (!todo.length) return;
+  const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
+  const values: any[] = [];
+  for (const d of todo) {
+    const r = d.routine as Routine; const len = r.windowMinutes || 60;
+    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m + len <= toMin(end); m += len)
+      values.push({ tenantId: t, branchId: br.id, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(m + len), capacity: r.capacity || 7, source: 'routine' });
+  }
+  if (values.length) await tx.insert(session).values(values);
+}
+
 /**
  * Windows for a day with allocated counts and *effective* capacity.
  * A block (break, leave, procedure) on the window's doctor removes a proportional share of places:
  * 7 places/hour with a 30-minute procedure → 4 (rounded). This is the rule reception described.
  */
 export async function windowsForDay(tx: Tx, t: string, day: string, practitionerId?: string | null) {
+  await ensureDaySessions(tx, t, day);
   const rows = await tx.select({
     s: session,
     // explicit "session"."id": an embedded column renders unqualified here and would match a.id instead
@@ -86,6 +112,22 @@ export function schedulingRoutes(app: FastifyInstance) {
     if (blocks.length) await tx.insert(calendarBlock).values(blocks.map(({ id, createdAt, procedureSessionId, ...b }) => ({ ...b, day: toDay })));
     if (!src.length) return [];
     return tx.insert(session).values(src.map(({ id, createdAt, ...s }) => ({ ...s, day: toDay }))).returning();
+  });
+
+  // --- weekly routine: set once by the doctor (own) or the owner ---
+  const RoutineIn = z.object({ days: z.record(z.string().regex(/^[0-6]$/), z.array(z.tuple([HHMM, HHMM]))), capacity: z.number().int().min(1).max(50), windowMinutes: z.number().int().min(15).max(240) });
+  route(app, 'put', '/calendar/routine/:practitionerId', null, async (req, tx) => {
+    const pid = (req.params as any).practitionerId; const t = req.ctx.tenantId;
+    if (!(can(req.perms, 'config.write') || req.ctx.practitionerId === pid)) throw new HttpError(403, 'FORBIDDEN:routine');
+    const routine = RoutineIn.parse(req.body);
+    const [row] = await tx.update(practitioner).set({ routine }).where(and(eq(practitioner.id, pid), eq(practitioner.tenantId, t))).returning();
+    if (!row) throw new HttpError(404, 'NOT_FOUND');
+    // Future routine-generated windows without bookings are dropped so they regenerate from the new routine.
+    const today = todayIn(req.ctx.timezone);
+    await tx.execute(sql`delete from session s where s.tenant_id = ${t} and s.practitioner_id = ${pid} and s.source = 'routine' and s.day >= ${today}
+      and not exists (select 1 from appointment a where a.session_id = s.id and a.status in ('booked','arrived'))`);
+    await emit(tx, req.ctx, 'routine.updated', 'practitioner', pid, routine);
+    return row;
   });
 
   // --- calendar: one view of a day for a doctor, rooms and the clinic ---

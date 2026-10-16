@@ -76,8 +76,10 @@ export async function createClinic(input: NewClinic) {
   const tid = t.id;
   const [b] = await db.insert(branch).values({ tenantId: tid, name: 'Main', address: input.address ?? null }).returning();
   const [derm] = await db.insert(specialty).values({ tenantId: tid, key: 'dermatology', name: 'Dermatology', sourcePack: `dermatology@${DERM_ENCOUNTER_VERSION}` }).returning();
+  // Default routine Mon–Sat 10–13 and 16–20; the owner changes it once in their profile.
+  const routine = { days: Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), [['10:00', '13:00'], ['16:00', '20:00']] as [string, string][]])), capacity: 7, windowMinutes: 60 };
   let ownerPrac: any = null;
-  if (input.owner.isDoctor !== false) [ownerPrac] = await db.insert(practitioner).values({ tenantId: tid, name: input.owner.name, regNo: input.owner.regNo ?? null, qualification: input.owner.qualification ?? null, specialtyId: derm.id }).returning();
+  if (input.owner.isDoctor !== false) [ownerPrac] = await db.insert(practitioner).values({ tenantId: tid, name: input.owner.name, regNo: input.owner.regNo ?? null, qualification: input.owner.qualification ?? null, specialtyId: derm.id, routine }).returning();
   const roles = input.owner.isDoctor !== false ? ['owner', 'doctor'] : ['owner'];
   await db.insert(appUser).values({ tenantId: tid, email: input.owner.email.toLowerCase(), name: input.owner.name, passwordHash: hashPassword(input.owner.password), role: 'owner', roles, practitionerId: ownerPrac?.id ?? null });
   await db.insert(formDefinition).values([
@@ -102,6 +104,7 @@ export async function createClinic(input: NewClinic) {
 export async function ensureFormsCurrent() {
   // Data upgrades for clinics created by earlier builds
   await db.execute(sql`update app_user set roles = array_append(roles, 'doctor') where 'owner' = any(roles) and practitioner_id is not null and not ('doctor' = any(roles))`);
+  await db.execute(sql`update practitioner set routine = '{"days":{"1":[["10:00","13:00"],["16:00","20:00"]],"2":[["10:00","13:00"],["16:00","20:00"]],"3":[["10:00","13:00"],["16:00","20:00"]],"4":[["10:00","13:00"],["16:00","20:00"]],"5":[["10:00","13:00"],["16:00","20:00"]],"6":[["10:00","13:00"],["16:00","20:00"]]},"capacity":7,"windowMinutes":60}'::jsonb where routine is null and active`);
   for (const p of DERM_PROCEDURES) await db.execute(sql`update procedure_catalog set required_capability = ${p.requiredCapability}, buffer_minutes = ${(p as any).bufferMinutes ?? 0} where name = ${p.name} and required_capability is null`);
   for (const t of await db.select().from(tenant).where(eq(tenant.kind, 'clinic'))) {
     const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
@@ -131,7 +134,8 @@ export async function seedDemo(slug = 'sahitya') {
   const c = await createClinic({ name: 'Sahitya Dermatology Hospital', slug, address: 'Rajahmundry, Andhra Pradesh', owner: { name: 'Dr. Main Doctor', email: 'owner@demo.clinic', password: 'demo1234', regNo: 'APMC/00000', qualification: 'MD (DVL)' } });
   const tid = c.tenantId;
   await db.update(tenant).set({ settings: { scheduling: { windowMinutes: 60, arriveEarlyMinutes: 35, defaultCapacity: 7 }, numbering: { opNumberScope: 'day+category' }, print: { address: 'Rajahmundry, Andhra Pradesh', phone: '', footer: 'Get well soon · ఆరోగ్యంగా ఉండండి' }, languages: ['te', 'en'] } }).where(eq(tenant.id, tid));
-  const [drB] = await db.insert(practitioner).values({ tenantId: tid, name: 'Dr. Second Doctor', regNo: 'APMC/00001', qualification: 'MBBS, DDVL', specialtyId: c.specialtyId }).returning();
+  const [drB] = await db.insert(practitioner).values({ tenantId: tid, name: 'Dr. Second Doctor', regNo: 'APMC/00001', qualification: 'MBBS, DDVL', specialtyId: c.specialtyId,
+    routine: { days: Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), [['10:00', '14:00']] as [string, string][]])), capacity: 6, windowMinutes: 60 } }).returning();
   const pw = hashPassword('demo1234');
   await db.insert(appUser).values([
     { tenantId: tid, email: 'doctor2@demo.clinic', name: 'Dr. Second Doctor', passwordHash: pw, role: 'doctor', roles: ['doctor'], practitionerId: drB.id },

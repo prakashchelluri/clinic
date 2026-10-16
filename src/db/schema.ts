@@ -43,8 +43,11 @@ export const practitioner = pgTable('practitioner', {
   regNo: text('reg_no'),
   qualification: text('qualification'),
   specialtyId: uuid('specialty_id').references(() => specialty.id),
+  // Weekly routine, set once: { days: { "1": [["10:00","12:00"],["15:00","19:00"]], ... }, capacity: 7, windowMinutes: 60 }. OP windows are generated from it on demand.
+  routine: jsonb('routine').$type<Routine | null>(),
   active: boolean('active').notNull().default(true),
 });
+export type Routine = { days: Record<string, [string, string][]>; capacity: number; windowMinutes: number };
 
 export const formDefinition = pgTable('form_definition', {
   ...tenantCols,
@@ -118,6 +121,7 @@ export const session = pgTable('session', {
   endTime: text('end_time').notNull(),
   capacity: integer('capacity').notNull(),
   note: text('note'),
+  source: text('source').notNull().default('manual'), // manual | routine
 }, (t) => [index('session_day').on(t.tenantId, t.day)]);
 
 export const appointment = pgTable('appointment', {

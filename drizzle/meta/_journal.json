@@ -22,6 +22,13 @@
       "when": 1792148044163,
       "tag": "0002_calendar_rooms_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792152106182,
+      "tag": "0003_routine",
+      "breakpoints": true
     }
   ]
 }
