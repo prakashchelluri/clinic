@@ -1,11 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc, desc } from 'drizzle-orm';
+import { and, eq, sql, asc, desc, gte, lte, ilike, or } from 'drizzle-orm';
 import jsonLogic from 'json-logic-js';
 import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter, session, procedureCatalog } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, nextNumber, todayIn, daysBetween } from '../lib/core.js';
+import { emit, nextNumber, todayIn, daysBetween, addDays } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 
 /** Facts the fee-category eligibility rules can look at. */
@@ -85,6 +85,39 @@ export function visitRoutes(app: FastifyInstance) {
     }
     await emit(tx, req.ctx, 'visit.checked_in', 'visit', v.id, { patientId: body.patientId, opNumber, category: cat.code, amountPaise: amount, status });
     return { ...v, charge: ch };
+  });
+
+  /** History across days: visits and no-shows in a date range, searchable, with outcome and what to tell the patient. */
+  route(app, 'get', '/frontdesk/history', 'visit.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const q = req.query as any;
+    const to = String(q.to ?? todayIn(req.ctx.timezone)); const from = String(q.from ?? addDays(to, -6));
+    const term = String(q.q ?? '').trim(); const filter = String(q.filter ?? 'all');
+    const like = (c: any) => ilike(c, `%${term}%`);
+    const vrows = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex }, doctor: practitioner.name, encounterId: encounter.id, completedAt: encounter.completedAt })
+      .from(visit).innerJoin(patient, eq(patient.id, visit.patientId)).leftJoin(practitioner, eq(practitioner.id, visit.practitionerId)).leftJoin(encounter, eq(encounter.visitId, visit.id))
+      .where(and(eq(visit.tenantId, t), gte(visit.day, from), lte(visit.day, to), sql`${visit.status} in ('done','left')`, term ? or(like(patient.fullName), like(patient.phone), like(patient.patientNo), like(visit.opNumber)) : undefined))
+      .orderBy(desc(visit.day), desc(visit.arrivedAt)).limit(500);
+    const arows = await tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex }, w: { day: session.day, startTime: session.startTime, practitionerId: session.practitionerId } })
+      .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId))
+      .where(and(eq(appointment.tenantId, t), eq(appointment.status, 'no_show'), gte(session.day, from), lte(session.day, to), term ? or(like(patient.fullName), like(patient.phone), like(patient.patientNo)) : undefined))
+      .orderBy(desc(session.day), desc(session.startTime)).limit(200);
+    const vids = vrows.map((x) => x.v.id); const eids = vrows.map((x) => x.encounterId).filter(Boolean) as string[];
+    const recs = eids.length ? await tx.select({ r: recommendation, procedure: procedureCatalog.name }).from(recommendation).leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), sql`${recommendation.encounterId} in ${eids}`)) : [];
+    const charges = vids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), sql`${charge.visitId} in ${vids}`)) : [];
+    const paid = vids.length ? await tx.select({ total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int` }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId)).where(and(eq(payment.tenantId, t), sql`${charge.visitId} in ${vids}`)).then((r) => r[0].total) : 0;
+    const docs = await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(eq(practitioner.tenantId, t));
+    let rows: any[] = [
+      ...vrows.map((x) => ({ key: x.v.id, date: x.v.day, time: x.completedAt ?? x.v.arrivedAt, kind: 'visit', outcome: x.v.status === 'left' ? 'left' : x.v.status === 'done' ? 'completed' : x.v.status, token: x.v.opNumber, patient: x.p, doctor: x.doctor, encounterId: x.encounterId,
+        recommendations: recs.filter((r) => r.r.encounterId === x.encounterId).map((r) => ({ ...r.r, procedure: r.procedure })),
+        charges: charges.filter((c) => c.visitId === x.v.id).map((c) => ({ id: c.id, status: c.status, amountPaise: c.amountPaise, reason: c.adjustmentReason })), complaint: x.v.details?.complaint ?? null })),
+      ...arows.map((x) => ({ key: x.a.id, date: x.w.day, time: x.w.startTime, kind: 'noshow', outcome: 'noshow', token: x.w.startTime, patient: x.p, doctor: docs.find((d) => d.id === x.w.practitionerId)?.name ?? null, encounterId: null, recommendations: [], charges: [], complaint: x.a.note })),
+    ];
+    if (filter === 'left') rows = rows.filter((r) => r.outcome === 'left');
+    else if (filter === 'noshow') rows = rows.filter((r) => r.outcome === 'noshow');
+    else if (filter === 'adjusted') rows = rows.filter((r) => r.charges.some((c: any) => ['waived', 'refunded'].includes(c.status)));
+    rows.sort((a, b) => (b.date + String(b.time)).localeCompare(a.date + String(a.time)));
+    return { from, to, rows,
+      summary: { visits: vrows.length, left: vrows.filter((x) => x.v.status === 'left').length, noShows: arows.length, adjusted: charges.filter((c) => ['waived', 'refunded'].includes(c.status)).length, collectedPaise: paid } };
   });
 
   /** Everything the front desk screen shows, in one call: appointments, visits with plans and dues, money, doctors. */

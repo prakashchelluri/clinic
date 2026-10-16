@@ -135,5 +135,6 @@ async function getEncounter(tx: any, t: string, id: string) {
   if (!row) throw new HttpError(404, 'NOT_FOUND');
   const rx = await tx.select().from(prescriptionItem).where(eq(prescriptionItem.encounterId, id)).orderBy(asc(prescriptionItem.sortOrder));
   const recs = await tx.select().from(recommendation).where(eq(recommendation.encounterId, id));
-  return { ...row.e, form: row.form, patient: row.p, doctor: row.doctor, prescription: rx, recommendations: recs };
+  const v = await tx.select({ details: visit.details, opNumber: visit.opNumber }).from(visit).where(eq(visit.id, row.e.visitId)).then((r: any[]) => r[0]);
+  return { ...row.e, form: row.form, patient: row.p, doctor: row.doctor, prescription: rx, recommendations: recs, visit: v };
 }

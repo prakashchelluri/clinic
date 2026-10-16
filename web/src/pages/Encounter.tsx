@@ -28,7 +28,11 @@ export function Encounter() {
   const loaded = useRef(false); const dirty = useRef(false);
   useEffect(() => {
     if (enc.data && !loaded.current) {
-      loaded.current = true; setData(enc.data.data ?? {}); setRx(enc.data.prescription.map((i: any) => ({ ...i })));
+      // Complaints typed at arrival pre-fill the consultation so nobody types them twice.
+      const arrival: string[] = (enc.data.visit?.details?.complaints ?? []).map((c: any) => (c.duration ? `${c.text} (${c.duration})` : c.text));
+      const existing = enc.data.data ?? {};
+      const hasComplaint = Array.isArray(existing.complaint?.chief_complaint) ? existing.complaint.chief_complaint.length : !!existing.complaint?.chief_complaint;
+      loaded.current = true; setData(!hasComplaint && arrival.length ? { ...existing, complaint: { ...(existing.complaint ?? {}), chief_complaint: arrival } } : existing); setRx(enc.data.prescription.map((i: any) => ({ ...i })));
       setRecs(enc.data.recommendations.map((r: any) => ({ kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes })));
     }
   }, [enc.data]);
@@ -60,6 +64,7 @@ export function Encounter() {
           <div className="flex items-center gap-3"><Avatar name={p.fullName} size="h-12 w-12 text-base" /><div className="min-w-0"><div className="text-lg font-medium leading-tight truncate">{p.fullName}</div><div className="text-xs text-muted">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''} · {p.patientNo}</div></div></div>
           <div className="text-xs text-muted mt-3 flex flex-wrap gap-x-3 gap-y-1"><span>{p.phone ?? 'no phone'}</span>{p.locality && <span>{p.locality}</span>}</div>
           {p.allergies && <div className="mt-3 text-sm text-rose bg-rose-soft rounded-xl px-3 py-2 flex gap-2"><Icon name="spark" className="h-4 w-4 shrink-0" />Allergies: {p.allergies}</div>}
+          {(() => { const d = e.visit?.details ?? {}; const v = [['Wt', d.weight_kg, 'kg'], ['Ht', d.height_cm, 'cm'], ['BMI', d.bmi, ''], ['Temp', d.temp_f, '°F'], ['BP', d.bp, ''], ['SpO₂', d.spo2, '%'], ['Pulse', d.pulse, '']].filter((x) => x[1] !== undefined && x[1] !== null && x[1] !== ''); return v.length ? <div className="mt-3 flex flex-wrap gap-1.5">{v.map(([l, val, u]) => <span key={String(l)} className="chip !bg-paper"><span className="text-muted">{l}</span> {val}{u ? ` ${u}` : ''}</span>)}</div> : null; })()}
           {me.role === 'assistant' && <div className="mt-3"><Chip tone="sky">Intake mode · doctor reviews next</Chip></div>}
         </div>
         <div className="card anim-fade-up" style={{ animationDelay: '60ms' }}>

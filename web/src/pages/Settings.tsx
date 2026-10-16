@@ -4,6 +4,7 @@ import { useOutletContext } from 'react-router';
 import { get, post, patch, api, qc } from '../api';
 import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
+import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
 
 type Tab = 'clinic' | 'people' | 'forms' | 'fees' | 'medicines' | 'procedures' | 'rooms';
 const TABS: [Tab, string, string, string][] = [
@@ -52,8 +53,9 @@ export function Settings() {
 /* ---------------- Clinic ---------------- */
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
+  const [vitals, setVitals] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
   const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', arriveEarlyMinutes: s.scheduling?.arriveEarlyMinutes ?? 35, defaultCapacity: s.scheduling?.defaultCapacity ?? 7, windowMinutes: s.scheduling?.windowMinutes ?? 60, opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { print: { address: f.address, phone: f.phone, footer: f.footer }, scheduling: { arriveEarlyMinutes: Number(f.arriveEarlyMinutes), defaultCapacity: Number(f.defaultCapacity), windowMinutes: Number(f.windowMinutes) }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); } });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { vitals, print: { address: f.address, phone: f.phone, footer: f.footer }, scheduling: { arriveEarlyMinutes: Number(f.arriveEarlyMinutes), defaultCapacity: Number(f.defaultCapacity), windowMinutes: Number(f.windowMinutes) }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); } });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="space-y-4">
@@ -62,6 +64,11 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div><label className="label">Clinic name</label><input className="input" value={f.name} onChange={set('name')} /></div>
         <div><label className="label">Address (printed on Rx)</label><input className="input" value={f.address} onChange={set('address')} /></div>
         <div className="grid grid-cols-2 gap-3"><div><label className="label">Phone</label><input className="input" value={f.phone} onChange={set('phone')} /></div><div><label className="label">Footer line</label><input className="input" value={f.footer} onChange={set('footer')} /></div></div>
+      </div>
+      <div className="card space-y-3">
+        <div className="text-[11px] uppercase tracking-wider text-muted">Vitals taken at arrival</div>
+        <div className="flex flex-wrap gap-1.5">{VITAL_FIELDS.map((v) => <button key={v.key} type="button" className={`toggle-opt ${vitals.includes(v.key) ? 'on' : ''}`} onClick={() => setVitals(vitals.includes(v.key) ? vitals.filter((x) => x !== v.key) : VITAL_FIELDS.map((x) => x.key).filter((k) => k === v.key || vitals.includes(k)))}>{v.label} ({v.unit})</button>)}</div>
+        <div className="text-xs text-muted">These appear on the arrival sheet and on the doctor's screen. Switch off what your clinic does not measure.</div>
       </div>
       <div className="card space-y-3">
         <div className="text-[11px] uppercase tracking-wider text-muted">Booking defaults</div>

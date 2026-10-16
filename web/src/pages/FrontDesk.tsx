@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, patch, qc, uuid, ApiError, today } from '../api';
@@ -13,14 +13,20 @@ const toHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${
 const shiftDay = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
-type Tab = 'waiting' | 'scheduled' | 'doctor' | 'completed' | 'all' | 'needs';
+type Tab = 'waiting' | 'scheduled' | 'doctor' | 'completed' | 'all' | 'needs' | 'history';
+
+/** Download rows as CSV (opens in Excel). Values are quoted; a BOM keeps Telugu/Hindi names intact. */
+function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
+  const csv = rows.map((r) => r.map((c) => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+}
 
 /** The receptionist's home as one board: every patient is a row, the stage is a tab, Waiting is the default. */
 export function FrontDesk() {
   const { perms, cfg, me } = useOutletContext<Ctx>();
   const nav = useNavigate();
-  const [day, setDay] = useState(today());
-  const isToday = day === today();
+  const day = today(); const isToday = true;
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
   const [tab, setTab] = useState<Tab>('waiting');
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null);
@@ -49,7 +55,7 @@ export function FrontDesk() {
   const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
   const docName = (id: string | null) => cfg?.practitioners.find((p: any) => p.id === id)?.name ?? '—';
-  const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not yet arrived', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount]];
+  const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not yet arrived', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount], ['history', 'History', -1]];
 
   type Row = { type: 'waiting' | 'doctor' | 'appt' | 'noshow' | 'done'; v?: any; a?: any; i?: number };
   const W = { group: 'Waiting · in order', rows: waiting.map((v, i): Row => ({ type: 'waiting', v, i })) };
@@ -57,8 +63,19 @@ export function FrontDesk() {
   const D = { group: 'With the doctor', rows: inConsult.map((v): Row => ({ type: 'doctor', v })) };
   const C = { group: 'Completed · newest first', rows: [...completed.map((v): Row => ({ type: 'done', v })), ...noShows.map((a): Row => ({ type: 'noshow', a }))] };
   const N = { group: 'Needs you', rows: [...late.map((a): Row => ({ type: 'appt', a })), ...withDue.map((v): Row => ({ type: 'done', v }))] };
-  const groups = ({ waiting: [W], scheduled: [S], doctor: [D], completed: [C], needs: [N], all: [W, D, S, C] } as Record<Tab, { group: string; rows: Row[] }[]>)[tab].filter((g) => g.rows.length);
-  const emptyText: Record<Tab, string> = { waiting: 'Nobody waiting', scheduled: 'Everyone booked has arrived', doctor: 'Consultation room is free', completed: 'Nothing completed yet', all: 'Nothing on this day', needs: 'All clear' };
+  const groups = ({ waiting: [W], scheduled: [S], doctor: [D], completed: [C], needs: [N], all: [W, D, S, C], history: [] } as Record<Tab, { group: string; rows: Row[] }[]>)[tab].filter((g) => g.rows.length);
+  const emptyText: Record<Tab, string> = { waiting: 'Nobody waiting', scheduled: 'Everyone booked has arrived', doctor: 'Consultation room is free', completed: 'Nothing completed yet', all: 'Nothing on this day', needs: 'All clear', history: '' };
+
+  const exportRows = () => {
+    const out: (string | number | null | undefined)[][] = [['Date', 'Token / time', 'Patient', 'Age', 'Sex', 'Phone', 'Stage', 'Doctor', 'Note']];
+    for (const g of groups) for (const r of g.rows) {
+      const p = (r.v ?? r.a).patient;
+      const stage = r.type === 'waiting' ? 'waiting' : r.type === 'doctor' ? 'with doctor' : r.type === 'appt' ? 'not yet arrived' : r.type === 'noshow' ? 'no-show' : r.v.status === 'left' ? 'left' : 'completed';
+      const note = r.type === 'done' ? (r.v.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ') : (r.v?.details?.complaint ?? r.a?.note ?? '');
+      out.push([day, r.v ? r.v.opNumber : r.a.window.startTime, p.fullName, p.ageYears, p.sex, p.phone, stage, r.v ? r.v.doctor : docName(r.a.window.practitionerId), note]);
+    }
+    downloadCsv(`front-desk-${tab}-${day}.csv`, out);
+  };
 
   const render = (r: Row) => {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; return (
@@ -117,19 +134,19 @@ export function FrontDesk() {
         </div>
 
         <div className="anim-fade-up flex flex-wrap items-center gap-1.5 mb-3" style={{ animationDelay: '40ms' }}>
-          {tabs.map(([k, label, n]) => <button key={k} className={`toggle-opt !py-2 ${tab === k ? 'on' : ''} ${k === 'needs' && tab !== k && n > 0 ? '!text-rose !border-rose/30' : ''}`} onClick={() => setTab(k)}>{label} <span className={tab === k ? 'opacity-70' : 'text-muted'}>· {n}</span></button>)}
-          <div className="ml-auto flex items-center gap-0.5 card !p-0.5 !rounded-full"><button className="btn btn-ghost btn-icon !h-8 !w-8" onClick={() => setDay(shiftDay(day, -1))}><Icon name="chevL" /></button><span className="text-xs px-1.5 min-w-14 text-center">{isToday ? 'Today' : fmtDate(day)}</span><button className="btn btn-ghost btn-icon !h-8 !w-8" disabled={isToday} onClick={() => setDay(shiftDay(day, 1))}><Icon name="chevR" /></button></div>
+          {tabs.map(([k, label, n]) => <button key={k} className={`toggle-opt !py-2 ${tab === k ? 'on' : ''} ${k === 'needs' && tab !== k && n > 0 ? '!text-rose !border-rose/30' : ''}`} onClick={() => setTab(k)}>{label}{n >= 0 && <span className={tab === k ? 'opacity-70' : 'text-muted'}> · {n}</span>}</button>)}
+          {tab !== 'history' && <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-sm" onClick={() => window.print()}><Icon name="print" className="h-3.5 w-3.5" />Print</button><button className="btn btn-sm" onClick={exportRows}>Export to Excel</button></div>}
         </div>
 
-        <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} onBook={() => nav('/booking')} /> : <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
           <div className="overflow-x-auto"><table className="table !text-sm min-w-[880px]">
             <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
             <tbody>
               {groups.length === 0 && <tr><td colSpan={6} className="!py-10 text-center text-muted">{emptyText[tab]}</td></tr>}
-              {groups.map((g) => (<GroupRows key={g.group} showGroup={tab === 'all'} group={g.group}>{g.rows.map(render)}</GroupRows>))}
+              {groups.map((g) => (<GroupRows key={g.group} showGroup={false} group={g.group}>{g.rows.map(render)}</GroupRows>))}
             </tbody>
           </table></div>
-        </div>
+        </div>}
       </>)}
       {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visits.filter((v) => ['waiting', 'intake'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); refresh(); }} />}
     </div>
@@ -144,13 +161,87 @@ function GroupRows({ showGroup, group, children }: { showGroup: boolean; group: 
   return <>{showGroup && <tr><td colSpan={6} className="!py-2 !bg-paper text-[11px] font-semibold uppercase tracking-wider text-muted">{group}</td></tr>}{children}</>;
 }
 
-/** Arrival: who they are, why this fee, what to collect, which doctor. One screen, one button. */
+const dayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+const weekdayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short' });
+
+/** History across days: a period, an outcome filter, and one search over everyone. Date is a column, not a break. */
+function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook: () => void }) {
+  const { perms } = useOutletContext<Ctx>();
+  const nav = useNavigate();
+  const [period, setPeriod] = useState<'today' | 'yesterday' | '7' | '30' | 'custom'>('7');
+  const [custom, setCustom] = useState({ from: shiftDay(today(), -13), to: today() });
+  const [filter, setFilter] = useState<'all' | 'left' | 'noshow' | 'adjusted'>('all');
+  const [term, setTerm] = useState(find); const [qd, setQd] = useState(find);
+  const t0 = today();
+  const { from, to } = period === 'today' ? { from: t0, to: t0 } : period === 'yesterday' ? { from: shiftDay(t0, -1), to: shiftDay(t0, -1) } : period === '7' ? { from: shiftDay(t0, -6), to: t0 } : period === '30' ? { from: shiftDay(t0, -29), to: t0 } : custom;
+  useEffect(() => { const h = setTimeout(() => setQd(term), 300); return () => clearTimeout(h); }, [term]);
+  const h = useQuery({ queryKey: ['fd-history', from, to, qd, filter], queryFn: () => get(`/frontdesk/history?from=${from}&to=${to}&q=${encodeURIComponent(qd)}&filter=${filter}`) });
+  const refund = useMutation({ mutationFn: (c: any) => post(`/charges/${c.id}/adjust`, { kind: 'refunded', reason: 'left without consultation' }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['fd-history'] }); toast('Refund recorded'); } });
+  const rows: any[] = h.data?.rows ?? []; const s = h.data?.summary;
+  const outcomeChip = (r: any) => r.outcome === 'completed' ? <Chip tone="sage">completed</Chip> : r.outcome === 'left' ? <Chip>left</Chip> : r.outcome === 'noshow' ? <Chip tone="rose">no-show</Chip> : <Chip tone="amber">{r.outcome.replace('_', ' ')}</Chip>;
+  const exportCsv = () => downloadCsv(`front-desk-history-${from}-to-${to}.csv`, [['Date', 'Token / time', 'Patient', 'Age', 'Sex', 'Phone', 'Outcome', 'Doctor', 'What happened'],
+    ...rows.map((r) => [r.date, r.token, r.patient.fullName, r.patient.ageYears, r.patient.sex, r.patient.phone, r.outcome, r.doctor, r.kind === 'noshow' ? 'Did not arrive' : r.outcome === 'left' ? 'Left without seeing the doctor' : (r.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ')])]);
+  const Chipbtn = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button className={`toggle-opt ${on ? 'on' : ''}`} onClick={onClick}>{children}</button>;
+  return (
+    <div className="space-y-3 anim-fade-up">
+      <div className="card !p-4 flex flex-wrap items-center gap-2 no-print">
+        <span className="label !mb-0 mr-1">Period</span>
+        {([['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']] as const).map(([k, l]) => <Chipbtn key={k} on={period === k} onClick={() => setPeriod(k)}>{l}</Chipbtn>)}
+        {period === 'custom' && <><input type="date" className="input !w-auto !py-1.5" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} /><span className="text-muted">to</span><input type="date" className="input !w-auto !py-1.5" value={custom.to} min={custom.from} max={t0} onChange={(e) => setCustom({ ...custom, to: e.target.value })} /></>}
+        <span className="w-px h-7 bg-line mx-1.5" />
+        <span className="label !mb-0 mr-1">Show</span>
+        {([['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']] as const).map(([k, l]) => <Chipbtn key={k} on={filter === k} onClick={() => setFilter(k)}>{l}</Chipbtn>)}
+        <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-72 !rounded-full" placeholder="Search all days: phone, name, token" value={term} onChange={(e) => setTerm(e.target.value)} /></div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+        {s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : <span>Loading…</span>}
+        <span className="ml-auto flex gap-1.5 no-print"><button className="btn btn-sm" onClick={() => window.print()}><Icon name="print" className="h-3.5 w-3.5" />Print or save as PDF</button><button className="btn btn-sm" disabled={!rows.length} onClick={exportCsv}>Export to Excel</button></span>
+      </div>
+      <div className="card-flat overflow-hidden"><div className="overflow-x-auto"><table className="table !text-sm min-w-[980px]">
+        <thead><tr><th className="pl-4 w-28">Date</th><th className="w-24">Token</th><th>Patient</th><th className="w-36">Outcome</th><th className="w-36">Doctor</th><th>What happened</th><th className="text-right pr-4 w-60 no-print">Action</th></tr></thead>
+        <tbody>
+          {h.isLoading && <tr><td colSpan={7} className="!py-10 text-center text-muted">Loading…</td></tr>}
+          {!h.isLoading && rows.length === 0 && <tr><td colSpan={7} className="!py-10 text-center text-muted">Nothing found for this period</td></tr>}
+          {rows.map((r) => { const paid = r.charges.find((c: any) => c.status === 'paid' && c.amountPaise > 0); const adj = r.charges.find((c: any) => ['waived', 'refunded'].includes(c.status));
+            return (
+            <tr key={r.key}><td className="pl-4">{dayOf(r.date)}<div className="text-xs text-muted">{weekdayOf(r.date)}</div></td>
+              <td className={r.kind === 'noshow' ? 'font-semibold' : 'serif text-lg'}>{r.token}</td>
+              <td><b>{r.patient.fullName}</b> <span className="text-muted">{r.patient.ageYears ?? ''} {r.patient.sex ?? ''}</span><div className="text-xs text-muted">{r.patient.phone ?? ''}</div></td>
+              <td>{outcomeChip(r)}</td><td>{r.doctor ?? '—'}</td>
+              <td className="text-xs">{r.kind === 'noshow' ? <span className="text-muted">Did not arrive</span> : r.outcome === 'left' ? <span className="text-muted">Left without seeing the doctor{paid ? ` · ${money(paid.amountPaise)} paid` : ''}</span> : (
+                <div className="flex flex-wrap gap-1">{r.recommendations.length ? r.recommendations.map((x: any) => <Chip key={x.id} tone={x.kind === 'procedure' ? 'sky' : x.kind === 'investigation' ? 'clay' : 'amber'}>{x.kind === 'procedure' ? x.procedure ?? 'Procedure' : x.kind === 'investigation' ? `Test: ${x.notes}` : `Review ${x.dueOn ? fmtDate(x.dueOn) : ''}`}</Chip>) : <span className="text-muted">Medicines only</span>}</div>)}
+                {adj && <div className="mt-1"><Chip tone="amber">{adj.status}{adj.reason ? ` · ${adj.reason}` : ''}</Chip></div>}</td>
+              <td className="text-right pr-4 whitespace-nowrap no-print"><button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>
+                {r.kind === 'noshow' && <> <button className="btn btn-sm" onClick={onBook}>Rebook</button></>}
+                {r.outcome === 'left' && paid && can(perms, 'payment.waive') && <> <button className="btn btn-sm btn-ghost" onClick={() => refund.mutate(paid)}>Refund</button></>}</td></tr>); })}
+        </tbody></table></div>
+        {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-line">Showing the newest 500. Narrow the period or search to see older rows.</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Vitals every clinic checks by default; the owner switches fields on or off in Settings → Clinic. */
+export const VITAL_FIELDS: { key: string; label: string; unit: string; ph: string; type: 'number' | 'text' }[] = [
+  { key: 'weight_kg', label: 'Weight', unit: 'kg', ph: '', type: 'number' }, { key: 'height_cm', label: 'Height', unit: 'cm', ph: '', type: 'number' },
+  { key: 'temp_f', label: 'Temp', unit: '°F', ph: '98.4', type: 'number' }, { key: 'bp', label: 'BP', unit: 'mmHg', ph: '120/80', type: 'text' },
+  { key: 'spo2', label: 'SpO₂', unit: '%', ph: '98', type: 'number' }, { key: 'pulse', label: 'Pulse', unit: 'bpm', ph: '', type: 'number' },
+];
+export const DEFAULT_VITALS = ['weight_kg', 'height_cm', 'temp_f', 'bp', 'spo2'];
+
+type Complaint = { text: string; duration: string };
+
+/** Arrival: who they are, why this fee, vitals, complaints, which doctor. One screen, one button. */
 function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string }; cfg: any; perms: string[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [patientId, setPatientId] = useState(init.patientId);
   const [newP, setNewP] = useState<null | { fullName: string; phone: string; ageYears: string; sex: string }>(null);
   const [cat, setCat] = useState('');
-  const [details, setDetails] = useState({ weight_kg: '', locality: '', complaint: '' });
+  const enabled: string[] = cfg?.tenant.settings?.vitals ?? DEFAULT_VITALS;
+  const [vit, setVit] = useState<Record<string, string>>({});
+  const [locality, setLocality] = useState('');
+  const [list, setList] = useState<Complaint[]>([]);
+  const [draft, setDraft] = useState<Complaint>({ text: '', duration: '' });
   const [method, setMethod] = useState('cash'); const [amount, setAmount] = useState('');
   const [waive, setWaive] = useState('');
   const [practitionerId, setPractitionerId] = useState('');
@@ -162,13 +253,19 @@ function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { 
   const fee = catRow?.amountPaise ?? 0;
   const p = sug.data?.patient;
   const openPlans = (tl.data?.recommendations ?? []).filter((r: any) => !['done', 'cancelled'].includes(r.status));
+  const w = Number(vit.weight_kg), h = Number(vit.height_cm);
+  const bmi = w > 0 && h > 0 ? Math.round((w / ((h / 100) ** 2)) * 10) / 10 : null;
+  const commit = () => { if (draft.text.trim()) { setList([...list, { text: draft.text.trim(), duration: draft.duration.trim() }]); setDraft({ text: '', duration: '' }); } };
   const submit = useMutation({
     mutationFn: async () => {
       let pid = patientId;
-      if (!pid && newP) { const np = await post('/patients?force=1', { fullName: newP.fullName, phone: newP.phone || null, ageYears: newP.ageYears ? Number(newP.ageYears) : null, sex: newP.sex || null, locality: details.locality || null }); pid = np.id; }
+      if (!pid && newP) { const np = await post('/patients?force=1', { fullName: newP.fullName, phone: newP.phone || null, ageYears: newP.ageYears ? Number(newP.ageYears) : null, sex: newP.sex || null, locality: locality || null }); pid = np.id; }
       if (!pid) throw new Error('Pick or register a patient');
+      const complaints = [...list, ...(draft.text.trim() ? [{ text: draft.text.trim(), duration: draft.duration.trim() }] : [])];
+      const vitals: Record<string, any> = {};
+      for (const f of VITAL_FIELDS) if (enabled.includes(f.key) && vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
       return post('/visits', { patientId: pid, appointmentId: init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
-        details: { ...details, weight_kg: details.weight_kg ? Number(details.weight_kg) : undefined, locality: details.locality || p?.locality },
+        details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: complaints.map((c) => c.text).join(', ') },
         payment: !waive && fee > 0 ? { method, amountPaise: Math.round(Number(amount || fee / 100) * 100) } : undefined, waive: waive ? { reason: waive } : undefined, idempotencyKey: uuid() });
     },
     onSuccess: (v: any) => { toast(`Checked in · token ${v.opNumber}`); onClose(); },
@@ -206,13 +303,39 @@ function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { 
             </div>
           )}
           {facts && <div className="flex gap-2 items-start text-sm bg-paper rounded-xl px-3.5 py-2.5"><Icon name="spark" className="h-4 w-4 text-clay shrink-0 mt-0.5" /><span>{facts.days_since_last_paid_consult < 9999 ? <>Last paid consult <b>{facts.days_since_last_paid_consult} days ago</b></> : 'No previous paid consult'} → suggested <b>{sug.data.suggested.name}</b>.{openPlans.length > 0 && <> Open plan: {openPlans.map((r: any) => r.kind === 'procedure' ? 'procedure' : r.kind === 'followup' ? `review ${r.dueOn ? fmtDate(r.dueOn) : ''}` : `test ${r.notes}`).join(', ')}.</>}</span></div>}
-          <div className="grid grid-cols-3 gap-2">
-            <div><label className="label">Weight (kg)</label><input className="input" inputMode="decimal" value={details.weight_kg} onChange={(e) => setDetails({ ...details, weight_kg: e.target.value })} /></div>
-            <div><label className="label">Location</label><input className="input" placeholder={p?.locality ?? ''} value={details.locality} onChange={(e) => setDetails({ ...details, locality: e.target.value })} /></div>
-            <div><label className="label">Complaint</label><input className="input" placeholder="acne, review…" value={details.complaint} onChange={(e) => setDetails({ ...details, complaint: e.target.value })} /></div>
+
+          <div>
+            <div className="flex items-baseline gap-2 mb-1.5"><span className="label !mb-0">Vitals</span><span className="text-xs text-muted">all optional{bmi ? ` · BMI ${bmi}` : ' · BMI is calculated from weight and height'}</span></div>
+            <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${Math.min(enabled.length, 5)}, minmax(0, 1fr))` }}>
+              {VITAL_FIELDS.filter((f) => enabled.includes(f.key)).map((f) => (
+                <div key={f.key}><label htmlFor={`v-${f.key}`} className="text-[10px] font-semibold uppercase tracking-wider text-muted block mb-1">{f.label}</label>
+                  <div className="relative"><input id={`v-${f.key}`} className="input !pr-12" inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph} value={vit[f.key] ?? ''} onChange={(e) => setVit({ ...vit, [f.key]: e.target.value })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
+              ))}
+            </div>
           </div>
-          <div><label className="label">Visit · fee</label>
-            <div className="flex flex-wrap gap-1.5">{cfg?.feeCategories.map((c: any) => <button key={c.code} type="button" className={`toggle-opt !py-2.5 ${chosen === c.code ? 'on' : ''}`} onClick={() => setCat(c.code)}>{c.name.replace(/ \(.*\)/, '')} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code && <Icon name="spark" className="h-3 w-3 ml-1 inline -mt-0.5" />}</button>)}</div></div>
+
+          <div>
+            <span className="label">Complaints</span>
+            <div className="space-y-2">
+              {list.map((c, i) => (
+                <div key={i} className="grid grid-cols-[1fr_150px_44px_44px] gap-2 items-center anim-scale-in">
+                  <div className="input flex items-center !bg-paper">{c.text}</div><div className="input flex items-center !bg-paper text-muted">{c.duration || '—'}</div>
+                  <span className="grid place-items-center h-11 rounded-full bg-sage-soft text-sage border border-sage/40" title="Done"><Icon name="check" /></span>
+                  <button type="button" className="btn btn-icon !h-11 !w-11" aria-label="Remove complaint" onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
+                </div>))}
+              <div className="grid grid-cols-[1fr_150px_92px] gap-2 items-center">
+                <input className="input" aria-label="Complaint" placeholder={list.length ? 'Another complaint…' : 'Main complaint…'} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                <input className="input" aria-label="Since when" placeholder="Since when" value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                <button type="button" className="btn !bg-ink !text-paper !border-ink !h-11" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div><label htmlFor="visit-type" className="label">Visit type · fee</label>
+              <select id="visit-type" className="input" value={chosen} onChange={(e) => setCat(e.target.value)}>{cfg?.feeCategories.map((c: any) => <option key={c.code} value={c.code}>{c.name} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code ? ' (suggested)' : ''}</option>)}</select></div>
+            <div><label htmlFor="locality" className="label">Location</label><input id="locality" className="input" placeholder={p?.locality ?? ''} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="label">Doctor</label><div className="flex flex-wrap gap-1.5">{cfg?.practitioners.map((x: any) => <button key={x.id} type="button" className={`toggle-opt !py-2.5 ${practitionerId === x.id ? 'on' : ''}`} onClick={() => setPractitionerId(practitionerId === x.id ? '' : x.id)}>{x.name} · {waitingByDoctor[x.id] ?? 0} waiting</button>)}</div></div>
             <div><label className="label">Payment</label>
