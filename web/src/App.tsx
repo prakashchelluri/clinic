@@ -3,11 +3,11 @@ import { useMe, useConfig, post, qc } from './api';
 import { Avatar, Icon, ToastHost } from './ui';
 
 const NAV = [
-  ['/queue', 'Queue', 'queue', 'visit.read'],
+  ['/queue', 'Front desk', 'queue', 'visit.read'],
   ['/booking', 'Booking', 'calendar', 'appointment.read'],
   ['/calendar', 'Calendar', 'clock', 'appointment.read'],
   ['/patients', 'Patients', 'users', 'patient.read'],
-  ['/worklist', 'Worklists', 'list', 'worklist.read'],
+  ['/worklist', 'Procedures', 'stetho', 'worklist.read'],
   ['/pharmacy', 'Pharmacy', 'pill', 'pharmacy.read'],
   ['/reports', 'Reports', 'chart', 'report.daily'],
   ['/settings', 'Settings', 'edit', 'config.write'],

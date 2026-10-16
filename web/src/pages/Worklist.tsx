@@ -25,7 +25,7 @@ export function Worklist() {
   const overdue = rows.filter((r) => r.dueOn && r.dueOn < t && r.status !== 'scheduled');
   return (
     <div>
-      <PageHeader title="Worklists" subtitle={overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Everything the doctor recommended, nothing re-typed'}>
+      <PageHeader title="Procedures" subtitle={overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Everything the doctor recommended, nothing re-typed'}>
         <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }, { value: 'investigation', label: 'Tests', count: inv.data?.length }]} />
       </PageHeader>
       {kind === 'procedure' && (sessions.data ?? []).length > 0 && (

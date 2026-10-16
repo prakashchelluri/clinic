@@ -6,7 +6,7 @@ import './index.css';
 import { qc } from './api';
 import { App } from './App';
 import { Login } from './pages/Login';
-import { Queue } from './pages/Queue';
+import { FrontDesk } from './pages/FrontDesk';
 import { Booking } from './pages/Booking';
 import { Patients } from './pages/Patients';
 import { Encounter } from './pages/Encounter';
@@ -27,7 +27,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/print/:id" element={<PrintRx />} />
           <Route element={<App />}>
             <Route index element={<Navigate to="/queue" replace />} />
-            <Route path="/queue" element={<Queue />} />
+            <Route path="/queue" element={<FrontDesk />} />
             <Route path="/booking" element={<Booking />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:id" element={<Patients />} />

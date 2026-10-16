@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc } from 'drizzle-orm';
 import jsonLogic from 'json-logic-js';
-import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter } from '../db/schema.js';
+import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter, session, procedureCatalog } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, daysBetween } from '../lib/core.js';
@@ -85,6 +85,33 @@ export function visitRoutes(app: FastifyInstance) {
     }
     await emit(tx, req.ctx, 'visit.checked_in', 'visit', v.id, { patientId: body.patientId, opNumber, category: cat.code, amountPaise: amount, status });
     return { ...v, charge: ch };
+  });
+
+  /** Everything the front desk screen shows, in one call: appointments, visits with plans and dues, money, doctors. */
+  route(app, 'get', '/frontdesk', 'visit.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const day = String((req.query as any).day ?? todayIn(req.ctx.timezone));
+    const appts = await tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex, locality: patient.locality }, w: { startTime: session.startTime, endTime: session.endTime, practitionerId: session.practitionerId } })
+      .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId))
+      .where(and(eq(appointment.tenantId, t), eq(session.day, day))).orderBy(asc(session.startTime), asc(appointment.createdAt));
+    const visits = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex }, cat: feeCategory.code, doctor: practitioner.name, encounterId: encounter.id, encounterStatus: encounter.status, completedAt: encounter.completedAt })
+      .from(visit).innerJoin(patient, eq(patient.id, visit.patientId)).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId))
+      .leftJoin(practitioner, eq(practitioner.id, visit.practitionerId)).leftJoin(encounter, eq(encounter.visitId, visit.id))
+      .where(and(eq(visit.tenantId, t), eq(visit.day, day))).orderBy(desc(visit.priority), asc(visit.queuePosition));
+    const vids = visits.map((x) => x.v.id);
+    const encIds = visits.map((x) => x.encounterId).filter(Boolean) as string[];
+    const recs = encIds.length ? await tx.select({ r: recommendation, procedure: procedureCatalog.name }).from(recommendation).leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), sql`${recommendation.encounterId} in ${encIds}`)) : [];
+    const dues = vids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), sql`${charge.visitId} in ${vids}`)) : [];
+    const pays = vids.length ? await tx.select({ method: payment.method, total: sql<number>`sum(${payment.amountPaise})::int` }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId)).where(and(eq(payment.tenantId, t), sql`${charge.visitId} in ${vids}`)).groupBy(payment.method) : [];
+    const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
+    const windows = await tx.select({ practitionerId: session.practitionerId, startTime: session.startTime, endTime: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day))).orderBy(asc(session.startTime));
+    return {
+      day,
+      appointments: appts.map((x) => ({ ...x.a, patient: x.p, window: x.w })),
+      visits: visits.map((x) => ({ ...x.v, patient: x.p, category: x.cat, doctor: x.doctor, encounterId: x.encounterId, encounterStatus: x.encounterStatus, completedAt: x.completedAt,
+        recommendations: recs.filter((r) => r.r.encounterId === x.encounterId).map((r) => ({ ...r.r, procedure: r.procedure })), due: dues.filter((d) => d.visitId === x.v.id) })),
+      payments: pays,
+      doctors: docs.map((d) => ({ id: d.id, name: d.name, from: windows.find((w) => w.practitionerId === d.id)?.startTime ?? null, until: [...windows].reverse().find((w) => w.practitionerId === d.id)?.endTime ?? null })),
+    };
   });
 
   /** Live queue for a day: waiting first by priority then position, then in-consult, then done. */
