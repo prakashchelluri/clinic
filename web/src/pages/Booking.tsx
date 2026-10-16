@@ -35,13 +35,13 @@ export function Booking() {
       {sessions.isLoading ? <Skeleton rows={2} /> : sessions.data?.length === 0 ? (
         <div className="card anim-fade-up"><Empty icon="calendar" title="No OP windows for this day" hint="Copy the previous day's plan or add windows one by one." />{writable && <div className="flex justify-center pb-4"><button className="btn" onClick={() => copy.mutate()}>Copy previous day's windows</button></div>}</div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 stagger">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
           {(sessions.data ?? []).map((s: any, i: number) => {
             const pct = s.capacity ? Math.min(100, Math.round((s.allocated / s.capacity) * 100)) : 100;
             const tone = s.free <= 0 ? 'rose' : s.free <= 2 ? 'amber' : 'sage';
             return (
               <button key={s.id} style={{ ['--i' as any]: i }} onClick={() => setSel(s)} className={`card card-hover text-left ${sel?.id === s.id ? '!border-clay ring-4 ring-clay/15' : ''}`}>
-                <div className="flex items-start justify-between"><div className="serif text-xl">{s.startTime}<span className="text-muted text-base"> – {s.endTime}</span></div><Chip tone={tone as any}>{s.allocated}/{s.capacity}</Chip></div>
+                <div className="flex items-start justify-between"><div className="serif text-lg whitespace-nowrap">{s.startTime}<span className="text-muted text-sm"> – {s.endTime}</span></div><Chip tone={tone as any}>{s.allocated}/{s.capacity}</Chip></div>
                 <div className="h-1.5 bg-paper-2 rounded-full mt-3 overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${tone === 'rose' ? 'bg-rose' : tone === 'amber' ? 'bg-amber' : 'bg-sage'}`} style={{ width: pct + '%' }} /></div>
                 <div className="text-xs text-muted mt-2 flex items-center gap-2"><span className="truncate">{cfg?.practitioners.find((p: any) => p.id === s.practitionerId)?.name ?? 'Any doctor'}</span>
                   {writable && <span className="ml-auto flex gap-0.5"><span role="button" className="btn btn-ghost btn-sm !px-2" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: Math.max(0, s.capacity - 1) }); }}>−</span><span role="button" className="btn btn-ghost btn-sm !px-2" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: s.capacity + 1 }); }}>+</span></span>}</div>
