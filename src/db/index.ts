@@ -49,4 +49,7 @@ export async function applyRls() {
     ];
     for (const q of stmts) await db.execute(sql.raw(q));
   }
+  // Login runs before a tenant is known: permit reads of app_user only when app.tenant_id is unset.
+  await db.execute(sql.raw(`drop policy if exists login_lookup on "app_user"`));
+  await db.execute(sql.raw(`create policy login_lookup on "app_user" for select using (coalesce(current_setting('app.tenant_id', true), '') = '')`));
 }

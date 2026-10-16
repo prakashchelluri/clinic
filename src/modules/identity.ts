@@ -1,25 +1,28 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
-import { db, withTenant } from '../db/index.js';
+import { db } from '../db/index.js';
 import { tenant, appUser, practitioner, feeCategory, formDefinition, medicine, procedureCatalog, branch, specialty } from '../db/schema.js';
 import { verifyPassword, HttpError } from '../lib/auth.js';
 import { route } from '../lib/route.js';
 
-const Login = z.object({ tenant: z.string(), email: z.string().email(), password: z.string() });
+const Login = z.object({ tenant: z.string().optional(), email: z.string().email(), password: z.string() });
 
 export function identityRoutes(app: FastifyInstance) {
+  // Clinic is resolved from the email. Only if the same email exists in several clinics is a clinic choice needed.
   app.post('/auth/login', async (req, reply) => {
     const body = Login.parse(req.body);
-    const ten = await db.select().from(tenant).where(eq(tenant.slug, body.tenant)).then((r) => r[0]);
-    if (!ten) throw new HttpError(401, 'BAD_CREDENTIALS');
-    const user = await withTenant(ten.id, '', (tx) =>
-      tx.select().from(appUser).where(and(eq(appUser.tenantId, ten.id), eq(appUser.email, body.email.toLowerCase()))).then((r) => r[0]));
-    if (!user?.active || !verifyPassword(body.password, user.passwordHash)) throw new HttpError(401, 'BAD_CREDENTIALS');
-    reply.setCookie('cc_session', JSON.stringify({ u: user.id, t: ten.id }), {
+    const email = body.email.toLowerCase();
+    let candidates = await db.select({ u: appUser, t: tenant }).from(appUser).innerJoin(tenant, eq(tenant.id, appUser.tenantId))
+      .where(and(eq(appUser.email, email), eq(appUser.active, true)));
+    if (body.tenant) candidates = candidates.filter((c) => c.t.slug === body.tenant);
+    if (candidates.length > 1) throw new HttpError(409, 'CHOOSE_CLINIC', { clinics: candidates.map((c) => ({ slug: c.t.slug, name: c.t.name })) });
+    const hit = candidates[0];
+    if (!hit || !verifyPassword(body.password, hit.u.passwordHash)) throw new HttpError(401, 'BAD_CREDENTIALS');
+    reply.setCookie('cc_session', JSON.stringify({ u: hit.u.id, t: hit.t.id }), {
       path: '/', httpOnly: true, sameSite: 'lax', signed: true, secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 * 14,
     });
-    return { id: user.id, name: user.name, role: user.role, tenant: { id: ten.id, name: ten.name, slug: ten.slug } };
+    return { id: hit.u.id, name: hit.u.name, role: hit.u.role, tenant: { id: hit.t.id, name: hit.t.name, slug: hit.t.slug } };
   });
 
   app.post('/auth/logout', async (_req, reply) => { reply.clearCookie('cc_session', { path: '/' }); return { ok: true }; });

@@ -15,7 +15,7 @@ const { buildApp } = await import('../src/app.js');
 let app: Awaited<ReturnType<typeof buildApp>>;
 const jar: Record<string, string> = {};
 async function as(email: string) {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { tenant: 'sahitya', email, password: 'demo1234' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'demo1234' } });
   assert.equal(r.statusCode, 200, r.body);
   jar[email] = r.cookies.find((c) => c.name === 'cc_session')!.value;
   return (method: 'GET' | 'POST' | 'PATCH', url: string, payload?: unknown) =>
