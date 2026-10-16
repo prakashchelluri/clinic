@@ -33,7 +33,7 @@ export function CommandPalette({ open, onClose, can }: { open: boolean; onClose:
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex justify-center items-start pt-[12vh] px-4 anim-fade-in" style={{ background: 'rgba(23,25,26,0.34)', backdropFilter: 'blur(6px)' }} onClick={onClose}>
-      <div className="w-full max-w-[620px] rounded-[28px] border border-white/90 bg-white/85 p-3.5 anim-scale-in" style={{ boxShadow: '0 40px 80px -30px rgba(40,25,10,.5)', backdropFilter: 'blur(18px)' }} onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-[620px] rounded-[28px] border border-white/90 bg-[#FBFAF7]/97 p-3.5 anim-scale-in" style={{ boxShadow: '0 40px 80px -30px rgba(40,25,10,.5)', backdropFilter: 'blur(18px)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-3.5 pt-3 pb-3.5 border-b border-ink/8">
           <Icon name="search" className="h-5 w-5" />
           <input ref={input} className="flex-1 bg-transparent outline-none text-[17px] font-medium placeholder:text-muted/70" placeholder="Search patients, or type an action" value={q} onChange={(e) => setQ(e.target.value)}

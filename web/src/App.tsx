@@ -94,7 +94,9 @@ export function App() {
           <span className="ml-auto" />
           {!platform && <button onClick={() => setPalette(true)} className="hidden lg:flex h-10 min-w-[260px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white">
             <Icon name="search" className="h-4 w-4" />Search patients<span className="kbd ml-auto">⌘K</span></button>}
-          {!platform && <button onClick={() => setPalette(true)} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>}
+          {!platform && (c('visit.write')
+            ? <button onClick={() => nav('/queue?arrive=1')} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Patient arrived</span></button>
+            : <button onClick={() => setPalette(true)} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>)}
           <div className="relative">
             <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-[42px] w-[42px] text-sm" /></button>
             {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}

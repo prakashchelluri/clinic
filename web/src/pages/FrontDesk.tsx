@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, qc, uuid, ApiError, today } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Icon, Modal, MoreMenu, Num, Segmented, Skeleton, money, toast, fmtDate } from '../ui';
+import { Avatar, Chip, Floating, Icon, Modal, MoreMenu, Num, Segmented, Skeleton, money, toast, fmtDate } from '../ui';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -30,7 +31,8 @@ export function FrontDesk() {
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
   const [tab, setTab] = useState<Tab>('waiting');
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null);
-  const [find, setFind] = useState('');
+  const find = '';
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [sp, setSp] = useSearchParams();
   useEffect(() => { if (sp.get('arrive')) { setArrive({}); setSp({}, { replace: true }); } }, [sp]);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['frontdesk'] }); qc.invalidateQueries({ queryKey: ['queue'] }); };
@@ -125,8 +127,7 @@ export function FrontDesk() {
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
         <div className="mr-auto"><h1 className="text-[30px] leading-tight font-semibold">Front desk</h1>
           <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
-        <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-72 !rounded-full" placeholder="Phone, name or token" value={find} onChange={(e) => setFind(e.target.value)} /></div>
-        {canDesk && isToday && <button className="btn btn-primary !py-2.5" onClick={() => setArrive({})}><Icon name="plus" />Patient arrived</button>}
+        {canDesk && <button className="btn btn-primary !py-2.5" onClick={() => nav('/booking')}><Icon name="calendar" />Schedule</button>}
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
@@ -136,15 +137,14 @@ export function FrontDesk() {
           <Sep /><Stat label="With doctor" value={inConsult.length} />
           <Sep /><Stat label="Completed" value={completed.filter((v) => v.status === 'done').length} />
           <Sep /><Stat label="Collected" value={<Num value={collected} format={money} />} tone="sage" sub={(d.payments ?? []).length ? '· ' + d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : ''} />
-          {needsCount > 0 && <button className="ml-auto chip chip-rose !py-2 !px-3.5 !text-xs" onClick={() => setTab('needs')}>{needsCount} need you{dueTotal ? ` · ${money(dueTotal)} due` : ''}</button>}
         </div>
 
         <div className="anim-fade-up flex flex-wrap items-center gap-1.5 mb-3" style={{ animationDelay: '40ms' }}>
           <Segmented value={tab} onChange={setTab} options={tabs.map(([k, label, n]) => ({ value: k, label, count: n >= 0 ? n : undefined, tone: k === 'needs' && n > 0 ? ('rose' as const) : undefined }))} />
-          {tab !== 'history' && <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button></div>}
+          {tab === 'history' ? <div ref={setSlot} className="ml-auto flex flex-wrap items-center gap-2 no-print" /> : <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button></div>}
         </div>
 
-        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} onBook={() => nav('/booking')} /> : <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={() => nav('/booking')} /> : <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
           <div className="overflow-x-auto"><table className="table !text-sm min-w-[880px]">
             <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
             <tbody>
@@ -170,14 +170,17 @@ function GroupRows({ showGroup, group, children }: { showGroup: boolean; group: 
 const dayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 const weekdayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short' });
 
-/** History across days: a period, an outcome filter, and one search over everyone. Date is a column, not a break. */
-function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook: () => void }) {
+/** History across days. The controls sit on the tab row (search, one Filters dropdown, print, export); the date is a column. */
+const PERIODS: [string, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']];
+const SHOWS: [string, string][] = [['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']];
+function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; onBook: () => void; slot: HTMLElement | null }) {
   const { perms } = useOutletContext<Ctx>();
   const nav = useNavigate();
-  const [period, setPeriod] = useState<'today' | 'yesterday' | '7' | '30' | 'custom'>('7');
+  const [period, setPeriod] = useState('7');
   const [custom, setCustom] = useState({ from: shiftDay(today(), -13), to: today() });
-  const [filter, setFilter] = useState<'all' | 'left' | 'noshow' | 'adjusted'>('all');
+  const [filter, setFilter] = useState('all');
   const [term, setTerm] = useState(find); const [qd, setQd] = useState(find);
+  const [open, setOpen] = useState(false); const fbtn = useRef<HTMLButtonElement>(null);
   const t0 = today();
   const { from, to } = period === 'today' ? { from: t0, to: t0 } : period === 'yesterday' ? { from: shiftDay(t0, -1), to: shiftDay(t0, -1) } : period === '7' ? { from: shiftDay(t0, -6), to: t0 } : period === '30' ? { from: shiftDay(t0, -29), to: t0 } : custom;
   useEffect(() => { const h = setTimeout(() => setQd(term), 300); return () => clearTimeout(h); }, [term]);
@@ -187,22 +190,30 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
   const outcomeChip = (r: any) => r.outcome === 'completed' ? <Chip tone="sage">completed</Chip> : r.outcome === 'left' ? <Chip>left</Chip> : r.outcome === 'noshow' ? <Chip tone="rose">no-show</Chip> : <Chip tone="amber">{r.outcome.replace('_', ' ')}</Chip>;
   const exportCsv = () => downloadCsv(`front-desk-history-${from}-to-${to}.csv`, [['Date', 'Token / time', 'Patient', 'Age', 'Sex', 'Phone', 'Outcome', 'Doctor', 'What happened'],
     ...rows.map((r) => [r.date, r.token, r.patient.fullName, r.patient.ageYears, r.patient.sex, r.patient.phone, r.outcome, r.doctor, r.kind === 'noshow' ? 'Did not arrive' : r.outcome === 'left' ? 'Left without seeing the doctor' : (r.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ')])]);
-  const Chipbtn = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button className={`toggle-opt ${on ? 'on' : ''}`} onClick={onClick}>{children}</button>;
+  const periodLabel = period === 'custom' ? `${dayOf(custom.from)} – ${dayOf(custom.to)}` : PERIODS.find((p) => p[0] === period)![1];
+  const showLabel = SHOWS.find((x) => x[0] === filter)![1];
+  const Opt = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button type="button" onClick={onClick} className={on ? '!font-semibold' : ''}><span className="flex-1">{children}</span>{on && <Icon name="check" className="h-4 w-4" />}</button>;
+  const controls = (
+    <>
+      <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !h-10 !py-0 !pl-10 !w-48 !rounded-full" placeholder="Search all days" value={term} onChange={(e) => setTerm(e.target.value)} /></div>
+      <button ref={fbtn} type="button" className={`btn ${open ? '!bg-white' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="filter" className="h-4 w-4" />{periodLabel}{filter !== 'all' && <span className="text-muted font-medium">· {showLabel}</span>}<Icon name="chevR" className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? '-rotate-90' : 'rotate-90'}`} /></button>
+      <Floating anchor={fbtn} open={open} onClose={() => setOpen(false)} width={300}>
+        <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Period</div>
+        {PERIODS.map(([k, l]) => <Opt key={k} on={period === k} onClick={() => { setPeriod(k); if (k !== 'custom') setOpen(false); }}>{l}</Opt>)}
+        {period === 'custom' && <div className="flex items-center gap-2 px-3 pb-2"><input type="date" className="input !py-1.5 !px-2.5 text-xs" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} /><span className="text-muted text-xs">to</span><input type="date" className="input !py-1.5 !px-2.5 text-xs" value={custom.to} min={custom.from} max={t0} onChange={(e) => setCustom({ ...custom, to: e.target.value })} /></div>}
+        <div className="my-1.5 h-px bg-ink/8" />
+        <div className="px-3 pt-1 pb-1 text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Show</div>
+        {SHOWS.map(([k, l]) => <Opt key={k} on={filter === k} onClick={() => { setFilter(k); setOpen(false); }}>{l}</Opt>)}
+        {(period !== '7' || filter !== 'all') && <><div className="my-1.5 h-px bg-ink/8" /><button type="button" onClick={() => { setPeriod('7'); setFilter('all'); setOpen(false); }} className="!text-muted">Reset filters</button></>}
+      </Floating>
+      <button className="btn btn-icon" title="Print or save as PDF" aria-label="Print or save as PDF" onClick={() => window.print()}><Icon name="print" /></button>
+      <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" disabled={!rows.length} onClick={exportCsv}><Icon name="export" /></button>
+    </>
+  );
   return (
     <div className="space-y-3 anim-fade-up">
-      <div className="flex flex-wrap items-center gap-3 no-print">
-        
-        <Segmented value={period} onChange={setPeriod} options={[{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: 'custom', label: 'Pick dates' }]} />
-        {period === 'custom' && <><input type="date" className="input !w-auto !py-1.5" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} /><span className="text-muted">to</span><input type="date" className="input !w-auto !py-1.5" value={custom.to} min={custom.from} max={t0} onChange={(e) => setCustom({ ...custom, to: e.target.value })} /></>}
-        
-        
-        <Segmented value={filter} onChange={setFilter} options={[{ value: 'all', label: 'Everything' }, { value: 'left', label: 'Left without consult' }, { value: 'noshow', label: 'No-shows' }, { value: 'adjusted', label: 'Fees waived or refunded' }]} />
-        <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-72 !rounded-full" placeholder="Search all days: phone, name, token" value={term} onChange={(e) => setTerm(e.target.value)} /></div>
-      </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
-        {s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : <span>Loading…</span>}
-        <span className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print or save as PDF" aria-label="Print or save as PDF" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" disabled={!rows.length} onClick={exportCsv}><Icon name="export" /></button></span>
-      </div>
+      {slot && createPortal(controls, slot)}
+      <div className="text-sm text-muted">{s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : 'Loading…'}</div>
       <div className="card-flat overflow-hidden"><div className="overflow-x-auto"><table className="table !text-sm min-w-[980px]">
         <thead><tr><th className="pl-4 w-28">Date</th><th className="w-24">Token</th><th>Patient</th><th className="w-36">Outcome</th><th className="w-36">Doctor</th><th>What happened</th><th className="text-right pr-4 w-60 no-print">Action</th></tr></thead>
         <tbody>
@@ -217,11 +228,11 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
               <td className="text-xs">{r.kind === 'noshow' ? <span className="text-muted">Did not arrive</span> : r.outcome === 'left' ? <span className="text-muted">Left without seeing the doctor{paid ? ` · ${money(paid.amountPaise)} paid` : ''}</span> : (
                 <div className="flex flex-wrap gap-1">{r.recommendations.length ? r.recommendations.map((x: any) => <Chip key={x.id} tone={x.kind === 'procedure' ? 'sky' : x.kind === 'investigation' ? 'clay' : 'amber'}>{x.kind === 'procedure' ? x.procedure ?? 'Procedure' : x.kind === 'investigation' ? `Test: ${x.notes}` : `Review ${x.dueOn ? fmtDate(x.dueOn) : ''}`}</Chip>) : <span className="text-muted">Medicines only</span>}</div>)}
                 {adj && <div className="mt-1"><Chip tone="amber">{adj.status}{adj.reason ? ` · ${adj.reason}` : ''}</Chip></div>}</td>
-              <td className="text-right pr-4 whitespace-nowrap no-print"><button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>
-                {r.kind === 'noshow' && <> <button className="btn btn-sm" onClick={onBook}>Rebook</button></>}
-                {r.outcome === 'left' && paid && can(perms, 'payment.waive') && <> <button className="btn btn-sm btn-ghost" onClick={() => refund.mutate(paid)}>Refund</button></>}</td></tr>); })}
+              <td className="text-right pr-4 whitespace-nowrap no-print">
+                {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={onBook}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.waive') ? <button className="btn btn-sm btn-primary" onClick={() => refund.mutate(paid)}>Refund</button> : <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>}
+                {(r.kind === 'noshow' || r.outcome === 'left') && <> <MoreMenu items={[{ label: 'Open record', onClick: () => nav(`/patients/${r.patient.id}`) }, { label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }]} /></>}</td></tr>); })}
         </tbody></table></div>
-        {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-line">Showing the newest 500. Narrow the period or search to see older rows.</div>}
+        {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-ink/8">Showing the newest 500. Narrow the period or search to see older rows.</div>}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 
 /* ---------- Icons (inline, stroke) ---------- */
 const PATHS: Record<string, string> = {
@@ -24,14 +25,16 @@ const PATHS: Record<string, string> = {
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
   chevL: 'm15 18-6-6 6-6', chevR: 'm9 18 6-6-6-6',
   dots: 'M12 5v.01M12 12v.01M12 19v.01',
+  filter: 'M4 5h16l-6 7v6l-4 2v-8z',
   export: 'M12 15V4M8 8l4-4 4 4M5 14v5h14v-5',
   moon: 'M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z',
   home: 'M3 11 12 3l9 8M5 10v10h14V10',
   wallet: 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2zM16 14h.01',
   stetho: 'M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4M20 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
 };
-export function Icon({ name, className = 'h-4 w-4' }: { name: keyof typeof PATHS | string; className?: string }) {
-  return (<svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d={PATHS[name] ?? ''} /></svg>);
+export function Icon({ name, className = '' }: { name: keyof typeof PATHS | string; className?: string }) {
+  // keep the default size whenever the caller only passes colour or spacing classes
+  return (<svg className={/(^|\s)(h|w|size)-/.test(className) ? className : `h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d={PATHS[name] ?? ''} /></svg>);
 }
 
 /* ---------- Primitives ---------- */
@@ -125,27 +128,39 @@ export function Num({ value, format = (n: number) => String(n) }: { value: numbe
   return <span key={flash} className={flash ? 'is-flash' : ''}>{format(shown)}</span>;
 }
 
+/** A panel that floats above everything, anchored under a button. Used by the ⋯ menu and filters, so rows never cover it. */
+export function Floating({ anchor, open, onClose, children, width }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; width?: number }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  useLayoutEffect(() => { if (!open) { setPos(null); return; } const r = anchor.current?.getBoundingClientRect(); if (r) setPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) }); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => { const t = e.target as Node; if (!panel.current?.contains(t) && !anchor.current?.contains(t)) onClose(); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const away = (e: Event) => { if (!panel.current?.contains(e.target as Node)) onClose(); };
+    document.addEventListener('mousedown', down); document.addEventListener('keydown', key); window.addEventListener('resize', onClose); window.addEventListener('scroll', away, true);
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); window.removeEventListener('resize', onClose); window.removeEventListener('scroll', away, true); };
+  }, [open]);
+  if (!open || !pos) return null;
+  return createPortal(<div ref={panel} className="menu anim-menu" style={{ position: 'fixed', top: pos.top, right: pos.right, left: 'auto', zIndex: 70, width, marginTop: 0 }}>{children}</div>, document.body);
+}
+
 /** The ⋯ menu: secondary actions live here so a row shows one clear button. */
 export type MenuItem = { label: string; onClick?: () => void; href?: string; danger?: boolean; hidden?: boolean };
 export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
-    document.addEventListener('mousedown', close); document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
-  }, [open]);
+  const btn = useRef<HTMLButtonElement>(null);
   const shown = items.filter((i) => !i.hidden);
   if (!shown.length) return null;
   return (
-    <div className="relative inline-block" ref={ref}>
-      <button type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" className="h-5 w-5" /></button>
-      {open && <div className="menu anim-menu" role="menu">{shown.map((i) => i.href
-        ? <a key={i.label} href={i.href} role="menuitem" className={i.danger ? 'danger' : ''}>{i.label}</a>
-        : <button key={i.label} type="button" role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => { setOpen(false); i.onClick?.(); }}>{i.label}</button>)}</div>}
-    </div>
+    <>
+      <button ref={btn} type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" className="h-5 w-5" /></button>
+      <Floating anchor={btn} open={open} onClose={() => setOpen(false)}>
+        <div role="menu">{shown.map((i) => i.href
+          ? <a key={i.label} href={i.href} role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => setOpen(false)}>{i.label}</a>
+          : <button key={i.label} type="button" role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => { setOpen(false); i.onClick?.(); }}>{i.label}</button>)}</div>
+      </Floating>
+    </>
   );
 }
 
@@ -153,7 +168,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl' 
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   return (
     <div className="fixed inset-0 z-40 grid place-items-center p-4 anim-fade-in" style={{ background: 'rgba(28,27,25,0.35)', backdropFilter: 'blur(6px)' }} onClick={onClose}>
-      <div className={`card anim-scale-in w-full ${width} max-h-[94vh] overflow-auto !p-0`} style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()}>
+      <div className={`rounded-[28px] border border-white bg-[#FBFAF7] anim-scale-in w-full ${width} max-h-[94vh] overflow-auto !p-0`} style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start gap-3 px-6 pt-5 pb-3"><div className="mr-auto"><h2 className="text-xl font-medium">{title}</h2>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
         <div className="px-6 pb-6">{children}</div>
       </div>
