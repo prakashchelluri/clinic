@@ -3,3 +3,4 @@ dist
 web/dist
 data
 .env
+server.log
