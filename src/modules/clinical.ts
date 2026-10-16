@@ -32,6 +32,11 @@ export function clinicalRoutes(app: FastifyInstance) {
     const v = await tx.select().from(visit).where(and(eq(visit.id, visitId), eq(visit.tenantId, t))).then((r) => r[0]);
     if (!v) throw new HttpError(404, 'VISIT_NOT_FOUND');
     let enc = await tx.select().from(encounter).where(and(eq(encounter.visitId, visitId), eq(encounter.tenantId, t))).then((r) => r[0]);
+    if (enc && enc.status === 'draft') {
+      // Drafts follow the latest form version; completed encounters stay pinned to the version they were written with.
+      const latest = await tx.select({ id: formDefinition.id }).from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, 'encounter'), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
+      if (latest && latest.id !== enc.formDefinitionId) await tx.update(encounter).set({ formDefinitionId: latest.id }).where(eq(encounter.id, enc.id));
+    }
     if (!enc) {
       const form = await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, 'encounter'), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
       if (!form) throw new HttpError(500, 'NO_ENCOUNTER_FORM');
