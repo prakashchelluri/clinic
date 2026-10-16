@@ -98,7 +98,7 @@ export function FrontDesk() {
       <tr key={a.id} className={`anim-fade-up ${isLate ? 'bg-rose-soft/40' : ''}`}><td className={`pl-4 font-semibold ${isLate ? 'text-rose' : ''}`}>{a.window.startTime}{isLate && <div className="text-[11px] font-normal">late</div>}</td>
         <td><b>{a.patient.fullName}</b> <span className="text-muted">{a.patient.ageYears ?? ''} {a.patient.sex ?? ''}</span><div className="text-xs text-muted">{[a.patient.phone, a.patient.locality].filter(Boolean).join(' · ')}</div></td>
         <td>{isLate ? <Chip tone="rose">not arrived</Chip> : <Chip>booked</Chip>}</td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">{a.note ?? ''}</td>
-        <td className="text-right pr-4 whitespace-nowrap">{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Arrived</button>} {canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}` }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</td></tr>); }
+        <td className="text-right pr-4 whitespace-nowrap">{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>} {canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}` }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</td></tr>); }
     if (r.type === 'noshow') { const a = r.a; return (
       <tr key={a.id} className="anim-fade-up opacity-70"><td className="pl-4 font-semibold">{a.window.startTime}</td>
         <td><b>{a.patient.fullName}</b><div className="text-xs text-muted">{a.patient.phone ?? ''}</div></td>
@@ -123,11 +123,11 @@ export function FrontDesk() {
   };
 
   return (
-    <div>
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
         <div className="mr-auto"><h1 className="text-[30px] leading-tight font-semibold">Front desk</h1>
           <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
-        {canDesk && <button className="btn btn-primary !py-2.5" onClick={() => nav('/booking')}><Icon name="calendar" />Schedule</button>}
+        
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
@@ -144,8 +144,8 @@ export function FrontDesk() {
           {tab === 'history' ? <div ref={setSlot} className="ml-auto flex flex-wrap items-center gap-2 no-print" /> : <div className="ml-auto flex gap-1.5 no-print"><button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button><button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button></div>}
         </div>
 
-        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={() => nav('/booking')} /> : <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
-          <div className="overflow-x-auto"><table className="table !text-sm min-w-[880px]">
+        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={() => nav('/booking')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+          <div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm min-w-[760px]">
             <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
             <tbody>
               {groups.length === 0 && <tr><td colSpan={6} className="!py-10 text-center text-muted">{emptyText[tab]}</td></tr>}
@@ -211,10 +211,10 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
     </>
   );
   return (
-    <div className="space-y-3 anim-fade-up">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 anim-fade-up">
       {slot && createPortal(controls, slot)}
       <div className="text-sm text-muted">{s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : 'Loading…'}</div>
-      <div className="card-flat overflow-hidden"><div className="overflow-x-auto"><table className="table !text-sm min-w-[980px]">
+      <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden"><div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm min-w-[860px]">
         <thead><tr><th className="pl-4 w-28">Date</th><th className="w-24">Token</th><th>Patient</th><th className="w-36">Outcome</th><th className="w-36">Doctor</th><th>What happened</th><th className="text-right pr-4 w-60 no-print">Action</th></tr></thead>
         <tbody>
           {h.isLoading && <tr><td colSpan={7} className="!py-10 text-center text-muted">Loading…</td></tr>}

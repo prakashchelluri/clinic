@@ -16,7 +16,7 @@ export function CommandPalette({ open, onClose, can }: { open: boolean; onClose:
 
   const search = useQuery({ queryKey: ['palette', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: open && q.trim().length >= 2 && can('patient.read') });
   const all: (Action | false)[] = [
-    can('visit.write') && { key: 'A', label: 'Patient arrived', icon: 'plus', hint: 'Check someone in', to: '/queue?arrive=1' },
+    can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/queue?arrive=1' },
     can('visit.write') && { key: 'B', label: 'Book an appointment', icon: 'calendar', hint: 'Pick a window', to: '/booking' },
     can('appointment.write') && { key: 'L', label: 'Doctor is late or away today', icon: 'clock', hint: 'Adjust capacity', to: '/calendar' },
     can('patient.write') && { key: 'R', label: 'Register a patient', icon: 'user', hint: 'New record', to: '/patients?new=1' },

@@ -134,6 +134,7 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
   .table { @apply w-full text-sm; }
   .table th { @apply text-left text-[11px] font-bold uppercase tracking-[0.09em] text-muted px-5 py-4 border-b border-ink/8 whitespace-nowrap; }
   .table td { @apply px-5 py-4 border-b border-ink/6 align-middle; }
+  .table.sticky-head th { position: sticky; top: 0; z-index: 2; background: #F7F4EE; }
   .table tbody tr { transition: background-color 0.15s var(--ease); }
   .table tbody tr:hover { background: rgba(255, 255, 255, 0.5); }
   .table tr:last-child td { @apply border-b-0; }

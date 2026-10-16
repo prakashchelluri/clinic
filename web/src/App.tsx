@@ -52,6 +52,7 @@ export function App() {
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
   const items = NAV.filter((n) => (n.to === '/platform' ? platform : !platform) && n.show(c));
+  const fit = loc.pathname === '/queue'; // table pages: the page stays put, only the table scrolls
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
 
   useEffect(() => {
@@ -79,7 +80,7 @@ export function App() {
   ];
 
   return (
-    <div className="min-h-dvh">
+    <div className={fit ? 'h-dvh overflow-hidden' : 'min-h-dvh'}>
       <aside className="no-print fixed left-6 top-40 z-20 hidden md:flex w-12 flex-col items-center gap-1.5 rounded-full bg-ink py-3.5 text-[#cfcac0]" style={{ boxShadow: '0 24px 40px -18px rgba(23,25,26,.6)' }} aria-label="Quick actions">
         {rail.filter((r) => r.show).map((r) => r.to
           ? <Link key={r.tip} to={r.to} viewTransition aria-label={r.tip} data-tip={r.tip} className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name={r.icon} /></Link>
@@ -88,14 +89,14 @@ export function App() {
         <button onClick={signOut} aria-label="Sign out" data-tip="Sign out" className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name="logout" /></button>
       </aside>
 
-      <div className="mx-auto max-w-[1440px] px-4 pb-16 pt-5 md:pl-[108px] md:pr-10 md:pt-7">
+      <div className={`mx-auto max-w-[1440px] px-4 pt-5 md:pl-[108px] md:pr-10 md:pt-7 ${fit ? 'h-full flex flex-col pb-5' : 'pb-16'}`}>
         <header className="no-print flex items-center gap-3 md:gap-5">
           <Link to="/" className="flex items-center gap-3 min-w-0"><span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-xl bg-ink text-xl font-bold text-white">{clinic.slice(0, 1)}</span><span className="truncate text-[19px] font-semibold">{clinic}</span></Link>
           <span className="ml-auto" />
           {!platform && <button onClick={() => setPalette(true)} className="hidden lg:flex h-10 min-w-[260px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white">
             <Icon name="search" className="h-4 w-4" />Search patients<span className="kbd ml-auto">⌘K</span></button>}
           {!platform && (c('visit.write')
-            ? <button onClick={() => nav('/queue?arrive=1')} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Patient arrived</span></button>
+            ? <button onClick={() => nav('/queue?arrive=1')} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Check in</span></button>
             : <button onClick={() => setPalette(true)} className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>)}
           <div className="relative">
             <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-[42px] w-[42px] text-sm" /></button>
@@ -112,7 +113,7 @@ export function App() {
           </div>
         </nav>
 
-        <main key={loc.pathname.split('/')[1]} className="page"><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></main>
+        <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'flex-1 min-h-0 flex flex-col' : ''}`}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />
