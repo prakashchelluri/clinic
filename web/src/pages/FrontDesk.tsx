@@ -9,17 +9,25 @@ type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+const toHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const shiftDay = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
-/** The receptionist's home: who is due, who is waiting, who is with the doctor, who just finished and needs what. */
+type Tab = 'waiting' | 'scheduled' | 'doctor' | 'completed' | 'all' | 'needs';
+
+/** The receptionist's home as one board: every patient is a row, the stage is a tab, Waiting is the default. */
 export function FrontDesk() {
   const { perms, cfg, me } = useOutletContext<Ctx>();
   const nav = useNavigate();
-  const q = useQuery({ queryKey: ['frontdesk'], queryFn: () => get('/frontdesk'), refetchInterval: 5000 });
+  const [day, setDay] = useState(today());
+  const isToday = day === today();
+  const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
+  const [tab, setTab] = useState<Tab>('waiting');
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null);
   const [find, setFind] = useState('');
   const refresh = () => { qc.invalidateQueries({ queryKey: ['frontdesk'] }); qc.invalidateQueries({ queryKey: ['queue'] }); };
   const upVisit = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/visits/${id}`, b), onSuccess: refresh });
-  const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: () => { refresh(); toast('Marked no-show', 'info'); } });
+  const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: () => { refresh(); toast('Updated', 'info'); } });
   const collect = useMutation({ mutationFn: ({ c, method }: any) => post('/payments', { patientId: c.patientId, chargeId: c.id, amountPaise: c.amountPaise, method, idempotencyKey: uuid() }), onSuccess: () => { refresh(); toast('Collected'); } });
   const openEncounter = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }) });
   const d = q.data;
@@ -27,89 +35,100 @@ export function FrontDesk() {
   const f = find.trim().toLowerCase();
   const match = (p: any, extra = '') => !f || p.fullName.toLowerCase().includes(f) || (p.phone ?? '').includes(f) || p.patientNo.toLowerCase().includes(f) || extra.toLowerCase().includes(f);
 
-  const appts: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'booked' && match(a.patient));
   const visits: any[] = d?.visits ?? [];
+  const scheduled: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'booked' && match(a.patient));
+  const noShows: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'no_show' && match(a.patient));
   const waiting = visits.filter((v) => ['waiting', 'intake'].includes(v.status) && match(v.patient, v.opNumber));
   const inConsult = visits.filter((v) => v.status === 'in_consult' && match(v.patient, v.opNumber));
-  const done = visits.filter((v) => ['done', 'left'].includes(v.status) && match(v.patient, v.opNumber)).sort((a, b) => (b.completedAt ?? b.arrivedAt).localeCompare(a.completedAt ?? a.arrivedAt));
-  const finishedUnhandled = done.filter((v) => v.status === 'done' && !v.details?.explainedAt && (v.recommendations.length || v.due.length));
-  const late = appts.filter((a) => toMin(a.window.endTime) < nowMin());
-  const dueTotal = visits.reduce((s, v) => s + v.due.reduce((x: number, c: any) => x + c.amountPaise, 0), 0);
+  const completed = visits.filter((v) => ['done', 'left'].includes(v.status) && match(v.patient, v.opNumber)).sort((a, b) => (b.completedAt ?? b.arrivedAt).localeCompare(a.completedAt ?? a.arrivedAt));
+  const late = scheduled.filter((a) => isToday && toMin(a.window.endTime) < nowMin());
+  const withDue = visits.filter((v) => v.due.length);
+  const needsCount = late.length + withDue.length;
+  const dueTotal = withDue.reduce((s, v) => s + v.due.reduce((x: number, c: any) => x + c.amountPaise, 0), 0);
   const collected = (d?.payments ?? []).reduce((s: number, p: any) => s + p.total, 0);
   const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
-  const needs = late.length + visits.filter((v) => v.due.length).length;
-  const dayLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+  const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+  const docName = (id: string | null) => cfg?.practitioners.find((p: any) => p.id === id)?.name ?? '—';
+  const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not yet arrived', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount]];
+
+  type Row = { type: 'waiting' | 'doctor' | 'appt' | 'noshow' | 'done'; v?: any; a?: any; i?: number };
+  const W = { group: 'Waiting · in order', rows: waiting.map((v, i): Row => ({ type: 'waiting', v, i })) };
+  const S = { group: 'Scheduled · not yet arrived', rows: scheduled.map((a): Row => ({ type: 'appt', a })) };
+  const D = { group: 'With the doctor', rows: inConsult.map((v): Row => ({ type: 'doctor', v })) };
+  const C = { group: 'Completed · newest first', rows: [...completed.map((v): Row => ({ type: 'done', v })), ...noShows.map((a): Row => ({ type: 'noshow', a }))] };
+  const N = { group: 'Needs you', rows: [...late.map((a): Row => ({ type: 'appt', a })), ...withDue.map((v): Row => ({ type: 'done', v }))] };
+  const groups = ({ waiting: [W], scheduled: [S], doctor: [D], completed: [C], needs: [N], all: [W, D, S, C] } as Record<Tab, { group: string; rows: Row[] }[]>)[tab].filter((g) => g.rows.length);
+  const emptyText: Record<Tab, string> = { waiting: 'Nobody waiting', scheduled: 'Everyone booked has arrived', doctor: 'Consultation room is free', completed: 'Nothing completed yet', all: 'Nothing on this day', needs: 'All clear' };
+
+  const render = (r: Row) => {
+    if (r.type === 'waiting') { const v = r.v; const i = r.i!; return (
+      <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
+        <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">waited {minsSince(v.arrivedAt)} min</div></td>
+        <td>{v.status === 'intake' ? <Chip tone="sky">intake</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : <Chip>waiting</Chip>}</td>
+        <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
+        <td className="text-right pr-4 whitespace-nowrap">{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>{me.role === 'assistant' ? 'Intake' : 'Call in'}</button>} {canDesk && <><button className="btn btn-sm btn-ghost" disabled={i === 0} title="Move up" onClick={() => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null })}><Icon name="up" className="h-3.5 w-3.5" /></button><button className="btn btn-sm btn-ghost" onClick={() => upVisit.mutate({ id: v.id, status: 'left' })}>Left</button></>}</td></tr>); }
+    if (r.type === 'doctor') { const v = r.v; return (
+      <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
+        <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></td>
+        <td><Chip tone="clay"><span className="h-1.5 w-1.5 rounded-full bg-clay live-dot inline-block mr-1" />in consult</Chip></td>
+        <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
+        <td className="text-right pr-4">{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}</td></tr>); }
+    if (r.type === 'appt') { const a = r.a; const isLate = isToday && toMin(a.window.endTime) < nowMin(); return (
+      <tr key={a.id} className={`anim-fade-up ${isLate ? 'bg-rose-soft/40' : ''}`}><td className={`pl-4 font-semibold ${isLate ? 'text-rose' : ''}`}>{a.window.startTime}{isLate && <div className="text-[11px] font-normal">late</div>}</td>
+        <td><b>{a.patient.fullName}</b> <span className="text-muted">{a.patient.ageYears ?? ''} {a.patient.sex ?? ''}</span><div className="text-xs text-muted">{[a.patient.phone, a.patient.locality].filter(Boolean).join(' · ')}</div></td>
+        <td>{isLate ? <Chip tone="rose">not arrived</Chip> : <Chip>booked</Chip>}</td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">{a.note ?? ''}</td>
+        <td className="text-right pr-4 whitespace-nowrap">{canDesk && isToday && <button className="btn btn-sm !bg-ink !text-paper !border-ink" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Arrived</button>} {isLate && canDesk && <><a className="btn btn-sm" href={`tel:${a.patient.phone ?? ''}`}>Call</a> <button className="btn btn-sm btn-ghost" onClick={() => upAppt.mutate({ id: a.id, status: 'no_show' })}>No-show</button></>}</td></tr>); }
+    if (r.type === 'noshow') { const a = r.a; return (
+      <tr key={a.id} className="anim-fade-up opacity-70"><td className="pl-4 font-semibold">{a.window.startTime}</td>
+        <td><b>{a.patient.fullName}</b><div className="text-xs text-muted">{a.patient.phone ?? ''}</div></td>
+        <td><Chip tone="rose">no-show</Chip></td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">Did not arrive</td>
+        <td className="text-right pr-4">{canDesk && <button className="btn btn-sm" onClick={() => nav('/booking')}>Rebook</button>}</td></tr>); }
+    const v = r.v; const due = v.due.reduce((s: number, c: any) => s + c.amountPaise, 0); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
+    return (
+      <tr key={v.id} className={`anim-fade-up ${due ? 'bg-rose-soft/40' : handled || left ? 'opacity-70' : ''}`}><td className="pl-4 serif text-lg">{v.opNumber}</td>
+        <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">{left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : ''}</div></td>
+        <td>{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : <Chip tone="sage">completed</Chip>}</td><td>{v.doctor ?? '—'}</td>
+        <td className="text-xs">{left ? <span className="text-muted">Did not see the doctor</span> : v.recommendations.length ? <div className="flex flex-wrap gap-1">{v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` · ${rc.sittings} sittings` : ''} → coordinator` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</div> : <span className="text-muted">Medicines only · pharmacy has the Rx</span>}</td>
+        <td className="text-right pr-4 whitespace-nowrap">
+          {canDesk && v.due.map((c: any) => <span key={c.id}><button className="btn btn-sm btn-primary" onClick={() => collect.mutate({ c, method: 'cash' })}>Collect {money(c.amountPaise)}</button> <button className="btn btn-sm" onClick={() => collect.mutate({ c, method: 'upi' })}>UPI</button> </span>)}
+          {v.encounterId && !left && <button className="btn btn-sm" onClick={() => window.open(`/print/${v.encounterId}?auto=0`, '_blank')}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
+          {canDesk && !left && !handled && v.recommendations.length > 0 && <> <button className="btn btn-sm !bg-ink !text-paper !border-ink" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button></>}
+          {left && canDesk && <a className="btn btn-sm" href={`tel:${v.patient.phone ?? ''}`}>Call</a>}
+        </td></tr>);
+  };
 
   return (
     <div>
-      <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-5">
+      <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
         <div className="mr-auto"><h1 className="text-[28px] leading-tight font-medium">Front desk</h1>
-          <div className="text-sm text-muted mt-0.5">{dayLabel}{(d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name.replace('Dr. ', 'Dr. ')} ${x.from <= toHHMM(nowMin()) ? 'until' : 'from'} ${x.from <= toHHMM(nowMin()) ? x.until : x.from}`).join('')}</div></div>
+          <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
         <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-72 !rounded-full" placeholder="Phone, name or token" value={find} onChange={(e) => setFind(e.target.value)} /></div>
-        {canDesk && <button className="btn btn-primary !py-2.5" onClick={() => setArrive({})}><Icon name="plus" />Patient arrived</button>}
+        {canDesk && isToday && <button className="btn btn-primary !py-2.5" onClick={() => setArrive({})}><Icon name="plus" />Patient arrived</button>}
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5 stagger">
-          <Tile i={0} label="Appointments" value={d.appointments.filter((a: any) => a.status !== 'cancelled').length} sub={`${appts.length} still to come`} />
-          <Tile i={1} label="Waiting now" value={waiting.length} tone="clay" sub={waiting.length ? `longest ${longest} min` : 'nobody waiting'} />
-          <Tile i={2} label="Completed" value={done.filter((v) => v.status === 'done').length} sub={inConsult.length ? `${inConsult.length} with the doctor` : ''} />
-          <Tile i={3} label="Collected" value={money(collected)} tone="sage" sub={(d.payments ?? []).map((p: any) => `${p.method.toUpperCase()} ${money(p.total)}`).join(' · ') || 'nothing yet'} />
-          <Tile i={4} label="Needs you" value={needs} tone={needs ? 'rose' : ''} sub={[late.length && `${late.length} not arrived`, dueTotal && `${money(dueTotal)} due`].filter(Boolean).join(' · ') || 'all clear'} />
+        <div className="card anim-fade-up !py-3.5 flex flex-wrap items-center gap-x-7 gap-y-3 mb-4">
+          <Stat label="Appointments" value={d.appointments.filter((a: any) => a.status !== 'cancelled').length} sub={scheduled.length ? `· ${scheduled.length} to come` : ''} />
+          <Sep /><Stat label="Waiting" value={waiting.length} tone="clay" sub={waiting.length ? `· longest ${longest} min` : ''} />
+          <Sep /><Stat label="With doctor" value={inConsult.length} />
+          <Sep /><Stat label="Completed" value={completed.filter((v) => v.status === 'done').length} />
+          <Sep /><Stat label="Collected" value={money(collected)} tone="sage" sub={(d.payments ?? []).length ? '· ' + d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : ''} />
+          {needsCount > 0 && <button className="ml-auto chip chip-rose !py-2 !px-3.5 !text-xs" onClick={() => setTab('needs')}>{needsCount} need you{dueTotal ? ` · ${money(dueTotal)} due` : ''}</button>}
         </div>
 
-        <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4 items-start">
-          <Col title="Scheduled appointments" count={appts.length} empty="Everyone booked has arrived">
-            {appts.map((a, i) => { const isLate = toMin(a.window.endTime) < nowMin(); return (
-              <div key={a.id} className={`px-3.5 py-2.5 border-t border-line first:border-t-0 anim-fade-up ${isLate ? 'bg-rose-soft/50' : ''}`} style={{ animationDelay: `${Math.min(i, 8) * 25}ms` }}>
-                <div className="flex justify-between text-sm"><span className="font-semibold">{a.patient.fullName}</span><span className={isLate ? 'text-rose font-semibold' : 'text-muted'}>{a.window.startTime}{isLate ? ' · late' : ''}</span></div>
-                <div className="text-xs text-muted mt-0.5">{[a.patient.phone, a.patient.ageYears && `${a.patient.ageYears} ${a.patient.sex ?? ''}`, a.patient.locality, a.note].filter(Boolean).join(' · ')}</div>
-                {canDesk && <div className="flex gap-1.5 mt-2"><button className="btn btn-sm !bg-ink !text-paper !border-ink" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Arrived</button>
-                  {isLate && <><a className="btn btn-sm" href={`tel:${a.patient.phone ?? ''}`}>Call</a><button className="btn btn-sm btn-ghost" onClick={() => upAppt.mutate({ id: a.id, status: 'no_show' })}>No-show</button></>}</div>}
-              </div>); })}
-          </Col>
+        <div className="anim-fade-up flex flex-wrap items-center gap-1.5 mb-3" style={{ animationDelay: '40ms' }}>
+          {tabs.map(([k, label, n]) => <button key={k} className={`toggle-opt !py-2 ${tab === k ? 'on' : ''} ${k === 'needs' && tab !== k && n > 0 ? '!text-rose !border-rose/30' : ''}`} onClick={() => setTab(k)}>{label} <span className={tab === k ? 'opacity-70' : 'text-muted'}>· {n}</span></button>)}
+          <div className="ml-auto flex items-center gap-0.5 card !p-0.5 !rounded-full"><button className="btn btn-ghost btn-icon !h-8 !w-8" onClick={() => setDay(shiftDay(day, -1))}><Icon name="chevL" /></button><span className="text-xs px-1.5 min-w-14 text-center">{isToday ? 'Today' : fmtDate(day)}</span><button className="btn btn-ghost btn-icon !h-8 !w-8" disabled={isToday} onClick={() => setDay(shiftDay(day, 1))}><Icon name="chevR" /></button></div>
+        </div>
 
-          <Col title="Waiting" hint="in order" count={waiting.length} empty="Nobody waiting" highlight>
-            {waiting.map((v, i) => (
-              <div key={v.id} className="px-3.5 py-2.5 border-t border-line first:border-t-0 flex items-center gap-2.5 anim-fade-up" style={{ animationDelay: `${Math.min(i, 8) * 25}ms` }}>
-                <div className="serif text-lg w-14 shrink-0">{v.opNumber}</div>
-                <div className="flex-1 min-w-0"><div className="text-sm font-semibold truncate">{v.patient.fullName}</div><div className="text-xs text-muted truncate">{minsSince(v.arrivedAt)} min{v.doctor ? ` · ${v.doctor.replace('Dr. ', 'Dr. ')}` : ''}{v.status === 'intake' ? ' · intake' : ''}</div></div>
-                {i === 0 && v.priority === 0 && v.status !== 'intake' && <Chip tone="clay">next</Chip>}
-                {v.priority > 0 && <Chip tone="amber">priority</Chip>}
-                {v.status === 'intake' && <Chip tone="sky">intake</Chip>}
-                {isClinical && <button className="btn btn-sm btn-ghost btn-icon" title={me.role === 'assistant' ? 'Intake' : 'Call in'} onClick={() => openEncounter.mutate(v.id)}><Icon name="chevR" /></button>}
-                {canDesk && <div className="flex flex-col"><button className="btn btn-ghost btn-icon !h-6 !w-6" title="Move up" disabled={i === 0} onClick={() => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null })}><Icon name="up" className="h-3 w-3" /></button><button className="btn btn-ghost btn-icon !h-6 !w-6" title="Left without consult" onClick={() => upVisit.mutate({ id: v.id, status: 'left' })}><Icon name="x" className="h-3 w-3" /></button></div>}
-              </div>
-            ))}
-            {waiting.length > 0 && <div className="px-3.5 py-2 text-[11px] text-muted">The doctor calls the next patient from their screen.</div>}
-          </Col>
-
-          <Col title="With the doctor" count={inConsult.length} empty="Consultation room is free">
-            {inConsult.map((v) => (
-              <div key={v.id} className="px-3.5 py-3 border-t border-line first:border-t-0 anim-fade-up">
-                <div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-clay live-dot" /><span className="serif text-lg">{v.opNumber}</span><span className="text-sm font-semibold truncate">{v.patient.fullName}</span>{isClinical && <button className="btn btn-sm btn-ghost ml-auto" onClick={() => openEncounter.mutate(v.id)}>Open</button>}</div>
-                <div className="text-xs text-muted mt-1">{v.doctor ?? 'Doctor'}</div>
-              </div>
-            ))}
-          </Col>
-
-          <Col title="Just finished" hint="what to tell them" count={finishedUnhandled.length} empty="Nothing to hand over">
-            {done.slice(0, 12).map((v, i) => { const handled = !!v.details?.explainedAt || (!v.recommendations.length && !v.due.length); return (
-              <div key={v.id} className={`px-3.5 py-2.5 border-t border-line first:border-t-0 anim-fade-up ${v.due.length ? 'bg-rose-soft/50' : handled ? 'opacity-60' : ''}`} style={{ animationDelay: `${Math.min(i, 8) * 25}ms` }}>
-                <div className="flex justify-between text-sm"><span className="font-semibold">{v.patient.fullName}</span>{v.due.length ? <span className="text-rose font-semibold">{money(v.due.reduce((s: number, c: any) => s + c.amountPaise, 0))} due</span> : <span className="text-muted">{v.opNumber}</span>}</div>
-                {v.status === 'left' ? <div className="text-xs text-muted mt-0.5">Left without consultation</div> : (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {v.recommendations.map((r: any) => <Chip key={r.id} tone={r.kind === 'procedure' ? 'sky' : r.kind === 'investigation' ? 'clay' : 'amber'}>{r.kind === 'procedure' ? `${r.procedure ?? 'Procedure'}${r.sittings ? ` · ${r.sittings} sittings` : ''} → coordinator` : r.kind === 'investigation' ? `Test: ${r.notes}` : `Review ${r.dueOn ? fmtDate(r.dueOn) : ''}`}</Chip>)}
-                    {!v.recommendations.length && !v.due.length && <span className="text-xs text-muted">Medicines only · pharmacy has the Rx</span>}
-                  </div>)}
-                {v.status === 'done' && (
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {v.due.map((c: any) => canDesk && <span key={c.id} className="flex gap-1"><button className="btn btn-sm btn-primary" onClick={() => collect.mutate({ c, method: 'cash' })}>Collect {money(c.amountPaise)} cash</button><button className="btn btn-sm" onClick={() => collect.mutate({ c, method: 'upi' })}>UPI</button></span>)}
-                    {v.encounterId && <button className="btn btn-sm" onClick={() => window.open(`/print/${v.encounterId}?auto=0`, '_blank')}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
-                    {canDesk && !handled && v.recommendations.length > 0 && <button className="btn btn-sm !bg-ink !text-paper !border-ink" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button>}
-                  </div>)}
-              </div>); })}
-          </Col>
+        <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+          <div className="overflow-x-auto"><table className="table !text-sm min-w-[880px]">
+            <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
+            <tbody>
+              {groups.length === 0 && <tr><td colSpan={6} className="!py-10 text-center text-muted">{emptyText[tab]}</td></tr>}
+              {groups.map((g) => (<GroupRows key={g.group} showGroup={tab === 'all'} group={g.group}>{g.rows.map(render)}</GroupRows>))}
+            </tbody>
+          </table></div>
         </div>
       </>)}
       {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visits.filter((v) => ['waiting', 'intake'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); refresh(); }} />}
@@ -117,26 +136,12 @@ export function FrontDesk() {
   );
 }
 
-const toHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-
-function Tile({ i, label, value, sub, tone = '' }: { i: number; label: string; value: any; sub?: string; tone?: '' | 'clay' | 'sage' | 'rose' }) {
-  return (
-    <div className={`card !p-3.5 ${tone === 'rose' ? '!bg-rose-soft !border-rose/30' : ''}`} style={{ ['--i' as any]: i }}>
-      <div className={`text-[11px] font-semibold uppercase tracking-wider ${tone === 'rose' ? 'text-rose' : 'text-muted'}`}>{label}</div>
-      <div className={`serif text-[28px] leading-none mt-1.5 ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : tone === 'rose' ? 'text-rose' : ''}`}>{value}</div>
-      {sub && <div className="text-xs text-muted mt-1.5 truncate">{sub}</div>}
-    </div>
-  );
+const Sep = () => <span className="w-px h-9 bg-line hidden sm:block" />;
+function Stat({ label, value, sub, tone = '' }: { label: string; value: any; sub?: string; tone?: '' | 'clay' | 'sage' }) {
+  return <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div><div className={`serif text-2xl leading-tight ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : ''}`}>{value} {sub && <span className="font-sans text-[13px] text-muted">{sub}</span>}</div></div>;
 }
-
-function Col({ title, hint, count, empty, highlight, children }: { title: string; hint?: string; count: number; empty: string; highlight?: boolean; children: React.ReactNode }) {
-  return (
-    <section className={`card-flat overflow-hidden anim-fade-up ${highlight ? '!border-clay ring-4 ring-clay/10' : ''}`}>
-      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-line"><div className="text-sm font-semibold">{title}</div>{hint && <span className="text-[11px] text-muted">{hint}</span>}<span className="ml-auto text-xs text-muted">{count}</span></div>
-      {count === 0 && !children ? null : null}
-      {(Array.isArray(children) ? children.flat().filter(Boolean).length === 0 : !children) ? <div className="p-4 text-sm text-muted">{empty}</div> : children}
-    </section>
-  );
+function GroupRows({ showGroup, group, children }: { showGroup: boolean; group: string; children: React.ReactNode }) {
+  return <>{showGroup && <tr><td colSpan={6} className="!py-2 !bg-paper text-[11px] font-semibold uppercase tracking-wider text-muted">{group}</td></tr>}{children}</>;
 }
 
 /** Arrival: who they are, why this fee, what to collect, which doctor. One screen, one button. */
