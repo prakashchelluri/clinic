@@ -10,6 +10,7 @@ export const tenant = pgTable('tenant', {
   slug: text('slug').notNull().unique(),
   name: text('name').notNull(),
   timezone: text('timezone').notNull().default('Asia/Kolkata'),
+  kind: text('kind').notNull().default('clinic'), // clinic | platform
   settings: jsonb('settings').$type<Record<string, any>>().notNull().default({}),
   createdAt: ts('created_at').notNull().defaultNow(),
 });
@@ -28,7 +29,8 @@ export const appUser = pgTable('app_user', {
   email: text('email').notNull(),
   name: text('name').notNull(),
   passwordHash: text('password_hash').notNull(),
-  role: text('role').notNull(), // owner | doctor | receptionist | coordinator | pharmacist | assistant | admin
+  role: text('role').notNull(), // primary role, kept for display
+  roles: text('roles').array().notNull().default([]), // all roles; permissions are the union
   practitionerId: uuid('practitioner_id'),
   active: boolean('active').notNull().default(true),
 }, (t) => [uniqueIndex('user_email').on(t.tenantId, t.email)]);
@@ -85,6 +87,8 @@ export const procedureCatalog = pgTable('procedure_catalog', {
   pricePaise: integer('price_paise'),
   taxRateBp: integer('tax_rate_bp').notNull().default(0),
   typicalSittings: integer('typical_sittings').notNull().default(1),
+  requiredCapability: text('required_capability'), // e.g. 'laser': only rooms tagged with it qualify
+  bufferMinutes: integer('buffer_minutes').notNull().default(0),
   active: boolean('active').notNull().default(true),
 });
 
@@ -166,6 +170,45 @@ export const prescriptionItem = pgTable('prescription_item', {
   sortOrder: integer('sort_order').notNull().default(0),
   dispensed: boolean('dispensed').notNull().default(false),
 });
+
+export const room = pgTable('room', {
+  ...tenantCols,
+  branchId: uuid('branch_id').notNull().references(() => branch.id),
+  name: text('name').notNull(),
+  capabilities: text('capabilities').array().notNull().default([]), // e.g. ['laser', 'minor_ot']
+  active: boolean('active').notNull().default(true),
+});
+
+// Time the doctor is NOT available for OP: breaks, leave, procedures. Reduces window capacity proportionally.
+export const calendarBlock = pgTable('calendar_block', {
+  ...tenantCols,
+  practitionerId: uuid('practitioner_id').references(() => practitioner.id),
+  roomId: uuid('room_id').references(() => room.id),
+  day: date('day').notNull(),
+  startTime: text('start_time').notNull(), // HH:MM local
+  endTime: text('end_time').notNull(),
+  kind: text('kind').notNull(), // break | leave | procedure | other
+  note: text('note'),
+  procedureSessionId: uuid('procedure_session_id'),
+}, (t) => [index('block_day').on(t.tenantId, t.day)]);
+
+// One sitting of a procedure course, scheduled against a room and a practitioner.
+export const procedureSession = pgTable('procedure_session', {
+  ...tenantCols,
+  recommendationId: uuid('recommendation_id').notNull(),
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  procedureId: uuid('procedure_id').references(() => procedureCatalog.id),
+  practitionerId: uuid('practitioner_id').references(() => practitioner.id),
+  roomId: uuid('room_id').references(() => room.id),
+  sittingNo: integer('sitting_no').notNull().default(1),
+  day: date('day').notNull(),
+  startTime: text('start_time').notNull(),
+  endTime: text('end_time').notNull(),
+  state: text('state').notNull().default('confirmed'), // confirmed | in_progress | completed | missed | cancelled | postponed
+  stateReason: text('state_reason'),
+  notes: text('notes'),
+  outcome: jsonb('outcome').$type<Record<string, any>>(),
+}, (t) => [index('psession_day').on(t.tenantId, t.day)]);
 
 // doctor's plan → worklists. One table serves both follow-up and procedure recommendations.
 export const recommendation = pgTable('recommendation', {
@@ -251,11 +294,11 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'document', 'numbering_sequence', 'domain_event',
+  'expense', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event',
 ];
 
 export type FormField = {
-  key: string; label: string; type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'tags' | 'duration' | 'date';
+  key: string; label: string; type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'tags' | 'diagnoses' | 'duration' | 'date';
   required?: boolean; options?: string[]; unit?: string; placeholder?: string;
 };
 export type FormSchema = { sections: { key: string; title: string; fields: FormField[] }[] };

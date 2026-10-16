@@ -11,7 +11,7 @@ export function verifyPassword(pw: string, stored: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export type Ctx = { tenantId: string; userId: string; role: string; name: string; practitionerId: string | null; timezone: string };
+export type Ctx = { tenantId: string; userId: string; role: string; roles: string[]; name: string; practitionerId: string | null; timezone: string; tenantKind: string };
 
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {
@@ -22,7 +22,13 @@ export const DEFAULT_ROLES: Record<string, string[]> = {
   receptionist: ['patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.write', 'document.*'],
   coordinator: ['patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
   pharmacist: ['patient.read', 'pharmacy.*', 'payment.record', 'document.read'],
+  superadmin: ['platform.*'],
 };
+
+/** Union of permissions across all of a user's roles, honouring tenant overrides. */
+export function permsFor(roles: string[], overrides?: Record<string, string[]>) {
+  return [...new Set(roles.flatMap((r) => overrides?.[r] ?? DEFAULT_ROLES[r] ?? []))];
+}
 
 export function can(perms: string[], needed: string) {
   return perms.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));

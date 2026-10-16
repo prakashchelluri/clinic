@@ -87,7 +87,7 @@ export function Encounter() {
             <div className="serif text-lg mb-3">{s.title}</div>
             <div className="grid md:grid-cols-2 gap-4">
               {s.fields.map((f: Field) => (
-                <div key={f.key} className={['textarea', 'multiselect', 'tags'].includes(f.type) ? 'md:col-span-2' : ''}>
+                <div key={f.key} className={['textarea', 'multiselect', 'tags', 'diagnoses'].includes(f.type) ? 'md:col-span-2' : ''}>
                   <label className="label">{f.label}{f.required && <span className="text-clay"> *</span>} {f.unit && <span className="normal-case tracking-normal">({f.unit})</span>}</label>
                   <FieldInput f={f} value={data[s.key]?.[f.key]} onChange={(v) => set(s.key, f.key, v)} disabled={readOnly} invalid={!!err(s.key, f.key)} />
                   {err(s.key, f.key) && <div className="text-xs text-rose mt-1 anim-fade-in">{err(s.key, f.key)}</div>}
@@ -188,8 +188,34 @@ function TagsInput({ value, onChange, options, placeholder, disabled, invalid }:
   );
 }
 
+const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
+type Dx = { name: string; severity?: string };
+/** Diagnoses: each entry carries its own severity. Old string values are upgraded on first edit. */
+function DiagnosesInput({ value, onChange, options, placeholder, disabled, invalid }: { value: Dx[]; onChange: (v: Dx[]) => void; options?: string[]; placeholder?: string; disabled: boolean; invalid?: boolean }) {
+  const [draft, setDraft] = useState('');
+  const add = (s: string) => { const v = s.trim(); if (v && !value.some((d) => d.name === v)) onChange([...value, { name: v }]); setDraft(''); };
+  return (
+    <div className="space-y-2">
+      {value.map((d, i) => (
+        <div key={d.name} className="flex items-center gap-2 flex-wrap anim-fade-up">
+          <span className="chip chip-clay !text-xs !py-1">{d.name}{!disabled && <button type="button" className="ml-0.5 hover:text-ink" onClick={() => onChange(value.filter((_, j) => j !== i))}><Icon name="x" className="h-3 w-3" /></button>}</span>
+          <div className="flex gap-1">{SEVERITIES.map((s) => <button key={s} type="button" disabled={disabled} className={`toggle-opt !py-1 ${d.severity === s ? 'on' : ''}`} onClick={() => onChange(value.map((x, j) => j === i ? { ...x, severity: x.severity === s ? undefined : s } : x))}>{s}</button>)}</div>
+        </div>
+      ))}
+      {!disabled && <div className={`input flex items-center gap-2 !py-1.5 ${invalid ? '!border-rose' : ''}`}>
+        <input list="dx-options" className="flex-1 min-w-32 bg-transparent outline-none text-sm py-0.5" placeholder={value.length ? 'Add another diagnosis…' : placeholder} value={draft}
+          onChange={(ev) => { if (options?.includes(ev.target.value)) add(ev.target.value); else setDraft(ev.target.value); }}
+          onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ',') { ev.preventDefault(); add(draft); } }} onBlur={() => draft && add(draft)} />
+        <datalist id="dx-options">{(options ?? []).filter((o) => !value.some((d) => d.name === o)).map((o) => <option key={o} value={o} />)}</datalist>
+      </div>}
+    </div>
+  );
+}
+const asDx = (v: any): Dx[] => Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? { name: x } : x)) : v ? [{ name: String(v) }] : [];
+
 function FieldInput({ f, value, onChange, disabled, invalid }: { f: Field; value: any; onChange: (v: any) => void; disabled: boolean; invalid?: boolean }) {
   const cls = `input ${invalid ? '!border-rose' : ''}`;
+  if (f.type === 'diagnoses') return <DiagnosesInput value={asDx(value)} onChange={onChange} options={f.options} placeholder={f.placeholder} disabled={disabled} invalid={invalid} />;
   if (f.type === 'tags') return <TagsInput value={asList(value)} onChange={onChange} options={f.options} placeholder={f.placeholder} disabled={disabled} invalid={invalid} />;
   if (f.type === 'textarea') return <textarea className={`${cls} min-h-20`} value={value ?? ''} placeholder={f.placeholder} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
   if (f.type === 'select') return <div className="flex flex-wrap gap-1.5">{f.options!.map((o) => <button type="button" key={o} disabled={disabled} className={`toggle-opt ${value === o ? 'on' : ''}`} onClick={() => onChange(value === o ? undefined : o)}>{o}</button>)}</div>;

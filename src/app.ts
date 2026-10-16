@@ -7,7 +7,7 @@ import { ZodError } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db, withTenant } from './db/index.js';
 import { tenant, appUser } from './db/schema.js';
-import { type Ctx, DEFAULT_ROLES, HttpError } from './lib/auth.js';
+import { type Ctx, permsFor, HttpError } from './lib/auth.js';
 import { route } from './lib/route.js';
 import { identityRoutes } from './modules/identity.js';
 import { patientRoutes } from './modules/patients.js';
@@ -19,6 +19,8 @@ import { sampleRoutes } from './modules/sample.js';
 import { documentRoutes } from './modules/documents.js';
 import { pharmacyRoutes } from './modules/pharmacy.js';
 import { adminRoutes } from './modules/admin.js';
+import { procedureRoutes } from './modules/procedures.js';
+import { platformRoutes } from './modules/platform.js';
 
 declare module 'fastify' {
   interface FastifyRequest { ctx: Ctx; perms: string[] }
@@ -46,12 +48,13 @@ export async function buildApp() {
     const ten = await db.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
     const user = await withTenant(t, u, (tx) => tx.select().from(appUser).where(and(eq(appUser.id, u), eq(appUser.tenantId, t))).then((r) => r[0]));
     if (!ten || !user?.active) throw new HttpError(401, 'UNAUTHENTICATED');
-    req.ctx = { tenantId: t, userId: u, role: user.role, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone };
-    req.perms = ten.settings?.roles?.[user.role] ?? DEFAULT_ROLES[user.role] ?? [];
+    const roles = user.roles?.length ? user.roles : [user.role];
+    req.ctx = { tenantId: t, userId: u, role: user.role, roles, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone, tenantKind: ten.kind };
+    req.perms = permsFor(roles, ten.settings?.roles);
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api);
+    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

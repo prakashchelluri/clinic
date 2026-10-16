@@ -8,6 +8,8 @@ const DEMO = [
   ['owner@demo.clinic', 'Doctor · owner', 'Consult, prescribe, reports, settings'],
   ['assistant@demo.clinic', 'Assistant', 'Intake before the doctor'],
   ['procedures@demo.clinic', 'Coordinator', 'Procedure & follow-up worklists'],
+  ['pharmacy@demo.clinic', 'Pharmacy', 'Dispense and bill'],
+  ['superadmin@cubott.in', 'CUBOTT admin', 'Onboard clinics'],
 ];
 
 export function Login() {

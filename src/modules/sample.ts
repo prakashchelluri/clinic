@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { and, eq, desc } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { patient, session, appointment, visit, encounter, prescriptionItem, recommendation, charge, payment, expense, feeCategory, medicine, procedureCatalog, formDefinition, practitioner, branch } from '../db/schema.js';
+import { patient, session, appointment, visit, encounter, prescriptionItem, recommendation, charge, payment, expense, feeCategory, medicine, procedureCatalog, formDefinition, practitioner, branch, room, calendarBlock, procedureSession } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { nextNumber, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
@@ -83,7 +83,7 @@ export async function loadSample(tx: Tx, t: string, userId: string, tz: string) 
     if (kase && (status === 'done' || status === 'in_consult')) {
       const completed = status === 'done' && !opts.draft;
       const [e] = await tx.insert(encounter).values({ tenantId: t, visitId: v.id, patientId: p.id, practitionerId: doctor.id, formDefinitionId: form.id, createdAt: at(day, time),
-        data: { complaint: { chief_complaint: kase.c, duration: pick(['2 weeks', '1 month', '3 months', '6 months', '1 year']), site: kase.site }, exam: { morphology: kase.morph, distribution: pick(['Localised', 'Symmetrical']) }, assessment: completed || opts.draft ? { diagnosis: kase.dx, severity: kase.sev } : {}, plan: completed ? { advice: 'Sun protection. Avoid scrubbing. Review as advised.' } : {} },
+        data: { complaint: { chief_complaint: [kase.c], duration: pick(['2 weeks', '1 month', '3 months', '6 months', '1 year']), site: kase.site }, exam: { morphology: kase.morph, distribution: pick(['Localised', 'Symmetrical']) }, assessment: completed || opts.draft ? { diagnosis: [{ name: kase.dx, severity: kase.sev }] } : {}, plan: completed ? { advice: 'Sun protection. Avoid scrubbing. Review as advised.' } : {} },
         status: completed ? 'completed' : 'draft', completedAt: completed ? at(day, addMin(time, 12)) : null, provenance: { source: 'typed' } }).returning();
       encCount++;
       if (kase.rx.length) await tx.insert(prescriptionItem).values(kase.rx.map((name, i) => { const m = meds[name]; return { tenantId: t, encounterId: e.id, medicineId: m?.id, name, dose: m?.defaults?.dose, route: m?.defaults?.route, frequency: m?.defaults?.frequency, durationDays: m?.defaults?.durationDays, instructions: m?.defaults?.instructions, sortOrder: i }; }));
@@ -153,6 +153,20 @@ export async function loadSample(tx: Tx, t: string, userId: string, tz: string) 
   let tmSessions = await tx.select().from(session).where(and(eq(session.tenantId, t), eq(session.day, tomorrow)));
   if (!tmSessions.length) tmSessions = await tx.insert(session).values(sessions.map(({ id, createdAt, ...s }) => ({ ...s, day: tomorrow }))).returning();
   await tx.insert(appointment).values(pts.slice(20, 25).map((p, i) => ({ tenantId: t, patientId: p.id, sessionId: tmSessions[i % 2].id, source: 'phone' })));
+
+  // 4b. Doctor's day: lunch break, and two procedures scheduled in rooms (one on the main doctor, which lowers OP capacity 12–13)
+  await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: docs[0].id, day: today, startTime: '13:00', endTime: '14:00', kind: 'break', note: 'Lunch' });
+  const rooms = await tx.select().from(room).where(eq(room.tenantId, t));
+  const laserRoom = rooms.find((r) => r.capabilities.includes('laser')) ?? rooms[0]; const procRoom = rooms.find((r) => r.id !== laserRoom?.id) ?? rooms[0];
+  const schedRecs = await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'), eq(recommendation.status, 'scheduled'))).limit(2);
+  const plan = [{ start: '12:15', end: '13:00', room: laserRoom, doc: docs[0] }, { start: '15:00', end: '15:45', room: procRoom, doc: docs[1] ?? docs[0] }];
+  for (const [i, r] of schedRecs.entries()) {
+    const pz = plan[i]; if (!pz?.room) continue;
+    const pr = r.procedureId ? procs[Object.keys(procs).find((k) => procs[k].id === r.procedureId)!] : null;
+    const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: r.id, patientId: r.patientId, procedureId: r.procedureId, practitionerId: pz.doc.id, roomId: pz.room.id, sittingNo: 1, day: today, startTime: pz.start, endTime: pz.end, state: i === 0 ? 'confirmed' : 'confirmed', notes: r.notes }).returning();
+    await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: pz.doc.id, roomId: pz.room.id, day: today, startTime: pz.start, endTime: pz.end, kind: 'procedure', note: `${pr?.name ?? 'Procedure'} · sitting 1`, procedureSessionId: ps.id });
+    await tx.update(recommendation).set({ dueOn: today }).where(eq(recommendation.id, r.id));
+  }
 
   // 5. Expenses for today and yesterday
   await tx.insert(expense).values([

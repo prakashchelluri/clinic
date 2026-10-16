@@ -13,6 +13,9 @@ const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']),
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
 
 /** Validate submitted data against the form definition: required fields and option membership only. */
+/** Assistant-only users save intake and hand back to the doctor; a doctor who also holds assistant stays in consult. */
+function isIntakeOnly(req: any) { return req.ctx.roles.includes('assistant') && !req.perms.some((p: string) => p === '*' || p === 'encounter.*' || p === 'encounter.complete'); }
+
 function validate(schema: FormSchema, data: Record<string, any>) {
   const errors: { path: string; message: string }[] = [];
   for (const s of schema.sections) for (const f of s.fields) {
@@ -41,8 +44,8 @@ export function clinicalRoutes(app: FastifyInstance) {
       const form = await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, 'encounter'), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
       if (!form) throw new HttpError(500, 'NO_ENCOUNTER_FORM');
       [enc] = await tx.insert(encounter).values({ tenantId: t, visitId, patientId: v.patientId, practitionerId: v.practitionerId ?? req.ctx.practitionerId, formDefinitionId: form.id,
-        provenance: { source: req.ctx.role === 'assistant' ? 'intake' : 'typed', openedBy: req.ctx.userId } }).returning();
-      const newStatus = req.ctx.role === 'assistant' ? 'intake' : 'in_consult';
+        provenance: { source: isIntakeOnly(req) ? 'intake' : 'typed', openedBy: req.ctx.userId } }).returning();
+      const newStatus = isIntakeOnly(req) ? 'intake' : 'in_consult';
       await tx.update(visit).set({ status: newStatus }).where(eq(visit.id, visitId));
       await emit(tx, req.ctx, 'encounter.opened', 'encounter', enc.id, { visitId, by: req.ctx.role });
     }
@@ -83,7 +86,7 @@ export function clinicalRoutes(app: FastifyInstance) {
     if (body.complete) {
       await tx.update(visit).set({ status: 'done' }).where(eq(visit.id, enc.visitId));
       await emit(tx, req.ctx, 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length });
-    } else if (req.ctx.role === 'assistant') {
+    } else if (isIntakeOnly(req)) {
       await tx.update(visit).set({ status: 'waiting' }).where(eq(visit.id, enc.visitId)); // intake done, back to doctor's queue
     }
     return getEncounter(tx, t, id);

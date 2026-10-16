@@ -16,7 +16,7 @@ export async function nextNumber(tx: Tx, tenantId: string, key: string, scope: s
 export async function emit(tx: Tx, ctx: Ctx, type: string, aggregate: string, aggregateId: string, payload: Record<string, unknown>) {
   await tx.insert(domainEvent).values({
     tenantId: ctx.tenantId, type, aggregate, aggregateId, payload,
-    actor: { userId: ctx.userId, role: ctx.role, via: 'ui' },
+    actor: { userId: ctx.userId, roles: ctx.roles, via: 'ui' },
   });
 }
 

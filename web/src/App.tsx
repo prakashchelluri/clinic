@@ -5,11 +5,13 @@ import { Avatar, Icon, ToastHost } from './ui';
 const NAV = [
   ['/queue', 'Queue', 'queue', 'visit.read'],
   ['/booking', 'Booking', 'calendar', 'appointment.read'],
+  ['/calendar', 'Calendar', 'clock', 'appointment.read'],
   ['/patients', 'Patients', 'users', 'patient.read'],
   ['/worklist', 'Worklists', 'list', 'worklist.read'],
   ['/pharmacy', 'Pharmacy', 'pill', 'pharmacy.read'],
   ['/reports', 'Reports', 'chart', 'report.daily'],
   ['/settings', 'Settings', 'edit', 'config.write'],
+  ['/platform', 'Clinics', 'door', 'platform.read'],
 ] as const;
 
 export function can(perms: string[] | undefined, needed: string) {
@@ -30,7 +32,7 @@ export function App() {
       <aside className="no-print hidden md:flex flex-col gap-1 p-4 sticky top-0 h-dvh border-r border-line/70">
         <div className="px-3 pt-2 pb-5">
           <div className="serif text-[22px] leading-none text-ink">{cfg.data?.tenant.name ?? 'CUBOTT'}</div>
-          <div className="text-[11px] uppercase tracking-wider text-muted mt-1.5">CUBOTT Clinical</div>
+          <div className="text-[11px] uppercase tracking-wider text-muted mt-1.5">{(me.data.roles ?? [me.data.role]).join(' · ')}</div>
         </div>
         {items.map(([to, label, icon]) => (
           <NavLink key={to} to={to} viewTransition className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>

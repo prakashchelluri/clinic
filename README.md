@@ -5,9 +5,11 @@ Architecture and product reasoning: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## What works today (MVP slice 1)
 
-Phone booking with capacity windows → arrival check-in with fee-category suggestion, OP numbering, payment → live queue (reception, doctor, assistant intake) → encounter on a configurable form (dermatology pack) with Rx favourites and "repeat last Rx" → printable A5 prescription → follow-up and procedure recommendations flowing to worklists with contact log → daily collections and expenses report. Multi-tenant with Postgres Row-Level Security.
+Doctor sets the day's availability and breaks on the Calendar (procedures on the doctor reduce OP capacity automatically) → phone booking with capacity windows → arrival check-in with fee-category suggestion, OP numbering, payment → live queue (reception, doctor, assistant intake) → encounter on a configurable form (dermatology pack) with Rx favourites and "repeat last Rx" → printable A5 prescription → follow-up and procedure recommendations flowing to worklists with contact log → daily collections and expenses report. Multi-tenant with Postgres Row-Level Security.
 
-Not yet: WhatsApp, procedure room scheduling, pharmacy counter, photos, offline queue, multi-language UI. See roadmap in ARCHITECTURE.md §8.
+Also: rooms with capabilities and conflict-checked procedure scheduling, pharmacy counter, document uploads, owner Settings (forms editor, people with multiple roles, fees, medicines, procedures, rooms), platform admin for onboarding clinics.
+
+Not yet: WhatsApp, offline queue, multi-language UI, GST invoices, inventory. See roadmap in ARCHITECTURE.md §8.
 
 ## Run locally (no database install needed)
 
@@ -27,7 +29,8 @@ Demo logins (password `demo1234`, clinic `sahitya`):
 | reception@demo.clinic | OP receptionist |
 | procedures@demo.clinic | Procedure coordinator |
 | assistant@demo.clinic | Assistant (intake before doctor) |
-| pharmacy@demo.clinic | Pharmacy |
+| pharmacy@demo.clinic | Pharmacy counter |
+| superadmin@cubott.in | CUBOTT platform admin: onboards clinics (no clinic data access) |
 
 Tests (end-to-end slice + tenant isolation, on embedded Postgres):
 

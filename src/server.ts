@@ -1,9 +1,10 @@
 import { buildApp } from './app.js';
 import { migrate, applyRls } from './db/index.js';
-import { seedIfEmpty, ensureFormsCurrent } from './db/seed.js';
+import { seedIfEmpty, ensureFormsCurrent, ensurePlatform } from './db/seed.js';
 
 await migrate();
 await applyRls();
+await ensurePlatform();
 await seedIfEmpty();
 await ensureFormsCurrent();
 const app = await buildApp();

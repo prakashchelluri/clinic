@@ -9,7 +9,8 @@ import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, toast } from 
 export function Booking() {
   const { cfg, perms } = useOutletContext<any>();
   const [day, setDay] = useState(today());
-  const sessions = useQuery({ queryKey: ['sessions', day], queryFn: () => get(`/sessions?day=${day}`), refetchInterval: 10000 });
+  const [doc, setDoc] = useState('');
+  const sessions = useQuery({ queryKey: ['sessions', day, doc], queryFn: () => get(`/sessions?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 10000 });
   const appts = useQuery({ queryKey: ['appointments', day], queryFn: () => get(`/appointments?day=${day}`) });
   const [sel, setSel] = useState<any>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['sessions'] }); qc.invalidateQueries({ queryKey: ['appointments'] }); };
@@ -18,7 +19,7 @@ export function Booking() {
   const setCap = useMutation({ mutationFn: ({ id, capacity }: any) => patch(`/sessions/${id}`, { capacity }), onSuccess: refresh });
   const cancel = useMutation({ mutationFn: (id: string) => patch(`/appointments/${id}`, { status: 'cancelled' }), onSuccess: () => { refresh(); toast('Appointment cancelled', 'info'); } });
   const writable = can(perms, 'appointment.write');
-  const total = (sessions.data ?? []).reduce((s: any, x: any) => ({ a: s.a + x.allocated, c: s.c + x.capacity }), { a: 0, c: 0 });
+  const total = (sessions.data ?? []).reduce((s: any, x: any) => ({ a: s.a + x.allocated, c: s.c + x.effectiveCapacity }), { a: 0, c: 0 });
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
@@ -29,6 +30,8 @@ export function Booking() {
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
           <button className="btn btn-ghost btn-icon" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" /></button>
         </div>
+        {(cfg?.practitioners ?? []).length > 1 && <select className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">All doctors</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+        <a className="btn" href="/calendar"><Icon name="clock" />Doctor's day</a>
         {writable && <AddWindow onAdd={(w) => addWin.mutate(w)} practitioners={cfg?.practitioners ?? []} />}
       </PageHeader>
 
@@ -37,11 +40,12 @@ export function Booking() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
           {(sessions.data ?? []).map((s: any, i: number) => {
-            const pct = s.capacity ? Math.min(100, Math.round((s.allocated / s.capacity) * 100)) : 100;
+            const cap = s.effectiveCapacity; const pct = cap ? Math.min(100, Math.round((s.allocated / cap) * 100)) : 100;
             const tone = s.free <= 0 ? 'rose' : s.free <= 2 ? 'amber' : 'sage';
             return (
               <button key={s.id} style={{ ['--i' as any]: i }} onClick={() => setSel(s)} className={`card card-hover text-left ${sel?.id === s.id ? '!border-clay ring-4 ring-clay/15' : ''}`}>
-                <div className="flex items-start justify-between"><div className="serif text-lg whitespace-nowrap">{s.startTime}<span className="text-muted text-sm"> – {s.endTime}</span></div><Chip tone={tone as any}>{s.allocated}/{s.capacity}</Chip></div>
+                <div className="flex items-start justify-between"><div className="serif text-lg whitespace-nowrap">{s.startTime}<span className="text-muted text-sm"> – {s.endTime}</span></div><Chip tone={tone as any}>{s.allocated}/{cap}{cap !== s.capacity && <span className="opacity-60 line-through ml-1">{s.capacity}</span>}</Chip></div>
+                {s.reductions?.length > 0 && <div className="text-[11px] text-amber mt-1 flex items-center gap-1"><Icon name="clock" className="h-3 w-3" />{s.reductions.map((r: any) => `${r.note ?? r.kind} ${r.startTime}–${r.endTime}`).join(', ')}</div>}
                 <div className="h-1.5 bg-paper-2 rounded-full mt-3 overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${tone === 'rose' ? 'bg-rose' : tone === 'amber' ? 'bg-amber' : 'bg-sage'}`} style={{ width: pct + '%' }} /></div>
                 <div className="text-xs text-muted mt-2 flex items-center gap-2"><span className="truncate">{cfg?.practitioners.find((p: any) => p.id === s.practitionerId)?.name ?? 'Any doctor'}</span>
                   {writable && <span className="ml-auto flex gap-0.5"><span role="button" className="btn btn-ghost btn-sm !px-2" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: Math.max(0, s.capacity - 1) }); }}>−</span><span role="button" className="btn btn-ghost btn-sm !px-2" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: s.capacity + 1 }); }}>+</span></span>}</div>

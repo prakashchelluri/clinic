@@ -3,7 +3,8 @@ import { get, post } from './api';
 import { Chip, Icon, Modal, Skeleton, fmtDate } from './ui';
 
 /** Form values may be a string (old encounters) or an array (tags fields). */
-export const asList = (v: any): string[] => (Array.isArray(v) ? v : v === undefined || v === null || v === '' ? [] : [String(v)]);
+const label = (x: any) => (x && typeof x === 'object' ? `${x.name}${x.severity ? ` (${x.severity})` : ''}` : String(x));
+export const asList = (v: any): string[] => (Array.isArray(v) ? v.map(label) : v === undefined || v === null || v === '' ? [] : [label(v)]);
 export const joinList = (v: any) => asList(v).join(', ');
 
 /** Full read-only view of one encounter, rendered from the form version it was written with. */
@@ -25,7 +26,7 @@ export function EncounterDetail({ id }: { id: string }) {
             <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               {filled.map((f: any) => { const v = d[s.key][f.key]; return (
                 <div key={f.key} className={f.type === 'textarea' ? 'sm:col-span-2' : ''}><div className="text-xs text-muted">{f.label}</div>
-                  {Array.isArray(v) ? <div className="flex flex-wrap gap-1 mt-0.5">{v.map((x: string) => <Chip key={x}>{x}</Chip>)}</div> : <div className="text-ink">{String(v)}{f.unit ? ` ${f.unit}` : ''}</div>}</div>); })}
+                  {Array.isArray(v) ? <div className="flex flex-wrap gap-1 mt-0.5">{asList(v).map((x: string) => <Chip key={x}>{x}</Chip>)}</div> : <div className="text-ink">{String(v)}{f.unit ? ` ${f.unit}` : ''}</div>}</div>); })}
             </div>
           </div>
         );
