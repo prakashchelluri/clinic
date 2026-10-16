@@ -52,7 +52,16 @@ export function Booking() {
       )}
 
       <div className="grid lg:grid-cols-2 gap-5 mt-5">
-        {sel && writable ? <BookForm key={sel.id} session={sel} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={refresh} /> : <div className="card anim-fade-in border-dashed grid place-items-center text-sm text-muted min-h-32">{writable ? 'Pick a window above to book a caller' : 'Read-only view'}</div>}
+        {sel && writable ? <BookForm key={sel.id} session={sel} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={refresh} /> : <div className="card anim-fade-in border-dashed text-sm">
+          <div className="serif text-lg mb-2">How booking works here</div>
+          <ol className="space-y-2 text-ink-2">
+            <li className="flex gap-3"><span className="chip chip-clay shrink-0">1</span><span>Each card is an <b>OP window</b>: one hour of the doctor's time with a practical capacity (for example 7 patients). It is not an exact appointment time.</span></li>
+            <li className="flex gap-3"><span className="chip chip-clay shrink-0">2</span><span>When a patient calls, <b>click a window with free places</b>, type their phone or name, and press Book. Only name and phone are needed on the call.</span></li>
+            <li className="flex gap-3"><span className="chip chip-clay shrink-0">3</span><span>Tell them the <b>arrive-by time</b> shown (35 minutes before the window) and that the wait can be 30–45 minutes.</span></li>
+            <li className="flex gap-3"><span className="chip chip-clay shrink-0">4</span><span>When they walk in, they appear on the <b>Queue page</b> under “Booked, not arrived”. Press Arrived there to register, take the fee and add them to the live queue.</span></li>
+          </ol>
+          <div className="text-xs text-muted mt-3">Use − / + on a card to change today's capacity when the doctor has a procedure or a break. “+ Window” adds a block; on an empty day “Copy previous day” reuses yesterday's plan.</div>
+        </div>}
         <Section title={<>Appointments <span className="text-muted font-normal">· {(appts.data ?? []).filter((a: any) => a.status !== 'cancelled').length}</span></>} delay={120}>
           {appts.isLoading ? <Skeleton /> : (appts.data ?? []).length === 0 ? <Empty icon="calendar" title="No bookings yet" /> : (appts.data ?? []).map((a: any, i: number) => (
             <div key={a.id} className={`row anim-fade-up ${a.status === 'cancelled' ? 'opacity-50' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
