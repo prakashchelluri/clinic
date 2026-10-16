@@ -25,7 +25,7 @@ export function App() {
   if (me.isLoading) return <div className="min-h-dvh grid place-items-center text-muted text-sm anim-fade-in">Opening clinic…</div>;
   if (me.isError) { location.href = '/login'; return null; }
   const perms: string[] = me.data.perms;
-  const items = NAV.filter(([, , , p]) => can(perms, p));
+  const items = NAV.filter(([to, , , p]) => can(perms, p) && (to === '/platform' ? me.data.tenantKind === 'platform' : me.data.tenantKind !== 'platform'));
   if (loc.pathname === '/queue' && !can(perms, 'visit.read') && items[0]) return <Navigate to={items[0][0]} replace />;
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[232px_1fr]">
