@@ -1,0 +1,16 @@
+# Render Blueprint: free web service. Database: create a free Neon project and set DATABASE_URL.
+services:
+  - type: web
+    name: cubott-clinical
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: COOKIE_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
