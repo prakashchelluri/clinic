@@ -64,3 +64,13 @@ drizzle/            generated SQL migrations (npm run db:generate after schema c
 ```
 
 Config that is data, not code: fee categories and eligibility rules (JSONLogic), encounter and intake forms, medicines with defaults, procedure catalogue, OP windows and capacity, numbering scope, print header, role permission bundles (`tenant.settings.roles`).
+
+## Sample data
+
+Sign in as the owner and call the loader once (it refuses to run twice):
+
+```bash
+curl -c cj -X POST http://localhost:4000/api/auth/login -H "content-type: application/json" -d "{\"email\":\"owner@demo.clinic\",\"password\":\"demo1234\"}" && curl -b cj -X POST http://localhost:4000/api/dev/sample-data
+```
+
+It creates 26 Rajahmundry patients with months of history, today's bookings and a live queue in mixed states, completed encounters with prescriptions, procedure and follow-up worklist items with call logs, payments and expenses. Delete the `data` folder and restart to start clean.

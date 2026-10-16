@@ -15,7 +15,7 @@ const { buildApp } = await import('../src/app.js');
 let app: Awaited<ReturnType<typeof buildApp>>;
 const jar: Record<string, string> = {};
 async function as(email: string) {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'demo1234' } });
+  const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'demo1234', tenant: 'sahitya' } });
   assert.equal(r.statusCode, 200, r.body);
   jar[email] = r.cookies.find((c) => c.name === 'cc_session')!.value;
   return (method: 'GET' | 'POST' | 'PATCH', url: string, payload?: unknown) =>
@@ -113,4 +113,19 @@ test('tenant isolation: a second tenant sees nothing of the first', async () => 
   assert.equal(q.json().length, 0);
   const w = await app.inject({ method: 'GET', url: '/api/worklist?kind=procedure', cookies: { cc_session: cookie } });
   assert.equal(w.json().length, 0);
+});
+
+test('sample data loads once and populates today', async () => {
+  const owner = await as('owner@demo.clinic');
+  const r = await owner('POST', '/dev/sample-data');
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.ok(r.body.patients >= 25 && r.body.encounters >= 15);
+  const again = await owner('POST', '/dev/sample-data');
+  assert.equal(again.status, 409);
+  const queue = await owner('GET', '/queue');
+  assert.ok(queue.body.filter((q: any) => q.status === 'waiting').length >= 4);
+  const wl = await owner('GET', '/worklist?kind=procedure');
+  assert.ok(wl.body.length >= 3);
+  const rep = await owner('GET', '/reports/daily');
+  assert.ok(rep.body.totals.collectedPaise > 0 && rep.body.expenses.length >= 2);
 });
