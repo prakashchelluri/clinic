@@ -8,7 +8,7 @@ import { HttpError } from '../lib/auth.js';
 
 const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().optional(), route: z.string().optional(),
   frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() });
-const Rec = z.object({ kind: z.enum(['followup', 'procedure']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().optional(),
+const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().optional(),
   intervalDays: z.number().int().optional(), sittings: z.number().int().optional(), notes: z.string().optional() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
 
@@ -19,7 +19,7 @@ function validate(schema: FormSchema, data: Record<string, any>) {
     const v = data[s.key]?.[f.key];
     const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
     if (f.required && empty) errors.push({ path: `${s.key}.${f.key}`, message: 'required' });
-    if (!empty && f.options && (f.type === 'select' ? !f.options.includes(v) : f.type === 'multiselect' && !(v as string[]).every((x) => f.options!.includes(x))))
+    if (!empty && f.options && f.type !== 'tags' && (f.type === 'select' ? !f.options.includes(v) : f.type === 'multiselect' && !(v as string[]).every((x) => f.options!.includes(x))))
       errors.push({ path: `${s.key}.${f.key}`, message: 'not an allowed option' });
   }
   return errors;

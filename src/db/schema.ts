@@ -214,6 +214,21 @@ export const expense = pgTable('expense', {
   enteredBy: uuid('entered_by').notNull(),
 });
 
+// Uploaded files: lab reports, clinical photos, consent scans. Bytes live on disk (UPLOAD_DIR) or object storage later.
+export const document = pgTable('document', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  encounterId: uuid('encounter_id').references(() => encounter.id),
+  recommendationId: uuid('recommendation_id').references(() => recommendation.id),
+  kind: text('kind').notNull().default('report'), // report | photo | prescription | consent | other
+  title: text('title').notNull(),
+  mime: text('mime').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  storageKey: text('storage_key').notNull(),
+  note: text('note'),
+  uploadedBy: uuid('uploaded_by').notNull(),
+}, (t) => [index('doc_patient').on(t.tenantId, t.patientId)]);
+
 export const numberingSequence = pgTable('numbering_sequence', {
   tenantId: uuid('tenant_id').notNull(),
   key: text('key').notNull(),
@@ -236,11 +251,11 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'numbering_sequence', 'domain_event',
+  'expense', 'document', 'numbering_sequence', 'domain_event',
 ];
 
 export type FormField = {
-  key: string; label: string; type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'duration' | 'date';
+  key: string; label: string; type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'tags' | 'duration' | 'date';
   required?: boolean; options?: string[]; unit?: string; placeholder?: string;
 };
 export type FormSchema = { sections: { key: string; title: string; fields: FormField[] }[] };

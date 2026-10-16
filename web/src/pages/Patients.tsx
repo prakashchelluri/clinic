@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext } from 'react-router';
-import { get, post, patch, qc, ApiError } from '../api';
+import { get, post, patch, api, qc, ApiError } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, money, toast } from '../ui';
+import { EncounterModal, DocList, UploadButton, joinList } from '../encounterDetail';
 
 export function Patients() {
   const { id } = useParams(); const nav = useNavigate(); const { perms } = useOutletContext<any>();
@@ -28,7 +29,7 @@ export function Patients() {
                 </button>))}
           </Section>
         </div>
-        <div>{id ? <Timeline key={id} id={id} /> : <div className="card border-dashed anim-fade-in"><Empty icon="users" title="Select a patient" hint="Their visits, prescriptions, plans and payments appear here as one timeline." /></div>}</div>
+        <div>{id ? <Timeline key={id} id={id} /> : <div className="card border-dashed anim-fade-in"><Empty icon="users" title="Select a patient" hint="Their visits, prescriptions, plans, reports and payments appear here as one timeline." /></div>}</div>
       </div>
       {showNew && <NewPatient onClose={(p) => { setShowNew(false); if (p) { qc.invalidateQueries({ queryKey: ['patients'] }); nav(`/patients/${p.id}`); } }} />}
     </div>
@@ -37,9 +38,12 @@ export function Patients() {
 
 function Timeline({ id }: { id: string }) {
   const t = useQuery({ queryKey: ['timeline', id], queryFn: () => get(`/patients/${id}/timeline`) });
+  const docs = useQuery({ queryKey: ['documents', id], queryFn: () => get(`/patients/${id}/documents`) });
   const { perms } = useOutletContext<any>();
   const [edit, setEdit] = useState<any>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); } });
+  const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
   const { patient: p, encounters, recommendations, charges, outstandingPaise, visits } = t.data;
   const openPlans = recommendations.filter((r: any) => !['done', 'cancelled'].includes(r.status));
@@ -68,27 +72,35 @@ function Timeline({ id }: { id: string }) {
           </div>
         )}
       </div>
-      {openPlans.length > 0 && (
+
+      <div className="grid md:grid-cols-2 gap-4">
         <Section title="Open plans" delay={60}>
-          {openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : 'stetho'} className="h-4 w-4 text-clay" /><div className="flex-1 text-sm">{r.kind === 'followup' ? 'Follow-up review' : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
+          {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
+            openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
         </Section>
-      )}
+        <Section title={<>Reports & photos <span className="text-muted font-normal">· {(docs.data ?? []).length}</span></>} delay={90}
+          aside={can(perms, 'document.write') && <UploadButton patientId={id} onDone={() => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Uploaded'); }} />}>
+          <div className="p-3">{(docs.data ?? []).length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and clinical photos. Upload from a phone camera or a PDF.</div> : <DocList docs={docs.data} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
+        </Section>
+      </div>
+
       <div className="relative pl-6">
         <div className="absolute left-[9px] top-2 bottom-2 w-px bg-line" />
         {encounters.length === 0 && <div className="text-sm text-muted py-2">No consultations yet.</div>}
         {encounters.map((e: any, i: number) => (
           <div key={e.id} className="relative mb-3 anim-fade-up" style={{ animationDelay: `${100 + i * 50}ms` }}>
             <div className={`absolute -left-6 top-5 h-[11px] w-[11px] rounded-full border-2 border-paper ${e.status === 'completed' ? 'bg-clay' : 'bg-line-2'}`} />
-            <div className="card card-hover">
+            <button className="card card-hover w-full text-left" onClick={() => setViewing(e.id)}>
               <div className="flex items-center gap-2 text-sm"><span className="font-semibold">{new Date(e.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span><Chip tone={e.status === 'completed' ? 'sage' : 'amber'}>{e.status}</Chip>
-                {e.status === 'completed' && <button className="btn btn-sm btn-ghost ml-auto" onClick={() => window.open(`/print/${e.id}`, '_blank')}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}</div>
-              <div className="mt-2 text-[15px]"><span className="font-medium">{e.data?.complaint?.chief_complaint ?? 'Consultation'}</span>{e.data?.assessment?.diagnosis && <span className="text-ink-2"> → {e.data.assessment.diagnosis}{e.data.assessment.severity ? ` (${e.data.assessment.severity})` : ''}</span>}</div>
+                <span className="ml-auto text-xs text-muted flex items-center gap-1">Open details <Icon name="chevR" className="h-3 w-3" /></span></div>
+              <div className="mt-2 text-[15px]"><span className="font-medium">{joinList(e.data?.complaint?.chief_complaint) || 'Consultation'}</span>{joinList(e.data?.assessment?.diagnosis) && <span className="text-ink-2"> → {joinList(e.data.assessment.diagnosis)}{e.data.assessment?.severity ? ` (${e.data.assessment.severity})` : ''}</span>}</div>
               {e.prescription.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{e.prescription.map((i: any) => <Chip key={i.id}><Icon name="pill" className="h-3 w-3" />{i.name}{i.durationDays ? ` · ${i.durationDays}d` : ''}</Chip>)}</div>}
-            </div>
+            </button>
           </div>
         ))}
       </div>
       {charges.length > 0 && <Section title="Charges" delay={200}><table className="table"><tbody>{charges.map((c: any) => <tr key={c.id}><td className="pl-4">{c.description}</td><td><Chip tone={c.status === 'paid' ? 'sage' : c.status === 'due' ? 'rose' : ''}>{c.status}</Chip></td><td className="text-right pr-4">{money(c.amountPaise)}</td></tr>)}</tbody></table></Section>}
+      {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 }

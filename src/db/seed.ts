@@ -5,10 +5,11 @@ import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
 
 /** Dermatology encounter form: the first "specialty pack". Everything here is data, editable per tenant. */
+export const DERM_ENCOUNTER_VERSION = 2;
 export const DERM_ENCOUNTER: FormSchema = {
   sections: [
     { key: 'complaint', title: 'Complaint', fields: [
-      { key: 'chief_complaint', label: 'Chief complaint', type: 'text', required: true, placeholder: 'e.g. acne on face' },
+      { key: 'chief_complaint', label: 'Complaints', type: 'tags', required: true, placeholder: 'Type a complaint, press Enter for the next', options: ['Pimples', 'Itching', 'Rash', 'Hair fall', 'Dark patches', 'White patches', 'Dandruff', 'Warts', 'Dry skin', 'Nail changes', 'Burning sensation', 'Scars', 'Unwanted hair'] },
       { key: 'duration', label: 'Duration', type: 'text', placeholder: 'e.g. 3 months' },
       { key: 'site', label: 'Site', type: 'multiselect', options: ['Face', 'Scalp', 'Neck', 'Trunk', 'Back', 'Arms', 'Hands', 'Legs', 'Feet', 'Nails', 'Genitals', 'Generalised'] },
       { key: 'history', label: 'History / triggers', type: 'textarea' },
@@ -19,7 +20,7 @@ export const DERM_ENCOUNTER: FormSchema = {
       { key: 'findings', label: 'Findings', type: 'textarea' },
     ] },
     { key: 'assessment', title: 'Assessment', fields: [
-      { key: 'diagnosis', label: 'Diagnosis', type: 'text', required: true, placeholder: 'e.g. Acne vulgaris grade 2' },
+      { key: 'diagnosis', label: 'Diagnoses', type: 'tags', required: true, placeholder: 'Type a diagnosis, press Enter for the next', options: ['Acne vulgaris', 'Melasma', 'Tinea corporis', 'Tinea cruris', 'Psoriasis vulgaris', 'Alopecia areata', 'Androgenetic alopecia', 'Verruca vulgaris', 'Atopic dermatitis', 'Seborrheic dermatitis', 'Contact dermatitis', 'Acute urticaria', 'Chronic urticaria', 'Vitiligo', 'Post-inflammatory hyperpigmentation', 'Scabies', 'Pityriasis versicolor', 'Lichen planus', 'Rosacea', 'Molluscum contagiosum', 'Impetigo', 'Herpes zoster'] },
       { key: 'severity', label: 'Severity', type: 'select', options: ['Mild', 'Moderate', 'Severe'] },
     ] },
     { key: 'plan', title: 'Plan', fields: [
@@ -37,6 +38,18 @@ export const DERM_INTAKE: FormSchema = {
     { key: 'allergies', label: 'Known allergies', type: 'text' },
   ] }],
 };
+
+/** Forms are versioned: encounters pin the version they were written with. New versions are added, never edited in place. */
+export async function ensureFormsCurrent() {
+  const { and, eq, desc } = await import('drizzle-orm');
+  const tenants = await db.select().from(tenant);
+  for (const t of tenants) {
+    const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
+    if (cur && cur.version >= DERM_ENCOUNTER_VERSION) continue;
+    if (cur) await db.update(formDefinition).set({ active: false }).where(eq(formDefinition.id, cur.id));
+    await db.insert(formDefinition).values({ tenantId: t.id, key: 'encounter', specialtyId: cur?.specialtyId ?? null, version: DERM_ENCOUNTER_VERSION, schema: DERM_ENCOUNTER });
+  }
+}
 
 export async function seedIfEmpty() {
   const existing = await db.select().from(tenant).limit(1);
@@ -71,7 +84,7 @@ export async function seedDemo(slug = 'sahitya') {
     { tenantId: tid, email: 'pharmacy@demo.clinic', name: 'Pharmacy', passwordHash: pw, role: 'pharmacist' },
   ]);
   await db.insert(formDefinition).values([
-    { tenantId: tid, key: 'encounter', specialtyId: derm.id, version: 1, schema: DERM_ENCOUNTER },
+    { tenantId: tid, key: 'encounter', specialtyId: derm.id, version: DERM_ENCOUNTER_VERSION, schema: DERM_ENCOUNTER },
     { tenantId: tid, key: 'intake', specialtyId: derm.id, version: 1, schema: DERM_INTAKE },
   ]);
   // Fee categories from discovery. Amounts in paise. Eligibility = JSONLogic over facts in visits.ts.

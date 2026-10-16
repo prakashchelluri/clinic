@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from 'react-router';
+import { NavLink, Outlet, useNavigate, useLocation, Navigate } from 'react-router';
 import { useMe, useConfig, post, qc } from './api';
 import { Avatar, Icon, ToastHost } from './ui';
 
@@ -7,7 +7,9 @@ const NAV = [
   ['/booking', 'Booking', 'calendar', 'appointment.read'],
   ['/patients', 'Patients', 'users', 'patient.read'],
   ['/worklist', 'Worklists', 'list', 'worklist.read'],
+  ['/pharmacy', 'Pharmacy', 'pill', 'pharmacy.read'],
   ['/reports', 'Reports', 'chart', 'report.daily'],
+  ['/settings', 'Settings', 'edit', 'config.write'],
 ] as const;
 
 export function can(perms: string[] | undefined, needed: string) {
@@ -17,11 +19,12 @@ export function can(perms: string[] | undefined, needed: string) {
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 
 export function App() {
-  const me = useMe(); const cfg = useConfig(); const nav = useNavigate();
+  const me = useMe(); const cfg = useConfig(); const nav = useNavigate(); const loc = useLocation();
   if (me.isLoading) return <div className="min-h-dvh grid place-items-center text-muted text-sm anim-fade-in">Opening clinic…</div>;
   if (me.isError) { location.href = '/login'; return null; }
   const perms: string[] = me.data.perms;
   const items = NAV.filter(([, , , p]) => can(perms, p));
+  if (loc.pathname === '/queue' && !can(perms, 'visit.read') && items[0]) return <Navigate to={items[0][0]} replace />;
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[232px_1fr]">
       <aside className="no-print hidden md:flex flex-col gap-1 p-4 sticky top-0 h-dvh border-r border-line/70">

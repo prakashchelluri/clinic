@@ -16,13 +16,16 @@ import { visitRoutes } from './modules/visits.js';
 import { clinicalRoutes } from './modules/clinical.js';
 import { billingRoutes } from './modules/billing.js';
 import { sampleRoutes } from './modules/sample.js';
+import { documentRoutes } from './modules/documents.js';
+import { pharmacyRoutes } from './modules/pharmacy.js';
+import { adminRoutes } from './modules/admin.js';
 
 declare module 'fastify' {
   interface FastifyRequest { ctx: Ctx; perms: string[] }
 }
 
 export async function buildApp() {
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test' });
+  const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 15 * 1024 * 1024 });
   await app.register(cookie, { secret: process.env.COOKIE_SECRET ?? 'dev-secret-change-me' });
 
   app.setErrorHandler((err: any, _req, reply) => {
@@ -48,7 +51,7 @@ export async function buildApp() {
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api);
+    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

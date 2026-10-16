@@ -16,12 +16,12 @@ export type Ctx = { tenantId: string; userId: string; role: string; name: string
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {
   owner: ['*'],
-  admin: ['config.*', 'user.*', 'report.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*'],
-  doctor: ['patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read'],
-  assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake'],
-  receptionist: ['patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.write'],
-  coordinator: ['patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record'],
-  pharmacist: ['patient.read', 'pharmacy.*', 'payment.record'],
+  admin: ['config.*', 'user.*', 'report.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'document.read'],
+  doctor: ['patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
+  assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
+  receptionist: ['patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.write', 'document.*'],
+  coordinator: ['patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
+  pharmacist: ['patient.read', 'pharmacy.*', 'payment.record', 'document.read'],
 };
 
 export function can(perms: string[], needed: string) {

@@ -13,6 +13,8 @@ import { Encounter } from './pages/Encounter';
 import { Worklist } from './pages/Worklist';
 import { Reports } from './pages/Reports';
 import { PrintRx } from './pages/PrintRx';
+import { Pharmacy } from './pages/Pharmacy';
+import { Settings } from './pages/Settings';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -30,6 +32,8 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/encounter/:id" element={<Encounter />} />
             <Route path="/worklist" element={<Worklist />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/pharmacy" element={<Pharmacy />} />
+            <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

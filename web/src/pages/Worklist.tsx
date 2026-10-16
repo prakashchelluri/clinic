@@ -8,19 +8,20 @@ const OUTCOMES = ['Will come', 'Wants another date', 'No answer', 'Wrong number'
 
 /** Follow-up and procedure worklists: what used to be the procedure book and the follow-up book. */
 export function Worklist() {
-  const [kind, setKind] = useState<'followup' | 'procedure'>('procedure');
+  const [kind, setKind] = useState<'followup' | 'procedure' | 'investigation'>('procedure');
   const proc = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), refetchInterval: 15000 });
   const fu = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), refetchInterval: 15000 });
+  const inv = useQuery({ queryKey: ['worklist', 'investigation'], queryFn: () => get('/worklist?kind=investigation'), refetchInterval: 15000 });
   const nav = useNavigate();
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: () => { qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
   const t = today();
-  const list = kind === 'procedure' ? proc : fu;
+  const list = kind === 'procedure' ? proc : kind === 'followup' ? fu : inv;
   const rows: any[] = list.data ?? [];
   const overdue = rows.filter((r) => r.dueOn && r.dueOn < t);
   return (
     <div>
       <PageHeader title="Worklists" subtitle={overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Everything the doctor recommended, nothing re-typed'}>
-        <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }]} />
+        <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }, { value: 'investigation', label: 'Tests', count: inv.data?.length }]} />
       </PageHeader>
       <Section>
         {list.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <Empty icon="check" title="Nothing pending" hint="New recommendations appear here the moment the doctor completes an encounter." /> :
@@ -40,10 +41,10 @@ function Row({ r, i, today, onUpdate, onOpen }: { r: any; i: number; today: stri
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap"><button className="font-medium hover:text-clay transition-colors" onClick={onOpen}>{r.patient.fullName}</button><span className="text-xs text-muted">{r.patient.phone ?? 'no phone'} · {r.patient.patientNo}</span></div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {r.procedure && <Chip tone="sky">{r.procedure}{r.sittings ? ` · ${r.sittings} sittings` : ''}</Chip>}
+            {r.procedure && <Chip tone="sky">{r.procedure}{r.sittings ? ` · ${r.sittings} sittings` : ''}</Chip>}{r.kind === 'investigation' && <Chip tone="clay">{r.notes}</Chip>}
             {r.dueOn && <Chip tone={late ? 'rose' : ''}>{late ? 'overdue · ' : 'due '}{fmtDate(r.dueOn)}</Chip>}
             <Chip tone={r.status === 'scheduled' ? 'sage' : r.status === 'contacted' ? 'amber' : ''}>{r.status}</Chip>
-            {r.notes && <span className="text-xs text-ink-2">{r.notes}</span>}
+            {r.notes && r.kind !== 'investigation' && <span className="text-xs text-ink-2">{r.notes}</span>}
           </div>
           {r.contactLog.length > 0 && <div className="text-[11px] text-muted mt-1">{r.contactLog.slice(-2).map((c: any, k: number) => <span key={k} className="mr-3">{fmtDate(c.at)} · {c.by.split(' ')[0]}: {c.outcome}{c.note ? ` — ${c.note}` : ''}</span>)}</div>}
         </div>
