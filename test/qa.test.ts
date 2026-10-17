@@ -40,7 +40,7 @@ test('expenses: validated, categorised, voided not deleted', async () => {
     assert.ok([400].includes(r.status), `${JSON.stringify(bad)} should be 400, got ${r.status}`);
   }
   const edited = await reception('PATCH', `/expenses/${ok.body.id}`, { amountPaise: 50000 });
-  assert.equal(edited.body.amountPaise, 50000);
+  assert.equal(edited.body.amountPaise, 50000); assert.equal(edited.body.category, 'Medicines and supplies'); assert.equal(edited.body.method, 'cash'); // a partial edit must not reset other fields
   const list = await reception('GET', '/expenses');
   assert.equal(list.body.totalPaise, 50100); assert.equal(list.body.byCategory[0].category, 'Medicines and supplies');
   assert.equal((await assistant('GET', '/expenses')).status, 403);
@@ -77,6 +77,10 @@ test('roles: clinic-defined roles and permissions', async () => {
   assert.equal((await reception('POST', '/visits', {})).status, 403);
   assert.equal((await owner('DELETE', '/admin/roles/receptionist')).status, 200);
   assert.notEqual((await reception('POST', '/visits', {})).status, 403);
+  // editing one field of a room keeps the rest
+  const room = await owner('POST', '/admin/rooms', { name: 'QA Room', capabilities: ['laser'] });
+  const off = await owner('PATCH', `/admin/rooms/${room.body.id}`, { active: false });
+  assert.deepEqual(off.body.capabilities, ['laser']); assert.equal(off.body.active, false);
   // an admin cannot hand out permissions they do not hold
   await owner('POST', '/admin/users', { name: 'Adm', email: 'adm@demo.clinic', password: 'secret12', roles: ['admin'] });
   const adm = await as('adm@demo.clinic', 'secret12');

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { patient, visit, encounter, prescriptionItem, recommendation, charge, payment } from '../db/schema.js';
 import { route } from '../lib/route.js';
-import { nextNumber, emit } from '../lib/core.js';
+import { nextNumber, emit, sent } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 
 const PatientIn = z.object({
@@ -43,7 +43,7 @@ export function patientRoutes(app: FastifyInstance) {
   });
 
   route(app, 'patch', '/patients/:id', 'patient.write', async (req, tx) => {
-    const body = PatientIn.partial().parse(req.body);
+    const body = sent(PatientIn.partial().parse(req.body), req.body);
     const [row] = await tx.update(patient).set(body).where(and(eq(patient.id, (req.params as any).id), eq(patient.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     return row;

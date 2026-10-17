@@ -4,7 +4,7 @@ import { and, eq, sql, asc } from 'drizzle-orm';
 import { session, appointment, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, type Routine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, todayIn, nextNumber } from '../lib/core.js';
+import { emit, sent, todayIn, nextNumber } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 
 export const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
@@ -69,7 +69,7 @@ export function schedulingRoutes(app: FastifyInstance) {
   const SessionIn = z.object({ branchId: z.string().uuid(), practitionerId: z.string().uuid().nullable().optional(), day: DAY, startTime: HHMM, endTime: HHMM, capacity: z.number().int().min(0).max(100), note: z.string().optional() });
   route(app, 'post', '/sessions', 'appointment.write', async (req, tx) => (await tx.insert(session).values({ ...SessionIn.parse(req.body), tenantId: req.ctx.tenantId }).returning())[0]);
   route(app, 'patch', '/sessions/:id', 'appointment.write', async (req, tx) => {
-    const [row] = await tx.update(session).set(SessionIn.partial().parse(req.body)).where(and(eq(session.id, (req.params as any).id), eq(session.tenantId, req.ctx.tenantId))).returning();
+    const [row] = await tx.update(session).set(sent(SessionIn.partial().parse(req.body), req.body)).where(and(eq(session.id, (req.params as any).id), eq(session.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND'); return row;
   });
   route(app, 'delete', '/sessions/:id', 'appointment.write', async (req, tx) => {

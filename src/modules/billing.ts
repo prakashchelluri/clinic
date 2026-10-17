@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, eq, sql, gte, lt, lte, desc, isNull } from 'drizzle-orm';
 import { charge, payment, expense, visit, feeCategory, patient, tenant, appUser } from '../db/schema.js';
 import { route } from '../lib/route.js';
-import { emit, todayIn, addDays } from '../lib/core.js';
+import { emit, sent, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 
 /** [start,end) in UTC for a local day in the tenant timezone. */
@@ -82,7 +82,7 @@ export function billingRoutes(app: FastifyInstance) {
     return row;
   });
   route(app, 'patch', '/expenses/:id', 'expense.write', async (req, tx) => {
-    const body = ExpenseIn.partial().parse(req.body); await checkExpense(req, tx, body);
+    const body = sent(ExpenseIn.partial().parse(req.body), req.body); await checkExpense(req, tx, body);
     const [row] = await tx.update(expense).set(body).where(and(eq(expense.id, (req.params as any).id), eq(expense.tenantId, req.ctx.tenantId), isNull(expense.voidedAt))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     await emit(tx, req.ctx, 'expense.edited', 'expense', row.id, body);

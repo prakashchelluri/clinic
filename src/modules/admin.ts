@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { tenant, appUser, practitioner, feeCategory, medicine, procedureCatalog, room, formDefinition, branch, type FormSchema } from '../db/schema.js';
 import { route } from '../lib/route.js';
-import { emit } from '../lib/core.js';
+import { emit, sent } from '../lib/core.js';
 import jsonLogic from 'json-logic-js';
 import { DEFAULT_ROLES, PERMISSIONS, hashPassword, HttpError, can, rolesFor, isKnownPerm, expandPerms, BUILTIN_NAMES } from '../lib/auth.js';
 
@@ -31,7 +31,7 @@ export function adminRoutes(app: FastifyInstance) {
     return pub(row);
   });
   route(app, 'patch', '/admin/users/:id', 'user.write', async (req, tx) => {
-    const body = UserIn.partial().parse(req.body); const id = (req.params as any).id; if (body.roles) await checkRoles(tx, req.ctx.tenantId, body.roles);
+    const body = sent(UserIn.partial().parse(req.body), req.body); const id = (req.params as any).id; if (body.roles) await checkRoles(tx, req.ctx.tenantId, body.roles);
     if (id === req.ctx.userId && body.active === false) throw new HttpError(400, 'CANNOT_DEACTIVATE_SELF');
     const set: any = { ...body }; delete set.password; if (body.password) set.passwordHash = hashPassword(body.password); if (body.email) set.email = body.email.toLowerCase(); if (body.roles) set.role = body.roles[0];
     const [row] = await tx.update(appUser).set(set).where(and(eq(appUser.id, id), eq(appUser.tenantId, req.ctx.tenantId))).returning();
@@ -96,7 +96,7 @@ export function adminRoutes(app: FastifyInstance) {
   // --- practitioners ---
   const PracIn = z.object({ name: Name, regNo: z.string().optional().nullable(), qualification: z.string().optional().nullable(), specialtyId: z.string().uuid().optional().nullable(), active: z.boolean().optional() });
   route(app, 'post', '/admin/practitioners', 'config.write', async (req, tx) => (await tx.insert(practitioner).values({ ...PracIn.parse(req.body), tenantId: req.ctx.tenantId }).returning())[0]);
-  route(app, 'patch', '/admin/practitioners/:id', 'config.write', async (req, tx) => upd(tx, practitioner, req, PracIn.partial().parse(req.body)));
+  route(app, 'patch', '/admin/practitioners/:id', 'config.write', async (req, tx) => upd(tx, practitioner, req, sent(PracIn.partial().parse(req.body), req.body)));
 
   // --- rooms ---
   const RoomIn = z.object({ name: Name, capabilities: z.array(z.string().min(1)).default([]), branchId: z.string().uuid().optional(), active: z.boolean().optional() });
@@ -105,12 +105,12 @@ export function adminRoutes(app: FastifyInstance) {
     const branchId = body.branchId ?? (await tx.select().from(branch).where(eq(branch.tenantId, req.ctx.tenantId)))[0].id;
     return (await tx.insert(room).values({ ...body, branchId, tenantId: req.ctx.tenantId }).returning())[0];
   });
-  route(app, 'patch', '/admin/rooms/:id', 'config.write', async (req, tx) => upd(tx, room, req, RoomIn.partial().parse(req.body)));
+  route(app, 'patch', '/admin/rooms/:id', 'config.write', async (req, tx) => upd(tx, room, req, sent(RoomIn.partial().parse(req.body), req.body)));
 
   // --- fee categories ---
   const FeeIn = z.object({ code: z.string().min(1).max(8).toUpperCase(), name: Name, amountPaise: z.number().int().min(0).max(100000000), taxRateBp: z.number().int().min(0).optional(), priority: z.number().int().optional(), affectsCapacity: z.boolean().optional(), eligibility: z.any().optional().nullable(), eligibilityNote: z.string().optional().nullable(), active: z.boolean().optional() });
   route(app, 'post', '/admin/fee-categories', 'config.write', async (req, tx) => { const b = FeeIn.parse(req.body); checkRule(b.eligibility); return (await tx.insert(feeCategory).values({ ...b, tenantId: req.ctx.tenantId }).returning())[0]; });
-  route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => { const b = FeeIn.partial().parse(req.body); checkRule(b.eligibility); return upd(tx, feeCategory, req, b); });
+  route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => { const b = sent(FeeIn.partial().parse(req.body), req.body); checkRule(b.eligibility); return upd(tx, feeCategory, req, b); });
 
   // --- medicines ---
   const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });
@@ -120,13 +120,13 @@ export function adminRoutes(app: FastifyInstance) {
     if (dup.length) throw new HttpError(409, 'DUPLICATE', { what: 'medicine' });
     return (await tx.insert(medicine).values({ ...b, tenantId: req.ctx.tenantId }).returning())[0];
   });
-  route(app, 'patch', '/admin/medicines/:id', 'config.write', async (req, tx) => upd(tx, medicine, req, MedIn.partial().parse(req.body)));
+  route(app, 'patch', '/admin/medicines/:id', 'config.write', async (req, tx) => upd(tx, medicine, req, sent(MedIn.partial().parse(req.body), req.body)));
   route(app, 'delete', '/admin/medicines/:id', 'config.write', async (req, tx) => { await tx.delete(medicine).where(and(eq(medicine.id, (req.params as any).id), eq(medicine.tenantId, req.ctx.tenantId))); return { ok: true }; });
 
   // --- procedures ---
   const ProcIn = z.object({ name: Name, typicalMinutes: z.number().int().min(5).optional(), bufferMinutes: z.number().int().min(0).optional(), requiresMainDoctor: z.boolean().optional(), requiresReview: z.boolean().optional(), requiredCapability: z.string().optional().nullable(), pricePaise: z.number().int().min(0).optional().nullable(), taxRateBp: z.number().int().min(0).optional(), typicalSittings: z.number().int().min(1).optional(), specialtyId: z.string().uuid().optional().nullable(), active: z.boolean().optional() });
   route(app, 'post', '/admin/procedures', 'config.write', async (req, tx) => (await tx.insert(procedureCatalog).values({ ...ProcIn.parse(req.body), tenantId: req.ctx.tenantId }).returning())[0]);
-  route(app, 'patch', '/admin/procedures/:id', 'config.write', async (req, tx) => upd(tx, procedureCatalog, req, ProcIn.partial().parse(req.body)));
+  route(app, 'patch', '/admin/procedures/:id', 'config.write', async (req, tx) => upd(tx, procedureCatalog, req, sent(ProcIn.partial().parse(req.body), req.body)));
 
   // --- forms: saving creates a new version; completed encounters keep theirs ---
   const Field = z.object({ key: z.string().regex(/^[a-z0-9_]+$/), label: z.string().min(1), type: z.enum(['text', 'textarea', 'number', 'select', 'multiselect', 'tags', 'diagnoses', 'duration', 'date']), required: z.boolean().optional(), options: z.array(z.string()).optional(), unit: z.string().optional(), placeholder: z.string().optional() });

@@ -30,3 +30,7 @@ export function addDays(day: string, n: number) {
 export function daysBetween(a: string, b: string) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 }
+
+/** A PATCH changes only what was sent. Newer zod re-applies schema defaults on .partial(), which would silently reset untouched fields, so keep just the keys in the request. */
+export const sent = <T extends Record<string, any>>(parsed: T, raw: unknown): Partial<T> =>
+  Object.fromEntries(Object.entries(parsed).filter(([k]) => raw && typeof raw === 'object' && k in (raw as object))) as Partial<T>;
