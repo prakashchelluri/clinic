@@ -23,7 +23,7 @@ export function EncounterDetail({ id }: { id: string }) {
         return (
           <div key={s.key}>
             <div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">{s.title}</div>
-            <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
               {filled.map((f: any) => { const v = d[s.key][f.key]; return (
                 <div key={f.key} className={f.type === 'textarea' ? 'sm:col-span-2' : ''}><div className="text-xs text-muted">{f.label}</div>
                   {Array.isArray(v) ? <div className="flex flex-wrap gap-1 mt-0.5">{asList(v).map((x: string) => <Chip key={x}>{x}</Chip>)}</div> : <div className="text-ink">{String(v)}{f.unit ? ` ${f.unit}` : ''}</div>}</div>); })}

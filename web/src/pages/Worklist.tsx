@@ -52,7 +52,7 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule }: { r: any; 
       <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
         <Avatar name={r.patient.fullName} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap"><button className="font-medium hover:text-clay transition-colors" onClick={onOpen}>{r.patient.fullName}</button><span className="text-xs text-muted">{r.patient.phone ?? 'no phone'} · {r.patient.patientNo}</span></div>
+          <div className="flex items-center gap-2 flex-wrap"><button className="font-medium hover:text-clay transition-colors py-2 -my-2" onClick={onOpen}>{r.patient.fullName}</button><span className="text-xs text-muted">{r.patient.phone ?? 'no phone'} · {r.patient.patientNo}</span></div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
             {r.procedure && <Chip tone="sky">{r.procedure}{r.sittings ? ` · ${r.sittings} ${r.sittings === 1 ? 'sitting' : 'sittings'}` : ''}</Chip>}
             {isTest && <Chip tone="clay">{r.notes}</Chip>}

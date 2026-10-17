@@ -18,20 +18,20 @@ export function Reports() {
     <div>
       <PageHeader title="Daily report" subtitle={dayLabel}>
         <div className="flex items-center gap-1 card !p-1 !rounded-full no-print">
-          <button className="btn btn-ghost btn-icon" onClick={() => d && setDay(d.prevDay)}><Icon name="chevL" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label="Previous day" onClick={() => d && setDay(d.prevDay)}><Icon name="chevL" /></button>
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
-          <button className="btn btn-ghost btn-icon" onClick={() => d && setDay(d.nextDay)}><Icon name="chevR" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => d && setDay(d.nextDay)}><Icon name="chevR" /></button>
         </div>
         <button className="btn no-print" onClick={() => window.print()}><Icon name="print" />Print</button>
       </PageHeader>
       {!d ? <Skeleton rows={3} /> : (<>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat label="Visits" value={d.totals.visits} delay={0} />
           <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.byMethod.length ? d.byMethod.map((m: any) => `${m.method.toUpperCase()} ${money(m.total)}`).join(' · ') : 'no payments yet'} delay={40} />
           <Stat label="Expenses" value={money(d.totals.expensesPaise)} sub={`${d.expenses.length} entries`} delay={80} />
           <Stat label="Net for the day" value={money(d.totals.netPaise)} tone="clay" sub={`Outstanding overall ${money(d.outstanding.total)} across ${d.outstanding.n}`} delay={120} />
         </div>
-        <div className="grid lg:grid-cols-2 gap-5 mt-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
           <Section title="By visit category" delay={160}>
             {d.byCategory.length === 0 ? <Empty icon="users" title="No visits recorded" /> : (
               <div className="overflow-x-auto"><table className="table min-w-[460px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Refunded</th></tr></thead>

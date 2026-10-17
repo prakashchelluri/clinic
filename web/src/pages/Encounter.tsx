@@ -90,7 +90,7 @@ export function Encounter() {
         {e.form.sections.map((s: any, si: number) => (
           <div key={s.key} className="card anim-fade-up" style={{ animationDelay: `${60 + si * 50}ms` }}>
             <div className="serif text-lg mb-3">{s.title}</div>
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {s.fields.map((f: Field) => (
                 <div key={f.key} data-invalid={!!err(s.key, f.key)} className={['textarea', 'multiselect', 'tags', 'diagnoses'].includes(f.type) ? 'md:col-span-2' : ''}>
                   <label className="label">{f.label}{f.required && <span className="text-clay"> *</span>} {f.unit && <span className="normal-case tracking-normal">({f.unit})</span>}</label>
@@ -161,12 +161,12 @@ export function Encounter() {
         </>)}
 
         <div className="sticky bottom-20 md:bottom-4 z-10 anim-fade-up" style={{ animationDelay: '380ms' }}>
-          <div className="card !py-3 flex items-center gap-2 flex-wrap !bg-[#FBFAF7]" style={{ boxShadow: 'var(--shadow-lift)' }}>
-            <button className="btn btn-ghost" onClick={() => nav('/queue', { viewTransition: true })}><Icon name="chevL" />Queue</button>
+          <div className="card !py-2.5 sm:!py-3 flex items-center gap-2 sm:flex-wrap !bg-[#FBFAF7]" style={{ boxShadow: 'var(--shadow-lift)' }}>
+            <button className="btn btn-ghost !px-2.5 sm:!px-4" aria-label="Back to queue" onClick={() => nav('/queue', { viewTransition: true })}><Icon name="chevL" /><span className="hidden sm:inline">Queue</span></button>
             {errors.length > 0 && <button type="button" className="text-xs text-rose underline" onClick={() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}>{errors.length} required field{errors.length > 1 ? 's' : ''} missing · show</button>}
             <span className="ml-auto" />
             {!readOnly && <button className="btn" disabled={save.isPending} onClick={() => save.mutate(false)}>{me.role === 'assistant' ? 'Save intake & return to queue' : 'Save draft'}</button>}
-            {!readOnly && isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}><Icon name="print" />Complete & print Rx</button>}
+            {!readOnly && isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}><Icon name="print" />Complete<span className="hidden sm:inline"> & print Rx</span></button>}
             {readOnly && <button className="btn btn-primary" onClick={() => window.open(`/print/${id}`, '_blank')}><Icon name="print" />Print Rx</button>}
           </div>
         </div>

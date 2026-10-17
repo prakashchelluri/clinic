@@ -41,12 +41,12 @@ export function Expenses() {
 
       {canWrite && (
         <form className="card !p-4 mb-5 anim-fade-up" onSubmit={(e) => { e.preventDefault(); if (valid(form) && !add.isPending) add.mutate(); }}>
-          <div className="grid gap-3 md:grid-cols-[1fr_190px_150px_150px_auto] items-end">
-            <div><label className="label" htmlFor="ex-desc">What was paid for</label><input id="ex-desc" className="input" maxLength={200} placeholder="e.g. Gloves and syringes" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_190px_150px_150px_auto] items-end">
+            <div className="sm:col-span-2 xl:col-span-1"><label className="label" htmlFor="ex-desc">What was paid for</label><input id="ex-desc" className="input" maxLength={200} placeholder="e.g. Gloves and syringes" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
             <div><label className="label" htmlFor="ex-cat">Category</label><select id="ex-cat" className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{(d?.categories ?? ['Other']).map((c: string) => <option key={c}>{c}</option>)}</select></div>
             <div><label className="label" htmlFor="ex-amt">Amount</label><MoneyInput id="ex-amt" value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /></div>
             <div><label className="label" htmlFor="ex-day">Date</label><input id="ex-day" type="date" className="input" max={today()} value={form.day} onChange={(e) => setForm({ ...form, day: e.target.value || today() })} /></div>
-            <button className="btn btn-primary !h-11" disabled={!valid(form) || add.isPending}><Icon name="plus" className="h-4 w-4" />Add expense</button>
+            <button className="btn btn-primary !h-11 sm:col-span-2 xl:col-span-1" disabled={!valid(form) || add.isPending}><Icon name="plus" className="h-4 w-4" />Add expense</button>
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="text-xs text-muted mr-1">Paid by</span>
@@ -57,7 +57,7 @@ export function Expenses() {
       )}
 
       {!d ? <Skeleton rows={4} /> : (<>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat label="Total spent" value={money(d.totalPaise)} tone="clay" sub={`${live.length} ${live.length === 1 ? 'entry' : 'entries'}`} />
           <Stat label="Biggest category" value={top ? money(top.total) : '₹0'} sub={top ? top.category : 'nothing yet'} delay={40} />
           {d.byMethod.slice(0, 2).map((m: any, i: number) => <Stat key={m.method} label={'Paid by ' + m.method} value={money(m.total)} delay={80 + i * 40} />)}

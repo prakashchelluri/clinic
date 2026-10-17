@@ -26,9 +26,9 @@ export function Booking() {
     <div>
       <PageHeader title="Booking" subtitle={<>{dayLabel} · <b className="text-ink">{total.a}</b> of {total.c} places allocated</>}>
         <div className="flex items-center gap-1 card !p-1 !rounded-full">
-          <button className="btn btn-ghost btn-icon" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label="Previous day" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" /></button>
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
-          <button className="btn btn-ghost btn-icon" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" /></button>
         </div>
         {(cfg?.practitioners ?? []).length > 1 && <select className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">All doctors</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
         <a className="btn" href="/calendar"><Icon name="clock" />Doctor's day</a>
@@ -38,7 +38,7 @@ export function Booking() {
       {sessions.isLoading ? <Skeleton rows={2} /> : sessions.data?.length === 0 ? (
         <div className="card anim-fade-up"><Empty icon="calendar" title="No OP windows for this day" hint="Copy the previous day's plan or add windows one by one." />{writable && <div className="flex justify-center pb-4"><button className="btn" onClick={() => copy.mutate()}>Copy previous day's windows</button></div>}</div>
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
           {(sessions.data ?? []).map((s: any, i: number) => {
             const cap = s.effectiveCapacity; const pct = cap ? Math.min(100, Math.round((s.allocated / cap) * 100)) : 100;
             const tone = s.free <= 0 ? 'rose' : s.free <= 2 ? 'amber' : 'sage';
@@ -48,14 +48,14 @@ export function Booking() {
                 {s.reductions?.length > 0 && <div className="text-[11px] text-amber mt-1 flex items-center gap-1"><Icon name="clock" className="h-3 w-3" />{s.reductions.map((r: any) => `${r.note ?? r.kind} ${r.startTime}–${r.endTime}`).join(', ')}</div>}
                 <div className="h-1.5 bg-paper-2 rounded-full mt-3 overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${tone === 'rose' ? 'bg-rose' : tone === 'amber' ? 'bg-amber' : 'bg-sage'}`} style={{ width: pct + '%' }} /></div>
                 <div className="text-xs text-muted mt-2 flex items-center gap-2"><span className="truncate">{cfg?.practitioners.find((p: any) => p.id === s.practitionerId)?.name ?? 'Any doctor'}</span>
-                  {writable && <span className="ml-auto flex gap-0.5"><span role="button" className="btn btn-ghost btn-sm !px-2" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: Math.max(0, s.capacity - 1) }); }}>−</span><span role="button" className="btn btn-ghost btn-sm !px-2" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: s.capacity + 1 }); }}>+</span></span>}</div>
+                  {writable && <span className="ml-auto flex gap-0.5"><button type="button" aria-label="One place fewer" className="btn btn-ghost btn-sm !px-3" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: Math.max(0, s.capacity - 1) }); }}>−</button><button type="button" aria-label="One place more" className="btn btn-ghost btn-sm !px-3" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: s.capacity + 1 }); }}>+</button></span>}</div>
               </button>
             );
           })}
         </div>
       )}
 
-      <div className="grid lg:grid-cols-2 gap-5 mt-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
         {sel && writable ? <BookForm key={sel.id} session={sel} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={refresh} /> : <div className="card anim-fade-in border-dashed text-sm">
           <div className="serif text-lg mb-2">How booking works here</div>
           <ol className="space-y-2 text-ink-2">

@@ -75,7 +75,7 @@ function Timeline({ id }: { id: string }) {
         )}
       </div>
 
-      <div className="grid md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Section title="Open plans" delay={60}>
           {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
             openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}

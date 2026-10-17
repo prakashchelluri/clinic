@@ -135,7 +135,7 @@ export function FrontDesk() {
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7 mb-4 stagger">
+        <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-4 sm:gap-3 xl:grid-cols-7 mb-4 stagger [&>*]:min-w-[132px] [&>*]:shrink-0 sm:[&>*]:min-w-0">
           <FilterCard i={0} label="Waiting" value={waiting.length} sub={waiting.length ? `longest ${longest} min` : 'nobody waiting'} tone="clay" on={tab === 'waiting'} onClick={() => setTab('waiting')} />
           {canDesk && <FilterCard i={1} label="Not yet arrived" value={scheduled.length} sub={late.length ? `${late.length} late` : 'booked'} on={tab === 'scheduled'} onClick={() => setTab('scheduled')} />}
           <FilterCard i={2} label="With doctor" value={inConsult.length} sub="in consultation" on={tab === 'doctor'} onClick={() => setTab('doctor')} />
@@ -146,7 +146,7 @@ export function FrontDesk() {
         </div>
 
         {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={() => nav('/booking')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
-          <div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm min-w-[760px]">
+          <div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm md:min-w-[760px] stack-on-phone">
             <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
             <tbody>
               {groups.length === 0 && <tr><td colSpan={6} className="!py-10 text-center text-muted">{emptyText[tab]}</td></tr>}

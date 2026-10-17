@@ -33,10 +33,10 @@ export function Settings() {
       <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-5">
         <nav className="space-y-1 anim-fade-up">
           {TABS.map(([k, label, icon, hint]) => (
-            <button key={k} onClick={() => setTab(k)} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
+            <button key={k} onClick={() => { setTab(k); if (innerWidth < 1024) setTimeout(() => document.getElementById('settings-body')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); }} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
           ))}
         </nav>
-        <div key={tab} className="anim-fade-up min-w-0">
+        <div key={tab} id="settings-body" className="anim-fade-up min-w-0 scroll-mt-4">
           <h2 className="text-xl font-medium mb-3">{cur[1]}</h2>
           {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
           {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}

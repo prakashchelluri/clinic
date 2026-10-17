@@ -39,9 +39,9 @@ export function Calendar() {
       <PageHeader title={practitioner ? `${practitioner.name} · ${dayLabel}` : dayLabel}
         subtitle={<>{practitioner?.routine ? <>Routine: {routineSummary(practitioner.routine)}</> : <span className="text-amber">No weekly routine yet</span>}{totals ? <> · <b className="text-ink">{totals.a}</b> of {totals.c} OP places taken{d.procedures.length ? ` · ${d.procedures.length} procedure${d.procedures.length === 1 ? '' : 's'}` : ''}</> : null}</>}>
         <div className="flex items-center gap-1 card !p-1 !rounded-full">
-          <button className="btn btn-ghost btn-icon" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label="Previous day" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" /></button>
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
-          <button className="btn btn-ghost btn-icon" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" /></button>
         </div>
         {(cfg?.practitioners ?? []).length > 1 && <select className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
       </PageHeader>
@@ -85,7 +85,7 @@ export function Calendar() {
                 {d.blocks.filter((b: any) => !(b.kind === 'leave' && toMin(b.endTime) - toMin(b.startTime) >= 600)).map((b: any) => (
                   <div key={b.id} className="absolute left-0 right-[42%] rounded-xl px-3 py-1.5 text-xs anim-fade-up flex items-center gap-2" style={{ top: top(b.startTime), height: height(b.startTime, b.endTime), background: b.kind === 'leave' ? 'var(--color-rose-soft)' : 'repeating-linear-gradient(135deg, var(--color-paper-2) 0 6px, var(--color-paper) 6px 12px)', border: '1px dashed var(--color-line-2)' }}>
                     <Icon name={b.kind === 'leave' ? 'door' : 'clock'} className="h-3.5 w-3.5 text-muted" /><span className="font-medium">{b.note ?? b.kind}</span><span className="text-muted">{b.startTime}–{b.endTime}</span>
-                    {writable && <button className="btn btn-ghost btn-icon ml-auto !h-6 !w-6" onClick={() => delBlock.mutate(b.id)}><Icon name="x" className="h-3 w-3" /></button>}
+                    {writable && <button className="btn btn-ghost btn-icon ml-auto !h-6 !w-6" aria-label="Remove this" onClick={() => delBlock.mutate(b.id)}><Icon name="x" className="h-3 w-3" /></button>}
                   </div>
                 ))}
                 {d.procedures.map((p: any) => (
@@ -113,7 +113,7 @@ export function Calendar() {
                 <div key={x.id} className="row text-sm">
                   <Chip tone={x.type === 'procedure' ? 'sky' : x.kind === 'leave' ? 'rose' : 'amber'}>{x.type === 'procedure' ? 'procedure' : x.kind}</Chip>
                   <div className="flex-1 min-w-0 truncate">{x.type === 'procedure' ? `${x.procedure ?? 'Procedure'} · ${x.patient}` : (x.note ?? x.kind)} <span className="text-muted">{x.startTime}–{x.endTime}</span></div>
-                  {x.type === 'block' && writable && <button className="btn btn-ghost btn-icon" onClick={() => delBlock.mutate(x.id)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+                  {x.type === 'block' && writable && <button className="btn btn-ghost btn-icon" aria-label="Remove this" onClick={() => delBlock.mutate(x.id)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
                 </div>
               ))}
           </Section>

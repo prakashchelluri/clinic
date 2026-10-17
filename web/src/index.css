@@ -154,3 +154,20 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
 }
 
 @media print { .no-print { display: none !important; } html, body { background: white !important; } }
+
+/* Phones: fingers need bigger targets than a mouse */
+@media (max-width: 767px) {
+  .btn-sm { min-height: 40px; padding-left: 1rem; padding-right: 1rem; }
+  .toggle-opt { min-height: 40px; }
+  .btn-icon { min-width: 40px; min-height: 40px; }
+}
+
+/* Phones: a wide table becomes a list of cards, so the action button is never off-screen */
+@media (max-width: 767px) {
+  .stack-on-phone thead { display: none; }
+  .stack-on-phone, .stack-on-phone tbody, .stack-on-phone tr, .stack-on-phone td { display: block; width: 100%; }
+  .stack-on-phone tr { padding: 14px 16px; border-bottom: 1px solid rgba(23,25,26,.08); }
+  .stack-on-phone td { padding: 2px 0 !important; border: 0 !important; text-align: left !important; }
+  .stack-on-phone td:empty { display: none; }
+  .stack-on-phone td:last-child { margin-top: 10px; }
+}

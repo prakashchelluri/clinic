@@ -64,7 +64,7 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
         <div className="space-y-5">
           {Object.entries(groups).map(([g, items]) => (
             <fieldset key={g}><legend className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">{g}</legend>
-              <div className="grid sm:grid-cols-2 gap-x-6">{items.map((p) => {
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">{items.map((p) => {
                 const on = perms.includes(p.key); const cannot = !locked && !can(mine, p.key);
                 return (
                   <label key={p.key} className={'flex items-start gap-2.5 py-1.5 text-sm ' + (locked || cannot ? 'opacity-60' : 'cursor-pointer')} title={cannot ? 'You can only hand out permissions you have yourself' : ''}>

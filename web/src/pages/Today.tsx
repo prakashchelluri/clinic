@@ -58,7 +58,7 @@ export function Today() {
         </section>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-5 mt-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-5">
         <section className="glass p-5 anim-fade-up min-w-0" style={{ animationDelay: '140ms' }}>
           <div className="flex items-center"><div className="text-[15px] font-semibold">On you today</div><span className="ml-auto text-xs text-muted">procedures</span></div>
           {!cal.data || cal.data.procedures.filter((p: any) => p.practitionerId === me.practitionerId).length === 0 ? <div className="py-6 text-sm text-muted">No procedures on you today.</div> :

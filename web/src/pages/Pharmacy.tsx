@@ -21,7 +21,7 @@ export function Pharmacy() {
         <input type="date" className="input !w-auto" value={day} onChange={(e) => setDay(e.target.value)} />
       </PageHeader>
       {q.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <div className="card"><Empty icon="pill" title="No prescriptions yet" hint="Completed consultations appear here the moment the doctor prints the Rx." /></div> : (
-        <div className="grid lg:grid-cols-2 gap-4 stagger">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 stagger">
           {[...pending, ...billed].map((r, i) => <RxCard key={r.encounterId} r={r} i={i} canBill={can(perms, 'pharmacy.bill')} canDispense={can(perms, 'pharmacy.dispense')} />)}
         </div>
       )}
