@@ -1,4 +1,12 @@
-# Render Blueprint: free web service. Database: create a free Neon project and set DATABASE_URL.
+# Render Blueprint: free web service plus a free Render Postgres so the app runs out of the box.
+# To use Neon instead: in the Render dashboard open the service -> Environment, set DATABASE_URL to the Neon pooled
+# connection string (remove the fromDatabase link here first, or the blueprint will keep resetting it).
+databases:
+  - name: cubott-db
+    plan: free
+    databaseName: cubott
+    user: cubott
+
 services:
   - type: web
     name: cubott-clinical
@@ -13,4 +21,6 @@ services:
       - key: COOKIE_SECRET
         generateValue: true
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: cubott-db
+          property: connectionString
