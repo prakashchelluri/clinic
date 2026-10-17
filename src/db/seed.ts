@@ -1,6 +1,7 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { db } from './index.js';
 import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, type FormSchema } from './schema.js';
+import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
 
@@ -70,7 +71,10 @@ export type NewClinic = { name: string; slug: string; timezone?: string; address
 export async function createClinic(input: NewClinic) {
   const slug = input.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
   if (await db.select().from(tenant).where(eq(tenant.slug, slug)).then((r) => r.length)) throw new Error('SLUG_TAKEN');
-  const [t] = await db.insert(tenant).values({ slug, name: input.name, timezone: input.timezone ?? 'Asia/Kolkata', kind: 'clinic', settings: {
+  const newId = randomUUID();
+  return (db as any).transaction(async (db: any) => {
+  await db.execute(sql`select set_config('app.tenant_id', ${newId}, true)`);
+  const [t] = await db.insert(tenant).values({ id: newId, slug, name: input.name, timezone: input.timezone ?? 'Asia/Kolkata', kind: 'clinic', settings: {
     scheduling: { windowMinutes: 60, arriveEarlyMinutes: 35, defaultCapacity: 7 }, numbering: { opNumberScope: 'day+category' },
     print: { address: input.address ?? '', phone: input.phone ?? '', footer: 'Get well soon' }, languages: ['en'] } }).returning();
   const tid = t.id;
@@ -98,30 +102,41 @@ export async function createClinic(input: NewClinic) {
   await db.insert(procedureCatalog).values(DERM_PROCEDURES.map((p) => ({ ...p, tenantId: tid, specialtyId: derm.id })));
   await db.insert(room).values(DERM_ROOMS.map((r) => ({ ...r, tenantId: tid, branchId: b.id })));
   return { tenantId: tid, branchId: b.id, practitionerId: ownerPrac?.id ?? null, specialtyId: derm.id, slug };
+  });
 }
 
 /** Forms are versioned: encounters pin the version they were written with. New versions are added, never edited in place. */
 export async function ensureFormsCurrent() {
-  // Data upgrades for clinics created by earlier builds
-  await db.execute(sql`update app_user set roles = array_append(roles, 'doctor') where 'owner' = any(roles) and practitioner_id is not null and not ('doctor' = any(roles))`);
-  await db.execute(sql`update practitioner set routine = '{"days":{"1":[["10:00","13:00"],["16:00","20:00"]],"2":[["10:00","13:00"],["16:00","20:00"]],"3":[["10:00","13:00"],["16:00","20:00"]],"4":[["10:00","13:00"],["16:00","20:00"]],"5":[["10:00","13:00"],["16:00","20:00"]],"6":[["10:00","13:00"],["16:00","20:00"]]},"capacity":7,"windowMinutes":60}'::jsonb where routine is null and active`);
-  for (const p of DERM_PROCEDURES) await db.execute(sql`update procedure_catalog set required_capability = ${p.requiredCapability}, buffer_minutes = ${(p as any).bufferMinutes ?? 0} where name = ${p.name} and required_capability is null`);
   for (const t of await db.select().from(tenant).where(eq(tenant.kind, 'clinic'))) {
-    const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
+    await (db as any).transaction(async (db: any) => {
+      await db.execute(sql`select set_config('app.tenant_id', ${t.id}, true)`);
+    // Data upgrades for clinics created by earlier builds
+    await db.execute(sql`update app_user set roles = array_append(roles, 'doctor') where 'owner' = any(roles) and practitioner_id is not null and not ('doctor' = any(roles))`);
+    await db.execute(sql`update practitioner set routine = '{"days":{"1":[["10:00","13:00"],["16:00","20:00"]],"2":[["10:00","13:00"],["16:00","20:00"]],"3":[["10:00","13:00"],["16:00","20:00"]],"4":[["10:00","13:00"],["16:00","20:00"]],"5":[["10:00","13:00"],["16:00","20:00"]],"6":[["10:00","13:00"],["16:00","20:00"]]},"capacity":7,"windowMinutes":60}'::jsonb where routine is null and active`);
+    for (const p of DERM_PROCEDURES) await db.execute(sql`update procedure_catalog set required_capability = ${p.requiredCapability}, buffer_minutes = ${(p as any).bufferMinutes ?? 0} where name = ${p.name} and required_capability is null`);
+  
+    const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r: any) => r[0]);
     // Only auto-upgrade clinics still on the stock pack (no owner-edited versions beyond it).
-    if (cur && cur.version >= DERM_ENCOUNTER_VERSION) continue;
+    if (cur && cur.version >= DERM_ENCOUNTER_VERSION) return;
     if (cur) await db.update(formDefinition).set({ active: false }).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter')));
     await db.insert(formDefinition).values({ tenantId: t.id, key: 'encounter', specialtyId: cur?.specialtyId ?? null, version: DERM_ENCOUNTER_VERSION, schema: DERM_ENCOUNTER });
     const rooms = await db.select().from(room).where(eq(room.tenantId, t.id));
     if (!rooms.length) { const b = (await db.select().from(branch).where(eq(branch.tenantId, t.id)))[0]; if (b) await db.insert(room).values(DERM_ROOMS.map((r) => ({ ...r, tenantId: t.id, branchId: b.id }))); }
+
+
+    });
   }
 }
 
 /** The platform tenant hosts CUBOTT staff who onboard clinics. Created once. */
 export async function ensurePlatform() {
   if (await db.select().from(tenant).where(eq(tenant.kind, 'platform')).then((r) => r.length)) return;
-  const [t] = await db.insert(tenant).values({ slug: 'cubott', name: 'CUBOTT Platform', kind: 'platform', settings: {} }).returning();
+  const pid = randomUUID();
+  await (db as any).transaction(async (db: any) => {
+  await db.execute(sql`select set_config('app.tenant_id', ${pid}, true)`);
+  const [t] = await db.insert(tenant).values({ id: pid, slug: 'cubott', name: 'CUBOTT Platform', kind: 'platform', settings: {} }).returning();
   await db.insert(appUser).values({ tenantId: t.id, email: 'superadmin@cubott.in', name: 'CUBOTT Admin', passwordHash: hashPassword(process.env.SUPERADMIN_PASSWORD ?? 'demo1234'), role: 'superadmin', roles: ['superadmin'] });
+  });
 }
 
 export async function seedIfEmpty() {
@@ -133,6 +148,8 @@ export async function seedIfEmpty() {
 export async function seedDemo(slug = 'sahitya') {
   const c = await createClinic({ name: 'Sahitya Dermatology Hospital', slug, address: 'Rajahmundry, Andhra Pradesh', owner: { name: 'Dr. Main Doctor', email: 'owner@demo.clinic', password: 'demo1234', regNo: 'APMC/00000', qualification: 'MD (DVL)' } });
   const tid = c.tenantId;
+  return (db as any).transaction(async (db: any) => {
+  await db.execute(sql`select set_config('app.tenant_id', ${tid}, true)`);
   await db.update(tenant).set({ settings: { scheduling: { windowMinutes: 60, arriveEarlyMinutes: 35, defaultCapacity: 7 }, numbering: { opNumberScope: 'day+category' }, print: { address: 'Rajahmundry, Andhra Pradesh', phone: '', footer: 'Get well soon · ఆరోగ్యంగా ఉండండి' }, languages: ['te', 'en'] } }).where(eq(tenant.id, tid));
   const [drB] = await db.insert(practitioner).values({ tenantId: tid, name: 'Dr. Second Doctor', regNo: 'APMC/00001', qualification: 'MBBS, DDVL', specialtyId: c.specialtyId,
     routine: { days: Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), [['10:00', '14:00']] as [string, string][]])), capacity: 6, windowMinutes: 60 } }).returning();
@@ -150,6 +167,7 @@ export async function seedDemo(slug = 'sahitya') {
     await db.insert(session).values(windows.map(([s, e, cap]) => ({ tenantId: tid, branchId: c.branchId, practitionerId: c.practitionerId!, day, startTime: s, endTime: e, capacity: cap })));
   }
   return { tenantId: tid, branchId: c.branchId };
+  });
 }
 
 if (process.argv[1]?.endsWith('seed.ts')) {

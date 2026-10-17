@@ -45,7 +45,7 @@ export async function applyRls() {
       `alter table "${t}" enable row level security`,
       `alter table "${t}" force row level security`,
       `drop policy if exists tenant_isolation on "${t}"`,
-      `create policy tenant_isolation on "${t}" using (tenant_id = current_setting('app.tenant_id', true)::uuid) with check (tenant_id = current_setting('app.tenant_id', true)::uuid)`,
+      `create policy tenant_isolation on "${t}" using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid) with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)`,
     ];
     for (const q of stmts) await db.execute(sql.raw(q));
   }
