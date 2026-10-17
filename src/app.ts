@@ -74,7 +74,7 @@ export async function buildApp() {
   // Serve the built PWA (web/dist) with SPA fallback.
   const dist = path.resolve('web/dist');
   if (existsSync(dist)) {
-    await app.register(fastifyStatic, { root: dist, setHeaders: (res, p) => res.setHeader('cache-control', p.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000, immutable') });
+    await app.register(fastifyStatic, { root: dist, setHeaders: (res: any, p: string) => { const v = p.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000, immutable'; if (typeof res.setHeader === 'function') res.setHeader('cache-control', v); else res.header('cache-control', v); } });
     app.setNotFoundHandler((req, reply) => req.url.startsWith('/api/') ? reply.code(404).send({ code: 'NOT_FOUND' }) : reply.header('cache-control', 'no-cache').sendFile('index.html'));
   }
   return app;
