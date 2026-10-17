@@ -11,7 +11,7 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 
 const { db, migrate, applyRls } = await import('../src/db/index.js');
 const { sql } = await import('drizzle-orm');
-const { ensurePlatform, seedIfEmpty, ensureFormsCurrent } = await import('../src/db/seed.js');
+const { ensurePlatform, seedIfEmpty, ensureFormsCurrent, healEmptyTenants } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -25,6 +25,10 @@ test('seed, upgrades and login work under enforced row-level security', async ()
   await db.execute(sql.raw(`set role app_rls`));
   // sanity: the role really is restricted (an unscoped insert must be refused)
   await assert.rejects(db.execute(sql.raw(`insert into branch (tenant_id, name) values ('${'00000000-0000-0000-0000-000000000001'}', 'x')`)));
+  // a tenant left empty by an interrupted first run is cleaned up, and seeding then proceeds
+  await db.execute(sql.raw(`insert into tenant (slug, name, kind, settings) values ('broken', 'Half made', 'clinic', '{}')`));
+  await healEmptyTenants();
+  assert.equal(((await db.execute(sql.raw(`select count(*)::int as n from tenant where slug = 'broken'`))) as any).rows[0].n, 0);
   await ensurePlatform(); await seedIfEmpty(); await ensureFormsCurrent();
   app = await buildApp();
   const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'owner@demo.clinic', password: 'demo1234' } });

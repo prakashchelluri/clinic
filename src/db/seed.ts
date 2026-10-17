@@ -175,3 +175,16 @@ if (process.argv[1]?.endsWith('seed.ts')) {
   await migrate(); await applyRls(); await ensurePlatform(); await seedIfEmpty(); await ensureFormsCurrent();
   console.log('seeded'); process.exit(0);
 }
+
+/** A seed that died half way (before it ran in one scoped transaction) can leave a tenant with no users, which blocks re-seeding. Remove only those. */
+export async function healEmptyTenants() {
+  for (const t of await db.select().from(tenant)) {
+    try {
+      await (db as any).transaction(async (db: any) => {
+        await db.execute(sql`select set_config('app.tenant_id', ${t.id}, true)`);
+        const [{ n }] = (await db.execute(sql`select count(*)::int as n from app_user where tenant_id = ${t.id}`)).rows ?? (await db.execute(sql`select count(*)::int as n from app_user where tenant_id = ${t.id}`));
+        if (Number(n) === 0) { await db.execute(sql`delete from tenant where id = ${t.id}`); console.log('removed empty tenant', t.slug); }
+      });
+    } catch (e) { console.warn('could not heal tenant', t.slug, (e as Error).message); }
+  }
+}
