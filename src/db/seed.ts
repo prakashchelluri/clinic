@@ -1,6 +1,6 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { db } from './index.js';
-import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, type FormSchema } from './schema.js';
+import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, TENANT_TABLES, type FormSchema } from './schema.js';
 import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
@@ -183,7 +183,10 @@ export async function healEmptyTenants() {
       await (db as any).transaction(async (db: any) => {
         await db.execute(sql`select set_config('app.tenant_id', ${t.id}, true)`);
         const [{ n }] = (await db.execute(sql`select count(*)::int as n from app_user where tenant_id = ${t.id}`)).rows ?? (await db.execute(sql`select count(*)::int as n from app_user where tenant_id = ${t.id}`));
-        if (Number(n) === 0) { await db.execute(sql`delete from tenant where id = ${t.id}`); console.log('removed empty tenant', t.slug); }
+        if (Number(n) === 0) {
+          for (const tbl of [...TENANT_TABLES].reverse()) await db.execute(sql.raw(`delete from "${tbl}" where tenant_id = '${t.id}'`));
+          await db.execute(sql`delete from tenant where id = ${t.id}`); console.log('removed empty tenant', t.slug);
+        }
       });
     } catch (e) { console.warn('could not heal tenant', t.slug, (e as Error).message); }
   }

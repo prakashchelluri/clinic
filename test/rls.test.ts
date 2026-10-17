@@ -27,6 +27,9 @@ test('seed, upgrades and login work under enforced row-level security', async ()
   await assert.rejects(db.execute(sql.raw(`insert into branch (tenant_id, name) values ('${'00000000-0000-0000-0000-000000000001'}', 'x')`)));
   // a tenant left empty by an interrupted first run is cleaned up, and seeding then proceeds
   await db.execute(sql.raw(`insert into tenant (slug, name, kind, settings) values ('broken', 'Half made', 'clinic', '{}')`));
+  await db.execute(sql.raw(`select set_config('app.tenant_id', (select id::text from tenant where slug = 'broken'), false)`));
+  await db.execute(sql.raw(`insert into branch (tenant_id, name) select id, 'orphan' from tenant where slug = 'broken'`));
+  await db.execute(sql.raw(`select set_config('app.tenant_id', '', false)`));
   await healEmptyTenants();
   assert.equal(((await db.execute(sql.raw(`select count(*)::int as n from tenant where slug = 'broken'`))) as any).rows[0].n, 0);
   await ensurePlatform(); await seedIfEmpty(); await ensureFormsCurrent();
