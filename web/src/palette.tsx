@@ -21,7 +21,7 @@ export function CommandPalette({ open, onClose, can }: { open: boolean; onClose:
     can('appointment.write') && { key: 'L', label: 'Doctor is late or away today', icon: 'clock', hint: 'Adjust capacity', to: '/calendar' },
     can('patient.write') && { key: 'R', label: 'Register a patient', icon: 'user', hint: 'New record', to: '/patients?new=1' },
     can('worklist.write') && { key: 'P', label: 'Book or schedule a procedure', icon: 'stetho', hint: 'Open procedures', to: '/worklist' },
-    can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: 'Daily ledger', to: '/reports?expense=1' },
+    can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: 'Expenses', to: '/expenses' },
     (can('report.daily') || can('finance.read')) && { key: 'T', label: "Print today's report", icon: 'print', hint: 'Daily collections', to: '/reports?print=1' },
   ];
   const actions = (all.filter(Boolean) as Action[]).filter((a) => !q || a.label.toLowerCase().includes(q.toLowerCase()));

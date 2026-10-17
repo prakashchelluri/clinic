@@ -29,6 +29,7 @@ const PATHS: Record<string, string> = {
   export: 'M12 15V4M8 8l4-4 4 4M5 14v5h14v-5',
   moon: 'M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z',
   home: 'M3 11 12 3l9 8M5 10v10h14V10',
+  lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
   wallet: 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2zM16 14h.01',
   stetho: 'M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4M20 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
 };
@@ -199,3 +200,36 @@ export function ToastHost() {
 
 export const money = (paise: number) => '₹' + (paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 export const fmtDate = (d: string) => new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
+/** Rupee amount input: only digits and one decimal point, at most 2 decimals and 7 whole digits. Letters and symbols never get in, even when pasted. */
+export function cleanMoney(raw: string) {
+  let v = raw.replace(/[^\d.]/g, ''); const dot = v.indexOf('.');
+  if (dot >= 0) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, 2);
+  const [w, f] = v.split('.'); const whole = w.slice(0, 7).replace(/^0+(?=\d)/, '');
+  return f === undefined ? whole : `${whole || '0'}.${f}`;
+}
+export const toPaise = (s: string) => Math.round(Number(s || 0) * 100);
+export function MoneyInput({ value, onChange, className = '', placeholder = '0', id, autoFocus }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; id?: string; autoFocus?: boolean }) {
+  return (
+    <div className={`relative ${className}`}>
+      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none">₹</span>
+      <input id={id} autoFocus={autoFocus} className="input !pl-8" inputMode="decimal" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(cleanMoney(e.target.value))} aria-label="Amount in rupees" />
+    </div>
+  );
+}
+
+export function NoAccess({ what }: { what?: string }) {
+  return <div className="card anim-fade-in max-w-lg mx-auto mt-10"><Empty icon="lock" title="You don't have access to this page" hint={`${what ? what + ' is' : 'It is'} not part of your role. If you need it, ask the clinic owner to change your role in Settings.`} /></div>;
+}
+export function NotFound() {
+  return <div className="card anim-fade-in max-w-lg mx-auto mt-10"><Empty icon="search" title="That page doesn't exist" hint="Use the menu above to find what you need." /></div>;
+}
+
+/** Drop-in for a number box: only digits (and one point when decimal) get in, even when pasted, and the value is capped at max. */
+export function NumInput({ max = 9999, decimal = false, onChange, ...rest }: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'max'> & { max?: number; decimal?: boolean }) {
+  return <input {...rest} type="text" inputMode={decimal ? 'decimal' : 'numeric'} autoComplete="off" onChange={(e) => {
+    let v = e.target.value.replace(decimal ? /[^\d.]/g : /\D/g, ''); if (decimal) v = v.replace(/(\..*)\./g, '$1');
+    v = v.slice(0, String(max).length + (decimal ? 3 : 0)); if (v !== '' && v !== '.' && Number(v) > max) v = String(max);
+    e.target.value = v; onChange?.(e);
+  }} />;
+}

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
-import { get, post, patch, api, qc, ApiError } from '../api';
+import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, money, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, money, toast, NumInput } from '../ui';
 import { EncounterModal, DocList, UploadButton, joinList } from '../encounterDetail';
 
 export function Patients() {
@@ -18,7 +18,7 @@ export function Patients() {
       <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
         {can(perms, 'patient.write') && <button className="btn btn-primary" onClick={() => setShowNew(true)}><Icon name="plus" />Register</button>}
       </PageHeader>
-      <div className="grid lg:grid-cols-[360px_1fr] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5">
         <div className="space-y-3">
           <div className="relative anim-fade-up"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10 !py-3" placeholder="Phone, name or patient ID" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <Section delay={60}>
@@ -55,7 +55,7 @@ function Timeline({ id }: { id: string }) {
         <div className="flex items-start gap-4">
           <Avatar name={p.fullName} size="h-14 w-14 text-lg" />
           <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-medium leading-tight">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></h2>
+            <h2 className="text-2xl font-medium leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></h2>
             <div className="text-sm text-muted mt-1 flex items-center gap-2 flex-wrap"><span>{p.patientNo}</span><span>·</span><span>{p.phone ?? 'no phone'}</span>{p.locality && <><span>·</span><span>{p.locality}</span></>}{p.referralCard && <Chip tone="sky">Special card</Chip>}</div>
             {p.allergies && <div className="mt-2 inline-flex items-center gap-1.5 text-sm text-rose bg-rose-soft rounded-full px-3 py-1"><Icon name="spark" className="h-3.5 w-3.5" />Allergies: {p.allergies}</div>}
             {p.notes && <div className="text-sm text-ink-2 mt-2">{p.notes}</div>}
@@ -66,7 +66,7 @@ function Timeline({ id }: { id: string }) {
         {edit && (
           <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-line anim-fade-up">
             {[['fullName', 'Full name'], ['phone', 'Phone'], ['locality', 'Location'], ['allergies', 'Allergies'], ['notes', 'Notes']].map(([k, l]) => <div key={k} className={k === 'notes' ? 'col-span-3' : ''}><label className="label">{l}</label><input className="input" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></div>)}
-            <div><label className="label">Age</label><input className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
+            <div><label className="label">Age</label><NumInput max={120} className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
             <div><label className="label">Sex</label><div className="flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
             <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={edit.referralCard} onChange={(e) => setEdit({ ...edit, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
             <div className="col-span-3 flex gap-2 justify-end"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
@@ -117,10 +117,10 @@ function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
   return (
     <Modal title="Register patient" subtitle="Only the name is required now; the rest can be completed at arrival" onClose={() => onClose()} width="max-w-lg">
       <div className="space-y-3">
-        <div><label className="label">Full name</label><input autoFocus className="input !py-3" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></div>
+        <div><label className="label">Full name</label><input autoFocus maxLength={100} className="input !py-3" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></div>
         <div className="grid grid-cols-3 gap-2">
           <div><label className="label">Phone</label><input className="input" inputMode="numeric" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} /></div>
-          <div><label className="label">Age</label><input className="input" inputMode="numeric" value={f.ageYears} onChange={(e) => setF({ ...f, ageYears: e.target.value })} /></div>
+          <div><label className="label">Age</label><NumInput max={120} className="input" placeholder="years" value={f.ageYears} onChange={(e) => setF({ ...f, ageYears: e.target.value })} /></div>
           <div><label className="label">Sex</label><div className="flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${f.sex === s ? 'on' : ''}`} onClick={() => setF({ ...f, sex: s })}>{s}</button>)}</div></div>
         </div>
         <div><label className="label">Location</label><input className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>

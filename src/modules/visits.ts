@@ -29,7 +29,7 @@ async function eligibilityContext(tx: Tx, ctx: Ctx, patientId: string) {
 export async function suggestCategory(tx: Tx, ctx: Ctx, patientId: string) {
   const facts = await eligibilityContext(tx, ctx, patientId);
   const cats = await tx.select().from(feeCategory).where(and(eq(feeCategory.tenantId, ctx.tenantId), eq(feeCategory.active, true)));
-  const eligible = cats.filter((c) => c.eligibility && jsonLogic.apply(c.eligibility as any, facts));
+  const eligible = cats.filter((c) => { if (!c.eligibility) return false; try { return jsonLogic.apply(c.eligibility as any, facts); } catch { return false; } });
   // most specific rule wins: lowest fee among eligible; fall back to the default (no rule, code GEN or first)
   const pick = eligible.sort((a, b) => a.amountPaise - b.amountPaise)[0] ?? cats.find((c) => c.code === 'GEN') ?? cats[0];
   const p = await tx.select().from(patient).where(and(eq(patient.id, patientId), eq(patient.tenantId, ctx.tenantId))).then((r) => r[0]);
@@ -40,7 +40,7 @@ const CheckIn = z.object({
   patientId: z.string().uuid(), appointmentId: z.string().uuid().optional(), branchId: z.string().uuid().optional(),
   feeCategoryCode: z.string(), practitionerId: z.string().uuid().nullable().optional(),
   details: z.record(z.string(), z.any()).default({}),
-  payment: z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0), reference: z.string().optional() }).optional(),
+  payment: z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0).max(100000000), reference: z.string().optional() }).optional(),
   waive: z.object({ reason: z.string().min(1) }).optional(),
   idempotencyKey: z.string().optional(),
 });
@@ -55,6 +55,8 @@ export function visitRoutes(app: FastifyInstance) {
       const dup = await tx.select().from(visit).where(and(eq(visit.tenantId, t), eq(visit.idempotencyKey, body.idempotencyKey))).then((r) => r[0]);
       if (dup) return dup;
     }
+    const open = await tx.select({ opNumber: visit.opNumber }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, body.patientId), eq(visit.day, day), sql`${visit.status} not in ('done','left')`)).limit(1);
+    if (open.length) throw new HttpError(409, 'ALREADY_CHECKED_IN', { opNumber: open[0].opNumber });
     const cat = await tx.select().from(feeCategory).where(and(eq(feeCategory.tenantId, t), eq(feeCategory.code, body.feeCategoryCode))).then((r) => r[0]);
     if (!cat) throw new HttpError(400, 'BAD_CATEGORY');
     const branchId = body.branchId ?? (await tx.query.branch.findFirst({ where: (b, { eq }) => eq(b.tenantId, t) }))!.id;

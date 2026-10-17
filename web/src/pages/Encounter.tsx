@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext } from 'react-router';
-import { get, patch, qc, ApiError } from '../api';
+import { get, patch, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Icon, Skeleton, fmtDate, toast } from '../ui';
+import { Avatar, Chip, Icon, Skeleton, fmtDate, toast, NumInput } from '../ui';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
@@ -39,7 +39,7 @@ export function Encounter() {
   const save = useMutation({
     mutationFn: (complete: boolean) => patch(`/encounters/${id}`, { data, prescription: rx.filter((i) => i.name), recommendations: recs.filter((r) => r.kind !== 'investigation' || r.notes), complete }),
     onSuccess: (_e, complete) => { setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })); qc.invalidateQueries({ queryKey: ['queue'] }); if (complete) { toast('Encounter completed'); window.open(`/print/${id}`, '_blank'); nav('/queue', { viewTransition: true }); } },
-    onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast('Some required fields are empty', 'err'); } else toast(e.message, 'err'); },
+    onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else toast(errText(e), 'err'); },
   });
   useEffect(() => { if (loaded.current) dirty.current = true; }, [data, rx, recs]);
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate(false); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
@@ -47,7 +47,7 @@ export function Encounter() {
   if (!enc.data) return <div className="card"><Skeleton rows={5} /></div>;
   const e = enc.data; const p = e.patient; const readOnly = e.status === 'completed';
   const isDoctor = can(perms, 'encounter.complete') || can(perms, 'encounter.*');
-  const set = (s: string, k: string, v: any) => setData((d) => ({ ...d, [s]: { ...(d[s] ?? {}), [k]: v } }));
+  const set = (s: string, k: string, v: any) => { setErrors((er) => er.filter((x) => x.path !== `${s}.${k}`)); setData((d) => ({ ...d, [s]: { ...(d[s] ?? {}), [k]: v } })); };
   const err = (s: string, k: string) => errors.find((x) => x.path === `${s}.${k}`)?.message;
   const previous = (timeline.data?.encounters ?? []).filter((x: any) => x.id !== id);
   // Medicines this patient has had before: name → most recent date
@@ -58,7 +58,7 @@ export function Encounter() {
   const addRx = (name: string) => { const m = cfg?.medicines.find((x: any) => x.name === name); setRx((cur) => [...cur.filter((r) => r.name), { name, medicineId: m?.id ?? null, dose: m?.defaults?.dose, route: m?.defaults?.route, frequency: m?.defaults?.frequency, durationDays: m?.defaults?.durationDays, instructions: m?.defaults?.instructions }]); };
 
   return (
-    <div className="grid lg:grid-cols-[300px_1fr] gap-5">
+    <div className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)] gap-5">
       <aside className="space-y-4 lg:sticky lg:top-6 self-start">
         <div className="card anim-fade-up">
           <div className="flex items-center gap-3"><Avatar name={p.fullName} size="h-12 w-12 text-base" /><div className="min-w-0"><div className="text-lg font-medium leading-tight truncate">{p.fullName}</div><div className="text-xs text-muted">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''} · {p.patientNo}</div></div></div>
@@ -92,7 +92,7 @@ export function Encounter() {
             <div className="serif text-lg mb-3">{s.title}</div>
             <div className="grid md:grid-cols-2 gap-4">
               {s.fields.map((f: Field) => (
-                <div key={f.key} className={['textarea', 'multiselect', 'tags', 'diagnoses'].includes(f.type) ? 'md:col-span-2' : ''}>
+                <div key={f.key} data-invalid={!!err(s.key, f.key)} className={['textarea', 'multiselect', 'tags', 'diagnoses'].includes(f.type) ? 'md:col-span-2' : ''}>
                   <label className="label">{f.label}{f.required && <span className="text-clay"> *</span>} {f.unit && <span className="normal-case tracking-normal">({f.unit})</span>}</label>
                   <FieldInput f={f} value={data[s.key]?.[f.key]} onChange={(v) => set(s.key, f.key, v)} disabled={readOnly} invalid={!!err(s.key, f.key)} />
                   {err(s.key, f.key) && <div className="text-xs text-rose mt-1 anim-fade-in">{err(s.key, f.key)}</div>}
@@ -128,7 +128,7 @@ export function Encounter() {
                       }} />
                       <input className="input" value={i.dose ?? ''} disabled={readOnly} onChange={(ev) => setRx(rx.map((r, j) => j === k ? { ...r, dose: ev.target.value } : r))} />
                       <input list="freq" className="input" value={i.frequency ?? ''} disabled={readOnly} onChange={(ev) => setRx(rx.map((r, j) => j === k ? { ...r, frequency: ev.target.value } : r))} />
-                      <input type="number" className="input" value={i.durationDays ?? ''} disabled={readOnly} onChange={(ev) => setRx(rx.map((r, j) => j === k ? { ...r, durationDays: ev.target.value ? Number(ev.target.value) : undefined } : r))} />
+                      <NumInput max={365} className="input" value={i.durationDays ?? ''} disabled={readOnly} onChange={(ev) => setRx(rx.map((r, j) => j === k ? { ...r, durationDays: ev.target.value ? Number(ev.target.value) : undefined } : r))} />
                       <input className="input" value={i.instructions ?? ''} disabled={readOnly} onChange={(ev) => setRx(rx.map((r, j) => j === k ? { ...r, instructions: ev.target.value } : r))} />
                       {!readOnly ? <button className="btn btn-ghost btn-icon" onClick={() => setRx(rx.filter((_, j) => j !== k))}><Icon name="x" className="h-3.5 w-3.5" /></button> : <span />}
                     </div>
@@ -149,9 +149,9 @@ export function Encounter() {
               recs.map((r, k) => (
                 <div key={k} className="flex items-center gap-2 text-sm py-2 border-t border-line first:border-t-0 flex-wrap anim-fade-up">
                   <Chip tone={r.kind === 'followup' ? 'amber' : r.kind === 'procedure' ? 'sky' : 'clay'}>{r.kind === 'followup' ? 'follow-up' : r.kind === 'procedure' ? 'procedure' : 'test'}</Chip>
-                  {r.kind === 'followup' && <span className="flex items-center gap-1">Review in <input type="number" className="input !w-16 !py-1" value={r.intervalDays ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, intervalDays: Number(ev.target.value), dueOn: undefined } : x))} /> days{r.dueOn && <span className="text-muted">(due {fmtDate(r.dueOn)})</span>}</span>}
+                  {r.kind === 'followup' && <span className="flex items-center gap-1">Review in <NumInput max={365} className="input !w-16 !py-1" value={r.intervalDays ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, intervalDays: Number(ev.target.value), dueOn: undefined } : x))} /> days{r.dueOn && <span className="text-muted">(due {fmtDate(r.dueOn)})</span>}</span>}
                   {r.kind === 'procedure' && <><select className="input !w-auto !py-1" value={r.procedureId ?? ''} disabled={readOnly} onChange={(ev) => { const pr = cfg.procedures.find((x: any) => x.id === ev.target.value); setRecs(recs.map((x, j) => j === k ? { ...x, procedureId: ev.target.value, sittings: pr?.typicalSittings } : x)); }}>{cfg?.procedures.map((pr: any) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}</select>
-                    <input type="number" className="input !w-16 !py-1" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, sittings: Number(ev.target.value) } : x))} /><span className="text-muted">sittings</span></>}
+                    <NumInput max={50} className="input !w-16 !py-1" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, sittings: Number(ev.target.value) } : x))} /><span className="text-muted">sittings</span></>}
                   {r.kind === 'investigation' ? <input list="tests" className="input flex-1 min-w-40 !py-1" placeholder="Test name, e.g. CBC" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, notes: ev.target.value } : x))} />
                     : <input className="input flex-1 min-w-40 !py-1" placeholder="notes for the coordinator" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, notes: ev.target.value } : x))} />}
                   {!readOnly && <button className="btn btn-ghost btn-icon" onClick={() => setRecs(recs.filter((_, j) => j !== k))}><Icon name="x" className="h-3.5 w-3.5" /></button>}
@@ -161,9 +161,9 @@ export function Encounter() {
         </>)}
 
         <div className="sticky bottom-20 md:bottom-4 z-10 anim-fade-up" style={{ animationDelay: '380ms' }}>
-          <div className="card !py-3 flex items-center gap-2 flex-wrap" style={{ boxShadow: 'var(--shadow-lift)' }}>
+          <div className="card !py-3 flex items-center gap-2 flex-wrap !bg-[#FBFAF7]" style={{ boxShadow: 'var(--shadow-lift)' }}>
             <button className="btn btn-ghost" onClick={() => nav('/queue', { viewTransition: true })}><Icon name="chevL" />Queue</button>
-            {errors.length > 0 && <span className="text-xs text-rose">{errors.length} required field{errors.length > 1 ? 's' : ''} missing</span>}
+            {errors.length > 0 && <button type="button" className="text-xs text-rose underline" onClick={() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}>{errors.length} required field{errors.length > 1 ? 's' : ''} missing · show</button>}
             <span className="ml-auto" />
             {!readOnly && <button className="btn" disabled={save.isPending} onClick={() => save.mutate(false)}>{me.role === 'assistant' ? 'Save intake & return to queue' : 'Save draft'}</button>}
             {!readOnly && isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}><Icon name="print" />Complete & print Rx</button>}
@@ -225,7 +225,7 @@ function FieldInput({ f, value, onChange, disabled, invalid }: { f: Field; value
   if (f.type === 'textarea') return <textarea className={`${cls} min-h-20`} value={value ?? ''} placeholder={f.placeholder} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
   if (f.type === 'select') return <div className="flex flex-wrap gap-1.5">{f.options!.map((o) => <button type="button" key={o} disabled={disabled} className={`toggle-opt ${value === o ? 'on' : ''}`} onClick={() => onChange(value === o ? undefined : o)}>{o}</button>)}</div>;
   if (f.type === 'multiselect') { const v: string[] = value ?? []; return <div className="flex flex-wrap gap-1.5">{f.options!.map((o) => <button type="button" key={o} disabled={disabled} className={`toggle-opt ${v.includes(o) ? 'on' : ''}`} onClick={() => onChange(v.includes(o) ? v.filter((x) => x !== o) : [...v, o])}>{o}</button>)}</div>; }
-  if (f.type === 'number') return <input type="number" className={cls} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />;
+  if (f.type === 'number') return <NumInput decimal max={100000} className={cls} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />;
   if (f.type === 'date') return <input type="date" className={cls} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
   return <input className={cls} value={value ?? ''} placeholder={f.placeholder} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
 }

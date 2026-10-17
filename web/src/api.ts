@@ -25,3 +25,43 @@ export const rupees = (paise: number) => '₹' + (paise / 100).toLocaleString('e
 export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 export const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 export const uuid = () => crypto.randomUUID();
+export const del = <T = any>(url: string) => api<T>('DELETE', url);
+
+const MESSAGES: Record<string, string> = {
+  ALREADY_BOOKED: 'This patient is already booked in this window.',
+  DUPLICATE: 'That already exists.',
+  BAD_RULE: 'That rule is not valid, so it was not saved.',
+  TOO_MANY_ATTEMPTS: 'Too many wrong attempts. Please wait a few minutes and try again.',
+  BAD_CREDENTIALS: 'That email or password is not right.',
+  FUTURE_DATE: 'The date cannot be in the future.',
+  TOO_OLD: 'That date is too far in the past.',
+  BAD_CATEGORY: 'Please pick a valid category.',
+  CANNOT_GRANT: 'You can only give a role permissions you have yourself.',
+  ROLE_IN_USE: 'Some staff still have this role. Change their role first.',
+  UNKNOWN_ROLE: 'That role does not exist.',
+  OWNER_IS_FIXED: 'The owner always has full access and cannot be changed.',
+  CANNOT_DEACTIVATE_SELF: 'You cannot deactivate your own account.',
+  NOT_FOUND: 'That record was not found. It may have been removed.',
+  BAD_ID: 'That record was not found.',
+  IN_USE: 'That is in use elsewhere, so it cannot be removed.',
+  WINDOW_FULL: 'That window is full.',
+  PASSWORD_REQUIRED: 'Please set a password.',
+  PATIENT_REQUIRED: 'Pick or register a patient first.',
+  BAD_REQUEST: 'That request was not understood.',
+  UNAUTHENTICATED: 'Please sign in again.',
+};
+const FIELD_NAMES: Record<string, string> = { fullName: 'Name', phone: 'Phone', ageYears: 'Age', amountPaise: 'Amount', description: 'Description', name: 'Name', email: 'Email', password: 'Password' };
+/** Turn any API failure into one plain sentence a receptionist can act on. */
+export function errText(e: any): string {
+  const b = e?.body; if (!b) return e?.message && !/^HTTP \d+$/.test(e.message) ? e.message : 'Could not reach the server. Check the connection and try again.';
+  const code: string = b.code ?? '';
+  if (code.startsWith('FORBIDDEN')) return "You don't have permission to do that.";
+  if (code === 'ALREADY_CHECKED_IN') return `Already checked in today${b.opNumber ? ` (token ${b.opNumber})` : ''}.`;
+  if (code === 'VALIDATION' && Array.isArray(b.errors) && b.errors[0]) {
+    const x = b.errors[0]; const f = FIELD_NAMES[x.path?.[0]] ?? String(x.path?.[0] ?? 'A field');
+    if (x.code === 'too_big') return `${f} is too ${typeof x.maximum === 'number' && x.type === 'string' ? 'long' : 'large'} (most ${x.maximum}).`;
+    if (x.code === 'too_small') return x.type === 'string' ? (x.minimum <= 1 ? `${f} is required.` : `${f} is too short (at least ${x.minimum} letters).`) : `${f} is too small.`;
+    return `${f} is not valid.`;
+  }
+  return MESSAGES[code] ?? (b.message && code === 'INTERNAL' ? b.message : code ? 'Something went wrong. Please try again.' : 'Failed');
+}

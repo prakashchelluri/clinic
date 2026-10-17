@@ -162,7 +162,7 @@ export function schedulingRoutes(app: FastifyInstance) {
       .then((rows) => rows.map((r) => ({ ...r.a, patient: r.p, window: r.s })));
   });
 
-  const ApptIn = z.object({ sessionId: z.string().uuid(), patientId: z.string().uuid().optional(), newPatient: z.object({ fullName: z.string().min(1), phone: z.string().regex(/^\d{10}$/).optional() }).optional(),
+  const ApptIn = z.object({ sessionId: z.string().uuid(), patientId: z.string().uuid().optional(), newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^\d{10}$/).optional() }).optional(),
     note: z.string().optional(), source: z.string().default('phone'), overbook: z.boolean().default(false), idempotencyKey: z.string().optional() });
   /** Book: checked against *effective* capacity, idempotent, creates a minimal patient for a new caller. */
   route(app, 'post', '/appointments', 'appointment.write', async (req, tx) => {
@@ -178,6 +178,10 @@ export function schedulingRoutes(app: FastifyInstance) {
     if (full && !(body.overbook && can(req.perms, 'appointment.overbook'))) {
       const alts = (await windowsForDay(tx, t, s.day)).filter((x) => x.free > 0).map((x) => ({ id: x.id, startTime: x.startTime, endTime: x.endTime, free: x.free, practitionerId: x.practitionerId }));
       throw new HttpError(409, 'WINDOW_FULL', { alternatives: alts, overrideRequires: 'appointment.overbook', reductions: w.reductions });
+    }
+    if (body.patientId) {
+      const twice = await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, body.patientId), eq(appointment.sessionId, s.id), eq(appointment.status, 'booked'))).limit(1);
+      if (twice.length) throw new HttpError(409, 'ALREADY_BOOKED');
     }
     let patientId = body.patientId;
     if (!patientId) {

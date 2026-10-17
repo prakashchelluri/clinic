@@ -19,6 +19,8 @@ import { Pharmacy } from './pages/Pharmacy';
 import { Settings } from './pages/Settings';
 import { Calendar } from './pages/Calendar';
 import { Platform } from './pages/Platform';
+import { Expenses } from './pages/Expenses';
+import { NotFound } from './ui';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -41,7 +43,9 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/calendar" element={<Calendar />} />
+            <Route path="/expenses" element={<Expenses />} />
             <Route path="/platform" element={<Platform />} />
+            <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -258,7 +258,11 @@ export const expense = pgTable('expense', {
   description: text('description').notNull(),
   amountPaise: integer('amount_paise').notNull(),
   method: text('method').notNull().default('cash'),
+  category: text('category').notNull().default('Other'),
+  note: text('note'),
   enteredBy: uuid('entered_by').notNull(),
+  voidedAt: ts('voided_at'),
+  voidedReason: text('voided_reason'),
 });
 
 // Uploaded files: lab reports, clinical photos, consent scans. Bytes live on disk (UPLOAD_DIR) or object storage later.

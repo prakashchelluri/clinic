@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
-import { get, post, patch, qc, today, fmtTime } from '../api';
+import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, money, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, money, toast, MoneyInput, toPaise } from '../ui';
 
 /** Pharmacy counter: today's prescriptions from the doctor, tick items as dispensed, bill once per visit. */
 export function Pharmacy() {
@@ -32,8 +32,8 @@ export function Pharmacy() {
 function RxCard({ r, i, canBill, canDispense }: { r: any; i: number; canBill: boolean; canDispense: boolean }) {
   const [amount, setAmount] = useState(''); const [method, setMethod] = useState('cash'); const [note, setNote] = useState('');
   const tick = useMutation({ mutationFn: ({ id, dispensed }: any) => patch(`/prescription-items/${id}`, { dispensed }), onSuccess: () => qc.invalidateQueries({ queryKey: ['pharmacy'] }) });
-  const bill = useMutation({ mutationFn: () => post('/pharmacy/bill', { visitId: r.visitId, patientId: r.patient.id, amountPaise: Math.round(Number(amount) * 100), method, note: note || undefined }),
-    onSuccess: () => { toast(`Billed ${money(Math.round(Number(amount) * 100))}`); qc.invalidateQueries({ queryKey: ['pharmacy'] }); }, onError: (e: any) => toast(e?.body?.code ?? 'Failed', 'err') });
+  const bill = useMutation({ mutationFn: () => post('/pharmacy/bill', { visitId: r.visitId, patientId: r.patient.id, amountPaise: toPaise(amount), method, note: note || undefined }),
+    onSuccess: () => { toast(`Billed ${money(toPaise(amount))}`); qc.invalidateQueries({ queryKey: ['pharmacy'] }); }, onError: (e: any) => toast(errText(e), 'err') });
   const allDone = r.items.every((x: any) => x.dispensed);
   return (
     <div className={`card ${r.bill ? 'opacity-75' : ''}`} style={{ ['--i' as any]: i }}>
@@ -55,7 +55,7 @@ function RxCard({ r, i, canBill, canDispense }: { r: any; i: number; canBill: bo
       {!r.bill && canBill && (
         <div className="mt-3 pt-3 border-t border-line flex items-center gap-2 flex-wrap">
           <div className="flex gap-1">{['cash', 'upi', 'card'].map((m) => <button key={m} type="button" className={`toggle-opt uppercase ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{m}</button>)}</div>
-          <input className="input !w-28" inputMode="decimal" placeholder="₹ total" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <MoneyInput className="!w-32" placeholder="total" value={amount} onChange={setAmount} />
           <input className="input flex-1 min-w-32" placeholder="note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
           <button className="btn btn-primary" disabled={!amount || bill.isPending} onClick={() => bill.mutate()}><Icon name="check" />Bill & mark dispensed</button>
         </div>

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
-import { get, post, patch, qc, today, uuid, ApiError } from '../api';
+import { get, post, patch, qc, today, uuid, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, toast, NumInput } from '../ui';
 
 /** Phone booking: pick a day, see windows with allocated/capacity, book with name + phone. */
 export function Booking() {
@@ -62,7 +62,7 @@ export function Booking() {
             <li className="flex gap-3"><span className="chip chip-clay shrink-0">1</span><span>Each card is an <b>OP window</b>: one hour of the doctor's time with a practical capacity (for example 7 patients). It is not an exact appointment time.</span></li>
             <li className="flex gap-3"><span className="chip chip-clay shrink-0">2</span><span>When a patient calls, <b>click a window with free places</b>, type their phone or name, and press Book. Only name and phone are needed on the call.</span></li>
             <li className="flex gap-3"><span className="chip chip-clay shrink-0">3</span><span>Tell them the <b>arrive-by time</b> shown (35 minutes before the window) and that the wait can be 30–45 minutes.</span></li>
-            <li className="flex gap-3"><span className="chip chip-clay shrink-0">4</span><span>When they walk in, they appear on the <b>Queue page</b> under “Booked, not arrived”. Press Arrived there to register, take the fee and add them to the live queue.</span></li>
+            <li className="flex gap-3"><span className="chip chip-clay shrink-0">4</span><span>When they walk in, they appear on the <b>Front desk</b> page under “Not yet arrived”. Press Check in there to register, take the fee and add them to the live queue.</span></li>
           </ol>
           <div className="text-xs text-muted mt-3">Use − / + on a card to change today's capacity when the doctor has a procedure or a break. “+ Window” adds a block; on an empty day “Copy previous day” reuses yesterday's plan.</div>
         </div>}
@@ -103,7 +103,7 @@ function BookForm({ session, arriveEarly, onDone }: { session: any; arriveEarly:
       <input className="input" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
       <div className="flex gap-2 items-center"><button className="btn btn-primary" disabled={book.isPending || (!patientId && !name)} onClick={() => book.mutate(false)}><Icon name="check" />Book</button>
         {err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}</div>
-      {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.capacity - a.allocated})`).join(', ') || 'none today'}.</> : JSON.stringify(err)}</div>}
+      {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.capacity - a.allocated})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
     </div>
   );
 }
@@ -115,7 +115,7 @@ function AddWindow({ onAdd, practitioners }: { onAdd: (w: any) => void; practiti
     <div className="card !p-2 !rounded-full flex items-center gap-1 text-sm anim-scale-in">
       <input type="time" className="input !w-auto !py-1.5" value={w.startTime} onChange={(e) => setW({ ...w, startTime: e.target.value })} /><span className="text-muted">–</span>
       <input type="time" className="input !w-auto !py-1.5" value={w.endTime} onChange={(e) => setW({ ...w, endTime: e.target.value })} />
-      <input type="number" className="input !w-16 !py-1.5" value={w.capacity} onChange={(e) => setW({ ...w, capacity: Number(e.target.value) })} />
+      <NumInput max={99} className="input !w-16 !py-1.5" value={w.capacity} onChange={(e) => setW({ ...w, capacity: Number(e.target.value) })} />
       <select className="input !w-auto !py-1.5" value={w.practitionerId ?? ''} onChange={(e) => setW({ ...w, practitionerId: e.target.value || null })}><option value="">Any</option>{practitioners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <button className="btn btn-sm btn-primary" onClick={() => { onAdd(w); setOpen(false); }}>Add</button><button className="btn btn-ghost btn-icon" onClick={() => setOpen(false)}><Icon name="x" /></button>
     </div>

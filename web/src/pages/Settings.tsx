@@ -1,22 +1,23 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
-import { get, post, patch, api, qc } from '../api';
-import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast } from '../ui';
+import { get, post, patch, api, qc, errText } from '../api';
+import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
+import { RolesTab, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
 
-type Tab = 'clinic' | 'people' | 'forms' | 'fees' | 'medicines' | 'procedures' | 'rooms';
+type Tab = 'clinic' | 'people' | 'roles' | 'forms' | 'fees' | 'medicines' | 'procedures' | 'rooms';
 const TABS: [Tab, string, string, string][] = [
   ['clinic', 'Clinic', 'door', 'Name, prescription header, booking defaults'],
   ['people', 'People', 'users', 'Staff accounts and doctors'],
+  ['roles', 'Roles and access', 'lock', 'What each role can see and do'],
   ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses, fields'],
   ['fees', 'Fees', 'rupee', 'Visit categories and amounts'],
   ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
   ['procedures', 'Procedures', 'stetho', 'Catalogue, duration, room needs, price'],
   ['rooms', 'Rooms', 'door', 'Rooms and what each can do'],
 ];
-const ROLES: [string, string][] = [['owner', 'Owner'], ['admin', 'Admin'], ['doctor', 'Doctor'], ['assistant', 'Assistant'], ['receptionist', 'Reception'], ['coordinator', 'Coordinator'], ['pharmacist', 'Pharmacy']];
 const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'Long text'], ['number', 'Number'], ['select', 'Pick one'], ['multiselect', 'Pick many'], ['tags', 'List (type several)'], ['diagnoses', 'Diagnoses with severity'], ['date', 'Date']];
 
 /** Owner's control panel. Everything here is data: no deploy needed to change it. */
@@ -29,7 +30,7 @@ export function Settings() {
   return (
     <div>
       <PageHeader title="Settings" subtitle="Everything the clinic runs on, editable by the owner. Changes apply immediately." />
-      <div className="grid lg:grid-cols-[240px_1fr] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-5">
         <nav className="space-y-1 anim-fade-up">
           {TABS.map(([k, label, icon, hint]) => (
             <button key={k} onClick={() => setTab(k)} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
@@ -39,6 +40,7 @@ export function Settings() {
           <h2 className="text-xl font-medium mb-3">{cur[1]}</h2>
           {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
           {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'roles' && <RolesTab onSaved={refresh} />}
           {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
           {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
@@ -72,7 +74,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       </div>
       <div className="card space-y-3">
         <div className="text-[11px] uppercase tracking-wider text-muted">Booking defaults</div>
-        <div className="grid grid-cols-3 gap-3"><div><label className="label">Arrive early (minutes)</label><input type="number" className="input" value={f.arriveEarlyMinutes} onChange={set('arriveEarlyMinutes')} /></div><div><label className="label">Places per window</label><input type="number" className="input" value={f.defaultCapacity} onChange={set('defaultCapacity')} /></div><div><label className="label">Window length</label><div className="flex gap-1">{[30, 60].map((m) => <button key={m} className={`toggle-opt ${Number(f.windowMinutes) === m ? 'on' : ''}`} onClick={() => setF({ ...f, windowMinutes: m })}>{m} min</button>)}</div></div></div>
+        <div className="grid grid-cols-3 gap-3"><div><label className="label">Arrive early (minutes)</label><NumInput max={240} className="input" value={f.arriveEarlyMinutes} onChange={set('arriveEarlyMinutes')} /></div><div><label className="label">Places per window</label><NumInput max={99} className="input" value={f.defaultCapacity} onChange={set('defaultCapacity')} /></div><div><label className="label">Window length</label><div className="flex gap-1">{[30, 60].map((m) => <button key={m} className={`toggle-opt ${Number(f.windowMinutes) === m ? 'on' : ''}`} onClick={() => setF({ ...f, windowMinutes: m })}>{m} min</button>)}</div></div></div>
         <div><label className="label">Daily OP number resets</label><div className="flex gap-1">{[['day+category', 'Per category (GEN-1, REN-1…)'], ['day', 'One sequence per day']].map(([v, l]) => <button key={v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div></div>
       </div>
       <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
@@ -83,8 +85,10 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- People: users (many roles each) + doctors ---------------- */
 function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const users = useQuery({ queryKey: ['users'], queryFn: () => get('/users') });
+  const roleList: { key: string; name: string }[] = (useRoles().data ?? []).map((r: any) => ({ key: r.key, name: r.name })); const ROLES: [string, string][] = roleList.map((r) => [r.key, r.name]);
+  const roleName = (k: string) => roleList.find((r) => r.key === k)?.name ?? k;
   const [edit, setEdit] = useState<any>(null); const [doc, setDoc] = useState<any>(null);
-  const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(e?.body?.code ?? 'Failed', 'err') });
+  const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const saveDoc = useMutation({ mutationFn: async ({ routine, ...p }: any) => { const row = p.id ? await patch(`/admin/practitioners/${p.id}`, p) : await post('/admin/practitioners', p); if (routine) await api('PUT', `/calendar/routine/${row.id}`, routine); return row; }, onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); } });
   const toggleRole = (r: string) => setEdit({ ...edit, roles: edit.roles.includes(r) ? edit.roles.filter((x: string) => x !== r) : [...edit.roles, r] });
   return (
@@ -93,7 +97,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         {(users.data ?? []).map((u: any) => (
           <div key={u.id} className={`row ${u.active ? '' : 'opacity-50'}`}>
             <div className="flex-1 min-w-0"><div className="text-sm font-medium">{u.name}</div><div className="text-xs text-muted">{u.email}{u.practitionerId ? ` · ${cfg.practitioners.find((p: any) => p.id === u.practitionerId)?.name ?? ''}` : ''}</div></div>
-            <div className="flex gap-1 flex-wrap justify-end">{(u.roles ?? [u.role]).map((r: string) => <Chip key={r} tone={r === 'owner' ? 'clay' : r === 'doctor' ? 'sky' : ''}>{r}</Chip>)}{!u.active && <Chip tone="rose">inactive</Chip>}</div>
+            <div className="flex gap-1 flex-wrap justify-end">{(u.roles ?? [u.role]).map((r: string) => <Chip key={r} tone={r === 'owner' ? 'clay' : r === 'doctor' ? 'sky' : ''}>{roleName(r)}</Chip>)}{!u.active && <Chip tone="rose">inactive</Chip>}</div>
             <button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...u, roles: u.roles ?? [u.role], password: '' })}><Icon name="edit" /></button>
           </div>
         ))}
@@ -142,7 +146,7 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   return (
     <div className="space-y-3">
       <div className="text-sm text-muted">Version {current?.version}. Saving publishes a new version; past consultations keep the version they were written with.</div>
-      <div className="grid lg:grid-cols-[1fr_360px] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
         <div className="space-y-3">
           {schema.sections.map((s: any, si: number) => (
             <div key={si} className="card !p-3">
@@ -179,7 +183,7 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Fees ---------------- */
 function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
-  const save = useMutation({ mutationFn: (c: any) => c.id ? patch(`/admin/fee-categories/${c.id}`, c) : post('/admin/fee-categories', c), onSuccess: () => { toast('Fee saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(e?.body?.code ?? 'Failed', 'err') });
+  const save = useMutation({ mutationFn: (c: any) => c.id ? patch(`/admin/fee-categories/${c.id}`, c) : post('/admin/fee-categories', c), onSuccess: () => { toast('Fee saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
     <Section title="Visit categories & fees" aside={<button className="btn btn-sm btn-primary" onClick={() => setEdit({ code: '', name: '', amount: '', priority: 0, affectsCapacity: true, active: true })}><Icon name="plus" className="h-3.5 w-3.5" />Add category</button>}>
       <table className="table"><thead><tr><th className="pl-4">Code</th><th>Name</th><th className="text-right">Fee</th><th>Rule</th><th>Queue</th><th /></tr></thead>
@@ -188,7 +192,7 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <Modal title={edit.id ? `Edit ${edit.code}` : 'New category'} onClose={() => setEdit(null)} width="max-w-md">
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2"><div><label className="label">Code</label><input className="input uppercase" maxLength={8} value={edit.code} disabled={!!edit.id} onChange={(e) => setEdit({ ...edit, code: e.target.value.toUpperCase() })} /></div><div className="col-span-2"><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div></div>
-            <div className="grid grid-cols-2 gap-2"><div><label className="label">Fee (₹)</label><input className="input" inputMode="numeric" value={edit.amount} onChange={(e) => setEdit({ ...edit, amount: e.target.value })} /></div><div><label className="label">Queue priority (0 = normal)</label><input type="number" className="input" value={edit.priority} onChange={(e) => setEdit({ ...edit, priority: Number(e.target.value) })} /></div></div>
+            <div className="grid grid-cols-2 gap-2"><div><label className="label">Fee (₹)</label><MoneyInput value={String(edit.amount ?? "")} onChange={(v) => setEdit({ ...edit, amount: v })} /></div><div><label className="label">Queue priority (0 = normal)</label><input type="number" className="input" value={edit.priority} onChange={(e) => setEdit({ ...edit, priority: Number(e.target.value) })} /></div></div>
             <div><label className="label">Rule note (shown to reception)</label><input className="input" value={edit.eligibilityNote ?? ''} onChange={(e) => setEdit({ ...edit, eligibilityNote: e.target.value })} /></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.affectsCapacity} onChange={(e) => setEdit({ ...edit, affectsCapacity: e.target.checked })} /> Counts against window capacity</label>
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
@@ -223,7 +227,7 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">Dose</label><input className="input" value={edit.defaults.dose ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, dose: e.target.value } })} /></div>
               <div><label className="label">Route</label><input className="input" value={edit.defaults.route ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, route: e.target.value } })} /></div>
               <div><label className="label">Frequency</label><input className="input" value={edit.defaults.frequency ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, frequency: e.target.value } })} /></div>
-              <div><label className="label">Days</label><input type="number" className="input" value={edit.defaults.durationDays ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, durationDays: e.target.value ? Number(e.target.value) : undefined } })} /></div>
+              <div><label className="label">Days</label><NumInput max={365} className="input" value={edit.defaults.durationDays ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, durationDays: e.target.value ? Number(e.target.value) : undefined } })} /></div>
             </div>
             <div><label className="label">Instructions</label><input className="input" value={edit.defaults.instructions ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, instructions: e.target.value } })} /></div>
             <div className="flex justify-between gap-2 pt-2">{edit.id ? <button className="btn btn-ghost text-rose" onClick={() => del.mutate(edit.id)}>Delete</button> : <span />}<div className="flex gap-2"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name} onClick={() => save.mutate({ id: edit.id, name: edit.name, form: edit.form, scheduleClass: edit.scheduleClass, defaults: edit.defaults })}>Save</button></div></div>
@@ -248,10 +252,10 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
             <div className="grid grid-cols-4 gap-2">
-              <div><label className="label">Minutes</label><input type="number" className="input" value={edit.typicalMinutes} onChange={(e) => setEdit({ ...edit, typicalMinutes: Number(e.target.value) })} /></div>
-              <div><label className="label">Buffer after</label><input type="number" className="input" value={edit.bufferMinutes ?? 0} onChange={(e) => setEdit({ ...edit, bufferMinutes: Number(e.target.value) })} /></div>
-              <div><label className="label">Sittings</label><input type="number" className="input" value={edit.typicalSittings} onChange={(e) => setEdit({ ...edit, typicalSittings: Number(e.target.value) })} /></div>
-              <div><label className="label">Price (₹)</label><input className="input" inputMode="numeric" value={edit.price} onChange={(e) => setEdit({ ...edit, price: e.target.value })} /></div>
+              <div><label className="label">Minutes</label><NumInput max={600} className="input" value={edit.typicalMinutes} onChange={(e) => setEdit({ ...edit, typicalMinutes: Number(e.target.value) })} /></div>
+              <div><label className="label">Buffer after</label><NumInput max={240} className="input" value={edit.bufferMinutes ?? 0} onChange={(e) => setEdit({ ...edit, bufferMinutes: Number(e.target.value) })} /></div>
+              <div><label className="label">Sittings</label><NumInput max={50} className="input" value={edit.typicalSittings} onChange={(e) => setEdit({ ...edit, typicalSittings: Number(e.target.value) })} /></div>
+              <div><label className="label">Price (₹)</label><MoneyInput value={String(edit.price ?? "")} onChange={(v) => setEdit({ ...edit, price: v })} /></div>
             </div>
             <div><label className="label">Needs a room with</label><div className="flex flex-wrap gap-1"><button className={`toggle-opt ${!edit.requiredCapability ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: '' })}>any room</button>{caps.map((c) => <button key={c} className={`toggle-opt ${edit.requiredCapability === c ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: c })}>{c}</button>)}</div><div className="text-[11px] text-muted mt-1">Capabilities come from Rooms. Add a new one there first.</div></div>
             <div><label className="label">GST</label><div className="flex gap-1">{[[0, 'Exempt (medical)'], [1800, '18% (cosmetic)']].map(([v, l]) => <button key={v} className={`toggle-opt ${edit.taxRateBp === v ? 'on' : ''}`} onClick={() => setEdit({ ...edit, taxRateBp: v })}>{l}</button>)}</div></div>

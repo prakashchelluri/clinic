@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
-import { get, post, patch, api, qc, today } from '../api';
+import { get, post, patch, api, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, toast } from '../ui';
+import { Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, toast, NumInput } from '../ui';
 import { RoutineModal, routineSummary } from '../routine';
 
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -21,7 +21,7 @@ export function Calendar() {
   const cal = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 15000, enabled: !!doc });
   const [modal, setModal] = useState<null | 'routine' | 'break' | 'early' | 'editday'>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); };
-  const addBlock = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }), onSuccess: (_r, b: any) => { refresh(); toast(b.kind === 'leave' ? 'Marked away · reception sees it now' : 'Added · capacity adjusted'); }, onError: (e: any) => toast(e?.body?.code ?? 'Failed', 'err') });
+  const addBlock = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }), onSuccess: (_r, b: any) => { refresh(); toast(b.kind === 'leave' ? 'Marked away · reception sees it now' : 'Added · capacity adjusted'); }, onError: (e: any) => toast(errText(e), 'err') });
   const delBlock = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { refresh(); toast('Removed', 'info'); } });
   const setState = useMutation({ mutationFn: ({ id, state, reason }: any) => patch(`/procedure-sessions/${id}`, { state, reason }), onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
   const writable = can(perms, 'appointment.write') || me.practitionerId === doc;
@@ -58,7 +58,7 @@ export function Calendar() {
         </div>
       )}
 
-      <div className="grid lg:grid-cols-[1fr_340px] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5">
         <Section delay={40}>
           {cal.isLoading || !d ? <Skeleton rows={6} /> : (
             <div className="relative p-4 pl-14" style={{ height: (DAY_END - DAY_START) * PX + 32 }}>
@@ -166,12 +166,12 @@ function EditDayModal({ day, practitionerId, cfg, onClose }: { day: string; prac
   const [ranges, setRanges] = useState([{ startTime: '10:00', endTime: '13:00' }]);
   const [capacity, setCapacity] = useState(cfg?.tenant.settings.scheduling?.defaultCapacity ?? 7);
   const save = useMutation({ mutationFn: () => post('/sessions/generate', { day, practitionerId, ranges, breaks: [], capacity: Number(capacity), windowMinutes: cfg?.tenant.settings.scheduling?.windowMinutes ?? 60, replace: true }),
-    onSuccess: (r: any) => { toast(`${r.windows} windows set for this day only`); onClose(); }, onError: (e: any) => toast(e?.body?.code ?? 'Failed', 'err') });
+    onSuccess: (r: any) => { toast(`${r.windows} windows set for this day only`); onClose(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
     <Modal title="Edit this day's windows" subtitle={`${day} only. Windows with bookings are kept. The weekly routine is unchanged.`} onClose={onClose} width="max-w-lg">
       <div className="space-y-3">
         {ranges.map((r, i) => <div key={i} className="flex items-center gap-2"><input type="time" className="input !w-auto" value={r.startTime} onChange={(e) => setRanges(ranges.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))} /><span className="text-muted">to</span><input type="time" className="input !w-auto" value={r.endTime} onChange={(e) => setRanges(ranges.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))} /><button className="btn btn-ghost btn-icon" onClick={() => setRanges(ranges.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button></div>)}
-        <div className="flex gap-2 items-center"><button className="btn btn-sm" onClick={() => setRanges([...ranges, { startTime: '16:00', endTime: '20:00' }])}><Icon name="plus" className="h-3.5 w-3.5" />Add hours</button><span className="ml-auto text-sm text-muted">Places per window</span><input type="number" className="input !w-20" value={capacity} onChange={(e) => setCapacity(e.target.value as any)} /></div>
+        <div className="flex gap-2 items-center"><button className="btn btn-sm" onClick={() => setRanges([...ranges, { startTime: '16:00', endTime: '20:00' }])}><Icon name="plus" className="h-3.5 w-3.5" />Add hours</button><span className="ml-auto text-sm text-muted">Places per window</span><NumInput max={99} className="input !w-20" value={capacity} onChange={(e) => setCapacity(e.target.value as any)} /></div>
         <div className="flex justify-end gap-2 pt-2 border-t border-line"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !ranges.length} onClick={() => save.mutate()}><Icon name="check" />Save for this day</button></div>
       </div>
     </Modal>

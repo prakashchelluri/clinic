@@ -1,15 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 import { useMe, useConfig, post, qc } from './api';
-import { Avatar, Icon, ToastHost } from './ui';
+import { Avatar, Icon, NoAccess, ToastHost } from './ui';
 import { CommandPalette } from './palette';
 
 export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
 }
 
-type NavItem = { to: string; label: string; show: (c: (p: string) => boolean) => boolean };
-const NAV: NavItem[] = [
+export type NavItem = { to: string; label: string; show: (c: (p: string) => boolean) => boolean };
+export const NAV: NavItem[] = [
   { to: '/overview', label: 'Overview', show: (c) => c('finance.read') },
   { to: '/today', label: 'Today', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { to: '/patients', label: 'Patients', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', show: (c) => c('worklist.read') },
   { to: '/pharmacy', label: 'Pharmacy', show: (c) => c('pharmacy.read') },
+  { to: '/expenses', label: 'Expenses', show: (c) => c('expense.read') },
   { to: '/reports', label: 'Reports', show: (c) => c('report.daily') || c('finance.read') },
   { to: '/settings', label: 'Settings', show: (c) => c('config.write') },
   { to: '/platform', label: 'Clinics', show: (c) => c('platform.read') },
@@ -31,6 +32,7 @@ export function homeFor(c: (p: string) => boolean, platform = false) {
   if (c('visit.write')) return '/queue';
   if (c('encounter.intake')) return '/queue';
   if (c('worklist.write')) return '/worklist';
+  if (c('expense.read')) return '/expenses';
   if (c('pharmacy.read')) return '/pharmacy';
   return '/patients';
 }
@@ -47,18 +49,26 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const pills = useRef<HTMLDivElement>(null);
+  const navBox = useRef<HTMLElement>(null);
+  const [more, setMore] = useState(false);
+  const checkMore = () => { const n = navBox.current; setMore(!!n && n.scrollWidth - n.clientWidth - n.scrollLeft > 8); };
   const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
   const perms: string[] = me.data?.perms ?? [];
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
   const items = NAV.filter((n) => (n.to === '/platform' ? platform : !platform) && n.show(c));
   const fit = loc.pathname === '/queue'; // table pages: the page stays put, only the table scrolls
+  // A page you cannot use is not shown, and typing its address gets a clear "no access" instead of an empty screen.
+  const sub = loc.pathname.split('/')[1] ?? '';
+  const pageRule = NAV.find((n) => n.to === '/' + sub) ?? (sub === 'encounter' ? { to: '', label: 'The consultation page', show: (x: (p: string) => boolean) => x('encounter.intake') } : null);
+  const blocked = !!pageRule && (platform ? pageRule.to !== '/platform' : pageRule.to === '/platform' || !pageRule.show(c));
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, []);
+  useLayoutEffect(() => { checkMore(); window.addEventListener('resize', checkMore); return () => window.removeEventListener('resize', checkMore); }, [items.length, me.data?.id]);
   useLayoutEffect(() => {
     const measure = () => { const el = pills.current?.querySelector<HTMLElement>('a.on'); setPill(el ? { left: el.offsetLeft, width: el.offsetWidth } : null); };
     measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
@@ -104,7 +114,7 @@ export function App() {
           </div>
         </header>
 
-        <nav className="no-print no-scrollbar mt-5 mb-6 -mx-1 overflow-x-auto px-1 pb-1" aria-label="Sections">
+        <nav ref={navBox} onScroll={checkMore} className="no-print no-scrollbar mt-5 mb-6 -mx-1 overflow-x-auto px-1 pb-1" style={more ? { WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 36px), transparent)', maskImage: 'linear-gradient(to right, #000 calc(100% - 36px), transparent)' } : undefined} aria-label="Sections">
           <div ref={pills} className="relative inline-flex gap-1 rounded-full border border-white/75 bg-white/50 p-1">
             {pill && <span className="absolute top-1 bottom-1 rounded-full bg-ink" style={{ left: pill.left, width: pill.width, transition: 'left .45s var(--ease), width .45s var(--ease)' }} />}
             {items.map((n) => (
@@ -113,7 +123,7 @@ export function App() {
           </div>
         </nav>
 
-        <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'flex-1 min-h-0 flex flex-col' : ''}`}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></main>
+        <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'flex-1 min-h-0 flex flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />

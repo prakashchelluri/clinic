@@ -39,7 +39,7 @@ export function Today() {
         {myDoc?.until && <div><div className="text-xl font-semibold leading-tight">until {myDoc.until}</div><div className="text-[12.5px] text-muted">Today's routine</div></div>}
       </div>
 
-      <div className="grid lg:grid-cols-[1.25fr_1fr] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.25fr_minmax(0,1fr)] gap-5">
         {next ? (
           <section className="dark-card p-6 anim-fade-up" style={{ animationDelay: '60ms' }}>
             <div className="flex items-center gap-2.5"><span className="rounded-full bg-clay px-3 py-1 text-[11.5px] font-bold text-white">{next.status === 'in_consult' ? 'With you now' : 'Next up'}</span><span className="text-[12.5px] text-[#a9a59c]">{next.opNumber} · {next.status === 'in_consult' ? 'in consultation' : `waiting ${minsSince(next.arrivedAt)} min`}{next.status === 'waiting' && next.details?.complaints ? ' · intake done' : ''}</span></div>
@@ -50,7 +50,7 @@ export function Today() {
           </section>
         ) : <section className="glass p-6 anim-fade-up"><Empty icon="check" title="Nobody waiting" hint="The next arrival appears here with their complaints and vitals." /></section>}
 
-        <section className="glass p-5 anim-fade-up" style={{ animationDelay: '100ms' }}>
+        <section className="glass p-5 anim-fade-up min-w-0" style={{ animationDelay: '100ms' }}>
           <div className="flex items-center"><div className="text-[15px] font-semibold">Then waiting</div><span className="ml-auto text-xs text-muted">{queue.length} more</span></div>
           {queue.length === 0 ? <div className="py-8 text-center text-sm text-muted">No one else waiting</div> : <div className="mt-2">{queue.slice(0, 5).map((v: any) => (
             <div key={v.id} className="flex items-center gap-3 py-3 border-t border-ink/7 first:border-t-0"><Avatar name={v.patient.fullName} /><div className="flex-1 min-w-0"><div className="font-semibold truncate">{v.patient.fullName} <span className="text-xs text-muted font-normal">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></div><div className="text-xs text-muted truncate">{v.details?.complaint ?? 'No complaint noted'}</div></div>
@@ -59,13 +59,13 @@ export function Today() {
       </div>
 
       <div className="grid md:grid-cols-2 gap-5 mt-5">
-        <section className="glass p-5 anim-fade-up" style={{ animationDelay: '140ms' }}>
+        <section className="glass p-5 anim-fade-up min-w-0" style={{ animationDelay: '140ms' }}>
           <div className="flex items-center"><div className="text-[15px] font-semibold">On you today</div><span className="ml-auto text-xs text-muted">procedures</span></div>
           {!cal.data || cal.data.procedures.filter((p: any) => p.practitionerId === me.practitionerId).length === 0 ? <div className="py-6 text-sm text-muted">No procedures on you today.</div> :
             <div className="mt-2">{cal.data.procedures.filter((p: any) => p.practitionerId === me.practitionerId).map((p: any) => (
               <div key={p.id} className="flex items-center gap-3 py-2.5 border-t border-ink/7 first:border-t-0"><Chip>{p.startTime}</Chip><div className="flex-1 min-w-0"><div className="text-sm font-semibold truncate">{p.procedure ?? 'Procedure'} · {p.patient}</div><div className="text-xs text-muted">{p.room ?? 'no room'} · sitting {p.sittingNo}</div></div><Chip tone={p.state === 'completed' ? 'sage' : 'sky'}>{p.state.replace('_', ' ')}</Chip></div>))}</div>}
         </section>
-        <section className="glass p-5 anim-fade-up" style={{ animationDelay: '180ms' }}>
+        <section className="glass p-5 anim-fade-up min-w-0" style={{ animationDelay: '180ms' }}>
           <div className="flex items-center"><div className="text-[15px] font-semibold">Plans that need your eye</div><span className="ml-auto text-xs text-muted">{needReview.length}</span></div>
           {needReview.length === 0 ? <div className="py-6 text-sm text-muted">Nothing waiting for review.</div> :
             <div className="mt-2">{needReview.slice(0, 4).map((r: any) => (

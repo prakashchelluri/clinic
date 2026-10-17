@@ -22,7 +22,7 @@ export function Login() {
     try { await post('/auth/login', { email, password: f.password, tenant: tenant || undefined }); qc.clear(); nav('/', { viewTransition: true }); }
     catch (x: any) {
       if (x instanceof ApiError && x.body.code === 'CHOOSE_CLINIC') setClinics(x.body.clinics);
-      else setErr('That email or password is not right.');
+      else setErr(x instanceof ApiError && x.body.code === 'TOO_MANY_ATTEMPTS' ? `Too many wrong attempts. Try again in ${Math.ceil((x.body.retryAfterSeconds ?? 600) / 60)} minutes.` : 'That email or password is not right.');
     } finally { setBusy(false); }
   };
   return (

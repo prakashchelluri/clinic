@@ -7,14 +7,14 @@ import { nextNumber, emit } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 
 const PatientIn = z.object({
-  fullName: z.string().min(1),
+  fullName: z.string().trim().min(2).max(100),
   phone: z.string().regex(/^\d{10}$/).optional().nullable(),
   sex: z.enum(['M', 'F', 'O']).optional().nullable(),
   ageYears: z.number().int().min(0).max(120).optional().nullable(),
-  locality: z.string().optional().nullable(),
+  locality: z.string().trim().max(100).optional().nullable(),
   referralCard: z.boolean().optional(),
-  allergies: z.string().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  allergies: z.string().max(500).optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
 });
 
 export function patientRoutes(app: FastifyInstance) {

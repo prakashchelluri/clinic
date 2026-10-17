@@ -55,7 +55,7 @@ export function Overview() {
         </div>
       </section>
 
-      <div className="grid lg:grid-cols-[1.1fr_1fr] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_minmax(0,1fr)] gap-5">
         <section className="glass p-5 anim-fade-up" style={{ animationDelay: '100ms' }}>
           <div className="flex items-center"><div className="text-[15px] font-semibold">Waiting now</div><span className="ml-auto text-xs text-muted">by arrival</span></div>
           {d.waiting.length === 0 ? <Empty icon="clock" title="Nobody waiting" /> : (

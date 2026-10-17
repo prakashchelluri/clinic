@@ -66,9 +66,9 @@ export function DocList({ docs, onDelete }: { docs: any[]; onDelete?: (id: strin
 }
 
 /** Upload button: reads the file, posts base64. Works with phone camera (accept image) and PDFs. */
-export function UploadButton({ patientId, encounterId, recommendationId, kind = 'report', onDone, label = 'Upload report / photo' }: { patientId: string; encounterId?: string; recommendationId?: string; kind?: string; onDone: () => void; label?: string }) {
+export function UploadButton({ patientId, encounterId, recommendationId, kind = 'report', onDone, label = 'Upload' }: { patientId: string; encounterId?: string; recommendationId?: string; kind?: string; onDone: () => void; label?: string }) {
   return (
-    <label className="btn btn-sm cursor-pointer"><Icon name="plus" className="h-3.5 w-3.5" />{label}
+    <label className="btn btn-sm cursor-pointer whitespace-nowrap"><Icon name="plus" className="h-3.5 w-3.5" />{label}
       <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (ev) => {
         const f = ev.target.files?.[0]; if (!f) return;
         const dataBase64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });

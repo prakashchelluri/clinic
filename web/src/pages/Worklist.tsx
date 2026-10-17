@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
-import { get, patch, post, qc, today } from '../api';
+import { get, patch, post, qc, today, errText } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast } from '../ui';
 
@@ -54,7 +54,7 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule }: { r: any; 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap"><button className="font-medium hover:text-clay transition-colors" onClick={onOpen}>{r.patient.fullName}</button><span className="text-xs text-muted">{r.patient.phone ?? 'no phone'} · {r.patient.patientNo}</span></div>
           <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {r.procedure && <Chip tone="sky">{r.procedure}{r.sittings ? ` · ${r.sittings} sittings` : ''}</Chip>}
+            {r.procedure && <Chip tone="sky">{r.procedure}{r.sittings ? ` · ${r.sittings} ${r.sittings === 1 ? 'sitting' : 'sittings'}` : ''}</Chip>}
             {isTest && <Chip tone="clay">{r.notes}</Chip>}
             {r.dueOn && <Chip tone={late ? 'rose' : ''}>{late ? 'overdue · ' : r.status === 'scheduled' ? 'on ' : 'due '}{fmtDate(r.dueOn)}</Chip>}
             <Chip tone={r.status === 'scheduled' ? 'sage' : r.status === 'contacted' ? 'amber' : ''}>{r.status}</Chip>
@@ -104,13 +104,13 @@ function ScheduleModal({ rec, onClose }: { rec: any; onClose: () => void }) {
   const save = useMutation({
     mutationFn: (force: boolean) => post('/procedure-sessions', { recommendationId: rec.id, day, startTime: pick?.startTime ?? manual.startTime, minutes, roomId: pick?.roomId ?? manual.roomId ?? null, practitionerId: doc || null, force }),
     onSuccess: (r: any) => { toast(`Scheduled ${day} ${r.startTime}`); onClose(); },
-    onError: (e: any) => { if (e?.body?.code === 'CONFLICT') setConf(e.body.conflicts); else toast(e?.body?.code ?? 'Failed', 'err'); },
+    onError: (e: any) => { if (e?.body?.code === 'CONFLICT') setConf(e.body.conflicts); else toast(errText(e), 'err'); },
   });
   const byRoom: Record<string, any[]> = {};
   for (const s of slots.data?.slots ?? []) (byRoom[s.room] ??= []).push(s);
   const existing = useQuery({ queryKey: ['psessions', rec.id], queryFn: () => get(`/procedure-sessions?recommendationId=${rec.id}`) });
   return (
-    <Modal title={`Schedule · ${proc?.name ?? 'procedure'}`} subtitle={`${rec.patient.fullName} · ${rec.patient.phone ?? ''}${rec.sittings ? ` · ${rec.sittings} sittings planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
+    <Modal title={`Schedule · ${proc?.name ?? 'procedure'}`} subtitle={`${rec.patient.fullName} · ${rec.patient.phone ?? ''}${rec.sittings ? ` · ${rec.sittings} ${rec.sittings === 1 ? 'sitting' : 'sittings'} planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
       <div className="space-y-4">
         {(existing.data ?? []).length > 0 && <div className="text-xs text-muted flex flex-wrap gap-1.5 items-center">Previous sittings: {existing.data.map((s: any) => <Chip key={s.id} tone={s.state === 'completed' ? 'sage' : s.state === 'confirmed' ? 'sky' : ''}>{fmtDate(s.day)} · {s.state}</Chip>)}</div>}
         <div className="grid grid-cols-3 gap-3">
