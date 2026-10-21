@@ -1,6 +1,6 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { db } from './index.js';
-import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, TENANT_TABLES, type FormSchema } from './schema.js';
+import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, service, TENANT_TABLES, type FormSchema } from './schema.js';
 import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
@@ -65,6 +65,18 @@ const DERM_ROOMS = [
   { name: 'Minor OT', capabilities: ['procedure', 'minor_ot', 'cryo'] },
 ];
 
+const DEFAULT_SERVICES = [
+  { name: 'New consultation', description: 'First visit, or a new problem', minutes: 60, color: '#D4421A', onlineBookable: true, fee: 'GEN' },
+  { name: 'Review', description: 'Follow-up with the same doctor', minutes: 60, color: '#3A5A78', onlineBookable: true, fee: 'REN' },
+  { name: 'Procedure follow-up', description: 'Check after a procedure sitting', minutes: 30, color: '#2F5D4B', onlineBookable: false, fee: 'FREE' },
+];
+
+async function insertDefaultServices(db: any, tid: string) {
+  const fees = await db.select().from(feeCategory).where(eq(feeCategory.tenantId, tid));
+  const fee = (code: string) => fees.find((f: any) => f.code === code);
+  await db.insert(service).values(DEFAULT_SERVICES.map(({ fee: code, ...s }, i) => ({ ...s, tenantId: tid, sortOrder: i, feeCategoryId: fee(code)?.id ?? null, pricePaise: fee(code)?.amountPaise ?? null })));
+}
+
 export type NewClinic = { name: string; slug: string; timezone?: string; address?: string; phone?: string; owner: { name: string; email: string; password: string; regNo?: string; qualification?: string; isDoctor?: boolean }; pack?: 'dermatology' };
 
 /** Onboard a clinic: tenant, branch, owner (also a doctor unless told otherwise), specialty pack, default fees, rooms. */
@@ -101,6 +113,7 @@ export async function createClinic(input: NewClinic) {
   await db.insert(medicine).values(DERM_MEDICINES.map((m) => ({ ...m, tenantId: tid })));
   await db.insert(procedureCatalog).values(DERM_PROCEDURES.map((p) => ({ ...p, tenantId: tid, specialtyId: derm.id })));
   await db.insert(room).values(DERM_ROOMS.map((r) => ({ ...r, tenantId: tid, branchId: b.id })));
+  await insertDefaultServices(db, tid);
   return { tenantId: tid, branchId: b.id, practitionerId: ownerPrac?.id ?? null, specialtyId: derm.id, slug };
   });
 }
@@ -114,7 +127,9 @@ export async function ensureFormsCurrent() {
     await db.execute(sql`update app_user set roles = array_append(roles, 'doctor') where 'owner' = any(roles) and practitioner_id is not null and not ('doctor' = any(roles))`);
     await db.execute(sql`update practitioner set routine = '{"days":{"1":[["10:00","13:00"],["16:00","20:00"]],"2":[["10:00","13:00"],["16:00","20:00"]],"3":[["10:00","13:00"],["16:00","20:00"]],"4":[["10:00","13:00"],["16:00","20:00"]],"5":[["10:00","13:00"],["16:00","20:00"]],"6":[["10:00","13:00"],["16:00","20:00"]]},"capacity":7,"windowMinutes":60}'::jsonb where routine is null and active`);
     for (const p of DERM_PROCEDURES) await db.execute(sql`update procedure_catalog set required_capability = ${p.requiredCapability}, buffer_minutes = ${(p as any).bufferMinutes ?? 0} where name = ${p.name} and required_capability is null`);
-  
+    // Visit types arrived with online booking: give every clinic a sensible starting set once.
+    if (!(await db.select({ id: service.id }).from(service).where(eq(service.tenantId, t.id)).limit(1)).length) await insertDefaultServices(db, t.id);
+
     const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r: any) => r[0]);
     // Only auto-upgrade clinics still on the stock pack (no owner-edited versions beyond it).
     if (cur && cur.version >= DERM_ENCOUNTER_VERSION) return;

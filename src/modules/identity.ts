@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
-import { tenant, appUser, practitioner, feeCategory, formDefinition, medicine, procedureCatalog, branch, specialty, room } from '../db/schema.js';
+import { tenant, appUser, practitioner, feeCategory, formDefinition, medicine, procedureCatalog, branch, specialty, room, service } from '../db/schema.js';
+import { whatsappReady } from '../lib/messaging.js';
 import { verifyPassword, HttpError } from '../lib/auth.js';
 import { route } from '../lib/route.js';
 
@@ -40,7 +41,7 @@ export function identityRoutes(app: FastifyInstance) {
   // Everything the UI needs to render forms, pickers and prices, in one call.
   route(app, 'get', '/config', null, async (req, tx) => {
     const t = req.ctx.tenantId;
-    const [ten, branches, practitioners, fees, forms, meds, procs, specs, rooms] = await Promise.all([
+    const [ten, branches, practitioners, fees, forms, meds, procs, specs, rooms, services] = await Promise.all([
       tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]),
       tx.select().from(branch).where(eq(branch.tenantId, t)),
       tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true))),
@@ -50,9 +51,10 @@ export function identityRoutes(app: FastifyInstance) {
       tx.select().from(procedureCatalog).where(and(eq(procedureCatalog.tenantId, t), eq(procedureCatalog.active, true))),
       tx.select().from(specialty).where(eq(specialty.tenantId, t)),
       tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true))),
+      tx.select().from(service).where(and(eq(service.tenantId, t), eq(service.active, true))).orderBy(service.sortOrder, service.name),
     ]);
     return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings: ten.settings },
-      branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms };
+      branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms, services, whatsappReady: whatsappReady() };
   });
 
   route(app, 'get', '/users', 'user.read', async (req, tx) =>

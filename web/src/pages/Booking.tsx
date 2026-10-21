@@ -82,7 +82,7 @@ export function Booking() {
   );
 }
 
-function BookForm({ session, arriveEarly, onDone }: { session: any; arriveEarly: number; onDone: () => void }) {
+export function BookForm({ session, arriveEarly, onDone }: { session: any; arriveEarly: number; onDone: () => void }) {
   const [q, setQ] = useState(''); const [patientId, setPatientId] = useState<string | undefined>(); const [name, setName] = useState(''); const [note, setNote] = useState('');
   const [err, setErr] = useState<any>(null);
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.length >= 3 && !patientId });
@@ -103,7 +103,7 @@ function BookForm({ session, arriveEarly, onDone }: { session: any; arriveEarly:
       <input className="input" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
       <div className="flex gap-2 items-center"><button className="btn btn-primary" disabled={book.isPending || (!patientId && !name)} onClick={() => book.mutate(false)}><Icon name="check" />Book</button>
         {err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}</div>
-      {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.capacity - a.allocated})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
+      {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.free})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
     </div>
   );
 }

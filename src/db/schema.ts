@@ -128,12 +128,56 @@ export const appointment = pgTable('appointment', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   sessionId: uuid('session_id').notNull().references(() => session.id),
-  status: text('status').notNull().default('booked'), // booked | arrived | cancelled | no_show
-  source: text('source').notNull().default('phone'),
+  status: text('status').notNull().default('booked'), // requested | booked | confirmed | arrived | cancelled | no_show
+  source: text('source').notNull().default('phone'), // phone | walk_in | online | repeat
   note: text('note'),
   overbooked: boolean('overbooked').notNull().default(false),
   idempotencyKey: text('idempotency_key'),
-}, (t) => [uniqueIndex('appt_idem').on(t.tenantId, t.idempotencyKey)]);
+  serviceId: uuid('service_id'),
+  seriesId: uuid('series_id'),          // repeat bookings share one id
+  publicToken: text('public_token'),    // the patient's confirm / cancel / reschedule link
+  confirmedAt: ts('confirmed_at'),
+  cancelReason: text('cancel_reason'),
+}, (t) => [uniqueIndex('appt_idem').on(t.tenantId, t.idempotencyKey), uniqueIndex('appt_token').on(t.publicToken), index('appt_series').on(t.tenantId, t.seriesId)]);
+
+/** Statuses that hold a place in a window, and the ones still ahead of arrival (movable, cancellable). */
+export const HOLDS_PLACE = ['requested', 'booked', 'confirmed', 'arrived'] as const;
+export const OPEN_STATUSES = ['requested', 'booked', 'confirmed'] as const;
+
+/** What patients book ("visit types"). Clinic-defined; colour shows on the calendar. */
+export const service = pgTable('service', {
+  ...tenantCols,
+  name: text('name').notNull(),
+  description: text('description'),
+  minutes: integer('minutes').notNull().default(60),
+  pricePaise: integer('price_paise'),
+  feeCategoryId: uuid('fee_category_id'),   // suggested at check-in
+  color: text('color').notNull().default('#3A5A78'),
+  bufferMinutes: integer('buffer_minutes').notNull().default(0),
+  places: integer('places').notNull().default(1), // OP places one booking uses
+  practitionerIds: uuid('practitioner_ids').array().notNull().default([]), // empty = every doctor
+  onlineBookable: boolean('online_bookable').notNull().default(false),
+  sortOrder: integer('sort_order').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+});
+
+/** Outbox: every patient message, rendered when queued, sent by the dispatcher. */
+export const message = pgTable('message', {
+  ...tenantCols,
+  patientId: uuid('patient_id'),
+  appointmentId: uuid('appointment_id'),
+  kind: text('kind').notNull(),        // confirmation | requested | reminder | cancelled | moved | declined
+  channel: text('channel').notNull(),  // whatsapp | sms | none
+  toPhone: text('to_phone'),
+  body: text('body').notNull(),
+  params: jsonb('params').$type<Record<string, string>>().notNull().default({}),
+  status: text('status').notNull().default('pending'), // pending | sent | logged | failed | skipped
+  sendAfter: ts('send_after').notNull().defaultNow(),
+  sentAt: ts('sent_at'),
+  attempts: integer('attempts').notNull().default(0),
+  error: text('error'),
+  providerRef: text('provider_ref'),
+}, (t) => [index('msg_due').on(t.status, t.sendAfter), index('msg_appt').on(t.tenantId, t.appointmentId)]);
 
 export const visit = pgTable('visit', {
   ...tenantCols,
@@ -302,7 +346,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event',
+  'expense', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

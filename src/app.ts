@@ -22,6 +22,7 @@ import { adminRoutes } from './modules/admin.js';
 import { procedureRoutes } from './modules/procedures.js';
 import { platformRoutes } from './modules/platform.js';
 import { overviewRoutes } from './modules/overview.js';
+import { publicRoutes } from './modules/public.js';
 
 declare module 'fastify' {
   interface FastifyRequest { ctx: Ctx; perms: string[] }
@@ -55,7 +56,7 @@ export async function buildApp() {
 
   // Auth: signed cookie carries {u: userId, t: tenantId}; user row is re-read per request so deactivation is immediate.
   app.addHook('preHandler', async (req) => {
-    if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth/login') || req.url === '/api/health') return;
+    if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth/login') || req.url.startsWith('/api/public/') || req.url === '/api/health') return;
     const raw = req.cookies.cc_session ? req.unsignCookie(req.cookies.cc_session) : null;
     if (!raw?.valid) throw new HttpError(401, 'UNAUTHENTICATED');
     const { u, t } = JSON.parse(raw.value);
@@ -68,7 +69,7 @@ export async function buildApp() {
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api);
+    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

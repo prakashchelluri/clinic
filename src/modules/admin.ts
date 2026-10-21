@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, desc, sql } from 'drizzle-orm';
-import { tenant, appUser, practitioner, feeCategory, medicine, procedureCatalog, room, formDefinition, branch, type FormSchema } from '../db/schema.js';
+import { tenant, appUser, practitioner, service, feeCategory, medicine, procedureCatalog, room, formDefinition, branch, type FormSchema } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, sent } from '../lib/core.js';
 import jsonLogic from 'json-logic-js';
@@ -127,6 +127,22 @@ export function adminRoutes(app: FastifyInstance) {
   const ProcIn = z.object({ name: Name, typicalMinutes: z.number().int().min(5).optional(), bufferMinutes: z.number().int().min(0).optional(), requiresMainDoctor: z.boolean().optional(), requiresReview: z.boolean().optional(), requiredCapability: z.string().optional().nullable(), pricePaise: z.number().int().min(0).optional().nullable(), taxRateBp: z.number().int().min(0).optional(), typicalSittings: z.number().int().min(1).optional(), specialtyId: z.string().uuid().optional().nullable(), active: z.boolean().optional() });
   route(app, 'post', '/admin/procedures', 'config.write', async (req, tx) => (await tx.insert(procedureCatalog).values({ ...ProcIn.parse(req.body), tenantId: req.ctx.tenantId }).returning())[0]);
   route(app, 'patch', '/admin/procedures/:id', 'config.write', async (req, tx) => upd(tx, procedureCatalog, req, sent(ProcIn.partial().parse(req.body), req.body)));
+
+  // --- visit types (services): what patients book ---
+  const ServiceIn = z.object({ name: Name, description: z.string().trim().max(300).optional().nullable(), minutes: z.number().int().min(5).max(480).optional(),
+    pricePaise: z.number().int().min(0).max(100000000).optional().nullable(), feeCategoryId: z.string().uuid().optional().nullable(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    bufferMinutes: z.number().int().min(0).max(240).optional(), places: z.number().int().min(1).max(10).optional(), practitionerIds: z.array(z.string().uuid()).max(50).optional(),
+    onlineBookable: z.boolean().optional(), sortOrder: z.number().int().min(0).max(1000).optional(), active: z.boolean().optional() });
+  route(app, 'get', '/admin/services', 'config.write', async (req, tx) => tx.select().from(service).where(eq(service.tenantId, req.ctx.tenantId)).orderBy(service.sortOrder, service.name));
+  route(app, 'post', '/admin/services', 'config.write', async (req, tx) => {
+    const b = ServiceIn.parse(req.body);
+    const [row] = await tx.insert(service).values({ ...b, tenantId: req.ctx.tenantId }).returning();
+    await emit(tx, req.ctx, 'service.created', 'service', row.id, b); return row;
+  });
+  route(app, 'patch', '/admin/services/:id', 'config.write', async (req, tx) => {
+    const b = sent(ServiceIn.partial().parse(req.body), req.body); const row = await upd(tx, service, req, b);
+    await emit(tx, req.ctx, 'service.updated', 'service', row.id, b); return row;
+  });
 
   // --- forms: saving creates a new version; completed encounters keep theirs ---
   const Field = z.object({ key: z.string().regex(/^[a-z0-9_]+$/), label: z.string().min(1), type: z.enum(['text', 'textarea', 'number', 'select', 'multiselect', 'tags', 'diagnoses', 'duration', 'date']), required: z.boolean().optional(), options: z.array(z.string()).optional(), unit: z.string().optional(), placeholder: z.string().optional() });
