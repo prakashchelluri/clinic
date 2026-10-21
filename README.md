@@ -9,7 +9,14 @@ Doctor sets the day's availability and breaks on the Calendar (procedures on the
 
 Also: rooms with capabilities and conflict-checked procedure scheduling, pharmacy counter, document uploads, owner Settings (forms editor, people with multiple roles, fees, medicines, procedures, rooms), platform admin for onboarding clinics.
 
-Not yet: WhatsApp, offline queue, multi-language UI, GST invoices, inventory. See roadmap in ARCHITECTURE.md §8.
+Scheduling (Practice Better-style, kept on OP windows):
+- **Calendar**: day, week, all doctors + procedure rooms, and a list view for phones. Names show inside each window, coloured by visit type and status. Click a window to book; drag a name to move it (capacity and past-day rules are enforced on the server).
+- **Bookings**: online requests to approve or decline, then upcoming, unconfirmed, past, no-shows and cancelled, filterable by doctor, visit type, dates and name. Every booking opens a drawer with confirm, move, no-show, cancel (optionally the rest of a repeat series), send reminder, the patient link and the message history.
+- **Settings → Scheduling**: each doctor's weekly availability; visit types (length, fee, colour, places used, buffer, which doctors, bookable online); booking rules (arrive early, patient cancel window, policy, no-show warning); online booking (on/off, approval, minimum notice, days ahead, daily cap, welcome note, shareable link); reminders and messages (confirmation, reminder hours, editable text with preview, Meta template names, outbox).
+- **Patients**: `/book/<clinic>` books online without signing in; every booking has a private link `/a/<clinic>/<token>` to confirm, cancel or pick a new time with the same doctor inside the clinic's rules.
+- **Messages**: queued in an outbox and sent every minute through the WhatsApp Cloud API when `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` are set. Without them nothing is lost: messages are marked "ready" and visible in Settings and in each booking. Set `APP_URL` so patient links use your public address.
+
+Not yet: real WhatsApp sending (needs the clinic's Meta Business account and approved templates), SMS fallback, offline queue, multi-language UI, GST invoices, inventory. See roadmap in ARCHITECTURE.md §8.
 
 ## Run locally (no database install needed)
 

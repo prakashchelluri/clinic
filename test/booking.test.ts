@@ -137,7 +137,11 @@ test('online booking: off by default, rules, request → approve, patient link, 
 
   const confirmed = await anon('POST', `/public${book.body.link}/confirm`);
   assert.equal(confirmed.body.status, 'confirmed');
-  const moveTo = (await anon('GET', `/public${book.body.link}/slots?from=${addDays(today(), 3)}&days=3`)).body.flatMap((d: any) => d.slots)[0];
+  const linkSlots = (await anon('GET', `/public${book.body.link}/slots?from=${addDays(today(), 3)}&days=3`)).body.flatMap((d: any) => d.slots);
+  assert.ok(linkSlots.every((s: any) => s.practitionerId === pick.practitionerId), 'a patient reschedules with the same doctor');
+  const otherDoc = slots.flatMap((d: any) => d.slots).find((s: any) => s.practitionerId !== pick.practitionerId);
+  if (otherDoc) assert.equal((await anon('POST', `/public${book.body.link}/reschedule`, { sessionId: otherDoc.id })).body.code, 'SLOT_TAKEN');
+  const moveTo = linkSlots[0];
   if (moveTo) assert.equal((await anon('POST', `/public${book.body.link}/reschedule`, { sessionId: moveTo.id })).status, 200);
   const cancelled = await anon('POST', `/public${book.body.link}/cancel`, { reason: 'feeling better' });
   assert.equal(cancelled.body.status, 'cancelled');

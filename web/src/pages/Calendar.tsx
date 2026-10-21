@@ -6,6 +6,7 @@ import { can } from '../App';
 import { Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, toast, NumInput } from '../ui';
 import { RoutineModal, routineSummary } from '../routine';
 import { BookForm } from './Booking';
+import { AppointmentDrawer } from '../apptDrawer';
 
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
@@ -15,7 +16,8 @@ const nowMin = () => toMin(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ko
 const label = (d: string, o: Intl.DateTimeFormatOptions) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', o);
 const fullDay = (d: string) => label(d, { weekday: 'long', day: 'numeric', month: 'long' });
 const isLongLeave = (b: any) => b.kind === 'leave' && toMin(b.endTime) - toMin(b.startTime) >= 600;
-const DOT: Record<string, string> = { arrived: 'var(--color-sage)', booked: 'var(--color-ink)', no_show: 'var(--color-rose)' };
+const DOT: Record<string, string> = { requested: 'var(--color-clay)', booked: 'var(--color-ink)', confirmed: 'var(--color-sky)', arrived: 'var(--color-sage)', no_show: 'var(--color-rose)' };
+const OPEN = ['requested', 'booked', 'confirmed'];
 
 type View = 'day' | 'week' | 'team' | 'list';
 const VIEW_KEY = 'cal.view';
@@ -53,7 +55,8 @@ export function Calendar() {
   });
   const onMove = (appt: any, to: any) => { if (appt.sessionId !== to.id) move.mutate({ appt, to }); };
   const docName = (id: string) => cfg?.practitioners.find((p: any) => p.id === id)?.name;
-  const grid = { canBook, onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => onMove(a, { ...w, doctor: view === 'team' ? docName(w.practitionerId) : undefined }) };
+  const [openId, setOpenId] = useState<string | null>(null);
+  const grid = { canBook, onOpen: (id: string) => setOpenId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => onMove(a, { ...w, doctor: view === 'team' ? docName(w.practitionerId) : undefined }) };
 
   const title = view === 'week' ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 6), { day: 'numeric', month: 'short' })}`
     : view === 'team' ? fullDay(day) : practitioner ? `${practitioner.name} · ${fullDay(day)}` : fullDay(day);
@@ -76,6 +79,7 @@ export function Calendar() {
       {view === 'team' && <TeamView day={day} cfg={cfg} grid={grid} />}
       {view === 'list' && <ListView day={day} doc={doc} grid={grid} />}
 
+      {openId && <AppointmentDrawer id={openId} cfg={cfg} canWrite={canBook} onClose={() => setOpenId(null)} />}
       {booking && (
         <Modal title="Book" subtitle={`${label(booking.day, { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${docName(booking.practitionerId) ? ` · ${docName(booking.practitionerId)}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
           <BookForm session={booking} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { refresh(); setBooking(null); }} />
@@ -87,12 +91,12 @@ export function Calendar() {
 
 const Legend = ({ hint }: { hint?: string }) => (
   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted mb-3">
-    {[['Arrived', DOT.arrived], ['Booked', DOT.booked], ['No-show', DOT.no_show], ['Procedure', '#9DB5CC']].map(([l, c]) => <span key={l} className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>)}
+    {[['Requested', DOT.requested], ['Booked', DOT.booked], ['Confirmed', DOT.confirmed], ['Arrived', DOT.arrived], ['No-show', DOT.no_show], ['Procedure', '#9DB5CC']].map(([l, c]) => <span key={l} className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>)}
     {hint && <span className="ml-auto">{hint}</span>}
   </div>
 );
 
-type Grid = { canBook: boolean; onBook: (w: any) => void; onMove: (a: any, w: any) => void };
+type Grid = { canBook: boolean; onOpen: (id: string) => void; onBook: (w: any) => void; onMove: (a: any, w: any) => void };
 type Col = { key: string; head: ReactNode; windows: any[]; blocks: any[]; procs: any[]; day: string; tint?: string };
 
 /** Shared time grid: one column per day or per doctor/room. */
@@ -164,11 +168,11 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
       </div>
       <div className={wide ? 'grid grid-cols-3 gap-x-3' : ''}>
         {shown.map((a) => (
-          <div key={a.id} draggable={grid.canBook && a.status === 'booked'} title={`${a.name}${a.phone ? ` · ${a.phone}` : ''} · ${a.status.replace('_', '-')}${a.note ? ` · ${a.note}` : ''}`}
+          <div key={a.id} draggable={grid.canBook && OPEN.includes(a.status)} title={`${a.name}${a.phone ? ` · ${a.phone}` : ''} · ${a.status.replace('_', '-')}${a.note ? ` · ${a.note}` : ''}`}
             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: a.id, sessionId: w.id, name: a.name })); e.dataTransfer.effectAllowed = 'move'; }}
-            onClick={(e) => { e.stopPropagation(); nav(`/patients/${a.patientId}`); }}
-            className={`flex items-center gap-1.5 text-[11.5px] leading-4 truncate hover:underline ${a.status === 'booked' && grid.canBook ? 'cursor-grab' : 'cursor-pointer'} ${a.status === 'no_show' ? 'line-through text-rose' : ''}`}>
-            <i className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: DOT[a.status] }} /><span className="truncate">{a.name}</span>
+            onClick={(e) => { e.stopPropagation(); grid.onOpen(a.id); }}
+            className={`flex items-center gap-1.5 text-[11.5px] leading-4 truncate hover:underline ${OPEN.includes(a.status) && grid.canBook ? 'cursor-grab' : 'cursor-pointer'} ${a.status === 'requested' ? 'italic' : ''} ${a.status === 'no_show' ? 'line-through text-rose' : ''}`}>
+            {a.color && <i className="h-3 w-[3px] rounded-full shrink-0" style={{ background: a.color }} />}<i className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: DOT[a.status] }} /><span className="truncate">{a.name}</span>
           </div>
         ))}
       </div>
@@ -333,8 +337,8 @@ function ListView({ day, doc, grid }: { day: string; doc: string; grid: Grid }) 
         <div key={x.id} className="card !py-3 anim-fade-up">
           <div className="flex items-center gap-2"><b>{x.startTime}–{x.endTime}</b>{x.reductions?.length > 0 && <span className="text-xs text-amber truncate">{x.reductions.map((r: any) => r.note ?? r.kind).join(', ')}</span>}<Chip tone={tone(x) as any} className="ml-auto">{x.allocated}/{x.effectiveCapacity}</Chip></div>
           {(x.appointments ?? []).map((a: any) => (
-            <button key={a.id} type="button" onClick={() => nav(`/patients/${a.patientId}`)} className={`flex w-full items-center gap-2.5 min-h-11 border-t border-line/60 text-left text-sm ${a.status === 'no_show' ? 'line-through text-rose' : ''}`}>
-              <i className="h-2 w-2 rounded-full shrink-0" style={{ background: DOT[a.status] }} /><span className="flex-1 truncate">{a.name}</span><span className="text-xs text-muted">{a.status.replace('_', '-')}</span>
+            <button key={a.id} type="button" onClick={() => grid.onOpen(a.id)} className={`flex w-full items-center gap-2.5 min-h-11 border-t border-line/60 text-left text-sm ${a.status === 'no_show' ? 'line-through text-rose' : ''}`}>
+              {a.color && <i className="h-4 w-[3px] rounded-full shrink-0" style={{ background: a.color }} />}<i className="h-2 w-2 rounded-full shrink-0" style={{ background: DOT[a.status] }} /><span className="flex-1 truncate">{a.name}{a.service ? <span className="text-xs text-muted"> · {a.service}</span> : null}</span><span className="text-xs text-muted">{a.status.replace('_', '-')}</span>
             </button>
           ))}
           {grid.canBook && x.free > 0 && x.day >= today() && <button type="button" className="flex w-full items-center min-h-11 border-t border-line/60 text-sm text-muted hover:text-ink" onClick={() => grid.onBook(x)}>+ Book into a free place</button>}

@@ -1,43 +1,71 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useOutletContext } from 'react-router';
+import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
 import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
+import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'people' | 'roles' | 'forms' | 'fees' | 'medicines' | 'procedures' | 'rooms';
-const TABS: [Tab, string, string, string][] = [
-  ['clinic', 'Clinic', 'door', 'Name, prescription header, booking defaults'],
-  ['people', 'People', 'users', 'Staff accounts and doctors'],
-  ['roles', 'Roles and access', 'lock', 'What each role can see and do'],
-  ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses, fields'],
-  ['fees', 'Fees', 'rupee', 'Visit categories and amounts'],
-  ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
-  ['procedures', 'Procedures', 'stetho', 'Catalogue, duration, room needs, price'],
-  ['rooms', 'Rooms', 'door', 'Rooms and what each can do'],
+type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'medicines' | 'procedures' | 'fees';
+type TabDef = [Tab, string, string, string];
+const GROUPS: [string, TabDef[]][] = [
+  ['Practice', [
+    ['clinic', 'Clinic details', 'door', 'Name, prescription header, vitals'],
+    ['people', 'Team members', 'users', 'Staff accounts and doctors'],
+    ['roles', 'Roles and access', 'lock', 'What each role can see and do'],
+    ['rooms', 'Rooms', 'door', 'Rooms and what each can do'],
+  ]],
+  ['Scheduling', [
+    ['availability', 'Availability', 'clock', 'Each doctor’s weekly hours'],
+    ['services', 'Visit types', 'calendar', 'What patients book, colour, fee'],
+    ['rules', 'Booking rules', 'list', 'Arrive early, cancel window, policy'],
+    ['online', 'Online booking', 'globe', 'Your booking page and its rules'],
+    ['messages', 'Reminders and messages', 'message', 'WhatsApp confirmations and reminders'],
+  ]],
+  ['Clinical', [
+    ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses'],
+    ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
+    ['procedures', 'Procedures', 'stetho', 'Catalogue, duration, room needs'],
+  ]],
+  ['Billing', [
+    ['fees', 'Fees', 'rupee', 'Visit categories and amounts'],
+  ]],
 ];
+const TABS: TabDef[] = GROUPS.flatMap(([, t]) => t);
 const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'Long text'], ['number', 'Number'], ['select', 'Pick one'], ['multiselect', 'Pick many'], ['tags', 'List (type several)'], ['diagnoses', 'Diagnoses with severity'], ['date', 'Date']];
 
 /** Owner's control panel. Everything here is data: no deploy needed to change it. */
 export function Settings() {
   const { cfg } = useOutletContext<any>();
-  const [tab, setTab] = useState<Tab>('clinic');
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = TABS.some((t) => t[0] === params.get('tab')) ? (params.get('tab') as Tab) : 'clinic';
+  const setTab = (k: Tab) => setParams({ tab: k }, { replace: true });
   const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); };
   const cur = TABS.find((t) => t[0] === tab)!;
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Everything the clinic runs on, editable by the owner. Changes apply immediately." />
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-5">
-        <nav className="space-y-1 anim-fade-up">
-          {TABS.map(([k, label, icon, hint]) => (
-            <button key={k} onClick={() => { setTab(k); if (innerWidth < 1024) setTimeout(() => document.getElementById('settings-body')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); }} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
+      <PageHeader title="Settings" subtitle="Everything the clinic runs on is yours to change here. It applies straight away." />
+      <div className="grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-5">
+        <nav className="card-flat !p-2 anim-fade-up self-start" aria-label="Settings sections">
+          {GROUPS.map(([g, tabs]) => (
+            <div key={g}>
+              <div className="px-3 pb-1 pt-3 text-[10.5px] font-bold uppercase tracking-[.1em] text-muted first:pt-1">{g}</div>
+              {tabs.map(([k, label, icon, hint]) => (
+                <button key={k} onClick={() => { setTab(k); if (innerWidth < 1024) setTimeout(() => document.getElementById('settings-body')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); }} aria-current={tab === k ? 'page' : undefined} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
+              ))}
+            </div>
           ))}
         </nav>
         <div key={tab} id="settings-body" className="anim-fade-up min-w-0 scroll-mt-4">
           <h2 className="text-xl font-medium mb-3">{cur[1]}</h2>
+          {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'rules' && <BookingRulesTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'online' && <OnlineBookingTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
           {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
           {tab === 'roles' && <RolesTab onSaved={refresh} />}
@@ -56,8 +84,8 @@ export function Settings() {
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
   const [vitals, setVitals] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
-  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', arriveEarlyMinutes: s.scheduling?.arriveEarlyMinutes ?? 35, defaultCapacity: s.scheduling?.defaultCapacity ?? 7, windowMinutes: s.scheduling?.windowMinutes ?? 60, opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { vitals, print: { address: f.address, phone: f.phone, footer: f.footer }, scheduling: { arriveEarlyMinutes: Number(f.arriveEarlyMinutes), defaultCapacity: Number(f.defaultCapacity), windowMinutes: Number(f.windowMinutes) }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); } });
+  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { vitals, print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="space-y-4">
@@ -73,8 +101,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div className="text-xs text-muted">These appear on the arrival sheet and on the doctor's screen. Switch off what your clinic does not measure.</div>
       </div>
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Booking defaults</div>
-        <div className="grid grid-cols-3 gap-3"><div><label className="label">Arrive early (minutes)</label><NumInput max={240} className="input" value={f.arriveEarlyMinutes} onChange={set('arriveEarlyMinutes')} /></div><div><label className="label">Places per window</label><NumInput max={99} className="input" value={f.defaultCapacity} onChange={set('defaultCapacity')} /></div><div><label className="label">Window length</label><div className="flex gap-1">{[30, 60].map((m) => <button key={m} className={`toggle-opt ${Number(f.windowMinutes) === m ? 'on' : ''}`} onClick={() => setF({ ...f, windowMinutes: m })}>{m} min</button>)}</div></div></div>
+        <div className="text-[11px] uppercase tracking-wider text-muted">OP numbers</div>
         <div><label className="label">Daily OP number resets</label><div className="flex gap-1">{[['day+category', 'Per category (GEN-1, REN-1…)'], ['day', 'One sequence per day']].map(([v, l]) => <button key={v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div></div>
       </div>
       <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>

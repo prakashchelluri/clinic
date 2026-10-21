@@ -52,7 +52,7 @@ async function openSlots(tx: Tx, t: any, from: string, days: number, svc: any, p
         && (!svc?.practitionerIds?.length || (w.practitionerId && svc.practitionerIds.includes(w.practitionerId)))
         && w.free >= (svc?.places ?? 1)
         && hoursUntil(day, w.startTime, t.timezone) >= cfg.minNoticeHours)
-        .map((w) => ({ id: w.id, startTime: w.startTime, endTime: w.endTime, practitionerId: w.practitionerId, doctor: w.practitionerId ? docName.get(w.practitionerId) ?? null : null }));
+        .map((w) => ({ id: w.id, startTime: w.startTime, endTime: w.endTime, practitionerId: w.practitionerId, doctor: w.practitionerId ? docName.get(w.practitionerId) ?? null : null })).sort((a, b) => a.startTime.localeCompare(b.startTime));
     }
     out.push({ day, slots });
   }
@@ -182,7 +182,7 @@ export function publicRoutes(app: FastifyInstance) {
     return inTenant(t, async (tx) => {
       const v = await find(tx);
       if (!patientView(v).canReschedule) throw new HttpError(409, 'CANNOT_RESCHEDULE');
-      return (await openSlots(tx, t, q.from, q.days, v.svc, null)).map((d) => ({ ...d, slots: d.slots.filter((x) => x.id !== v.a.sessionId) }));
+      return (await openSlots(tx, t, q.from, q.days, v.svc, v.s.practitionerId)).map((d) => ({ ...d, slots: d.slots.filter((x) => x.id !== v.a.sessionId) }));
     });
   });
   app.post('/public/a/:slug/:token/reschedule', async (req) => {
@@ -194,6 +194,7 @@ export function publicRoutes(app: FastifyInstance) {
       if (!patientView(v).canReschedule) throw new HttpError(409, 'CANNOT_RESCHEDULE');
       const s = await tx.select().from(session).where(and(eq(session.id, sessionId), eq(session.tenantId, t.id))).for('update').then((r) => r[0]);
       if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
+      if (s.practitionerId !== v.s.practitionerId) throw new HttpError(409, 'SLOT_TAKEN'); // a patient keeps their doctor; reception can hand over
       const day = (await openSlots(tx, t, s.day, 1, v.svc, s.practitionerId)).find((d) => d.day === s.day);
       if (!day?.slots.some((x) => x.id === s.id)) throw new HttpError(409, 'SLOT_TAKEN');
       await tx.update(appointment).set({ sessionId: s.id }).where(eq(appointment.id, v.a.id));

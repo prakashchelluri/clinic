@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
-import { get, post, patch, qc, today, uuid, ApiError, errText } from '../api';
+import { get, post, patch, qc, today, uuid, ApiError, errText, useConfig } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, toast, NumInput } from '../ui';
 
@@ -74,7 +74,7 @@ export function Booking() {
               <div className="min-w-0 flex-1"><div className={`text-sm font-medium truncate ${a.status === 'cancelled' ? 'line-through' : ''}`}>{a.patient.fullName}</div><div className="text-xs text-muted">{a.patient.phone ?? ''}{a.note ? ` · ${a.note}` : ''}</div></div>
               {a.overbooked && <Chip tone="amber">overbooked</Chip>}
               <Chip tone={a.status === 'arrived' ? 'sage' : a.status === 'cancelled' ? 'rose' : ''}>{a.status}</Chip>
-              {a.status === 'booked' && writable && <button className="btn btn-ghost btn-icon" title="Cancel" onClick={() => cancel.mutate(a.id)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+              {['requested', 'booked', 'confirmed'].includes(a.status) && writable && <button className="btn btn-ghost btn-icon" title="Cancel" onClick={() => cancel.mutate(a.id)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
             </div>))}
         </Section>
       </div>
@@ -83,12 +83,27 @@ export function Booking() {
 }
 
 export function BookForm({ session, arriveEarly, onDone }: { session: any; arriveEarly: number; onDone: () => void }) {
-  const [q, setQ] = useState(''); const [patientId, setPatientId] = useState<string | undefined>(); const [name, setName] = useState(''); const [note, setNote] = useState('');
+  const cfg = useConfig().data;
+  const services: any[] = (cfg?.services ?? []).filter((s: any) => !s.practitionerIds?.length || !session.practitionerId || s.practitionerIds.includes(session.practitionerId));
+  const [q, setQ] = useState(''); const [patientId, setPatientId] = useState<string | undefined>(); const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [note, setNote] = useState('');
+  const [serviceId, setServiceId] = useState<string>(''); const svcId = serviceId || services[0]?.id || '';
+  const [repeat, setRepeat] = useState(false); const [everyWeeks, setEveryWeeks] = useState(2); const [count, setCount] = useState<number | string>(4);
+  const [notify, setNotify] = useState(true);
   const [err, setErr] = useState<any>(null);
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.length >= 3 && !patientId });
+  const typedPhone = /^\d{10}$/.test(q) ? q : '';
+  const newPhone = typedPhone || phone;
+  const countN = Number(count);
+  const repeatBad = repeat && (!Number.isInteger(countN) || countN < 2 || countN > 26);
+  const phoneBad = !patientId && phone !== '' && !/^\d{10}$/.test(phone);
   const book = useMutation({
-    mutationFn: (overbook: boolean) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: name, phone: /^\d{10}$/.test(q) ? q : undefined }, note, overbook, idempotencyKey: uuid() }),
-    onSuccess: (r: any) => { toast(`Booked ${r.window.startTime}–${r.window.endTime} · arrive by ${minus(r.window.startTime, r.arriveEarlyMinutes)}`); setErr(null); setQ(''); setName(''); setNote(''); setPatientId(undefined); onDone(); },
+    mutationFn: (overbook: boolean) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: name.trim(), phone: newPhone || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined,
+      repeat: repeat ? { everyWeeks, count: countN } : undefined, notify, overbook, idempotencyKey: uuid() }),
+    onSuccess: (r: any) => {
+      const extra = r.series ? ` · ${r.series.created.length} repeat${r.series.created.length === 1 ? '' : 's'} booked${r.series.skipped.length ? `, ${r.series.skipped.length} skipped (${r.series.skipped.map((s: any) => s.day.slice(5)).join(', ')})` : ''}` : '';
+      toast(`Booked ${r.window.startTime}–${r.window.endTime} · arrive by ${minus(r.window.startTime, r.arriveEarlyMinutes)}${extra}`);
+      setErr(null); setQ(''); setName(''); setPhone(''); setNote(''); setPatientId(undefined); setRepeat(false); onDone();
+    },
     onError: (e: any) => setErr(e instanceof ApiError ? e.body : { code: e.message }),
   });
   const arriveBy = minus(session.startTime, arriveEarly);
@@ -96,12 +111,28 @@ export function BookForm({ session, arriveEarly, onDone }: { session: any; arriv
     <div className="card anim-slide-in space-y-3 !border-clay/30">
       <div className="flex items-baseline gap-2"><div className="serif text-xl">Book {session.startTime}–{session.endTime}</div><Chip tone="clay">{session.free} free</Chip></div>
       <div className="text-xs text-muted bg-paper rounded-xl p-3 flex gap-2"><Icon name="phone" className="h-4 w-4 shrink-0 text-clay" /><span>Tell the caller: <b className="text-ink">arrive by {arriveBy}</b>, the wait can be 30–45 minutes. No exact time is promised.</span></div>
-      <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10" placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setPatientId(undefined); }} /></div>
+      {services.length > 0 && (
+        <div role="radiogroup" aria-label="Visit type" className="flex flex-wrap gap-1.5">
+          {services.map((s) => <button key={s.id} type="button" role="radio" aria-checked={svcId === s.id} onClick={() => setServiceId(s.id)} className={`toggle-opt inline-flex items-center gap-1.5 ${svcId === s.id ? 'on' : ''}`}><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</button>)}
+        </div>
+      )}
+      <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone number or name" className="input !pl-10" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setPatientId(undefined); }} /></div>
       {!patientId && (search.data ?? []).length > 0 && <div className="card-flat overflow-hidden max-h-44 overflow-y-auto anim-fade-up">{search.data.map((p: any) => <button key={p.id} className="row w-full text-left" onClick={() => { setPatientId(p.id); setName(p.fullName); }}><Avatar name={p.fullName} size="h-7 w-7 text-[10px]" /><span className="flex-1 text-sm">{p.fullName} <span className="text-muted text-xs">{p.phone} · {p.patientNo}</span></span><Icon name="chevR" className="text-muted h-4 w-4" /></button>)}</div>}
       {patientId ? <div className="flex items-center gap-2 text-sm bg-sage-soft text-sage rounded-xl px-3 py-2 anim-fade-in"><Icon name="check" className="h-4 w-4" />Booking for <b>{name}</b><button className="btn btn-ghost btn-sm ml-auto" onClick={() => setPatientId(undefined)}>change</button></div>
-        : <input className="input" placeholder="New caller: name (we only need name and phone on the call)" value={name} onChange={(e) => setName(e.target.value)} />}
-      <input className="input" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-      <div className="flex gap-2 items-center"><button className="btn btn-primary" disabled={book.isPending || (!patientId && !name)} onClick={() => book.mutate(false)}><Icon name="check" />Book</button>
+        : <div className="grid gap-2 sm:grid-cols-[1fr_160px]">
+            <input aria-label="New caller name" className="input" maxLength={100} placeholder="New caller: name" value={name} onChange={(e) => setName(e.target.value)} />
+            {typedPhone ? <div className="input !bg-paper text-muted">{typedPhone}</div>
+              : <input aria-label="New caller phone" inputMode="numeric" className={`input ${phoneBad ? '!border-rose' : ''}`} maxLength={10} placeholder="Mobile (10 digits)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} />}
+          </div>}
+      {phoneBad && <div className="text-xs text-rose -mt-1">Mobile must be 10 digits.</div>}
+      <input aria-label="Note" className="input" maxLength={500} placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={repeat} onChange={(e) => setRepeat(e.target.checked)} /><Icon name="repeat" className="h-3.5 w-3.5" />Repeat</label>
+        {repeat && <span className="flex items-center gap-1.5 anim-fade-in">every<select aria-label="Repeat every" className="input !w-auto !py-1.5" value={everyWeeks} onChange={(e) => setEveryWeeks(Number(e.target.value))}>{[1, 2, 3, 4, 6, 8, 12].map((w) => <option key={w} value={w}>{w === 1 ? 'week' : `${w} weeks`}</option>)}</select>×<NumInput aria-label="Number of visits" max={26} className={`input !w-16 !py-1.5 ${repeatBad ? '!border-rose' : ''}`} value={count} onChange={(e) => setCount(e.target.value)} />visits</span>}
+        <label className="flex items-center gap-2"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />Send confirmation</label>
+      </div>
+      {repeatBad && <div className="text-xs text-rose -mt-1">Repeat between 2 and 26 visits.</div>}
+      <div className="flex gap-2 items-center"><button className="btn btn-primary" disabled={book.isPending || (!patientId && name.trim().length < 2) || phoneBad || repeatBad} onClick={() => book.mutate(false)}><Icon name="check" />Book</button>
         {err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}</div>
       {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.free})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
-import { useMe, useConfig, post, qc } from './api';
+import { useQuery } from '@tanstack/react-query';
+import { useMe, useConfig, post, get, qc } from './api';
 import { Avatar, Icon, NoAccess, ToastHost } from './ui';
 import { CommandPalette } from './palette';
 
@@ -8,20 +9,21 @@ export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
 }
 
-export type NavItem = { to: string; label: string; show: (c: (p: string) => boolean) => boolean };
+export type NavItem = { to: string; label: string; icon: string; group?: 'clinic'; show: (c: (p: string) => boolean) => boolean };
 export const NAV: NavItem[] = [
-  { to: '/overview', label: 'Overview', show: (c) => c('finance.read') },
-  { to: '/today', label: 'Today', show: (c) => c('encounter.complete') },
-  { to: '/queue', label: 'Front desk', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
-  { to: '/booking', label: 'Booking', show: (c) => c('visit.write') && c('appointment.read') },
-  { to: '/calendar', label: 'Calendar', show: (c) => c('appointment.read') },
-  { to: '/patients', label: 'Patients', show: (c) => c('patient.read') },
-  { to: '/worklist', label: 'Procedures', show: (c) => c('worklist.read') },
-  { to: '/pharmacy', label: 'Pharmacy', show: (c) => c('pharmacy.read') },
-  { to: '/expenses', label: 'Expenses', show: (c) => c('expense.read') },
-  { to: '/reports', label: 'Reports', show: (c) => c('report.daily') || c('finance.read') },
-  { to: '/settings', label: 'Settings', show: (c) => c('config.write') },
-  { to: '/platform', label: 'Clinics', show: (c) => c('platform.read') },
+  { to: '/overview', label: 'Dashboard', icon: 'home', show: (c) => c('finance.read') },
+  { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
+  { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
+  { to: '/calendar', label: 'Calendar', icon: 'calendar', show: (c) => c('appointment.read') },
+  { to: '/bookings', label: 'Bookings', icon: 'inbox', show: (c) => c('appointment.read') },
+  { to: '/booking', label: 'Quick book', icon: 'phone', show: (c) => c('visit.write') && c('appointment.read') },
+  { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
+  { to: '/worklist', label: 'Procedures', icon: 'clock', show: (c) => c('worklist.read') },
+  { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', group: 'clinic', show: (c) => c('pharmacy.read') },
+  { to: '/reports', label: 'Reports', icon: 'chart', group: 'clinic', show: (c) => c('report.daily') || c('finance.read') },
+  { to: '/expenses', label: 'Expenses', icon: 'wallet', group: 'clinic', show: (c) => c('expense.read') },
+  { to: '/settings', label: 'Settings', icon: 'gear', group: 'clinic', show: (c) => c('config.write') },
+  { to: '/platform', label: 'Clinics', icon: 'home', show: (c) => c('platform.read') },
 ];
 
 /** Where each role lands: the page that answers their first question of the day. */
@@ -44,15 +46,45 @@ export function Home() {
   return <Navigate to={homeFor(c, me.data?.tenantKind === 'platform')} replace />;
 }
 
+/** Left navigation. The dark pill slides to the active item, as the old top bar did. */
+function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => { const el = box.current?.querySelector<HTMLElement>('a.on'); setPill(el ? { top: el.offsetTop, height: el.offsetHeight } : null); };
+    measure(); document.fonts?.ready.then(measure); window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [active?.to, items.length]);
+  const link = (n: NavItem) => (
+    <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} className={`relative z-[1] flex items-center gap-3 rounded-full px-4 py-2.5 text-[14.5px] font-medium transition-colors duration-300 ${active?.to === n.to ? 'on text-white' : 'text-ink-2 hover:text-ink hover:bg-white/50'}`}>
+      <Icon name={n.icon} className="h-[18px] w-[18px]" /><span className="flex-1">{n.label}</span>
+      {n.to === '/bookings' && requests > 0 && <span className="rounded-full bg-clay px-2 text-[11px] font-bold leading-5 text-white" aria-label={`${requests} online requests`}>{requests}</span>}
+    </Link>
+  );
+  const main = items.filter((n) => !n.group); const clinicItems = items.filter((n) => n.group === 'clinic');
+  return (
+    <div className="flex h-full flex-col px-3.5 py-5">
+      <Link to="/" onClick={onNavigate} className="flex items-center gap-3 px-2 pb-5"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink text-lg font-bold text-white">{clinic.slice(0, 1)}</span><span className="text-[15px] font-semibold leading-tight line-clamp-2">{clinic}</span></Link>
+      <nav ref={box} className="relative flex flex-col gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
+        {pill && <span className="absolute left-0 right-0 rounded-full bg-ink" style={{ top: pill.top, height: pill.height, transition: 'top .45s var(--ease), height .45s var(--ease)' }} />}
+        {main.map(link)}
+        {clinicItems.length > 0 && <div className="px-4 pb-1 pt-4 text-[10.5px] font-bold uppercase tracking-[.1em] text-muted">Clinic</div>}
+        {clinicItems.map(link)}
+      </nav>
+      <div className="mt-auto flex items-center gap-2.5 border-t border-ink/8 px-2 pt-4">
+        <Avatar name={me.name} size="h-9 w-9 text-xs" />
+        <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-semibold">{me.name}</div><div className="truncate text-[11.5px] capitalize text-muted">{roles.join(' · ')}</div></div>
+        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon"><Icon name="logout" /></button>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const me = useMe(); const cfg = useConfig(); const nav = useNavigate(); const loc = useLocation();
   const [palette, setPalette] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
-  const pills = useRef<HTMLDivElement>(null);
-  const navBox = useRef<HTMLElement>(null);
-  const [more, setMore] = useState(false);
-  const checkMore = () => { const n = navBox.current; setMore(!!n && n.scrollWidth - n.clientWidth - n.scrollLeft > 8); };
-  const [pill, setPill] = useState<{ left: number; width: number } | null>(null);
+  const [drawer, setDrawer] = useState(false);
   const perms: string[] = me.data?.perms ?? [];
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
@@ -60,70 +92,58 @@ export function App() {
   const fit = loc.pathname === '/queue'; // table pages: the page stays put, only the table scrolls
   // A page you cannot use is not shown, and typing its address gets a clear "no access" instead of an empty screen.
   const sub = loc.pathname.split('/')[1] ?? '';
-  const pageRule = NAV.find((n) => n.to === '/' + sub) ?? (sub === 'encounter' ? { to: '', label: 'The consultation page', show: (x: (p: string) => boolean) => x('encounter.intake') } : null);
+  const pageRule = NAV.find((n) => n.to === '/' + sub) ?? (sub === 'encounter' ? { to: '', label: 'The consultation page', icon: '', show: (x: (p: string) => boolean) => x('encounter.intake') } : null);
   const blocked = !!pageRule && (platform ? pageRule.to !== '/platform' : pageRule.to === '/platform' || !pageRule.show(c));
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
+  const counts = useQuery({ queryKey: ['bookings', 'counts'], queryFn: () => get('/bookings/counts'), enabled: !!me.data && !platform && c('appointment.read'), refetchInterval: 30000 });
+  const requests = counts.data?.requests ?? 0;
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, []);
-  useLayoutEffect(() => { checkMore(); window.addEventListener('resize', checkMore); return () => window.removeEventListener('resize', checkMore); }, [items.length, me.data?.id]);
-  useLayoutEffect(() => {
-    const measure = () => { const el = pills.current?.querySelector<HTMLElement>('a.on'); setPill(el ? { left: el.offsetLeft, width: el.offsetWidth } : null); };
-    measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [active?.to, items.length, me.data?.id]);
+  useEffect(() => setDrawer(false), [loc.pathname]);
 
   if (me.isLoading) return <div className="min-h-dvh grid place-items-center text-muted text-sm anim-fade-in">Opening clinic…</div>;
   if (me.isError) { location.href = '/login'; return null; }
   const signOut = async () => { await post('/auth/logout'); qc.clear(); nav('/login'); };
   const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
   const roles: string[] = me.data.roles ?? [me.data.role];
-
-  const rail: { icon: string; tip: string; on?: () => void; to?: string; show: boolean }[] = [
-    { icon: 'search', tip: 'Search  ⌘K', on: () => setPalette(true), show: !platform },
-    { icon: 'plus', tip: 'Create', on: () => setPalette(true), show: !platform },
-    { icon: 'calendar', tip: 'Calendar', to: '/calendar', show: c('appointment.read') && !platform },
-    { icon: 'print', tip: 'Print this page', on: () => window.print(), show: true },
-    { icon: 'edit', tip: 'Settings', to: '/settings', show: c('config.write') },
-  ];
+  const side = { items, active, clinic, me: me.data, roles, requests, onSignOut: signOut };
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className="no-print fixed left-6 top-40 z-20 hidden md:flex w-12 flex-col items-center gap-1.5 rounded-full bg-ink py-3.5 text-[#cfcac0]" style={{ boxShadow: '0 24px 40px -18px rgba(23,25,26,.6)' }} aria-label="Quick actions">
-        {rail.filter((r) => r.show).map((r) => r.to
-          ? <Link key={r.tip} to={r.to} viewTransition aria-label={r.tip} data-tip={r.tip} className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name={r.icon} /></Link>
-          : <button key={r.tip} onClick={r.on} aria-label={r.tip} data-tip={r.tip} className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name={r.icon} /></button>)}
-        <i className="my-1 h-px w-5 bg-white/15" />
-        <button onClick={signOut} aria-label="Sign out" data-tip="Sign out" className="tip grid h-9 w-9 place-items-center rounded-full transition-colors duration-200 hover:bg-white/10 hover:text-white"><Icon name="logout" /></button>
+      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[244px] border-r border-white/80 bg-white/40 backdrop-blur-md md:block" aria-label="Main">
+        <Sidebar {...side} />
       </aside>
+      {drawer && (
+        <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(23,25,26,.34)', backdropFilter: 'blur(4px)' }} onClick={() => setDrawer(false)}>
+          <aside className="h-full w-[272px] max-w-[85vw] bg-[#F4F1EA] anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
+        </div>
+      )}
 
-      <div className={`mx-auto max-w-[1440px] px-4 pt-5 md:pl-[108px] md:pr-10 md:pt-7 ${fit ? 'pb-16 md:h-full md:flex md:flex-col md:pb-5' : 'pb-16'}`}>
-        <header className="no-print flex items-center gap-3 md:gap-5">
-          <Link to="/" className="flex items-center gap-3 min-w-0"><span className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-xl bg-ink text-xl font-bold text-white">{clinic.slice(0, 1)}</span><span className="truncate text-[19px] font-semibold">{clinic}</span></Link>
-          <span className="ml-auto" />
-          {!platform && <button onClick={() => setPalette(true)} className="hidden lg:flex h-10 min-w-[260px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white">
-            <Icon name="search" className="h-4 w-4" />Search patients<span className="kbd ml-auto">⌘K</span></button>}
-          {!platform && (c('visit.write')
-            ? <button onClick={() => nav('/queue?arrive=1')} aria-label="Check in" className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Check in</span></button>
-            : <button onClick={() => setPalette(true)} aria-label="Create" className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>)}
-          <div className="relative">
-            <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-[42px] w-[42px] text-sm" /></button>
-            {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
-          </div>
-        </header>
+      <div className={`md:pl-[244px] ${fit ? 'md:h-full' : ''}`}>
+        <div className={`mx-auto max-w-[1440px] px-4 pt-4 md:px-8 md:pt-6 ${fit ? 'pb-16 md:h-full md:flex md:flex-col md:pb-5' : 'pb-16'}`}>
+          <header className="no-print mb-5 flex items-center gap-2.5 md:mb-6 md:gap-4">
+            <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
+            <span className="truncate text-[17px] font-semibold md:hidden">{clinic}</span>
+            {!platform && <button onClick={() => setPalette(true)} className="hidden h-10 min-w-[280px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white lg:flex">
+              <Icon name="search" className="h-4 w-4" />Search patients or actions<span className="kbd ml-auto">⌘K</span></button>}
+            <span className="ml-auto" />
+            {!platform && <button onClick={() => setPalette(true)} aria-label="Search" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
+            {!platform && c('appointment.read') && <Link to="/bookings?tab=requests" aria-label={requests ? `${requests} booking requests` : 'Booking requests'} data-tip="Online requests" className="tip relative btn btn-ghost btn-icon">
+              <Icon name="bell" />{requests > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests}</span>}</Link>}
+            {!platform && (c('visit.write')
+              ? <button onClick={() => nav('/queue?arrive=1')} aria-label="Check in" className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Check in</span></button>
+              : <button onClick={() => setPalette(true)} aria-label="Create" className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>)}
+            <div className="relative md:hidden">
+              <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-10 w-10 text-sm" /></button>
+              {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
+            </div>
+          </header>
 
-        <nav ref={navBox} onScroll={checkMore} className="no-print no-scrollbar mt-5 mb-6 -mx-1 overflow-x-auto px-1 pb-1" style={more ? { WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 36px), transparent)', maskImage: 'linear-gradient(to right, #000 calc(100% - 36px), transparent)' } : undefined} aria-label="Sections">
-          <div ref={pills} className="relative inline-flex gap-1 rounded-full border border-white/75 bg-white/50 p-1">
-            {pill && <span className="absolute top-1 bottom-1 rounded-full bg-ink" style={{ left: pill.left, width: pill.width, transition: 'left .45s var(--ease), width .45s var(--ease)' }} />}
-            {items.map((n) => (
-              <Link key={n.to} to={n.to} viewTransition className={`relative z-[1] whitespace-nowrap rounded-full px-[18px] py-2.5 text-sm font-medium transition-colors duration-300 ${active?.to === n.to ? 'on text-white' : 'text-ink-2 hover:text-ink'}`}>{n.label}</Link>
-            ))}
-          </div>
-        </nav>
-
-        <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
+          <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
+        </div>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />

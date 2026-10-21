@@ -31,6 +31,15 @@ const PATHS: Record<string, string> = {
   home: 'M3 11 12 3l9 8M5 10v10h14V10',
   lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4',
   wallet: 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 3H8a2 2 0 0 0-2 2v2h12V5a2 2 0 0 0-2-2zM16 14h.01',
+  bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.8 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.8-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.8H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 2.8-1.2V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.8 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.8H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1.1z',
+  menu: 'M4 6h16M4 12h16M4 18h16',
+  repeat: 'M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3',
+  link: 'M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7',
+  copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+  message: 'M21 12a8 8 0 0 1-11.8 7L3 21l2-6.2A8 8 0 1 1 21 12z',
+  inbox: 'M22 12h-6l-2 3h-4l-2-3H2M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z',
+  globe: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
   stetho: 'M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4M20 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
 };
 export function Icon({ name, className = '' }: { name: keyof typeof PATHS | string; className?: string }) {
@@ -93,15 +102,18 @@ export function Stat({ label, value, sub, tone = '', delay = 0 }: { label: strin
 /** Segmented control with one dark pill that glides to the chosen option. */
 export function Segmented<T extends string>({ options, value, onChange }: { options: { value: T; label: string; count?: number; tone?: 'rose' }[]; value: T; onChange: (v: T) => void }) {
   const box = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; width: number } | null>(null);
+  const [pos, setPos] = useState<{ left: number; width: number; top: number; height: number } | null>(null);
   useLayoutEffect(() => {
-    const measure = () => { const el = box.current?.querySelector<HTMLElement>('button.on'); if (el) setPos({ left: el.offsetLeft, width: el.offsetWidth }); };
+    const measure = () => { const el = box.current?.querySelector<HTMLElement>('button.on'); if (el) setPos({ left: el.offsetLeft, width: el.offsetWidth, top: el.offsetTop, height: el.offsetHeight }); };
+    // A ResizeObserver also catches the box reflowing when its header wraps, which a window resize misses.
+    const ro = typeof ResizeObserver !== 'undefined' && box.current ? new ResizeObserver(measure) : null;
+    if (ro && box.current) { ro.observe(box.current); box.current.querySelectorAll('button').forEach((b) => ro.observe(b)); }
     measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
-    return () => window.removeEventListener('resize', measure);
+    return () => { window.removeEventListener('resize', measure); ro?.disconnect(); };
   }, [value, options.length, options.map((o) => o.count).join(',')]);
   return (
     <div className="seg" ref={box}>
-      {pos && <span className="seg-pill" style={{ left: pos.left, width: pos.width }} />}
+      {pos && <span className="seg-pill" style={{ left: pos.left, width: pos.width, top: pos.top, height: pos.height, bottom: 'auto' }} />}
       {options.map((o) => (
         <button key={o.value} type="button" onClick={() => onChange(o.value)} className={value === o.value ? 'on' : ''} style={o.tone === 'rose' && value !== o.value ? { color: 'var(--color-rose)' } : undefined}>
           {o.label}{o.count !== undefined && <span className="ml-1.5 opacity-60 font-medium">{o.count}</span>}

@@ -125,7 +125,7 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
   .seg > button { @apply relative z-[1] rounded-full px-4 py-2 text-[13px] font-semibold text-muted; transition: color 0.3s var(--ease); }
   .seg > button.on { @apply text-white; }
   .seg > button:not(.on):hover { @apply text-ink; }
-  .seg-pill { @apply absolute z-0 rounded-full bg-ink; top: 3px; bottom: 3px; transition: left 0.45s var(--ease), width 0.45s var(--ease); }
+  .seg-pill { @apply absolute z-0 rounded-full bg-ink; top: 3px; bottom: 3px; transition: left 0.45s var(--ease), width 0.45s var(--ease), top 0.45s var(--ease); }
 
   .row { @apply flex items-center gap-3 px-4 py-3 border-t border-ink/7 first:border-t-0; transition: background-color 0.15s var(--ease); }
   .row:hover { background: rgba(255, 255, 255, 0.5); }

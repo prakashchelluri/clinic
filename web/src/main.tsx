@@ -20,6 +20,9 @@ import { Settings } from './pages/Settings';
 import { Calendar } from './pages/Calendar';
 import { Platform } from './pages/Platform';
 import { Expenses } from './pages/Expenses';
+import { Bookings } from './pages/Bookings';
+import { PublicBook } from './pages/PublicBook';
+import { PatientLink } from './pages/PatientLink';
 import { NotFound } from './ui';
 
 createRoot(document.getElementById('root')!).render(
@@ -29,6 +32,8 @@ createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/print/:id" element={<PrintRx />} />
+          <Route path="/book/:slug" element={<PublicBook />} />
+          <Route path="/a/:slug/:token" element={<PatientLink />} />
           <Route element={<App />}>
             <Route index element={<Home />} />
             <Route path="/overview" element={<Overview />} />
@@ -43,6 +48,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/calendar" element={<Calendar />} />
+            <Route path="/bookings" element={<Bookings />} />
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/platform" element={<Platform />} />
             <Route path="*" element={<NotFound />} />

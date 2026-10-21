@@ -11,6 +11,7 @@ const ago = (iso: string) => { const m = minsSince(iso); return m < 1 ? 'just no
 export function Overview() {
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['overview'], queryFn: () => get('/overview'), refetchInterval: 15000 });
+  const counts = useQuery({ queryKey: ['bookings', 'counts'], queryFn: () => get('/bookings/counts'), refetchInterval: 30000 });
   const [range, setRange] = useState<'7' | '30'>('30');
   const [hover, setHover] = useState<number | null>(null);
   const d = q.data;
@@ -34,6 +35,13 @@ export function Overview() {
         <Kpi icon="rupee" value={<Num value={d.today.collectedPaise} format={money} />} label={d.today.byMethod.length ? d.today.byMethod.map((m: any) => `${m.method} ${money(m.totalPaise)}`).join(' · ') : 'Collected today'} />
         <Kpi icon="clock" value={<><Num value={d.today.waiting} /> <span className="text-[15px] font-medium text-muted">waiting</span></>} label={d.today.waiting ? `Longest ${d.today.longestWaitMin} min` : 'Nobody waiting'} />
       </div>
+
+      {(counts.data?.requests > 0 || counts.data?.unconfirmed > 0) && (
+        <div className="mb-5 flex flex-wrap gap-3 anim-fade-up" style={{ animationDelay: '30ms' }}>
+          {counts.data.requests > 0 && <button className="glass flex items-center gap-3 !rounded-[20px] px-4 py-3 text-left transition-shadow hover:shadow-md" onClick={() => nav('/bookings?tab=requests')}><Icon name="inbox" className="h-5 w-5 text-clay" /><span><b>{counts.data.requests} online request{counts.data.requests === 1 ? '' : 's'}</b><span className="block text-xs text-muted">waiting for approval</span></span><Icon name="chevR" className="ml-2 h-4 w-4 text-muted" /></button>}
+          {counts.data.unconfirmed > 0 && <button className="glass flex items-center gap-3 !rounded-[20px] px-4 py-3 text-left transition-shadow hover:shadow-md" onClick={() => nav('/bookings?tab=unconfirmed')}><Icon name="message" className="h-5 w-5 text-muted" /><span><b>{counts.data.unconfirmed} not yet confirmed</b><span className="block text-xs text-muted">upcoming bookings</span></span><Icon name="chevR" className="ml-2 h-4 w-4 text-muted" /></button>}
+        </div>
+      )}
 
       <section className="glass p-5 mb-5 anim-fade-up" style={{ animationDelay: '60ms' }}>
         <div className="flex items-center gap-3">
