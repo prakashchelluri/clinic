@@ -7,6 +7,7 @@ import { Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, toa
 import { RoutineModal, routineSummary } from '../routine';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
+import { PhotoCapture } from '../photos';
 
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
@@ -186,6 +187,7 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
 function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string; doc: string; practitioner: any; cfg: any; perms: string[]; me: any; grid: Grid }) {
   const cal = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 15000, enabled: !!doc });
   const [modal, setModal] = useState<null | 'routine' | 'break' | 'early' | 'editday'>(null);
+  const [cap, setCap] = useState<any>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); };
   const addBlock = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }), onSuccess: (_r, b: any) => { refresh(); toast(b.kind === 'leave' ? 'Marked away · reception sees it now' : 'Added · capacity adjusted'); }, onError: (e: any) => toast(errText(e), 'err') });
   const delBlock = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { refresh(); toast('Removed', 'info'); } });
@@ -254,12 +256,14 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
                       <button className="btn btn-sm btn-ghost" onClick={() => { const r = prompt('Reason for postponing?'); if (r !== null) setState.mutate({ id: p.id, state: 'postponed', reason: r }); }}>Postpone</button>
                     </div>
                   )}
+                  {can(perms, 'document.write') && !['cancelled', 'postponed'].includes(p.state) && <button className="btn btn-sm mt-2" onClick={() => setCap(p)}><Icon name="spark" className="h-3.5 w-3.5" />Photos</button>}
                 </div>
               ))}
           </Section>
         </div>
       </div>
 
+      {cap && <PhotoCapture patient={{ id: cap.patientId, fullName: cap.patient }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
       {modal === 'routine' && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setModal(null)} />}
       {modal === 'break' && <QuickBlock title="Add a break" defaultStart={firstStart ? toHHMM(Math.max(toMin(firstStart), 13 * 60)) : '13:00'} minutes={30} onSave={(s, e, note) => { addBlock.mutate({ kind: 'break', startTime: s, endTime: e, note: note || 'Break' }); setModal(null); }} onClose={() => setModal(null)} />}
       {modal === 'early' && lastEnd && <QuickBlock title="Leaving early" subtitle="From what time are you not available?" defaultStart={toHHMM(toMin(lastEnd) - 60)} fixedEnd={lastEnd} onSave={(s, e) => { addBlock.mutate({ kind: 'other', startTime: s, endTime: e, note: 'Leaving early' }); setModal(null); }} onClose={() => setModal(null)} />}

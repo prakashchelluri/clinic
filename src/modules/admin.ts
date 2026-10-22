@@ -15,6 +15,7 @@ const clinicRoles = async (tx: any, tenantId: string) => rolesFor((await tx.sele
 export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/clinic', 'config.write', async (req, tx) => {
     const body = z.object({ name: Name.optional(), settings: z.record(z.string(), z.any()).optional() }).parse(req.body);
+    if (body.settings?.photos?.areas !== undefined) body.settings.photos.areas = z.array(z.string().trim().min(1).max(40)).min(1).max(40).parse(body.settings.photos.areas);
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
     const [row] = await tx.update(tenant).set({ ...(body.name ? { name: body.name } : {}), ...(body.settings ? { settings: deepMerge(cur.settings, body.settings) } : {}) }).where(eq(tenant.id, req.ctx.tenantId)).returning();
     await emit(tx, req.ctx, 'clinic.updated', 'tenant', row.id, body);

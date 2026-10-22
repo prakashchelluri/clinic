@@ -6,9 +6,9 @@ import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInpu
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
-import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab } from './SettingsScheduling';
+import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'medicines' | 'procedures' | 'fees';
+type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'medicines' | 'procedures' | 'photos' | 'fees';
 type TabDef = [Tab, string, string, string];
 const GROUPS: [string, TabDef[]][] = [
   ['Practice', [
@@ -28,6 +28,7 @@ const GROUPS: [string, TabDef[]][] = [
     ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses'],
     ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
     ['procedures', 'Procedures', 'stetho', 'Catalogue, duration, room needs'],
+    ['photos', 'Photo areas', 'spark', 'Body areas for clinical photos'],
   ]],
   ['Billing', [
     ['fees', 'Fees', 'rupee', 'Visit categories and amounts'],
@@ -66,6 +67,7 @@ export function Settings() {
           {tab === 'rules' && <BookingRulesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'online' && <OnlineBookingTab cfg={cfg} onSaved={refresh} />}
           {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
           {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
           {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
           {tab === 'roles' && <RolesTab onSaved={refresh} />}

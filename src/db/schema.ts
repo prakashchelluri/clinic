@@ -322,7 +322,12 @@ export const document = pgTable('document', {
   storageKey: text('storage_key').notNull(),
   note: text('note'),
   uploadedBy: uuid('uploaded_by').notNull(),
-}, (t) => [index('doc_patient').on(t.tenantId, t.patientId)]);
+  // clinical photos: where on the body, which angle, and the procedure sitting they were taken at
+  area: text('area'),
+  view: text('view'),                         // front | left | right | back | closeup
+  procedureSessionId: uuid('procedure_session_id'),
+  takenAt: ts('taken_at').notNull().defaultNow(),
+}, (t) => [index('doc_patient').on(t.tenantId, t.patientId), index('doc_photo_area').on(t.tenantId, t.patientId, t.area)]);
 
 export const numberingSequence = pgTable('numbering_sequence', {
   tenantId: uuid('tenant_id').notNull(),

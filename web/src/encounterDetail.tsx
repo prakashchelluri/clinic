@@ -72,7 +72,7 @@ export function UploadButton({ patientId, encounterId, recommendationId, kind = 
       <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (ev) => {
         const f = ev.target.files?.[0]; if (!f) return;
         const dataBase64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
-        try { await post('/documents', { patientId, encounterId, recommendationId, kind: f.type.startsWith('image/') && kind === 'report' ? 'photo' : kind, title: f.name, mime: f.type, dataBase64 }); onDone(); }
+        try { await post('/documents', { patientId, encounterId, recommendationId, kind, title: f.name, mime: f.type, dataBase64 }); onDone(); }
         catch (e: any) { alert(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF are accepted' : 'Upload failed'); }
         ev.target.value = '';
       }} />

@@ -258,3 +258,37 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
     </div>
   );
 }
+
+/* ---------------- Photo areas ---------------- */
+const STOCK_AREAS = ['Face', 'Forehead', 'Cheeks', 'Chin', 'Upper lip', 'Nose', 'Scalp', 'Neck', 'Chest', 'Back', 'Arms', 'Hands', 'Underarms', 'Legs', 'Feet', 'Nails', 'Other'];
+export function PhotoAreasTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const [areas, setAreas] = useState<string[]>(cfg.tenant.settings?.photos?.areas ?? STOCK_AREAS);
+  const [add, setAdd] = useState('');
+  const clean = add.trim();
+  const dup = !!clean && areas.some((a) => a.toLowerCase() === clean.toLowerCase());
+  const doAdd = () => { if (!clean || dup || clean.length > 40 || areas.length >= 40) return; setAreas([...areas, clean]); setAdd(''); };
+  const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= areas.length) return; const n = [...areas]; [n[i], n[j]] = [n[j], n[i]]; setAreas(n); };
+  const m = useMutation({ mutationFn: () => save({ photos: { areas } }), onSuccess: () => { toast('Photo areas saved'); onSaved(); }, onError: (e) => toast(errText(e), 'err') });
+  return (
+    <div className="space-y-4">
+      <div className="text-sm text-muted">The body areas staff pick when taking clinical photos. Photos of the same area line up with each other and can be compared. Staff can still add a one-off area while taking photos.</div>
+      <Section title={<>Areas <span className="font-normal text-muted">· {areas.length}</span></>}>
+        {areas.length === 0 ? <div className="p-4 text-sm text-muted">No areas. Add at least one.</div> : areas.map((a, i) => (
+          <div key={a} className="row">
+            <span className="flex-1 text-sm font-medium">{a}</span>
+            <button className="btn btn-ghost btn-icon" aria-label={`Move ${a} up`} disabled={i === 0} onClick={() => move(i, -1)}><Icon name="up" className="h-3.5 w-3.5" /></button>
+            <button className="btn btn-ghost btn-icon" aria-label={`Move ${a} down`} disabled={i === areas.length - 1} onClick={() => move(i, 1)}><Icon name="up" className="h-3.5 w-3.5 rotate-180" /></button>
+            <button className="btn btn-ghost btn-icon" aria-label={`Remove ${a}`} onClick={() => setAreas(areas.filter((x) => x !== a))}><Icon name="x" className="h-3.5 w-3.5" /></button>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 border-t border-line/60 p-3">
+          <input aria-label="New area" className={`input ${dup ? '!border-rose' : ''}`} maxLength={40} placeholder="e.g. Left knee" value={add} onChange={(e) => setAdd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doAdd()} />
+          <button className="btn" disabled={!clean || dup || areas.length >= 40} onClick={doAdd}><Icon name="plus" className="h-3.5 w-3.5" />Add</button>
+        </div>
+        {dup && <div className="px-4 pb-3 text-xs text-rose">“{clean}” is already in the list.</div>}
+        {areas.length >= 40 && <div className="px-4 pb-3 text-xs text-muted">That is the most areas the list can hold (40).</div>}
+      </Section>
+      <div className="flex justify-between gap-2"><button className="btn btn-ghost" onClick={() => setAreas(STOCK_AREAS)}>Use the standard list</button><button className="btn btn-primary" disabled={m.isPending || areas.length === 0} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
+    </div>
+  );
+}

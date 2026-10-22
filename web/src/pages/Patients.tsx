@@ -5,6 +5,7 @@ import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, money, toast, NumInput } from '../ui';
 import { EncounterModal, DocList, UploadButton, joinList } from '../encounterDetail';
+import { PhotoTimeline } from '../photos';
 
 export function Patients() {
   const { id } = useParams(); const nav = useNavigate(); const { perms } = useOutletContext<any>();
@@ -49,6 +50,7 @@ function Timeline({ id }: { id: string }) {
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
   const { patient: p, encounters, recommendations, charges, outstandingPaise, visits } = t.data;
   const openPlans = recommendations.filter((r: any) => !['done', 'cancelled'].includes(r.status));
+  const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo');
   return (
     <div className="space-y-4">
       <div className="card anim-fade-up">
@@ -75,14 +77,16 @@ function Timeline({ id }: { id: string }) {
         )}
       </div>
 
+      <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Section title="Open plans" delay={60}>
           {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
             openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
         </Section>
-        <Section title={<>Reports & photos <span className="text-muted font-normal">· {(docs.data ?? []).length}</span></>} delay={90}
+        <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>} delay={90}
           aside={can(perms, 'document.write') && <UploadButton patientId={id} onDone={() => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Uploaded'); }} />}>
-          <div className="p-3">{(docs.data ?? []).length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and clinical photos. Upload from a phone camera or a PDF.</div> : <DocList docs={docs.data} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
+          <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos above.</div> : <DocList docs={reports} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
         </Section>
       </div>
 

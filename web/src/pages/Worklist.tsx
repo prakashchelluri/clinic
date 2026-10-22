@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, patch, post, qc, today, errText } from '../api';
 import { can } from '../App';
+import { PhotoCapture } from '../photos';
 import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast } from '../ui';
 
 const OUTCOMES = ['Will come', 'Wants another date', 'No answer', 'Wrong number', 'Declined', 'Done elsewhere'];
@@ -19,6 +20,7 @@ export function Worklist() {
   const nav = useNavigate();
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: () => { qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
   const [scheduling, setScheduling] = useState<any>(null);
+  const [cap, setCap] = useState<any>(null);
   const t = today();
   const list = kind === 'procedure' ? proc : kind === 'followup' ? fu : inv;
   const rows: any[] = list.data ?? [];
@@ -30,13 +32,14 @@ export function Worklist() {
       </PageHeader>
       {kind === 'procedure' && (sessions.data ?? []).length > 0 && (
         <div className="card anim-fade-up mb-4 flex items-center gap-3 flex-wrap text-sm"><Icon name="stetho" className="h-4 w-4 text-sky" /><span className="font-medium">Today in the rooms:</span>
-          {(sessions.data ?? []).map((s: any) => <Chip key={s.id} tone="sky">{s.startTime} {s.patient.fullName} · {s.room ?? 'no room'}</Chip>)}
+          {(sessions.data ?? []).map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><Chip tone="sky">{s.startTime} {s.patient.fullName} · {s.room ?? 'no room'}</Chip>{can(perms, 'document.write') && !['cancelled', 'postponed'].includes(s.state) && <button className="btn btn-ghost btn-icon !h-8 !w-8" aria-label={`Take photos for ${s.patient.fullName}`} data-tip="Photos" onClick={() => setCap(s)}><Icon name="spark" className="h-3.5 w-3.5" /></button>}</span>)}
           <a className="btn btn-sm ml-auto" href="/calendar">Open calendar<Icon name="chevR" className="h-3.5 w-3.5" /></a></div>
       )}
       <Section>
         {list.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <Empty icon="check" title="Nothing pending" hint="New recommendations appear here the moment the doctor completes an encounter." /> :
           rows.map((r, i) => <Row key={r.id} r={r} i={i} today={t} canWrite={can(perms, 'worklist.write')} onUpdate={(b) => upd.mutate({ id: r.id, ...b })} onOpen={() => nav(`/patients/${r.patient.id}`, { viewTransition: true })} onSchedule={() => setScheduling(r)} />)}
       </Section>
+      {cap && <PhotoCapture patient={{ id: cap.patient.id, fullName: cap.patient.fullName }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
       {scheduling && <ScheduleModal rec={scheduling} onClose={() => { setScheduling(null); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['psessions-upcoming'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
     </div>
   );
