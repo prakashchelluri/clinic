@@ -1,15 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, desc } from 'drizzle-orm';
-import { mkdirSync, writeFileSync, createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { document, recommendation, patient, procedureSession, procedureCatalog, practitioner, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
+import { putFile, getFile, deleteFile } from '../lib/storage.js';
 
-// ponytail: files on local disk under UPLOAD_DIR; swap for S3 with the same storageKey when hosting needs it.
-const ROOT = process.env.UPLOAD_DIR ?? './data/uploads';
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 export const PHOTO_VIEWS = ['front', 'left', 'right', 'back', 'closeup'] as const;
 export const DEFAULT_PHOTO_AREAS = ['Face', 'Forehead', 'Cheeks', 'Chin', 'Upper lip', 'Nose', 'Scalp', 'Neck', 'Chest', 'Back', 'Arms', 'Hands', 'Underarms', 'Legs', 'Feet', 'Nails', 'Other'];
@@ -79,8 +77,7 @@ export function documentRoutes(app: FastifyInstance) {
       title: body.title, mime: body.mime, sizeBytes: bytes.length, storageKey: 'pending', note: body.note, uploadedBy: req.ctx.userId,
       area: body.kind === 'photo' ? body.area ?? null : null, view: body.kind === 'photo' ? body.view ?? null : null, procedureSessionId: body.procedureSessionId ?? null }).returning();
     const key = path.posix.join(t, body.patientId, `${row.id}.${ext}`);
-    mkdirSync(path.join(ROOT, t, body.patientId), { recursive: true });
-    writeFileSync(path.join(ROOT, key), bytes);
+    await putFile(key, bytes, body.mime); // inside the transaction: if storage fails, no record is left pointing at nothing
     await tx.update(document).set({ storageKey: key }).where(eq(document.id, row.id));
     if (body.recommendationId) await tx.update(recommendation).set({ status: 'done' }).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'investigation')));
     await emit(tx, req.ctx, 'document.uploaded', 'document', row.id, { patientId: body.patientId, kind: body.kind, mime: body.mime, sizeBytes: bytes.length, area: body.area, procedureSessionId: body.procedureSessionId });
@@ -107,15 +104,16 @@ export function documentRoutes(app: FastifyInstance) {
     const doc = await withTenant(req.ctx.tenantId, req.ctx.userId, (tx) =>
       tx.select().from(document).where(and(eq(document.id, (req.params as any).id), eq(document.tenantId, req.ctx.tenantId))).then((r) => r[0]));
     if (!doc || !req.perms.some((p) => p === '*' || p === 'document.*' || p === 'document.read')) throw new HttpError(404, 'NOT_FOUND');
-    const file = path.join(ROOT, doc.storageKey);
-    if (!existsSync(file)) throw new HttpError(404, 'FILE_MISSING');
-    return reply.type(doc.mime).header('cache-control', 'private, max-age=3600').header('content-disposition', `inline; filename="${doc.title.replace(/[^\w. -]/g, '_')}"`).send(createReadStream(file));
+    const file = await getFile(doc.storageKey);
+    if (!file) throw new HttpError(404, 'FILE_MISSING');
+    return reply.type(doc.mime).header('cache-control', 'private, max-age=3600').header('content-disposition', `inline; filename="${doc.title.replace(/[^\w. -]/g, '_')}"`).send(file);
   });
 
   route(app, 'delete', '/documents/:id', 'document.write', async (req, tx) => {
     const [row] = await tx.delete(document).where(and(eq(document.id, (req.params as any).id), eq(document.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     await emit(tx, req.ctx, 'document.deleted', 'document', row.id, { patientId: row.patientId });
+    try { await deleteFile(row.storageKey); } catch (e) { req.log.warn({ err: e, key: row.storageKey }, 'stored file not deleted'); } // the record is gone either way
     return { ok: true };
   });
 }

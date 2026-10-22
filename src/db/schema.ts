@@ -309,7 +309,7 @@ export const expense = pgTable('expense', {
   voidedReason: text('voided_reason'),
 });
 
-// Uploaded files: lab reports, clinical photos, consent scans. Bytes live on disk (UPLOAD_DIR) or object storage later.
+// Uploaded files: lab reports, clinical photos, consent scans. Bytes live in object storage (R2/S3) or on local disk; see lib/storage.ts.
 export const document = pgTable('document', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
