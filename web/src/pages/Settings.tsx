@@ -107,6 +107,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div><label className="label">Daily OP number resets</label><div className="flex gap-1">{[['day+category', 'Per category (GEN-1, REN-1…)'], ['day', 'One sequence per day']].map(([v, l]) => <button key={v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div></div>
       </div>
       <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
+      <TestDataCard />
     </div>
   );
 }
@@ -320,5 +321,19 @@ function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         </Modal>
       )}
     </Section>
+  );
+}
+
+/** Owner-only: fill the clinic with realistic test data (patients, three weeks of bookings, requests, messages, procedure courses with photos). */
+function TestDataCard() {
+  const [result, setResult] = useState<any>(null);
+  const load = useMutation({ mutationFn: () => post('/dev/sample-bookings'), onSuccess: (r: any) => { setResult(r); qc.invalidateQueries(); toast('Test data loaded'); }, onError: (e: any) => toast(errText(e), 'err') });
+  return (
+    <div className="card space-y-3">
+      <div className="text-[11px] uppercase tracking-wider text-muted">Test data</div>
+      <div className="text-sm text-ink-2">Adds sample patients and visits, three weeks of bookings for every doctor, online requests to approve, repeat visits, patient messages, and two procedure courses with before/after photos. It also switches online booking on. Use it on a test clinic, not one with real patients.</div>
+      {result ? <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Loaded: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.requested} online requests, {result.series} repeat visits, {result.arrived} past visits, {result.no_show} no-shows, {result.sittings} procedure sittings, {result.photos} photos.</div>
+        : <button className="btn" disabled={load.isPending} onClick={() => { if (confirm('Load test data into this clinic? It cannot be removed in one step.')) load.mutate(); }}>{load.isPending ? 'Loading… (up to a minute)' : 'Load test data'}</button>}
+    </div>
   );
 }

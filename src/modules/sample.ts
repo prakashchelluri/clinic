@@ -5,11 +5,19 @@ import { patient, session, appointment, visit, encounter, prescriptionItem, reco
 import { route } from '../lib/route.js';
 import { nextNumber, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
+import { originOf } from '../lib/booking.js';
+import { loadBookingSample } from './sampleBookings.js';
 
 /** Demo data for a dermatology OP day in Rajahmundry. Owner-only; refuses to run twice. */
 export function sampleRoutes(app: FastifyInstance) {
   route(app, 'post', '/dev/sample-data', 'config.*', async (req, tx) => loadSample(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
   route(app, 'post', '/dev/sample-collections', 'config.*', async (req, tx) => backfillCollections(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
+  /** Everything at once for testers: the base sample if missing, then bookings, requests, series, messages, courses and photos. */
+  route(app, 'post', '/dev/sample-bookings', 'config.*', async (req, tx) => {
+    const t = req.ctx.tenantId;
+    const base = (await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.legacyId, 'SAMPLE'))).limit(1)).length ? null : await loadSample(tx, t, req.ctx.userId, req.ctx.timezone);
+    return { base, ...(await loadBookingSample(tx, t, req.ctx.userId, req.ctx.timezone, originOf(req))) };
+  });
 }
 
 const PEOPLE: [string, string | null, 'M' | 'F', number, string][] = [

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, qc, errText } from './api';
 import { Chip, Empty, Icon, Section, Skeleton, toast } from './ui';
@@ -102,7 +103,7 @@ export function PhotoCapture({ patient, sitting, onClose }: { patient: { id: str
   };
   const addArea = () => { const a = custom.trim().slice(0, 40); if (a) { setArea(a); setAdding(false); } };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1011] text-white anim-fade-in" role="dialog" aria-label="Take photos">
       <div className="flex items-center gap-3 px-4 pb-2 pt-4" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <button className="grid h-10 w-10 place-items-center rounded-full bg-white/15" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
@@ -141,7 +142,7 @@ export function PhotoCapture({ patient, sitting, onClose }: { patient: { id: str
         </div>
       </>)}
     </div>
-  );
+  , document.body);
 }
 
 /* ---------------- Timeline ---------------- */
@@ -223,7 +224,7 @@ export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b:
   const [mode, setMode] = useState<'side' | 'slider'>('side'); const [x, setX] = useState(50);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (mode === 'slider' && e.key === 'ArrowLeft') setX((v) => Math.max(0, v - 5)); if (mode === 'slider' && e.key === 'ArrowRight') setX((v) => Math.min(100, v + 5)); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [mode, onClose]);
   const tag = (p: any, which: string) => <div className="absolute left-3 top-3 rounded-xl bg-black/55 px-3 py-2 text-sm leading-tight text-white"><b>{which}</b> · {shortDay(p.takenAt)}<div className="text-xs text-white/70">{p.sitting ? `sitting ${p.sitting.sittingNo}${p.sitting.of ? ` of ${p.sitting.of}` : ''}` : 'no sitting'} · {viewLabel(p.view)}</div></div>;
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col gap-3 bg-[#141516] p-3 text-white anim-fade-in sm:p-6" role="dialog" aria-label="Compare photos">
       <div className="flex flex-wrap items-center gap-3">
         <button className="grid h-10 w-10 place-items-center rounded-full bg-white/15" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
@@ -245,7 +246,7 @@ export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b:
       )}
       <div className="text-center text-xs text-white/60">{mode === 'slider' ? 'Drag the slider or use the arrow keys · ' : ''}Photos stay inside the clinic record</div>
     </div>
-  );
+  , document.body);
 }
 
 /* ---------------- One photo: view, re-tag, remove ---------------- */
@@ -257,7 +258,7 @@ function PhotoViewer({ photo, list, areas, canWrite, patientId, onClose, onMove 
   const save = useMutation({ mutationFn: () => patch(`/documents/${photo.id}`, { area: area.trim() || null, view, note: note.trim() || null }), onSuccess: (r: any) => { refresh(patientId); toast('Photo updated'); onMove({ ...photo, ...r }); }, onError: (e) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: () => api('DELETE', `/documents/${photo.id}`), onSuccess: () => { refresh(patientId); toast('Photo removed', 'info'); onClose(); }, onError: (e) => toast(errText(e), 'err') });
   const dirty = (area.trim() || null) !== (photo.area ?? null) || view !== (photo.view ?? 'front') || (note.trim() || null) !== (photo.note ?? null);
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col bg-[#141516] text-white anim-fade-in lg:flex-row" role="dialog" aria-label="Photo">
       <div className="relative min-h-[50vh] flex-1">
         <img src={fileUrl(photo.id)} alt={`${photo.area ?? 'Photo'}, ${viewLabel(photo.view)}`} className="absolute inset-0 h-full w-full object-contain" />
@@ -275,5 +276,5 @@ function PhotoViewer({ photo, list, areas, canWrite, patientId, onClose, onMove 
         </>) : <div className="text-sm text-white/80">{photo.area ?? 'Untagged'} · {viewLabel(photo.view)}{photo.note ? <div className="mt-2">{photo.note}</div> : null}</div>}
       </div>
     </div>
-  );
+  , document.body);
 }

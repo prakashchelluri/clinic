@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, errText, ApiError, today } from './api';
@@ -35,7 +36,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
   const arriveEarly = cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 35;
   const warnAt = cfg?.tenant.settings.booking?.noShowWarnAt ?? 2;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-40 anim-fade-in" style={{ background: 'rgba(28,27,25,.28)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
       <aside role="dialog" aria-label="Booking details" className="absolute inset-y-0 right-0 flex w-full max-w-[420px] flex-col gap-4 overflow-y-auto bg-[#FBFAF7] p-5 anim-slide-in sm:p-6" style={{ boxShadow: '-30px 0 60px -30px rgba(40,30,20,.45)' }} onClick={(e) => e.stopPropagation()}>
         {!a ? <Skeleton rows={6} /> : (<>
@@ -113,7 +114,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
         {q.isError && <div className="text-sm text-rose">{errText(q.error)}</div>}
       </aside>
     </div>
-  );
+  , document.body);
 }
 
 /** Pick a new window: a date, then that doctor's windows with room. */
