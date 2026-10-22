@@ -9,7 +9,7 @@ import { Overview } from './pages/Overview';
 import { Today } from './pages/Today';
 import { Login } from './pages/Login';
 import { FrontDesk } from './pages/FrontDesk';
-import { Booking } from './pages/Booking';
+import { Navigate } from 'react-router';
 import { Patients } from './pages/Patients';
 import { Encounter } from './pages/Encounter';
 import { Worklist } from './pages/Worklist';
@@ -39,7 +39,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/overview" element={<Overview />} />
             <Route path="/today" element={<Today />} />
             <Route path="/queue" element={<FrontDesk />} />
-            <Route path="/booking" element={<Booking />} />
+            <Route path="/booking" element={<Navigate to="/calendar?book=1" replace />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:id" element={<Patients />} />
             <Route path="/encounter/:id" element={<Encounter />} />

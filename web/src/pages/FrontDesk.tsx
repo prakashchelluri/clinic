@@ -105,7 +105,7 @@ export function FrontDesk() {
       <tr key={a.id} className="anim-fade-up opacity-70"><td className="pl-4 font-semibold">{a.window.startTime}</td>
         <td><b>{a.patient.fullName}</b><div className="text-xs text-muted">{a.patient.phone ?? ''}</div></td>
         <td><Chip tone="rose">no-show</Chip></td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">Did not arrive</td>
-        <td className="text-right pr-4">{canDesk && <button className="btn btn-sm" onClick={() => nav('/booking')}>Rebook</button>}</td></tr>); }
+        <td className="text-right pr-4">{canDesk && <button className="btn btn-sm" onClick={() => nav(`/calendar?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>}</td></tr>); }
     const v = r.v; const due = v.due.reduce((s: number, c: any) => s + c.amountPaise, 0); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
     return (
       <tr key={v.id} className={`anim-fade-up ${due ? 'bg-rose-soft/40' : handled || left ? 'opacity-70' : ''}`}><td className="pl-4 serif text-lg">{v.opNumber}</td>
@@ -145,7 +145,7 @@ export function FrontDesk() {
           {(can(perms, 'report.daily') || can(perms, 'finance.read')) && <div style={{ ['--i' as any]: 6 }} className="rounded-[22px] border border-white/80 bg-white/35 px-4 py-3.5"><div className="text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Collected</div><div className="mt-1 text-[28px] font-semibold leading-none tracking-tight text-sage"><Num value={collected} format={money} /></div><div className="mt-1.5 text-xs text-muted truncate">{(d.payments ?? []).length ? d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : 'nothing yet'}</div></div>}
         </div>
 
-        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={() => nav('/booking')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+        {tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
           <div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm md:min-w-[760px] stack-on-phone">
             <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
             <tbody>
@@ -188,7 +188,7 @@ const weekdayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateStrin
 /** History across days. The controls sit on the tab row (search, one Filters dropdown, print, export); the date is a column. */
 const PERIODS: [string, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']];
 const SHOWS: [string, string][] = [['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']];
-function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; onBook: () => void; slot: HTMLElement | null }) {
+function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; onBook: (p?: any) => void; slot: HTMLElement | null }) {
   const { perms } = useOutletContext<Ctx>();
   const nav = useNavigate();
   const [period, setPeriod] = useState('7');
@@ -244,7 +244,7 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
                 <div className="flex flex-wrap gap-1">{r.recommendations.length ? r.recommendations.map((x: any) => <Chip key={x.id} tone={x.kind === 'procedure' ? 'sky' : x.kind === 'investigation' ? 'clay' : 'amber'}>{x.kind === 'procedure' ? x.procedure ?? 'Procedure' : x.kind === 'investigation' ? `Test: ${x.notes}` : `Review ${x.dueOn ? fmtDate(x.dueOn) : ''}`}</Chip>) : <span className="text-muted">Medicines only</span>}</div>)}
                 {adj && <div className="mt-1"><Chip tone="amber">{adj.status}{adj.reason ? ` · ${adj.reason}` : ''}</Chip></div>}</td>
               <td className="text-right pr-4 whitespace-nowrap no-print">
-                {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={onBook}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.waive') ? <button className="btn btn-sm btn-primary" onClick={() => refund.mutate(paid)}>Refund</button> : <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>}
+                {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={() => onBook(r.patient)}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.waive') ? <button className="btn btn-sm btn-primary" onClick={() => refund.mutate(paid)}>Refund</button> : <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>}
                 {(r.kind === 'noshow' || r.outcome === 'left') && <> <MoreMenu items={[{ label: 'Open record', onClick: () => nav(`/patients/${r.patient.id}`) }, { label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }]} /></>}</td></tr>); })}
         </tbody></table></div>
         {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-ink/8">Showing the newest 500. Narrow the period or search to see older rows.</div>}

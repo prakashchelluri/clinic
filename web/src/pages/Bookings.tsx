@@ -33,7 +33,7 @@ export function Bookings() {
     <div>
       <PageHeader title="Bookings" subtitle="Online requests, upcoming visits and history. Click any booking for details and actions.">
         <Link to="/calendar" className="btn"><Icon name="calendar" />Calendar</Link>
-        {canWrite && <Link to="/booking" className="btn btn-accent"><Icon name="plus" />New booking</Link>}
+        {canWrite && <Link to="?book=1" className="btn btn-accent"><Icon name="plus" />New booking</Link>}
       </PageHeader>
 
       {tab !== 'requests' && reqs.length > 0 && (

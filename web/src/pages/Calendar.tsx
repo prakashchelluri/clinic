@@ -29,6 +29,7 @@ const savedView = (): View => {
 /** Calendar: day / week / all doctors / list. Windows come from the weekly routine; click a window to book, drag a name to move it. */
 export function Calendar() {
   const { cfg, perms, me } = useOutletContext<any>();
+  const navTo = useNavigate();
   const [day, setDay] = useState(today());
   const [picked, setDoc] = useState<string>('');
   // Config can arrive after the first render, so the default doctor is derived, not frozen into state.
@@ -71,6 +72,7 @@ export function Calendar() {
           <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" /></button>
         </div>
         {day !== today() && <button className="btn btn-sm" onClick={() => setDay(today())}>Today</button>}
+        {canBook && <button className="btn btn-accent" onClick={() => navTo("?book=1")}><Icon name="plus" />New booking</button>}
         {view !== 'team' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
       </PageHeader>
 

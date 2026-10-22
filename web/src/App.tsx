@@ -1,9 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router';
+import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, qc } from './api';
 import { Avatar, Icon, NoAccess, ToastHost } from './ui';
 import { CommandPalette } from './palette';
+import { NewBooking } from './pages/Booking';
+import { refreshBookings } from './apptDrawer';
 
 export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
@@ -16,7 +18,6 @@ export const NAV: NavItem[] = [
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
   { to: '/calendar', label: 'Calendar', icon: 'calendar', show: (c) => c('appointment.read') },
   { to: '/bookings', label: 'Bookings', icon: 'inbox', show: (c) => c('appointment.read') },
-  { to: '/booking', label: 'Quick book', icon: 'phone', show: (c) => c('visit.write') && c('appointment.read') },
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', icon: 'clock', show: (c) => c('worklist.read') },
   { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', group: 'clinic', show: (c) => c('pharmacy.read') },
@@ -85,6 +86,8 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const closeBook = () => { const p = new URLSearchParams(params); ['book', 'patient', 'pname'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); };
   const perms: string[] = me.data?.perms ?? [];
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
@@ -145,6 +148,7 @@ export function App() {
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>
+      {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} onClose={closeBook} onDone={() => { refreshBookings(); closeBook(); }} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />
     </div>

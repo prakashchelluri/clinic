@@ -1,91 +1,59 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useOutletContext } from 'react-router';
-import { get, post, patch, qc, today, uuid, ApiError, errText, useConfig } from '../api';
-import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, PageHeader, Section, Skeleton, toast, NumInput } from '../ui';
+import { get, post, today, uuid, ApiError, errText, useConfig } from '../api';
+import { Avatar, Chip, Empty, Icon, Modal, Skeleton, toast, NumInput } from '../ui';
 
-/** Phone booking: pick a day, see windows with allocated/capacity, book with name + phone. */
-export function Booking() {
-  const { cfg, perms } = useOutletContext<any>();
+const shift = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+
+/**
+ * "New booking" from anywhere (sidebar pages open it with ?book=1): pick doctor, day and window, then the patient.
+ * It replaces the old Quick book page; clicking a window on the Calendar opens the same form directly.
+ */
+export function NewBooking({ cfg, me, initialPatient, onClose, onDone }: { cfg: any; me: any; initialPatient?: { id: string; name: string }; onClose: () => void; onDone: () => void }) {
+  const docs: any[] = cfg?.practitioners ?? [];
+  const [doc, setDoc] = useState<string>(me?.practitionerId ?? docs[0]?.id ?? '');
   const [day, setDay] = useState(today());
-  const [doc, setDoc] = useState('');
-  const sessions = useQuery({ queryKey: ['sessions', day, doc], queryFn: () => get(`/sessions?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 10000 });
-  const appts = useQuery({ queryKey: ['appointments', day], queryFn: () => get(`/appointments?day=${day}`) });
-  const [sel, setSel] = useState<any>(null);
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['sessions'] }); qc.invalidateQueries({ queryKey: ['appointments'] }); };
-  const copy = useMutation({ mutationFn: () => post('/sessions/copy', { fromDay: shift(day, -1), toDay: day }), onSuccess: () => { refresh(); toast('Windows copied'); } });
-  const addWin = useMutation({ mutationFn: (w: any) => post('/sessions', { ...w, day, branchId: cfg.branches[0].id }), onSuccess: refresh });
-  const setCap = useMutation({ mutationFn: ({ id, capacity }: any) => patch(`/sessions/${id}`, { capacity }), onSuccess: refresh });
-  const cancel = useMutation({ mutationFn: (id: string) => patch(`/appointments/${id}`, { status: 'cancelled' }), onSuccess: () => { refresh(); toast('Appointment cancelled', 'info'); } });
-  const writable = can(perms, 'appointment.write');
-  const total = (sessions.data ?? []).reduce((s: any, x: any) => ({ a: s.a + x.allocated, c: s.c + x.effectiveCapacity }), { a: 0, c: 0 });
-  const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
-
+  const [win, setWin] = useState<any>(null);
+  const ws = useQuery({ queryKey: ['sessions', day, doc], queryFn: () => get(`/sessions?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), enabled: !!day });
+  const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+  const windows: any[] = (ws.data ?? []).filter((w: any) => day > today() || w.endTime > now);
+  const pickDay = (d: string) => { if (d && d >= today()) { setDay(d); setWin(null); } };
   return (
-    <div>
-      <PageHeader title="Booking" subtitle={<>{dayLabel} · <b className="text-ink">{total.a}</b> of {total.c} places allocated</>}>
-        <div className="flex items-center gap-1 card !p-1 !rounded-full">
-          <button className="btn btn-ghost btn-icon" aria-label="Previous day" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" /></button>
-          <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
-          <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" /></button>
+    <Modal title="New booking" subtitle={initialPatient ? `For ${initialPatient.name}` : 'Doctor, day and window, then the patient'} onClose={onClose} width="max-w-xl">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {docs.length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => { setDoc(e.target.value); setWin(null); }}>{docs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+          <div className="flex items-center gap-1 card !p-1 !rounded-full">
+            <button className="btn btn-ghost btn-icon" aria-label="Previous day" disabled={day <= today()} onClick={() => pickDay(shift(day, -1))}><Icon name="chevL" /></button>
+            <input type="date" aria-label="Day" min={today()} className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => pickDay(e.target.value)} />
+            <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => pickDay(shift(day, 1))}><Icon name="chevR" /></button>
+          </div>
+          <span className="text-sm text-muted">{dayLabel(day)}</span>
         </div>
-        {(cfg?.practitioners ?? []).length > 1 && <select className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">All doctors</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
-        <a className="btn" href="/calendar"><Icon name="clock" />Doctor's day</a>
-        {writable && <AddWindow onAdd={(w) => addWin.mutate(w)} practitioners={cfg?.practitioners ?? []} />}
-      </PageHeader>
-
-      {sessions.isLoading ? <Skeleton rows={2} /> : sessions.data?.length === 0 ? (
-        <div className="card anim-fade-up"><Empty icon="calendar" title="No OP windows for this day" hint="Copy the previous day's plan or add windows one by one." />{writable && <div className="flex justify-center pb-4"><button className="btn" onClick={() => copy.mutate()}>Copy previous day's windows</button></div>}</div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
-          {(sessions.data ?? []).map((s: any, i: number) => {
-            const cap = s.effectiveCapacity; const pct = cap ? Math.min(100, Math.round((s.allocated / cap) * 100)) : 100;
-            const tone = s.free <= 0 ? 'rose' : s.free <= 2 ? 'amber' : 'sage';
-            return (
-              <button key={s.id} style={{ ['--i' as any]: i }} onClick={() => setSel(s)} className={`card card-hover text-left ${sel?.id === s.id ? '!border-clay ring-4 ring-clay/15' : ''}`}>
-                <div className="flex items-start justify-between"><div className="serif text-lg whitespace-nowrap">{s.startTime}<span className="text-muted text-sm"> – {s.endTime}</span></div><Chip tone={tone as any}>{s.allocated}/{cap}{cap !== s.capacity && <span className="opacity-60 line-through ml-1">{s.capacity}</span>}</Chip></div>
-                {s.reductions?.length > 0 && <div className="text-[11px] text-amber mt-1 flex items-center gap-1"><Icon name="clock" className="h-3 w-3" />{s.reductions.map((r: any) => `${r.note ?? r.kind} ${r.startTime}–${r.endTime}`).join(', ')}</div>}
-                <div className="h-1.5 bg-paper-2 rounded-full mt-3 overflow-hidden"><div className={`h-full rounded-full transition-all duration-500 ${tone === 'rose' ? 'bg-rose' : tone === 'amber' ? 'bg-amber' : 'bg-sage'}`} style={{ width: pct + '%' }} /></div>
-                <div className="text-xs text-muted mt-2 flex items-center gap-2"><span className="truncate">{cfg?.practitioners.find((p: any) => p.id === s.practitionerId)?.name ?? 'Any doctor'}</span>
-                  {writable && <span className="ml-auto flex gap-0.5"><button type="button" aria-label="One place fewer" className="btn btn-ghost btn-sm !px-3" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: Math.max(0, s.capacity - 1) }); }}>−</button><button type="button" aria-label="One place more" className="btn btn-ghost btn-sm !px-3" onClick={(e) => { e.stopPropagation(); setCap.mutate({ id: s.id, capacity: s.capacity + 1 }); }}>+</button></span>}</div>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
-        {sel && writable ? <BookForm key={sel.id} session={sel} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={refresh} /> : <div className="card anim-fade-in border-dashed text-sm">
-          <div className="serif text-lg mb-2">How booking works here</div>
-          <ol className="space-y-2 text-ink-2">
-            <li className="flex gap-3"><span className="chip chip-clay shrink-0">1</span><span>Each card is an <b>OP window</b>: one hour of the doctor's time with a practical capacity (for example 7 patients). It is not an exact appointment time.</span></li>
-            <li className="flex gap-3"><span className="chip chip-clay shrink-0">2</span><span>When a patient calls, <b>click a window with free places</b>, type their phone or name, and press Book. Only name and phone are needed on the call.</span></li>
-            <li className="flex gap-3"><span className="chip chip-clay shrink-0">3</span><span>Tell them the <b>arrive-by time</b> shown (35 minutes before the window) and that the wait can be 30–45 minutes.</span></li>
-            <li className="flex gap-3"><span className="chip chip-clay shrink-0">4</span><span>When they walk in, they appear on the <b>Front desk</b> page under “Not yet arrived”. Press Check in there to register, take the fee and add them to the live queue.</span></li>
-          </ol>
-          <div className="text-xs text-muted mt-3">Use − / + on a card to change today's capacity when the doctor has a procedure or a break. “+ Window” adds a block; on an empty day “Copy previous day” reuses yesterday's plan.</div>
-        </div>}
-        <Section title={<>Appointments <span className="text-muted font-normal">· {(appts.data ?? []).filter((a: any) => a.status !== 'cancelled').length}</span></>} delay={120}>
-          {appts.isLoading ? <Skeleton /> : (appts.data ?? []).length === 0 ? <Empty icon="calendar" title="No bookings yet" /> : (appts.data ?? []).map((a: any, i: number) => (
-            <div key={a.id} className={`row anim-fade-up ${a.status === 'cancelled' ? 'opacity-50' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
-              <span className="text-xs font-mono text-muted w-11">{a.window.startTime}</span>
-              <Avatar name={a.patient.fullName} size="h-8 w-8 text-[10px]" />
-              <div className="min-w-0 flex-1"><div className={`text-sm font-medium truncate ${a.status === 'cancelled' ? 'line-through' : ''}`}>{a.patient.fullName}</div><div className="text-xs text-muted">{a.patient.phone ?? ''}{a.note ? ` · ${a.note}` : ''}</div></div>
-              {a.overbooked && <Chip tone="amber">overbooked</Chip>}
-              <Chip tone={a.status === 'arrived' ? 'sage' : a.status === 'cancelled' ? 'rose' : ''}>{a.status}</Chip>
-              {['requested', 'booked', 'confirmed'].includes(a.status) && writable && <button className="btn btn-ghost btn-icon" title="Cancel" onClick={() => cancel.mutate(a.id)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
-            </div>))}
-        </Section>
+        {ws.isLoading ? <Skeleton rows={2} /> : windows.length === 0 ? <Empty icon="calendar" title="No windows left this day" hint="Try the next day, or another doctor." /> : (
+          <div role="radiogroup" aria-label="Window" className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            {windows.map((w) => {
+              const tone = w.free <= 0 ? 'rose' : w.free <= 2 ? 'amber' : 'sage';
+              return (
+                <button key={w.id} role="radio" aria-checked={win?.id === w.id} onClick={() => setWin(w)} className={`rounded-2xl border px-2 py-2.5 text-left transition-shadow ${win?.id === w.id ? 'border-ink bg-white ring-1 ring-ink' : 'border-white/90 bg-white/70 hover:bg-white'} ${w.effectiveCapacity === 0 ? 'opacity-50' : ''}`}>
+                  <div className="font-semibold">{w.startTime}</div>
+                  <Chip tone={tone as any} className="mt-1 !text-[10.5px]">{w.free > 0 ? `${w.free} free` : 'full'}</Chip>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {win && <BookForm key={win.id + (initialPatient?.id ?? '')} session={win} initialPatient={initialPatient} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 35} onDone={onDone} />}
       </div>
-    </div>
+    </Modal>
   );
 }
 
-export function BookForm({ session, arriveEarly, onDone }: { session: any; arriveEarly: number; onDone: () => void }) {
+export function BookForm({ session, arriveEarly, onDone, initialPatient }: { session: any; arriveEarly: number; onDone: () => void; initialPatient?: { id: string; name: string } }) {
   const cfg = useConfig().data;
   const services: any[] = (cfg?.services ?? []).filter((s: any) => !s.practitionerIds?.length || !session.practitionerId || s.practitionerIds.includes(session.practitionerId));
-  const [q, setQ] = useState(''); const [patientId, setPatientId] = useState<string | undefined>(); const [name, setName] = useState(''); const [phone, setPhone] = useState(''); const [note, setNote] = useState('');
+  const [q, setQ] = useState(''); const [patientId, setPatientId] = useState<string | undefined>(initialPatient?.id); const [name, setName] = useState(initialPatient?.name ?? ''); const [phone, setPhone] = useState(''); const [note, setNote] = useState('');
   const [serviceId, setServiceId] = useState<string>(''); const svcId = serviceId || services[0]?.id || '';
   const [repeat, setRepeat] = useState(false); const [everyWeeks, setEveryWeeks] = useState(2); const [count, setCount] = useState<number | string>(4);
   const [notify, setNotify] = useState(true);
@@ -139,19 +107,5 @@ export function BookForm({ session, arriveEarly, onDone }: { session: any; arriv
   );
 }
 
-function AddWindow({ onAdd, practitioners }: { onAdd: (w: any) => void; practitioners: any[] }) {
-  const [open, setOpen] = useState(false); const [w, setW] = useState({ startTime: '10:00', endTime: '11:00', capacity: 7, practitionerId: practitioners[0]?.id ?? null });
-  if (!open) return <button className="btn" onClick={() => setOpen(true)}><Icon name="plus" />Window</button>;
-  return (
-    <div className="card !p-2 !rounded-full flex items-center gap-1 text-sm anim-scale-in">
-      <input type="time" className="input !w-auto !py-1.5" value={w.startTime} onChange={(e) => setW({ ...w, startTime: e.target.value })} /><span className="text-muted">–</span>
-      <input type="time" className="input !w-auto !py-1.5" value={w.endTime} onChange={(e) => setW({ ...w, endTime: e.target.value })} />
-      <NumInput max={99} className="input !w-16 !py-1.5" value={w.capacity} onChange={(e) => setW({ ...w, capacity: Number(e.target.value) })} />
-      <select className="input !w-auto !py-1.5" value={w.practitionerId ?? ''} onChange={(e) => setW({ ...w, practitionerId: e.target.value || null })}><option value="">Any</option>{practitioners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      <button className="btn btn-sm btn-primary" onClick={() => { onAdd(w); setOpen(false); }}>Add</button><button className="btn btn-ghost btn-icon" onClick={() => setOpen(false)}><Icon name="x" /></button>
-    </div>
-  );
-}
 
-const shift = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const minus = (hhmm: string, min: number) => { const [h, m] = hhmm.split(':').map(Number); const t = h * 60 + m - min; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };

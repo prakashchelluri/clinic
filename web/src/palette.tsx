@@ -17,7 +17,7 @@ export function CommandPalette({ open, onClose, can }: { open: boolean; onClose:
   const search = useQuery({ queryKey: ['palette', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: open && q.trim().length >= 2 && can('patient.read') });
   const all: (Action | false)[] = [
     can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/queue?arrive=1' },
-    can('visit.write') && { key: 'B', label: 'Book an appointment', icon: 'calendar', hint: 'Pick a window', to: '/booking' },
+    can('visit.write') && { key: 'B', label: 'Book an appointment', icon: 'calendar', hint: 'Pick a window', to: '/calendar?book=1' },
     can('appointment.read') && { key: 'Q', label: 'Online booking requests', icon: 'inbox', hint: 'Approve or decline', to: '/bookings?tab=requests' },
     can('appointment.read') && { key: 'U', label: 'Unconfirmed bookings', icon: 'message', hint: 'Send reminders', to: '/bookings?tab=unconfirmed' },
     can('config.write') && { key: 'V', label: 'Visit types and online booking', icon: 'gear', hint: 'Settings', to: '/settings?tab=services' },
