@@ -85,10 +85,9 @@ export function Calendar() {
         </div>
         {day !== today() && <button className="btn btn-sm" onClick={() => setDay(today())}>Today</button>}
         {view !== 'team' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
-        {canEditDays && view !== 'team' && doc && <button className="btn" onClick={() => setAvail(day < today() ? today() : day)}><Icon name="clock" />Change availability</button>}
       </PageHeader>
 
-      {view === 'day' && <DayView day={day} doc={doc} practitioner={practitioner} cfg={cfg} perms={perms} me={me} grid={grid} />}
+      {view === 'day' && <DayView day={day} doc={doc} practitioner={practitioner} cfg={cfg} perms={perms} me={me} grid={grid} onAvailability={canEditDays && doc ? (d) => setAvail(d < today() ? today() : d) : undefined} />}
       {view === 'week' && <WeekView from={weekStart} doc={doc} docName={practitioner?.name} grid={grid} onOpenDay={(d) => { setDay(d); setView('day'); }} onAvailability={(d) => setAvail(d)} />}
       {avail && doc && <AvailabilityModal day={avail} doc={doc} docName={practitioner?.name ?? 'Doctor'} onRoutine={() => { setAvail(null); setRoutine(true); }} onEditDay={(d) => { setAvail(null); setEditDay(d); }} onClose={() => setAvail(null)} />}
       {editDay && doc && <EditDayModal day={editDay} practitionerId={doc} cfg={cfg} onClose={() => { setEditDay(null); refresh(); }} />}
@@ -213,7 +212,7 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
   );
 }
 
-function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string; doc: string; practitioner: any; cfg: any; perms: string[]; me: any; grid: Grid }) {
+function DayView({ day, doc, practitioner, cfg, perms, me, grid, onAvailability }: { day: string; doc: string; practitioner: any; cfg: any; perms: string[]; me: any; grid: Grid; onAvailability?: (day: string) => void }) {
   const cal = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 15000, enabled: !!doc });
   const [routine, setRoutine] = useState(false);
   const writable = can(perms, 'appointment.write') || me.practitionerId === doc;
@@ -228,7 +227,7 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
             {writable && !practitioner?.routine && <div className="flex justify-center pb-6"><button className="btn btn-primary" onClick={() => setRoutine(true)}><Icon name="spark" />Set weekly routine</button></div>}</div>
         ) : <TimeGrid wide px={1.3} minCol={320} grid={grid} cols={[{ key: day, day, head: null, windows: d.windows, blocks: d.blocks, procs: d.procedures.filter((p: any) => p.practitionerId === doc) }]} />}
       </div>
-      {d && <DayPanel d={d} grid={grid} />}
+      {d && <DayPanel d={d} grid={grid} onAvailability={onAvailability} />}
       {routine && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setRoutine(false)} />}
     </div>
   );
@@ -283,12 +282,11 @@ function DayPanel({ d, grid, onOpenDay, onAvailability }: { d: any; grid: Grid; 
   const n = d.windows.reduce((m: number, w: any) => m + (w.appointments?.length ?? 0), 0);
   return (
     <aside className="card-flat self-start p-4 anim-fade-up" aria-label={`${fullDay(d.day)} summary`}>
-      <div className="flex items-baseline gap-2"><b className="text-[16px]">{label(d.day, { weekday: 'short', day: 'numeric', month: 'short' })}</b>{d.day === today() && <span className="text-xs font-semibold text-clay">today</span>}</div>
+      <div className="flex items-baseline gap-2"><b className="text-[16px]">{label(d.day, { weekday: 'short', day: 'numeric', month: 'short' })}</b>{d.day === today() && <span className="text-xs font-semibold text-clay">today</span>}{onAvailability && grid.onRemoveBlock && d.day >= today() && <button className="btn btn-sm ml-auto" onClick={() => onAvailability(d.day)}><Icon name="clock" className="h-3.5 w-3.5" />Change availability</button>}</div>
       <div className="mt-3 rounded-2xl bg-paper px-3 py-2.5 text-sm">
         <div className="font-semibold">{away ? 'Away all day' : hours || 'Not working'}</div>
         <div className="text-xs text-muted">{d.blocks.length ? 'Changed for this day' : 'From the weekly routine'}</div>
         {d.blocks.map((b: any) => <div key={b.id} className="mt-1 flex items-center gap-2 text-xs"><span className="flex-1 truncate">{b.note ?? b.kind} · {b.startTime}–{b.endTime}</span>{grid.onRemoveBlock && <button className="font-semibold underline" onClick={() => grid.onRemoveBlock!(b)}>Undo</button>}</div>)}
-        {onAvailability && grid.onRemoveBlock && d.day >= today() && <button className="btn btn-sm mt-2" onClick={() => onAvailability(d.day)}>Change availability</button>}
       </div>
       <div className="mt-3 text-xs text-muted">{n} appointment{n === 1 ? '' : 's'} · {d.procedures.length} procedure{d.procedures.length === 1 ? '' : 's'}</div>
       <div className="mt-1 max-h-[420px] overflow-y-auto">
