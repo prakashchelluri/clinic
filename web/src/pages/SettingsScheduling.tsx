@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import QRCode from 'qrcode';
+import { openPrint } from '../printPreview';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, errText } from '../api';
 import { Chip, Empty, Icon, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise } from '../ui';
@@ -169,6 +171,7 @@ export function OnlineBookingTab({ cfg, onSaved }: { cfg: any; onSaved: () => vo
         <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-paper px-3 py-2.5 text-sm"><Icon name="globe" className="h-4 w-4 text-muted" /><span className="min-w-0 flex-1 truncate font-mono text-xs">{link}</span>
           <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(link).then(() => toast('Link copied'), () => toast(link, 'info'))}><Icon name="copy" className="h-3.5 w-3.5" />Copy</button>
           <a className="btn btn-sm" href={link} target="_blank" rel="noreferrer">Open</a></div>
+        <QrBlock link={link} clinic={cfg.tenant.name} />
         <div className="text-xs text-muted">Share it on WhatsApp, Google Maps and your clinic board. {online.length ? `${online.length} visit type${online.length === 1 ? ' is' : 's are'} offered online.` : <span className="text-amber">No visit type is marked “online” yet: set one under Visit types.</span>}</div>
       </div>
       <div className="card space-y-3">
@@ -289,6 +292,29 @@ export function PhotoAreasTab({ cfg, onSaved }: { cfg: any; onSaved: () => void 
         {areas.length >= 40 && <div className="px-4 pb-3 text-xs text-muted">That is the most areas the list can hold (40).</div>}
       </Section>
       <div className="flex justify-between gap-2"><button className="btn btn-ghost" onClick={() => setAreas(STOCK_AREAS)}>Use the standard list</button><button className="btn btn-primary" disabled={m.isPending || areas.length === 0} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
+    </div>
+  );
+}
+
+const escHtml = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+
+/** QR code for the booking page: patients scan it from the clinic board or a printout and land on the booking page. */
+function QrBlock({ link, clinic }: { link: string; clinic: string }) {
+  const [png, setPng] = useState('');
+  useEffect(() => { let on = true; QRCode.toDataURL(link, { width: 640, margin: 2, errorCorrectionLevel: 'M' }).then((u) => on && setPng(u), () => on && setPng('')); return () => { on = false; }; }, [link]);
+  const poster = () => openPrint({ title: 'Booking poster', html: `<!doctype html><title>Book online</title><style>@page{size:A4;margin:14mm}body{font-family:system-ui,sans-serif;text-align:center;color:#111;margin:0;padding:24px}h1{font-size:34px;margin:0 0 6px}p{margin:6px 0;color:#444}img{width:360px;height:360px;margin:22px auto;display:block}.u{font-family:monospace;font-size:14px;word-break:break-all}</style>
+<h1>${escHtml(clinic)}</h1><p style="font-size:20px"><b>Book your appointment online</b></p><p>Scan with your phone camera</p><img alt="QR code to book online" src="${png}"><p class="u">${escHtml(link)}</p>` });
+  return (
+    <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-paper px-4 py-3">
+      {png ? <img src={png} alt="QR code for the booking page" className="h-36 w-36 shrink-0 rounded-xl bg-white p-1.5" /> : <div className="h-36 w-36 shrink-0 rounded-xl bg-white/60" />}
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="font-semibold">Scan to book</div>
+        <div className="text-sm text-muted">Patients point their phone camera at this code and land on your booking page. Print it for the reception desk, the clinic door or a visiting card.</div>
+        <div className="flex flex-wrap gap-2">
+          <a className={`btn btn-sm ${png ? '' : 'pointer-events-none opacity-50'}`} href={png} download={`${clinic.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-booking-qr.png`}><Icon name="download" className="h-3.5 w-3.5" />Download</a>
+          <button className="btn btn-sm btn-primary" disabled={!png} onClick={poster}><Icon name="print" className="h-3.5 w-3.5" />Print poster</button>
+        </div>
+      </div>
     </div>
   );
 }
