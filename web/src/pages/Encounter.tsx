@@ -72,15 +72,15 @@ export function Encounter() {
           {me.role === 'assistant' && <Chip tone="sky">Intake mode · doctor reviews next</Chip>}
         </div>
         <div className="mt-2.5 flex gap-1.5 overflow-x-auto border-t border-line pt-2.5" role="navigation" aria-label="Jump to section">
-          {[...e.form.sections.map((x: any) => ({ key: x.key, title: x.title, done: Object.values(data[x.key] ?? {}).some((v: any) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '') })), ...(isDoctor ? [{ key: 'rx', title: 'Prescription', done: rx.some((i) => i.name) }, { key: 'recs', title: 'Follow-up', done: recs.length > 0 }] : [])].map((x) => <button key={x.key} className="toggle-opt shrink-0 !py-1 !text-xs" onClick={() => document.getElementById('sec-' + x.key)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{x.done && <Icon name="check" className="h-3 w-3 inline -mt-0.5 mr-1 text-sage" />}{x.title}</button>)}
+          {[...e.form.sections.filter((x: any) => !(isDoctor && x.key === 'plan')).map((x: any) => ({ key: x.key, title: x.title === 'Assessment' ? 'Diagnosis' : x.title, done: Object.values(data[x.key] ?? {}).some((v: any) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '') })), ...(isDoctor ? [{ key: 'rx', title: 'Prescription', done: rx.some((i) => i.name) }, { key: 'recs', title: 'Advice & follow-up', done: recs.length > 0 || !!data.plan?.advice }] : [])].map((x) => <button key={x.key} className="toggle-opt shrink-0 !py-1 !text-xs" onClick={() => document.getElementById('sec-' + x.key)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{x.done && <Icon name="check" className="h-3 w-3 inline -mt-0.5 mr-1 text-sage" />}{x.title}</button>)}
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="space-y-4 min-w-0">
-{e.form.sections.map((s: any, si: number) => (
+{e.form.sections.filter((x: any) => !(isDoctor && x.key === 'plan')).map((s: any, si: number) => (
           <div key={s.key} id={`sec-${s.key}`} className="card anim-fade-up scroll-mt-44" style={{ animationDelay: `${60 + si * 50}ms` }}>
-            <div className="serif text-lg mb-3">{s.title}</div>
+            <div className="serif text-lg mb-3">{s.title === 'Assessment' ? 'Diagnosis' : s.title}</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {s.fields.map((f: Field) => (
                 <div key={f.key} data-invalid={!!err(s.key, f.key)} className={['textarea', 'multiselect', 'tags', 'diagnoses'].includes(f.type) ? 'md:col-span-2' : ''}>
@@ -130,7 +130,11 @@ export function Encounter() {
           </div>
 
           <div id="sec-recs" className="card anim-fade-up scroll-mt-44" style={{ animationDelay: '320ms' }}>
-            <div className="flex items-center gap-2 mb-3 flex-wrap"><div className="serif text-lg">Plan</div>
+            <div className="serif text-lg mb-3">Advice & follow-up</div>
+            {e.form.sections.filter((x: any) => x.key === 'plan').flatMap((x: any) => x.fields).map((f: Field) => (
+              <div key={f.key} className="mb-4"><label className="label">{f.label}</label><FieldInput f={f} value={data.plan?.[f.key]} onChange={(v) => set('plan', f.key, v)} disabled={readOnly} invalid={false} /></div>
+            ))}
+            <div className="flex items-center gap-2 mb-3 flex-wrap"><div className="label !mb-0">Follow-up, procedures and tests</div>
               {!readOnly && <div className="ml-auto flex gap-1 flex-wrap">
                 {[7, 14, 30].map((d) => <button key={d} className={`toggle-opt ${recs.some((r) => r.kind === 'followup' && r.intervalDays === d) ? 'on' : ''}`} onClick={() => setRecs([...recs.filter((r) => r.kind !== 'followup'), { kind: 'followup', intervalDays: d }])}>Review in {d}d</button>)}
                 <button className="toggle-opt" onClick={() => setRecs([...recs, { kind: 'procedure', procedureId: cfg?.procedures[0]?.id, sittings: cfg?.procedures[0]?.typicalSittings }])}><Icon name="plus" className="h-3 w-3 inline -mt-0.5" /> Procedure</button>
