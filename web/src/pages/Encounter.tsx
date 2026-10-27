@@ -25,6 +25,7 @@ export function Encounter() {
   const [errors, setErrors] = useState<{ path: string; message: string }[]>([]);
   const [savedAt, setSavedAt] = useState<string>('');
   const [viewing, setViewing] = useState<string | null>(null);
+  const [side, setSide] = useState<'visits' | 'docs'>('visits');
   const loaded = useRef(false); const dirty = useRef(false);
   useEffect(() => {
     if (enc.data && !loaded.current) {
@@ -58,37 +59,26 @@ export function Encounter() {
   const addRx = (name: string) => { const m = cfg?.medicines.find((x: any) => x.name === name); setRx((cur) => [...cur.filter((r) => r.name), { name, medicineId: m?.id ?? null, dose: m?.defaults?.dose, route: m?.defaults?.route, frequency: m?.defaults?.frequency, durationDays: m?.defaults?.durationDays, instructions: m?.defaults?.instructions }]); };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)] gap-5">
-      <aside className="space-y-4 lg:sticky lg:top-6 self-start">
-        <div className="card anim-fade-up">
-          <div className="flex items-center gap-3"><Avatar name={p.fullName} size="h-12 w-12 text-base" /><div className="min-w-0"><div className="text-lg font-medium leading-tight truncate">{p.fullName}</div><div className="text-xs text-muted">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''} · {p.patientNo}</div></div></div>
-          <div className="text-xs text-muted mt-3 flex flex-wrap gap-x-3 gap-y-1"><span>{p.phone ?? 'no phone'}</span>{p.locality && <span>{p.locality}</span>}</div>
-          {p.allergies && <div className="mt-3 text-sm text-rose bg-rose-soft rounded-xl px-3 py-2 flex gap-2"><Icon name="spark" className="h-4 w-4 shrink-0" />Allergies: {p.allergies}</div>}
-          {(() => { const d = e.visit?.details ?? {}; const v = [['Wt', d.weight_kg, 'kg'], ['Ht', d.height_cm, 'cm'], ['BMI', d.bmi, ''], ['Temp', d.temp_f, '°F'], ['BP', d.bp, ''], ['SpO₂', d.spo2, '%'], ['Pulse', d.pulse, '']].filter((x) => x[1] !== undefined && x[1] !== null && x[1] !== ''); return v.length ? <div className="mt-3 flex flex-wrap gap-1.5">{v.map(([l, val, u]) => <span key={String(l)} className="chip !bg-paper"><span className="text-muted">{l}</span> {val}{u ? ` ${u}` : ''}</span>)}</div> : null; })()}
-          {me.role === 'assistant' && <div className="mt-3"><Chip tone="sky">Intake mode · doctor reviews next</Chip></div>}
-        </div>
-        <div className="card anim-fade-up" style={{ animationDelay: '60ms' }}>
-          <div className="text-[11px] uppercase tracking-wider text-muted mb-2">Previous visits <span className="normal-case tracking-normal">· click to open</span></div>
-          {previous.length === 0 && <div className="text-sm text-muted">First visit</div>}
-          {previous.slice(0, 6).map((x: any) => (
-            <button key={x.id} onClick={() => setViewing(x.id)} className="w-full text-left border-t border-line first:border-t-0 py-2.5 text-sm hover:bg-paper rounded-lg px-1 -mx-1 transition-colors">
-              <div className="flex items-center gap-2 text-xs text-muted"><span>{fmtDate(x.createdAt)}</span><Icon name="chevR" className="h-3 w-3 ml-auto" /></div>
-              <div className="mt-0.5"><b>{joinList(x.data?.complaint?.chief_complaint) || 'Consultation'}</b>{joinList(x.data?.assessment?.diagnosis) && <span className="text-ink-2"> → {joinList(x.data.assessment.diagnosis)}</span>}</div>
-              {x.prescription?.length > 0 && <div className="text-xs text-muted mt-0.5 truncate">{x.prescription.map((i: any) => i.name).join(', ')}</div>}
-            </button>
-          ))}
-        </div>
-        <div className="card anim-fade-up" style={{ animationDelay: '100ms' }}>
-          <div className="flex items-center gap-2 mb-2"><div className="text-[11px] uppercase tracking-wider text-muted">Reports & photos</div><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => { qc.invalidateQueries({ queryKey: ['documents', p.id] }); toast('Uploaded'); }} />}</div>
-          {myDocs.length === 0 ? <div className="text-xs text-muted">No reports yet. Lab PDFs and clinical photos go here.</div> : <DocList docs={myDocs.slice(0, 6)} />}
-        </div>
-      </aside>
+    <div className="space-y-4">
+      <div className="anim-fade-up flex items-center gap-3 flex-wrap md:pr-36"><h1 className="text-[28px] font-medium">Consultation</h1><Chip tone={readOnly ? 'sage' : 'amber'}>{e.status}</Chip>{e.doctor && <span className="text-sm text-muted">{e.doctor.name}</span>}<span className="ml-auto text-xs text-muted">{savedAt ? `Draft saved ${savedAt}` : readOnly ? '' : 'Autosaves every 15 s'}</span></div>
 
+      <div className="sticky top-0 z-20 card !p-3.5 anim-fade-up">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Avatar name={p.fullName} size="h-11 w-11 text-sm" />
+          <div className="min-w-0"><div className="text-[17px] font-semibold leading-tight">{p.fullName}</div><div className="text-xs text-muted">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''} · {p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div></div>
+          {p.allergies && <span className="chip chip-rose !text-xs"><Icon name="spark" className="h-3.5 w-3.5" />Allergies: {p.allergies}</span>}
+          <div className="flex flex-wrap gap-1.5">{(() => { const d = e.visit?.details ?? {}; return [['Wt', d.weight_kg, ' kg'], ['Ht', d.height_cm, ' cm'], ['BMI', d.bmi, ''], ['Temp', d.temp_f, '°F'], ['BP', d.bp, ''], ['SpO₂', d.spo2, '%'], ['Pulse', d.pulse, '']].filter((x) => x[1] !== undefined && x[1] !== null && x[1] !== '').map((x) => <span key={x[0] as string} className="chip !text-xs"><span className="text-muted">{x[0]}</span> <b>{x[1]}{x[2]}</b></span>); })()}</div>
+          {me.role === 'assistant' && <Chip tone="sky">Intake mode · doctor reviews next</Chip>}
+        </div>
+        <div className="mt-2.5 flex gap-1.5 overflow-x-auto border-t border-line pt-2.5" role="navigation" aria-label="Jump to section">
+          {[...e.form.sections.map((x: any) => ({ key: x.key, title: x.title, done: Object.values(data[x.key] ?? {}).some((v: any) => Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== '') })), ...(isDoctor ? [{ key: 'rx', title: 'Prescription', done: rx.some((i) => i.name) }, { key: 'recs', title: 'Follow-up', done: recs.length > 0 }] : [])].map((x) => <button key={x.key} className="toggle-opt shrink-0 !py-1 !text-xs" onClick={() => document.getElementById('sec-' + x.key)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{x.done && <Icon name="check" className="h-3 w-3 inline -mt-0.5 mr-1 text-sage" />}{x.title}</button>)}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="space-y-4 min-w-0">
-        <div className="anim-fade-up flex items-center gap-3 flex-wrap"><h1 className="text-[28px] font-medium">Consultation</h1><Chip tone={readOnly ? 'sage' : 'amber'}>{e.status}</Chip>{e.doctor && <span className="text-sm text-muted">{e.doctor.name}</span>}<span className="ml-auto text-xs text-muted">{savedAt ? `Draft saved ${savedAt}` : readOnly ? '' : 'Autosaves every 15 s'}</span></div>
-
-        {e.form.sections.map((s: any, si: number) => (
-          <div key={s.key} className="card anim-fade-up" style={{ animationDelay: `${60 + si * 50}ms` }}>
+{e.form.sections.map((s: any, si: number) => (
+          <div key={s.key} id={`sec-${s.key}`} className="card anim-fade-up scroll-mt-44" style={{ animationDelay: `${60 + si * 50}ms` }}>
             <div className="serif text-lg mb-3">{s.title}</div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {s.fields.map((f: Field) => (
@@ -103,7 +93,7 @@ export function Encounter() {
         ))}
 
         {isDoctor && (<>
-          <div className="card anim-fade-up" style={{ animationDelay: '260ms' }}>
+          <div id="sec-rx" className="card anim-fade-up scroll-mt-44" style={{ animationDelay: '260ms' }}>
             <div className="flex items-center gap-2 mb-3"><div className="serif text-lg">Prescription</div>
               {lastRx && !readOnly && <button className="btn btn-sm" onClick={() => setRx(lastRx.map(({ id, encounterId, tenantId, sortOrder, dispensed, ...i }: any) => i))}><Icon name="spark" className="h-3.5 w-3.5 text-clay" />Repeat last Rx</button>}
               {!readOnly && <button className="btn btn-sm btn-primary ml-auto" onClick={() => setRx([...rx, { name: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Medicine</button>}</div>
@@ -138,7 +128,7 @@ export function Encounter() {
             )}
           </div>
 
-          <div className="card anim-fade-up" style={{ animationDelay: '320ms' }}>
+          <div id="sec-recs" className="card anim-fade-up scroll-mt-44" style={{ animationDelay: '320ms' }}>
             <div className="flex items-center gap-2 mb-3 flex-wrap"><div className="serif text-lg">Plan</div>
               {!readOnly && <div className="ml-auto flex gap-1 flex-wrap">
                 {[7, 14, 30].map((d) => <button key={d} className={`toggle-opt ${recs.some((r) => r.kind === 'followup' && r.intervalDays === d) ? 'on' : ''}`} onClick={() => setRecs([...recs.filter((r) => r.kind !== 'followup'), { kind: 'followup', intervalDays: d }])}>Review in {d}d</button>)}
@@ -171,6 +161,23 @@ export function Encounter() {
           </div>
         </div>
       </section>
+      <aside className="lg:sticky lg:top-40 self-start card anim-fade-up">
+        <div className="mb-3 inline-flex rounded-full bg-white/60 p-1 gap-1" role="tablist">{([['visits', `Previous visits${previous.length ? ` · ${previous.length}` : ''}`], ['docs', `Reports${myDocs.length ? ` · ${myDocs.length}` : ''}`]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={side === k} className={`rounded-full px-3 py-1.5 text-[13px] font-semibold ${side === k ? 'bg-ink text-white' : 'text-ink-2'}`} onClick={() => setSide(k)}>{l}</button>)}</div>
+        {side === 'visits' ? (<div>
+          {previous.length === 0 && <div className="text-sm text-muted">First visit</div>}
+          {previous.slice(0, 8).map((x: any) => (
+            <button key={x.id} onClick={() => setViewing(x.id)} className="w-full text-left border-t border-line first:border-t-0 py-2.5 text-sm hover:bg-paper rounded-lg px-1 -mx-1 transition-colors">
+              <div className="flex items-center gap-2 text-xs text-muted"><span>{fmtDate(x.createdAt)}</span><Icon name="chevR" className="h-3 w-3 ml-auto" /></div>
+              <div className="mt-0.5"><b>{joinList(x.data?.complaint?.chief_complaint) || 'Consultation'}</b>{joinList(x.data?.assessment?.diagnosis) && <span className="text-ink-2"> → {joinList(x.data.assessment.diagnosis)}</span>}</div>
+              {x.prescription?.length > 0 && <div className="text-xs text-muted mt-0.5 truncate">{x.prescription.map((i: any) => i.name).join(', ')}</div>}
+            </button>
+          ))}
+        </div>) : (<div>
+          <div className="flex items-center gap-2 mb-2"><span className="text-xs text-muted">Lab PDFs and clinical photos</span><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => { qc.invalidateQueries({ queryKey: ['documents', p.id] }); }} />}</div>
+          {myDocs.length === 0 ? <div className="text-xs text-muted">No reports yet.</div> : <DocList docs={myDocs.slice(0, 8)} />}
+        </div>)}
+      </aside>
+      </div>
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
