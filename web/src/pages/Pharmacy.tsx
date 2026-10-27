@@ -18,6 +18,13 @@ export function Pharmacy() {
   const rows: any[] = (q.data ?? []).filter((r: any) => !filter || r.patient.fullName.toLowerCase().includes(filter.toLowerCase()) || r.opNumber.toLowerCase().includes(filter.toLowerCase()) || (r.patient.phone ?? '').includes(filter));
   const pending = rows.filter((r) => !r.bill);
   const billed = rows.filter((r) => r.bill);
+  const [status, setStatus] = useState<'all' | 'give' | 'billed'>('all');
+  const [sel, setSel] = useState<string | null>(null);
+  const [wide, setWide] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
+  useEffect(() => { const m = window.matchMedia('(min-width: 1024px)'); const on = () => setWide(m.matches); m.addEventListener('change', on); return () => m.removeEventListener('change', on); }, []);
+  const list = [...pending, ...billed].filter((r) => status === 'all' || (status === 'billed' ? r.bill : !r.bill));
+  const selected = rows.find((r) => r.encounterId === sel) ?? (wide ? list[0] : undefined); // on a wide screen the first one is open by default
+  const waited = (at?: string) => { if (!at) return '—'; const m = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} m`; };
   return (
     <div>
       <PageHeader title="Pharmacy">
@@ -27,13 +34,30 @@ export function Pharmacy() {
       </PageHeader>
       {tab === 'history' && <History filter={filter} />}
       {selling && <SaleDialog onClose={() => setSelling(false)} />}
-      {tab === 'now' && (<>
-      {q.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <div className="card"><Empty icon="pill" title="No prescriptions yet" hint="Completed consultations appear here the moment the doctor prints the Rx." /></div> : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 stagger">
-          {[...pending, ...billed].map((r, i) => <RxCard key={r.encounterId} r={r} i={i} canBill={can(perms, 'pharmacy.bill')} canDispense={can(perms, 'pharmacy.dispense')} />)}
+      {tab === 'now' && (q.isLoading ? <Skeleton rows={4} /> : (q.data ?? []).length === 0 ? <div className="card"><Empty icon="pill" title="No prescriptions yet" hint="Completed consultations appear here the moment the doctor prints the Rx." /></div> : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start">
+          <div>
+            <div className="mb-3"><Segmented<'all' | 'give' | 'billed'> value={status} onChange={setStatus} options={[{ value: 'all', label: 'All', count: rows.length }, { value: 'give', label: 'To give', count: pending.length }, { value: 'billed', label: 'Billed', count: billed.length }]} /></div>
+            <div className="card !p-0 overflow-hidden">
+              <div className="hidden sm:flex items-center gap-3 px-4 py-2.5 text-[11px] uppercase tracking-wider text-muted"><span className="w-16">Token</span><span className="flex-1">Patient</span><span className="w-12 text-right">Items</span><span className="w-16 text-right">Waiting</span><span className="w-28 text-right">Status</span></div>
+              {list.length === 0 ? <div className="p-6 text-center text-sm text-muted">Nothing here.</div> : list.map((r) => {
+                const left = r.items.filter((x: any) => !x.dispensed).length;
+                return (
+                  <button key={r.encounterId} onClick={() => setSel(r.encounterId)} aria-pressed={sel === r.encounterId} className={`flex w-full items-center gap-3 border-t border-line/70 px-4 py-3 text-left first:border-t-0 transition-colors ${sel === r.encounterId ? 'bg-ink/5' : 'hover:bg-white/60'}`}>
+                    <span className="w-16 font-mono text-xs font-semibold">{r.opNumber}</span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{r.patient.fullName}</span><span className="block truncate text-xs text-muted">{[r.patient.ageYears ? `${r.patient.ageYears}y` : '', r.patient.sex, r.patient.allergies ? 'allergies' : ''].filter(Boolean).join(' · ')}</span></span>
+                    <span className="w-12 text-right text-sm">{r.items.length}</span>
+                    <span className="hidden sm:block w-16 text-right text-xs text-muted">{r.bill ? '—' : waited(r.completedAt)}</span>
+                    <span className="w-28 text-right">{r.bill ? <Chip tone="sage">billed {money(r.bill.amountPaise)}</Chip> : left === 0 ? <Chip tone="amber">bill pending</Chip> : <Chip>{left} to give</Chip>}</span>
+                  </button>);
+              })}
+            </div>
+          </div>
+          {wide && (selected ? <div className="lg:sticky lg:top-4"><RxCard key={selected.encounterId} r={selected} i={0} canBill={can(perms, 'pharmacy.bill')} canDispense={can(perms, 'pharmacy.dispense')} /></div>
+            : <div className="card text-sm text-muted text-center py-10">Pick a prescription to dispense it.</div>)}
+          {!wide && selected && <Modal title={selected.patient.fullName} subtitle={selected.opNumber} onClose={() => setSel(null)} width="max-w-lg"><RxCard key={selected.encounterId} r={selected} i={0} canBill={can(perms, 'pharmacy.bill')} canDispense={can(perms, 'pharmacy.dispense')} /></Modal>}
         </div>
-      )}
-      </>)}
+      ))}
     </div>
   );
 }
