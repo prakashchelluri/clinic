@@ -62,7 +62,7 @@ export function Encounter() {
     <div className="space-y-4">
       <div className="anim-fade-up flex items-center gap-3 flex-wrap md:pr-36"><h1 className="text-[28px] font-medium">Consultation</h1><Chip tone={readOnly ? 'sage' : 'amber'}>{e.status}</Chip>{e.doctor && <span className="text-sm text-muted">{e.doctor.name}</span>}<span className="ml-auto text-xs text-muted">{savedAt ? `Draft saved ${savedAt}` : readOnly ? '' : 'Autosaves every 15 s'}</span></div>
 
-      <div className="sticky top-0 z-20 card !p-3.5 anim-fade-up">
+      <div className="sticky top-0 z-20 card !p-3.5 !bg-[#FBFAF7] anim-fade-up" style={{ boxShadow: "var(--shadow-lift)" }}>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Avatar name={p.fullName} size="h-11 w-11 text-sm" />
           <div className="min-w-0"><div className="text-[17px] font-semibold leading-tight">{p.fullName}</div><div className="text-xs text-muted">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''} · {p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div></div>
