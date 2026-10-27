@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, gte, lte, inArray, or, ilike } from 'drizzle-orm';
-import { session, appointment, service, message, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, type Routine } from '../db/schema.js';
+import { session, appointment, service, message, recommendation, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, type Routine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, nextNumber } from '../lib/core.js';
@@ -139,12 +139,12 @@ export function schedulingRoutes(app: FastifyInstance) {
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(service, eq(service.id, appointment.serviceId))
       .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('requested','booked','confirmed','arrived','no_show')`)).orderBy(asc(appointment.createdAt)) : [];
     const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : [])));
-    const procs = await tx.select({ ps: procedureSession, patient: patient.fullName, phone: patient.phone, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name })
-      .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
+    const procs = await tx.select({ ps: procedureSession, patient: patient.fullName, phone: patient.phone, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, review: procedureCatalog.requiresReview })
+      .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
       .leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
       .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, day), sql`${procedureSession.state} not in ('cancelled','postponed')`, ...(pid ? [eq(procedureSession.practitionerId, pid)] : []))).orderBy(asc(procedureSession.startTime));
     return { day, windows: windows.map((w) => ({ ...w, appointments: appts.filter((a) => a.sessionId === w.id) })), blocks: blocks.filter((b) => b.kind !== 'procedure'),
-      procedures: procs.map((p) => ({ ...p.ps, patient: p.patient, phone: p.phone, procedure: p.procedure, room: p.room, doctor: p.doctor })) };
+      procedures: procs.map((p) => ({ ...p.ps, patient: p.patient, phone: p.phone, procedure: p.procedure, room: p.room, doctor: p.doctor, of: p.of, requiresReview: p.review })) };
   }
   route(app, 'get', '/calendar', 'appointment.read', async (req, tx) => {
     const q = req.query as any;

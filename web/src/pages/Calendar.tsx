@@ -22,9 +22,9 @@ const OPEN = ['requested', 'booked', 'confirmed'];
 
 type View = 'day' | 'week' | 'team' | 'list';
 const VIEW_KEY = 'cal.view';
-const savedView = (): View => {
+const savedView = (isDoctor: boolean): View => {
   try { const v = localStorage.getItem(VIEW_KEY) as View | null; if (v && ['day', 'week', 'team', 'list'].includes(v)) return v; } catch { /* storage blocked */ }
-  return typeof window !== 'undefined' && window.innerWidth < 768 ? 'list' : 'day';
+  return typeof window !== 'undefined' && window.innerWidth < 768 ? 'list' : isDoctor ? 'week' : 'team';
 };
 
 /** Calendar: day / week / all doctors / list. Windows come from the weekly routine; click a window to book, drag a name to move it. */
@@ -35,7 +35,7 @@ export function Calendar() {
   const [picked, setDoc] = useState<string>('');
   // Config can arrive after the first render, so the default doctor is derived, not frozen into state.
   const doc: string = picked || me.practitionerId || cfg?.practitioners?.[0]?.id || '';
-  const [view, setViewState] = useState<View>(savedView);
+  const [view, setViewState] = useState<View>(() => savedView(!!me.practitionerId));
   const setView = (v: View) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage blocked */ } };
   const [booking, setBooking] = useState<any>(null);
   const canBook = can(perms, 'appointment.write');
@@ -58,7 +58,17 @@ export function Calendar() {
   const onMove = (appt: any, to: any) => { if (appt.sessionId !== to.id) move.mutate({ appt, to }); };
   const docName = (id: string) => cfg?.practitioners.find((p: any) => p.id === id)?.name;
   const [openId, setOpenId] = useState<string | null>(null);
-  const grid = { canBook, onOpen: (id: string) => setOpenId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => onMove(a, { ...w, doctor: view === 'team' ? docName(w.practitionerId) : undefined }) };
+  const [show, setShow] = useState<Show>('all');
+  const [svc, setSvc] = useState(''); const [status, setStatus] = useState('');
+  const [avail, setAvail] = useState<string | null>(null); // day being changed in the availability dialog
+  const [routine, setRoutine] = useState(false);
+  const canEditDays = canBook || !!me.practitionerId;
+  /** Remove a day change (break, late start, away). Undo puts it back exactly as it was. */
+  const removeBlock = async (b: any) => {
+    try { await api('DELETE', `/calendar/blocks/${b.id}`); } catch (e) { toast(errText(e), 'err'); return; }
+    refresh(); toast(`Removed: ${b.note ?? b.kind}`, 'info', { label: 'Undo', run: () => post('/calendar/blocks', { practitionerId: b.practitionerId, roomId: b.roomId, day: b.day, startTime: b.startTime, endTime: b.endTime, kind: b.kind, note: b.note ?? undefined }).then(refresh, (e) => toast(errText(e), 'err')) });
+  };
+  const grid = { svc, setSvc, status, setStatus, services: cfg?.services ?? [], show, setShow, canBook, onRemoveBlock: canEditDays ? removeBlock : undefined, onOpen: (id: string) => setOpenId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => onMove(a, { ...w, doctor: view === 'team' ? docName(w.practitionerId) : undefined }) };
 
   const title = view === 'week' ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 6), { day: 'numeric', month: 'short' })}`
     : view === 'team' ? fullDay(day) : practitioner ? `${practitioner.name} · ${fullDay(day)}` : fullDay(day);
@@ -73,12 +83,15 @@ export function Calendar() {
           <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" /></button>
         </div>
         {day !== today() && <button className="btn btn-sm" onClick={() => setDay(today())}>Today</button>}
+        {canEditDays && view !== 'team' && doc && <button className="btn" onClick={() => setAvail(day < today() ? today() : day)}><Icon name="clock" />Change availability</button>}
         {canBook && <button className="btn btn-accent" onClick={() => navTo("?book=1")}><Icon name="plus" />New booking</button>}
         {view !== 'team' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
       </PageHeader>
 
       {view === 'day' && <DayView day={day} doc={doc} practitioner={practitioner} cfg={cfg} perms={perms} me={me} grid={grid} />}
-      {view === 'week' && <WeekView from={weekStart} doc={doc} grid={grid} onPickDay={(d) => { setDay(d); setView('day'); }} />}
+      {view === 'week' && <WeekView from={weekStart} doc={doc} docName={practitioner?.name} grid={grid} onOpenDay={(d) => { setDay(d); setView('day'); }} onAvailability={(d) => setAvail(d)} />}
+      {avail && doc && <AvailabilityModal day={avail} doc={doc} docName={practitioner?.name ?? 'Doctor'} onRoutine={() => { setAvail(null); setRoutine(true); }} onClose={() => setAvail(null)} />}
+      {routine && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setRoutine(false)} />}
       {view === 'team' && <TeamView day={day} cfg={cfg} grid={grid} />}
       {view === 'list' && <ListView day={day} doc={doc} grid={grid} />}
 
@@ -92,18 +105,31 @@ export function Calendar() {
   );
 }
 
-const Legend = ({ hint }: { hint?: string }) => (
+type Show = 'all' | 'appts' | 'procs';
+/** Counts for what is on screen, a filter to see only appointments or only procedures, and the colour key. */
+const Legend = ({ hint, days, grid }: { hint?: string; days?: any[]; grid?: Grid }) => {
+  const appts = (days ?? []).reduce((n, d) => n + d.windows.reduce((m: number, w: any) => m + (w.appointments?.length ?? 0), 0), 0);
+  const procs = (days ?? []).reduce((n, d) => n + d.procedures.length, 0);
+  return (<>
+  {grid && days && <div className="mb-3 flex flex-wrap items-center gap-3">
+    <Segmented<Show> value={grid.show} onChange={grid.setShow} options={[{ value: 'all', label: 'All', count: appts + procs }, { value: 'appts', label: 'Appointments', count: appts }, { value: 'procs', label: 'Procedures', count: procs }]} />
+    {grid.services.length > 0 && grid.show !== 'procs' && <select aria-label="Visit type" className="input !w-auto !py-2" value={grid.svc} onChange={(e) => grid.setSvc(e.target.value)}><option value="">All visit types</option>{grid.services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
+    {grid.show !== 'procs' && <select aria-label="Status" className="input !w-auto !py-2" value={grid.status} onChange={(e) => grid.setStatus(e.target.value)}><option value="">All statuses</option>{[['requested', 'Requested'], ['booked', 'Booked'], ['confirmed', 'Confirmed'], ['arrived', 'Arrived'], ['no_show', 'No-show']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
+    {(grid.svc || grid.status || grid.show !== 'all') && <button className="btn btn-ghost btn-sm" onClick={() => { grid.setSvc(''); grid.setStatus(''); grid.setShow('all'); }}>Clear filters</button>}
+  </div>}
   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted mb-3">
     {[['Requested', DOT.requested], ['Booked', DOT.booked], ['Confirmed', DOT.confirmed], ['Arrived', DOT.arrived], ['No-show', DOT.no_show], ['Procedure', '#9DB5CC']].map(([l, c]) => <span key={l} className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>)}
     {hint && <span className="ml-auto">{hint}</span>}
   </div>
-);
+  </>);
+};
 
-type Grid = { canBook: boolean; onOpen: (id: string) => void; onBook: (w: any) => void; onMove: (a: any, w: any) => void };
+type Grid = { svc: string; setSvc: (s: string) => void; status: string; setStatus: (s: string) => void; services: any[]; show: Show; setShow: (s: Show) => void; canBook: boolean; onRemoveBlock?: (b: any) => void; onOpen: (id: string) => void; onBook: (w: any) => void; onMove: (a: any, w: any) => void };
 type Col = { key: string; head: ReactNode; windows: any[]; blocks: any[]; procs: any[]; day: string; tint?: string };
 
 /** Shared time grid: one column per day or per doctor/room. */
-function TimeGrid({ cols, grid, px = 1.15, minCol = 140, wide = false }: { cols: Col[]; grid: Grid; px?: number; minCol?: number; wide?: boolean }) {
+function TimeGrid({ cols: allCols, grid, px = 1.15, minCol = 140, wide = false }: { cols: Col[]; grid: Grid; px?: number; minCol?: number; wide?: boolean }) {
+  const cols = allCols.map((c) => grid.show === 'procs' ? { ...c, windows: [] } : grid.show === 'appts' ? { ...c, procs: [] } : c);
   const all = cols.flatMap((c) => [...c.windows, ...c.blocks.filter((b) => !isLongLeave(b)), ...c.procs]);
   const start = all.length ? Math.floor(Math.min(...all.map((x) => toMin(x.startTime))) / 60) * 60 : 10 * 60;
   const end = all.length ? Math.ceil(Math.max(...all.map((x) => toMin(x.endTime))) / 60) * 60 : 19 * 60;
@@ -123,13 +149,16 @@ function TimeGrid({ cols, grid, px = 1.15, minCol = 140, wide = false }: { cols:
               <div className="h-16 border-b border-line/70 px-3 flex items-center gap-2 min-w-0">{c.head}</div>
               <div className="relative" style={{ height }}>
                 {hours.map((m) => <div key={m} className="absolute inset-x-0 border-t border-dashed border-line/70" style={{ top: (m - start) * px }} />)}
-                {longLeave && <div className="absolute inset-1 rounded-xl px-2 py-1.5 text-xs text-muted" style={{ background: 'repeating-linear-gradient(135deg, var(--color-paper-2) 0 6px, var(--color-paper) 6px 12px)', border: '1px dashed var(--color-line-2)' }}><b className="text-ink-2">Away</b> {longLeave.note && longLeave.note !== 'Away' ? `· ${longLeave.note}` : ''}{c.windows.reduce((n, w) => n + w.allocated, 0) > 0 && <div className="mt-0.5 text-rose">{c.windows.reduce((n, w) => n + w.allocated, 0)} booked to call</div>}</div>}
+                {longLeave && <div className="absolute inset-1 rounded-xl px-2 py-1.5 text-xs text-muted" style={{ background: 'repeating-linear-gradient(135deg, var(--color-paper-2) 0 6px, var(--color-paper) 6px 12px)', border: '1px dashed var(--color-line-2)' }}><b className="text-ink-2">Away</b> {longLeave.note && longLeave.note !== 'Away' ? `· ${longLeave.note}` : ''}{c.windows.reduce((n, w) => n + w.allocated, 0) > 0 && <div className="mt-0.5 text-rose">{c.windows.reduce((n, w) => n + w.allocated, 0)} booked to call</div>}{grid.onRemoveBlock && <button className="btn btn-sm mt-2" onClick={() => grid.onRemoveBlock!(longLeave)}>Not away after all</button>}</div>}
+                {!longLeave && [...c.windows].sort((a, b) => toMin(a.startTime) - toMin(b.startTime)).map((w, i, ws) => i > 0 && toMin(w.startTime) > toMin(ws[i - 1].endTime) && (
+                  <div key={'gap' + w.id} className="pointer-events-none absolute left-1 right-1 rounded-lg px-2 py-1 text-[11px] text-muted/80" style={{ top: y(ws[i - 1].endTime) + 2, height: h(ws[i - 1].endTime, w.startTime) - 4, background: 'repeating-linear-gradient(135deg, rgba(23,25,26,.035) 0 6px, transparent 6px 12px)' }}>Not working {ws[i - 1].endTime}–{w.startTime}</div>
+                ))}
                 {!longLeave && c.windows.map((w) => {
                   const narrow = c.procs.some((p) => toMin(p.startTime) < toMin(w.endTime) && toMin(p.endTime) > toMin(w.startTime));
                   return <WindowBox key={w.id} w={{ ...w, day: c.day }} grid={grid} wide={wide} style={{ top: y(w.startTime) + 2, height: h(w.startTime, w.endTime) - 4, right: narrow ? '42%' : 4 }} />;
                 })}
                 {c.blocks.filter((b) => !isLongLeave(b)).map((b) => (
-                  <div key={b.id} className="absolute left-1 right-1 rounded-lg px-2 py-0.5 text-[11px] text-muted overflow-hidden pointer-events-none" style={{ top: y(b.startTime) + 1, height: h(b.startTime, b.endTime) - 2, background: 'repeating-linear-gradient(135deg, rgba(23,25,26,.06) 0 6px, rgba(23,25,26,.015) 6px 12px)', border: '1px dashed var(--color-line-2)', zIndex: 1 }}><b className="text-ink-2">{b.note ?? b.kind}</b> {b.startTime}–{b.endTime}</div>
+                  <div key={b.id} className="absolute left-1 right-1 flex items-start gap-1 rounded-lg px-2 py-0.5 text-[11px] text-muted overflow-hidden" style={{ top: y(b.startTime) + 1, height: h(b.startTime, b.endTime) - 2, background: 'repeating-linear-gradient(135deg, rgba(23,25,26,.06) 0 6px, rgba(23,25,26,.015) 6px 12px)', border: '1px dashed var(--color-line-2)', zIndex: 1 }}><span className="min-w-0 flex-1 truncate"><b className="text-ink-2">{b.note ?? b.kind}</b> {b.startTime}–{b.endTime}</span>{grid.onRemoveBlock && <button className="grid h-5 w-5 shrink-0 place-items-center rounded-full hover:bg-ink/10" aria-label={`Remove ${b.note ?? b.kind}`} data-tip="Remove" onClick={() => grid.onRemoveBlock!(b)}><Icon name="x" className="h-3 w-3" /></button>}</div>
                 ))}
                 {c.procs.map((p) => (
                   <div key={p.id} title={`${p.procedure ?? 'Procedure'} · ${p.patient} · ${p.startTime}–${p.endTime}${p.room ? ` · ${p.room}` : ''}`} className="absolute rounded-lg px-2 py-1 text-[11px] overflow-hidden" style={{ top: y(p.startTime) + 2, height: h(p.startTime, p.endTime) - 4, left: c.windows.length && !c.tint ? '60%' : 4, right: 4, background: 'var(--color-sky-soft)', border: '1px solid #c7d4e0', color: 'var(--color-sky)' }}>
@@ -152,7 +181,7 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
   const [over, setOver] = useState(false);
   if (w.day < today()) grid = { ...grid, canBook: false }; // the past is read-only
   const tone = w.effectiveCapacity === 0 || w.free <= 0 ? 'rose' : w.free <= 2 ? 'amber' : 'sage';
-  const appts: any[] = w.appointments ?? [];
+  const appts: any[] = (w.appointments ?? []).filter((a: any) => (!grid.svc || a.serviceId === grid.svc) && (!grid.status || a.status === grid.status));
   const rows = Math.max(0, Math.floor(((style.height as number) - 20) / 16));
   const fit = wide ? rows * 3 : rows;
   const shown = appts.length > fit ? appts.slice(0, Math.max(0, fit - 1)) : appts;
@@ -174,8 +203,9 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
           <div key={a.id} draggable={grid.canBook && OPEN.includes(a.status)} title={`${a.name}${a.phone ? ` · ${a.phone}` : ''} · ${a.status.replace('_', '-')}${a.note ? ` · ${a.note}` : ''}`}
             onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: a.id, sessionId: w.id, name: a.name })); e.dataTransfer.effectAllowed = 'move'; }}
             onClick={(e) => { e.stopPropagation(); grid.onOpen(a.id); }}
-            className={`flex items-center gap-1.5 text-[11.5px] leading-4 truncate hover:underline ${OPEN.includes(a.status) && grid.canBook ? 'cursor-grab' : 'cursor-pointer'} ${a.status === 'requested' ? 'italic' : ''} ${a.status === 'no_show' ? 'line-through text-rose' : ''}`}>
-            {a.color && <i className="h-3 w-[3px] rounded-full shrink-0" style={{ background: a.color }} />}<i className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: DOT[a.status] }} /><span className="truncate">{a.name}</span>
+            style={{ background: a.color ? a.color + '1f' : 'rgba(23,25,26,.04)', borderLeft: `3px solid ${a.color ?? 'var(--color-line-2)'}` }}
+            className={`mb-px flex items-center gap-1.5 rounded-[5px] px-1 text-[11.5px] leading-[15px] truncate hover:underline ${OPEN.includes(a.status) && grid.canBook ? 'cursor-grab' : 'cursor-pointer'} ${a.status === 'requested' ? 'italic' : ''} ${a.status === 'no_show' ? 'line-through text-rose' : ''}`}>
+            <i className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: DOT[a.status] }} /><span className="truncate">{a.name}</span>
           </div>
         ))}
       </div>
@@ -186,11 +216,11 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
 
 function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string; doc: string; practitioner: any; cfg: any; perms: string[]; me: any; grid: Grid }) {
   const cal = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 15000, enabled: !!doc });
-  const [modal, setModal] = useState<null | 'routine' | 'break' | 'early' | 'editday'>(null);
+  const [modal, setModal] = useState<null | 'routine' | 'break' | 'early' | 'late' | 'editday'>(null);
   const [cap, setCap] = useState<any>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); };
-  const addBlock = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }), onSuccess: (_r, b: any) => { refresh(); toast(b.kind === 'leave' ? 'Marked away · reception sees it now' : 'Added · capacity adjusted'); }, onError: (e: any) => toast(errText(e), 'err') });
-  const delBlock = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { refresh(); toast('Removed', 'info'); } });
+  const addBlock = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }), onSuccess: (r: any, b: any) => { refresh(); toast(b.kind === 'leave' ? 'Marked away · reception sees it now' : `${b.note ?? 'Change'} added · places adjusted`, 'ok', { label: 'Undo', run: () => delBlock.mutate(r.id) }); }, onError: (e: any) => toast(errText(e), 'err') });
+  const delBlock = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { refresh(); toast('Undone', 'info'); }, onError: (e: any) => toast(errText(e), 'err') });
   const setState = useMutation({ mutationFn: ({ id, state, reason }: any) => patch(`/procedure-sessions/${id}`, { state, reason }), onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
   const writable = can(perms, 'appointment.write') || me.practitionerId === doc;
   const d = cal.data;
@@ -207,7 +237,7 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
         <div className="anim-fade-up flex flex-wrap items-center gap-2 mb-5">
           <span className="text-xs uppercase tracking-wider text-muted mr-1">Today is different?</span>
           {!awayToday && <button className="btn" onClick={() => { if (confirm(`Mark ${practitioner?.name} away for the whole of ${dayLabel}? Reception will see every window at zero and can call the ${totals?.a ?? 0} booked patients.`)) addBlock.mutate({ kind: 'leave', startTime: '00:00', endTime: '23:59', note: 'Away' }); }}><Icon name="door" />Away today</button>}
-          {firstStart && !awayToday && <button className="btn" onClick={() => addBlock.mutate({ kind: 'other', startTime: firstStart, endTime: toHHMM(toMin(firstStart) + 30), note: 'Late by 30 min' })}><Icon name="clock" />Late by 30 min</button>}
+          {firstStart && !awayToday && <button className="btn" onClick={() => setModal('late')}><Icon name="clock" />Starting late</button>}
           {lastEnd && !awayToday && <button className="btn" onClick={() => setModal('early')}><Icon name="chevR" />Leaving early</button>}
           {!awayToday && <button className="btn btn-primary" onClick={() => setModal('break')}><Icon name="plus" />Add a break</button>}
           <span className="ml-auto" />
@@ -217,7 +247,7 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5">
         <div className="min-w-0">
-          <Legend hint={grid.canBook ? 'Click a window to book · drag a name to move it' : undefined} />
+          <Legend days={d ? [d] : []} grid={grid} hint={grid.canBook ? 'Click a window to book · drag a name to move it' : undefined} />
           {cal.isLoading || !d ? <Skeleton rows={6} /> : d.windows.length === 0 && d.blocks.length === 0 && d.procedures.length === 0 ? (
             <div className="card"><Empty icon="calendar" title={practitioner?.routine ? 'Not a working day in the routine' : 'No routine set for this doctor'} hint={writable ? (practitioner?.routine ? 'Use “Edit this day’s windows” for a one-off day.' : 'Set the weekly routine once; every day fills itself.') : undefined} />
               {writable && !practitioner?.routine && <div className="flex justify-center pb-6"><button className="btn btn-primary" onClick={() => setModal('routine')}><Icon name="spark" />Set weekly routine</button></div>}</div>
@@ -231,14 +261,14 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
             {practitioner?.routine && <div className="text-sm text-muted mt-1">{practitioner.routine.capacity} places per {practitioner.routine.windowMinutes === 30 ? 'half hour' : 'hour'}. Windows for every day come from this automatically.</div>}
             {writable && <button className="btn btn-sm mt-3" onClick={() => setModal('routine')}><Icon name="edit" className="h-3.5 w-3.5" />{practitioner?.routine ? 'Change routine' : 'Set routine'}</button>}
           </div>
-          <Section title="Today's exceptions" delay={90}>
+          <Section title="Changes to this day" aside={<span className="text-[11px] text-muted">differences from the weekly routine</span>} delay={90}>
             {!d ? <Skeleton rows={2} /> : awayToday ? <div className="p-4 text-sm flex items-center gap-2"><Chip tone="rose">away</Chip>Whole day. {writable && <button className="btn btn-sm btn-ghost ml-auto" onClick={() => delBlock.mutate(d.blocks.find(isLongLeave).id)}>Undo</button>}</div>
               : exceptions.length === 0 ? <div className="p-4 text-sm text-muted">None. Nothing to do today.</div>
               : exceptions.map((x: any) => (
                 <div key={x.id} className="row text-sm">
-                  <Chip tone={x.type === 'procedure' ? 'sky' : x.kind === 'leave' ? 'rose' : 'amber'}>{x.type === 'procedure' ? 'procedure' : x.kind}</Chip>
+                  <Chip tone={x.type === 'procedure' ? 'sky' : x.kind === 'leave' ? 'rose' : 'amber'}>{x.type === 'procedure' ? 'procedure' : x.kind === 'leave' ? 'away' : x.kind === 'other' ? 'change' : x.kind}</Chip>
                   <div className="flex-1 min-w-0 truncate">{x.type === 'procedure' ? `${x.procedure ?? 'Procedure'} · ${x.patient}` : (x.note ?? x.kind)} <span className="text-muted">{x.startTime}–{x.endTime}</span></div>
-                  {x.type === 'block' && writable && <button className="btn btn-ghost btn-icon" aria-label="Remove this" onClick={() => delBlock.mutate(x.id)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+                  {x.type === 'block' && writable && <button className="btn btn-ghost btn-icon" onClick={() => delBlock.mutate(x.id)}>Undo</button>}
                 </div>
               ))}
           </Section>
@@ -266,32 +296,134 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
       {cap && <PhotoCapture patient={{ id: cap.patientId, fullName: cap.patient }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
       {modal === 'routine' && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setModal(null)} />}
       {modal === 'break' && <QuickBlock title="Add a break" defaultStart={firstStart ? toHHMM(Math.max(toMin(firstStart), 13 * 60)) : '13:00'} minutes={30} onSave={(s, e, note) => { addBlock.mutate({ kind: 'break', startTime: s, endTime: e, note: note || 'Break' }); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal === 'late' && firstStart && lastEnd && <StartLate firstStart={firstStart} lastEnd={lastEnd} onSave={(t) => { addBlock.mutate({ kind: 'other', startTime: firstStart, endTime: t, note: `Starts at ${t}` }); setModal(null); }} onClose={() => setModal(null)} />}
       {modal === 'early' && lastEnd && <QuickBlock title="Leaving early" subtitle="From what time are you not available?" defaultStart={toHHMM(toMin(lastEnd) - 60)} fixedEnd={lastEnd} onSave={(s, e) => { addBlock.mutate({ kind: 'other', startTime: s, endTime: e, note: 'Leaving early' }); setModal(null); }} onClose={() => setModal(null)} />}
       {modal === 'editday' && <EditDayModal day={day} practitionerId={doc} cfg={cfg} onClose={() => { setModal(null); refresh(); }} />}
     </>
   );
 }
 
-function WeekView({ from, doc, grid, onPickDay }: { from: string; doc: string; grid: Grid; onPickDay: (d: string) => void }) {
+/** "10:00–13:00, 16:00–20:00" from back-to-back windows. */
+const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const last = out[out.length - 1]; if (last && last[1] === w.startTime) last[1] = w.endTime; else out.push([w.startTime, w.endTime]); return out; }, []).map(([a, b]) => `${a}–${b}`).join(', ');
+
+function WeekView({ from, doc, docName, grid, onOpenDay, onAvailability }: { from: string; doc: string; docName?: string; grid: Grid; onOpenDay: (d: string) => void; onAvailability: (d: string) => void }) {
   const q = useQuery({ queryKey: ['calendar', 'range', from, doc], queryFn: () => get(`/calendar/range?from=${from}&days=7${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 30000, enabled: !!doc });
+  const [sel, setSel] = useState<string | null>(null);
   if (q.isLoading || !q.data) return <Skeleton rows={8} />;
   // Sunday only shows when something is on it.
   const days = q.data.filter((d: any, i: number) => i < 6 || d.windows.length || d.procedures.length);
-  const tot = days.reduce((s: any, d: any) => ({ a: s.a + d.windows.reduce((n: number, w: any) => n + w.allocated, 0), c: s.c + d.windows.reduce((n: number, w: any) => n + w.effectiveCapacity, 0), p: s.p + d.procedures.length }), { a: 0, c: 0, p: 0 });
+  const tot = days.reduce((s: any, d: any) => ({ a: s.a + d.windows.reduce((n: number, w: any) => n + w.allocated, 0), c: s.c + d.windows.reduce((n: number, w: any) => n + w.effectiveCapacity, 0) }), { a: 0, c: 0 });
+  const pick = sel && days.some((d: any) => d.day === sel) ? sel : (days.find((d: any) => d.day === today()) ?? days[0])?.day;
+  const pd = days.find((d: any) => d.day === pick);
   return (
     <>
-      <div className="text-sm text-muted -mt-3 mb-4"><b className="text-ink">{tot.a}</b> of {tot.c} OP places booked{tot.p ? ` · ${tot.p} procedure${tot.p === 1 ? '' : 's'}` : ''}</div>
-      <Legend hint={grid.canBook ? 'Click a window to book · drag a name to move it' : undefined} />
-      <TimeGrid grid={grid} px={1.4} minCol={150} cols={days.map((d: any) => {
-        const a = d.windows.reduce((n: number, w: any) => n + w.allocated, 0), c = d.windows.reduce((n: number, w: any) => n + w.effectiveCapacity, 0);
-        const isToday = d.day === today();
-        return { key: d.day, day: d.day, windows: d.windows, blocks: d.blocks, procs: d.procedures, tint: undefined,
-          head: <button type="button" className="text-left min-w-0" onClick={() => onPickDay(d.day)} aria-label={`Open ${fullDay(d.day)}`}>
-            <div className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-clay' : 'text-muted'}`}>{label(d.day, { weekday: 'short' })}</div>
-            <div className="flex items-baseline gap-1.5"><span className="text-lg font-semibold">{label(d.day, { day: 'numeric' })}</span><span className="text-[11px] text-muted truncate">{d.blocks.some(isLongLeave) ? 'away' : c ? `${a}/${c}` : 'off'}</span></div>
-          </button> };
-      })} />
+      <div className="text-sm text-muted -mt-3 mb-4">{docName ? `${docName} · ` : ''}<b className="text-ink">{tot.a}</b> of {tot.c} OP places booked</div>
+      <Legend days={days} grid={grid} hint={grid.canBook ? 'Click a window to book · drag a name to move it · click a day for its panel' : undefined} />
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <TimeGrid grid={grid} px={1.4} minCol={140} cols={days.map((d: any) => {
+          const a = d.windows.reduce((n: number, w: any) => n + w.allocated, 0), c = d.windows.reduce((n: number, w: any) => n + w.effectiveCapacity, 0);
+          const isToday = d.day === today();
+          return { key: d.day, day: d.day, windows: d.windows, blocks: d.blocks, procs: d.procedures, tint: d.day === pick ? 'rgba(255,255,255,.45)' : undefined,
+            head: <button type="button" className="text-left min-w-0" onClick={() => setSel(d.day)} aria-pressed={d.day === pick} aria-label={`Show ${fullDay(d.day)} in the side panel`}>
+              <div className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-clay' : 'text-muted'}`}>{label(d.day, { weekday: 'short' })}</div>
+              <div className="flex items-baseline gap-1.5"><span className="text-lg font-semibold">{label(d.day, { day: 'numeric' })}</span><span className="text-[11px] text-muted truncate">{d.blocks.some(isLongLeave) ? 'away' : c ? `${a}/${c}` : 'off'}</span></div>
+            </button> };
+        })} />
+        {pd && <DayPanel d={pd} grid={grid} onOpenDay={onOpenDay} onAvailability={onAvailability} />}
+      </div>
+      {grid.onRemoveBlock && <div className="glass mt-4 flex flex-wrap items-center gap-3 px-5 py-4 anim-fade-up">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-sky-soft text-sky"><Icon name="clock" className="h-5 w-5" /></span>
+        <div className="min-w-0 flex-1"><div className="font-semibold">Need to change your hours?</div><div className="text-sm text-muted">Start late, leave early, add a break or mark the day away. Reception sees it straight away, and every change can be undone.</div></div>
+        <button className="btn btn-primary" onClick={() => onAvailability(pick && pick >= today() ? pick : today())}>Change availability</button>
+      </div>}
     </>
+  );
+}
+
+/** The picked day: hours (routine or changed, with undo), then everything booked, in time order. */
+function DayPanel({ d, grid, onOpenDay, onAvailability }: { d: any; grid: Grid; onOpenDay: (day: string) => void; onAvailability: (day: string) => void }) {
+  const items = [
+    ...d.windows.flatMap((w: any) => (w.appointments ?? []).map((a: any) => ({ t: w.startTime, key: a.id, name: a.name, sub: [a.service, a.status.replace('_', '-')].filter(Boolean).join(' · '), color: a.color, open: () => grid.onOpen(a.id), muted: a.status === 'no_show' }))),
+    ...d.procedures.map((p: any) => ({ t: p.startTime, key: p.id, name: p.patient, sub: `${p.procedure ?? 'Procedure'} · sitting ${p.sittingNo}${p.of ? ` of ${p.of}` : ''}`, color: '#6D5E86', open: null, muted: false })),
+    ...d.blocks.filter((b: any) => !isLongLeave(b)).map((b: any) => ({ t: b.startTime, key: b.id, name: b.note ?? b.kind, sub: `${b.startTime}–${b.endTime}`, color: null, open: null, muted: true })),
+  ].sort((a, b) => toMin(a.t) - toMin(b.t));
+  const away = d.blocks.find(isLongLeave);
+  const hours = hoursOf(d.windows);
+  const n = d.windows.reduce((m: number, w: any) => m + (w.appointments?.length ?? 0), 0);
+  return (
+    <aside className="card-flat self-start p-4 anim-fade-up" aria-label={`${fullDay(d.day)} summary`}>
+      <div className="flex items-baseline gap-2"><b className="text-[16px]">{label(d.day, { weekday: 'short', day: 'numeric', month: 'short' })}</b>{d.day === today() && <span className="text-xs font-semibold text-clay">today</span>}</div>
+      <div className="mt-3 rounded-2xl bg-paper px-3 py-2.5 text-sm">
+        <div className="font-semibold">{away ? 'Away all day' : hours || 'Not working'}</div>
+        <div className="text-xs text-muted">{d.blocks.length ? 'Changed for this day' : 'From the weekly routine'}</div>
+        {d.blocks.map((b: any) => <div key={b.id} className="mt-1 flex items-center gap-2 text-xs"><span className="flex-1 truncate">{b.note ?? b.kind} · {b.startTime}–{b.endTime}</span>{grid.onRemoveBlock && <button className="font-semibold underline" onClick={() => grid.onRemoveBlock!(b)}>Undo</button>}</div>)}
+        {grid.onRemoveBlock && d.day >= today() && <button className="btn btn-sm mt-2" onClick={() => onAvailability(d.day)}>Change availability</button>}
+      </div>
+      <div className="mt-3 text-xs text-muted">{n} appointment{n === 1 ? '' : 's'} · {d.procedures.length} procedure{d.procedures.length === 1 ? '' : 's'}</div>
+      <div className="mt-1 max-h-[420px] overflow-y-auto">
+        {items.length === 0 ? <div className="py-4 text-sm text-muted">Nothing booked.</div> : items.map((x) => (
+          <button key={x.key} disabled={!x.open} onClick={() => x.open?.()} className={`flex w-full items-start gap-2.5 border-t border-line/60 py-2 text-left first:border-t-0 ${x.muted ? 'opacity-60' : ''} ${x.open ? 'hover:bg-white/50' : 'cursor-default'}`}>
+            <b className="w-11 shrink-0 text-[13px]">{x.t}</b>
+            <i className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: x.color ?? 'transparent' }} />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{x.name}</span><span className="block truncate text-xs text-muted">{x.sub}</span></span>
+          </button>
+        ))}
+      </div>
+      <button className="btn btn-sm mt-3 w-full justify-center" onClick={() => onOpenDay(d.day)}>Open this day</button>
+    </aside>
+  );
+}
+
+/** One place to change a doctor's hours for a date: start late, leave early, a break, or away. Each change can be undone. */
+function AvailabilityModal({ day: initial, doc, docName, onRoutine, onClose }: { day: string; doc: string; docName: string; onRoutine: () => void; onClose: () => void }) {
+  const [day, setDay] = useState(initial);
+  const [kind, setKind] = useState<'late' | 'early' | 'break' | 'away'>('late');
+  const q = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}&practitionerId=${doc}`) });
+  const d = q.data;
+  const first = d?.windows[0]?.startTime as string | undefined; const last = d?.windows[d.windows.length - 1]?.endTime as string | undefined;
+  const [time, setTime] = useState(''); const [mins, setMins] = useState(30);
+  const refresh = () => ['calendar', 'sessions', 'appointments', 'queue'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { refresh(); toast('Undone', 'info'); }, onError: (e) => toast(errText(e), 'err') });
+  const add = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }),
+    onSuccess: (r: any, b: any) => { refresh(); toast(`${docName}: ${b.note} on ${label(day, { weekday: 'short', day: 'numeric', month: 'short' })}`, 'ok', { label: 'Undo', run: () => del.mutate(r.id) }); onClose(); }, onError: (e) => toast(errText(e), 'err') });
+  const t = time || (kind === 'late' && first ? toHHMM(toMin(first) + 30) : kind === 'early' && last ? toHHMM(toMin(last) - 60) : first ? toHHMM(Math.max(toMin(first), 13 * 60)) : '13:00');
+  const valid = /^\d{2}:\d{2}$/.test(t) && !!first && !!last && (kind === 'break' ? toMin(t) >= toMin(first) : toMin(t) > toMin(first)) && toMin(t) < toMin(last);
+  const away = !!d?.blocks.some(isLongLeave);
+  const working = (d?.windows.length ?? 0) > 0;
+  const save = () => {
+    if (kind === 'away') return add.mutate({ kind: 'leave', startTime: '00:00', endTime: '23:59', note: 'Away' });
+    if (!valid || !first || !last) return;
+    if (kind === 'late') add.mutate({ kind: 'other', startTime: first, endTime: t, note: `Starts at ${t}` });
+    if (kind === 'early') add.mutate({ kind: 'other', startTime: t, endTime: last, note: `Leaves at ${t}` });
+    if (kind === 'break') add.mutate({ kind: 'break', startTime: t, endTime: toHHMM(Math.min(toMin(t) + mins, toMin(last))), note: 'Break' });
+  };
+  return (
+    <Modal title="Change availability" subtitle={`${docName} · one date only; the weekly routine stays as it is`} onClose={onClose} width="max-w-lg">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2"><label className="label !mb-0" htmlFor="av-day">Date</label><input id="av-day" type="date" min={today()} className="input !w-auto" value={day} onChange={(e) => e.target.value >= today() && setDay(e.target.value)} />
+          <span className="text-sm text-muted">{q.isLoading ? '…' : away ? 'Away all day' : working ? `Hours ${hoursOf(d.windows)}` : 'Not a working day'}</span></div>
+        {d?.blocks.length > 0 && <div className="rounded-2xl bg-paper px-3 py-2 text-sm"><div className="text-xs font-bold uppercase tracking-wider text-muted">Already changed</div>
+          {d.blocks.map((b: any) => <div key={b.id} className="mt-1 flex items-center gap-2"><span className="flex-1">{b.note ?? b.kind} · {b.startTime}–{b.endTime}</span><button className="text-sm font-semibold underline" onClick={() => del.mutate(b.id)}>Undo</button></div>)}</div>}
+        {!q.isLoading && !away && !working && <div className="text-sm text-muted">{docName} does not work on this date in the routine. To add hours for a one-off day, open the day and use “Edit this day's windows”.</div>}
+        {!away && working && <>
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="What changes">
+            {([['late', 'Starts late'], ['early', 'Leaves early'], ['break', 'Break'], ['away', 'Away all day']] as const).map(([k, l]) => <button key={k} role="radio" aria-checked={kind === k} className={`toggle-opt ${kind === k ? 'on' : ''}`} onClick={() => { setKind(k); setTime(''); }}>{l}</button>)}
+          </div>
+          {kind !== 'away' && <div className="flex flex-wrap items-center gap-2">
+            <label className="label !mb-0" htmlFor="av-time">{kind === 'late' ? 'Starts at' : kind === 'early' ? 'Leaves at' : 'Break from'}</label>
+            <input id="av-time" type="time" step={300} className={`input !w-auto ${valid ? '' : '!border-rose'}`} value={t} onChange={(e) => setTime(e.target.value)} />
+            {kind === 'break' && <div className="flex gap-1">{[15, 30, 45, 60].map((m) => <button key={m} className={`toggle-opt ${mins === m ? 'on' : ''}`} onClick={() => setMins(m)}>{m} min</button>)}</div>}
+          </div>}
+          {kind !== 'away' && !valid && <div className="text-xs text-rose">Pick a time inside {first}–{last}.</div>}
+          {kind === 'away' && <div className="text-sm text-muted">Every window that day drops to zero places. Booked patients stay booked so reception can call them.</div>}
+        </>}
+        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <button className="btn btn-ghost btn-sm" onClick={onRoutine}>Change the weekly routine instead</button>
+          <span className="ml-auto" /><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={add.isPending || away || !working || (kind !== 'away' && !valid)} onClick={save}><Icon name="check" />Save</button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -317,7 +449,7 @@ function TeamView({ day, cfg, grid }: { day: string; cfg: any; grid: Grid }) {
   return (
     <>
       <div className="text-sm text-muted -mt-3 mb-4"><b className="text-ink">{tot.a}</b> of {tot.c} OP places booked · {d.procedures.length} procedure{d.procedures.length === 1 ? '' : 's'} in rooms</div>
-      <Legend hint={grid.canBook ? 'Drag a name to another doctor to hand the patient over' : undefined} />
+      <Legend days={[d]} grid={grid} hint={grid.canBook ? 'Drag a name to another doctor to hand the patient over' : undefined} />
       <TimeGrid grid={grid} px={1.25} minCol={170} cols={cols} />
     </>
   );
@@ -328,12 +460,12 @@ function ListView({ day, doc, grid }: { day: string; doc: string; grid: Grid }) 
   const q = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 15000, enabled: !!doc });
   if (q.isLoading || !q.data) return <Skeleton rows={6} />;
   const d = q.data;
-  const items = [...d.windows.map((w: any) => ({ ...w, type: 'w', day })), ...d.procedures.map((p: any) => ({ ...p, type: 'p' }))].sort((a, b) => toMin(a.startTime) - toMin(b.startTime));
+  const items = [...(grid.show === 'procs' ? [] : d.windows.map((w: any) => ({ ...w, type: 'w', day }))), ...(grid.show === 'appts' ? [] : d.procedures.map((p: any) => ({ ...p, type: 'p' })))].sort((a, b) => toMin(a.startTime) - toMin(b.startTime));
   if (d.blocks.some(isLongLeave)) return <div className="card"><Empty icon="door" title="Away this day" hint={`${d.windows.reduce((n: number, w: any) => n + w.allocated, 0)} booked patients may need a call.`} /></div>;
-  if (!items.length) return <div className="card"><Empty icon="calendar" title="Nothing on this day" /></div>;
+  if (!items.length) return <><Legend days={[d]} grid={grid} /><div className="card"><Empty icon="calendar" title={grid.show === 'procs' ? 'No procedures on this day' : grid.show === 'appts' ? 'No appointments on this day' : 'Nothing on this day'} /></div></>;
   const tone = (w: any) => (w.free <= 0 ? 'rose' : w.free <= 2 ? 'amber' : 'sage');
   return (
-    <div className="space-y-3 max-w-2xl">
+    <div className="space-y-3 max-w-2xl"><Legend days={[d]} grid={grid} />
       {items.map((x: any) => x.type === 'p' ? (
         <div key={x.id} className="rounded-2xl px-4 py-3 anim-fade-up" style={{ background: 'var(--color-sky-soft)', border: '1px solid #c7d4e0', color: 'var(--color-sky)' }}>
           <div className="flex items-center gap-2 font-semibold"><span>{x.startTime} {x.procedure ?? 'Procedure'}</span><span className="ml-auto text-xs font-normal">{x.room ?? ''}</span></div>
@@ -351,6 +483,23 @@ function ListView({ day, doc, grid }: { day: string; doc: string; grid: Grid }) 
         </div>
       ))}
     </div>
+  );
+}
+
+/** Doctor starts later than the routine: pick the new start (presets every 15 minutes, or any time). */
+function StartLate({ firstStart, lastEnd, onSave, onClose }: { firstStart: string; lastEnd: string; onSave: (t: string) => void; onClose: () => void }) {
+  const presets = [15, 30, 45, 60, 90, 120].map((m) => toHHMM(toMin(firstStart) + m)).filter((t) => toMin(t) < toMin(lastEnd));
+  const [t, setT] = useState(presets[1] ?? presets[0] ?? firstStart);
+  const bad = !/^\d{2}:\d{2}$/.test(t) || toMin(t) <= toMin(firstStart) || toMin(t) >= toMin(lastEnd);
+  return (
+    <Modal title="Starting late" subtitle={`The routine starts at ${firstStart}. Places before the new start are removed; reception sees why.`} onClose={onClose} width="max-w-md">
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="New start time">{presets.map((p) => <button key={p} role="radio" aria-checked={t === p} className={`toggle-opt ${t === p ? 'on' : ''}`} onClick={() => setT(p)}>{p}</button>)}</div>
+        <div className="flex items-center gap-2"><label className="label !mb-0" htmlFor="late-at">Or starts at</label><input id="late-at" type="time" step={300} className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={t} onChange={(e) => setT(e.target.value)} /></div>
+        {bad && <div className="text-xs text-rose">Pick a time after {firstStart} and before {lastEnd}.</div>}
+        <div className="flex justify-end gap-2 pt-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={bad} onClick={() => onSave(t)}><Icon name="check" />Start at {bad ? '…' : t}</button></div>
+      </div>
+    </Modal>
   );
 }
 

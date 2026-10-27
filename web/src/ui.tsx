@@ -190,13 +190,15 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl' 
 }
 
 /* ---------- Toasts (module store, no provider needed) ---------- */
-type Toast = { id: number; msg: string; tone: 'ok' | 'err' | 'info' };
+type Toast = { id: number; msg: string; tone: 'ok' | 'err' | 'info'; action?: { label: string; run: () => void } };
 let toasts: Toast[] = []; const subs = new Set<() => void>(); let nextId = 1;
 const notify = () => subs.forEach((s) => s());
-export function toast(msg: string, tone: Toast['tone'] = 'ok') {
-  const id = nextId++; toasts = [...toasts, { id, msg, tone }]; notify();
-  setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); notify(); }, 3200);
+/** A short message; with an action (e.g. Undo) it stays longer so there is time to press it. */
+export function toast(msg: string, tone: Toast['tone'] = 'ok', action?: Toast['action']) {
+  const id = nextId++; toasts = [...toasts, { id, msg, tone, action }]; notify();
+  setTimeout(() => dismiss(id), action ? 7000 : 3200);
 }
+const dismiss = (id: number) => { toasts = toasts.filter((t) => t.id !== id); notify(); };
 export function ToastHost() {
   const list = useSyncExternalStore((cb) => { subs.add(cb); return () => subs.delete(cb); }, () => toasts);
   return (
@@ -204,6 +206,7 @@ export function ToastHost() {
       {list.map((t) => (
         <div key={t.id} className={`anim-scale-in pointer-events-auto rounded-full px-4 py-2 text-sm font-medium shadow-lg flex items-center gap-2 ${t.tone === 'err' ? 'bg-rose text-white' : t.tone === 'info' ? 'bg-ink text-paper' : 'bg-sage text-white'}`}>
           <Icon name={t.tone === 'err' ? 'x' : 'check'} className="h-3.5 w-3.5" />{t.msg}
+          {t.action && <button className="-my-1 ml-1 rounded-full bg-white/20 px-3 py-1 text-xs font-bold underline-offset-2 hover:bg-white/30" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action.label}</button>}
         </div>
       ))}
     </div>

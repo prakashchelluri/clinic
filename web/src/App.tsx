@@ -13,7 +13,8 @@ export function can(perms: string[] | undefined, needed: string) {
 
 export type NavItem = { to: string; label: string; icon: string; group?: 'clinic'; show: (c: (p: string) => boolean) => boolean };
 export const NAV: NavItem[] = [
-  { to: '/overview', label: 'Dashboard', icon: 'home', show: (c) => c('finance.read') },
+  // ponytail: Dashboard hidden for now (PM review, Oct 2026); bring back by restoring c('finance.read')
+  { to: '/overview', label: 'Dashboard', icon: 'home', show: () => false },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
   { to: '/calendar', label: 'Calendar', icon: 'calendar', show: (c) => c('appointment.read') },
@@ -30,7 +31,6 @@ export const NAV: NavItem[] = [
 /** Where each role lands: the page that answers their first question of the day. */
 export function homeFor(c: (p: string) => boolean, platform = false) {
   if (platform) return '/platform';
-  if (c('finance.read')) return '/overview';
   if (c('encounter.complete')) return '/today';
   if (c('visit.write')) return '/queue';
   if (c('encounter.intake')) return '/queue';
