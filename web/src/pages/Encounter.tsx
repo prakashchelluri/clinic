@@ -40,7 +40,7 @@ export function Encounter() {
   }, [enc.data]);
   const save = useMutation({
     mutationFn: (complete: boolean) => patch(`/encounters/${id}`, { data, prescription: rx.filter((i) => i.name), recommendations: recs.filter((r) => r.kind !== 'investigation' || r.notes), complete }),
-    onSuccess: (_e, complete) => { setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })); qc.invalidateQueries({ queryKey: ['queue'] }); if (complete) { toast('Encounter completed'); window.open(`/print/${id}`, '_blank'); nav('/queue', { viewTransition: true }); } },
+    onSuccess: (_e, complete) => { setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })); qc.invalidateQueries({ queryKey: ['queue'] }); if (complete) { toast('Encounter completed'); openPrint({ title: 'Prescription', rx: id }); nav('/queue', { viewTransition: true }); } },
     onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else toast(errText(e), 'err'); },
   });
   useEffect(() => { if (loaded.current) dirty.current = true; }, [data, rx, recs]);

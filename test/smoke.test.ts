@@ -66,6 +66,13 @@ test('full OP slice', async () => {
   const forbidden = await reception('PATCH', `/encounters/${open.body.id}`, { complete: true });
   assert.equal(forbidden.status, 403);
 
+  // autosave: a draft reloaded from the database has blank fields as null, and sending them back must not be refused
+  const draft = await doctor('PATCH', `/encounters/${open.body.id}`, { data: {}, prescription: [{ name: 'Adapalene 0.1% gel' }], recommendations: [{ kind: 'investigation', notes: 'CBC' }] });
+  assert.equal(draft.status, 200, JSON.stringify(draft.body));
+  const loaded = await doctor('GET', `/encounters/${open.body.id}`);
+  const resave = await doctor('PATCH', `/encounters/${open.body.id}`, { data: {}, prescription: loaded.body.prescription, recommendations: loaded.body.recommendations.map((r: any) => ({ kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes })) });
+  assert.equal(resave.status, 200, JSON.stringify(resave.body));
+
   // 6. doctor: required field enforced, then completes with Rx + follow-up + procedure recommendation
   const invalid = await doctor('PATCH', `/encounters/${open.body.id}`, { data: { complaint: { chief_complaint: 'acne' } }, complete: true });
   assert.equal(invalid.status, 422);

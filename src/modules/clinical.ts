@@ -6,10 +6,10 @@ import { route } from '../lib/route.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 
-const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().optional(), route: z.string().optional(),
-  frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() });
-const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().optional(),
-  intervalDays: z.number().int().optional(), sittings: z.number().int().optional(), notes: z.string().optional() });
+const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
+  frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish() }); // blank fields come back from the database as null
+const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
+  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
 
 /** Validate submitted data against the form definition: required fields and option membership only. */
