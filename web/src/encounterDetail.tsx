@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { get, post } from './api';
 import { Chip, Icon, Modal, Skeleton, fmtDate, toast } from './ui';
+import { openPrint } from './printPreview';
 
 /** Form values may be a string (old encounters) or an array (tags fields). */
 const label = (x: any) => (x && typeof x === 'object' ? `${x.name}${x.severity ? ` (${x.severity})` : ''}` : String(x));
@@ -42,7 +43,7 @@ export function EncounterDetail({ id }: { id: string }) {
       {encDocs.length > 0 && (
         <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">Documents</div><DocList docs={encDocs} /></div>
       )}
-      <div className="flex gap-2"><button className="btn btn-sm" onClick={() => window.open(`/print/${id}?auto=0`, '_blank')}><Icon name="print" className="h-3.5 w-3.5" />Open prescription</button></div>
+      <div className="flex gap-2"><button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-3.5 w-3.5" />Print prescription</button></div>
     </div>
   );
 }

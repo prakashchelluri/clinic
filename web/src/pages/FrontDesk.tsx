@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, qc, uuid, ApiError, today, errText } from '../api';
+import { openPrint } from '../printPreview';
 import { can } from '../App';
 import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Segmented, Skeleton, cleanMoney, money, toast, fmtDate, toPaise } from '../ui';
 
@@ -117,7 +118,7 @@ export function FrontDesk() {
           {canDesk && !left && !handled && !v.due.length && v.recommendations.length > 0 && <button className="btn btn-sm btn-primary" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button>}
           {' '}<MoreMenu items={[
             { label: 'Collect by UPI', hidden: !(canDesk && v.due[0]), onClick: () => collect.mutate({ c: v.due[0], method: 'upi' }) },
-            { label: 'Print prescription', hidden: !(v.encounterId && !left), onClick: () => window.open(`/print/${v.encounterId}?auto=0`, '_blank') },
+            { label: 'Print prescription', hidden: !(v.encounterId && !left), onClick: () => openPrint({ title: 'Prescription', rx: v.encounterId }) },
             { label: 'Mark as explained', hidden: !(canDesk && !left && !handled && v.recommendations.length > 0 && v.due.length > 0), onClick: () => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } }) },
             { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}` },
           ]} />

@@ -6,6 +6,7 @@ import { Avatar, Icon, NoAccess, ToastHost, useScrollLock } from './ui';
 import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
 import { refreshBookings } from './apptDrawer';
+import { PrintHost } from './printPreview';
 
 export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
@@ -151,6 +152,7 @@ export function App() {
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>
+      <PrintHost />
       {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} onClose={closeBook} onDone={() => { refreshBookings(); const rec = params.get('rec'); if (rec) patch(`/worklist/${rec}`, { status: 'scheduled' }).then(() => qc.invalidateQueries({ queryKey: ['worklist'] }), () => {}); closeBook(); }} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />

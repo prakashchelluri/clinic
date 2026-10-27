@@ -4,6 +4,7 @@ import { useNavigate, useParams, useOutletContext } from 'react-router';
 import { get, patch, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Icon, Skeleton, fmtDate, toast, NumInput } from '../ui';
+import { openPrint } from '../printPreview';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
@@ -157,7 +158,7 @@ export function Encounter() {
             <span className="ml-auto" />
             {!readOnly && <button className="btn" disabled={save.isPending} onClick={() => save.mutate(false)}>{me.role === 'assistant' ? 'Save intake & return to queue' : 'Save draft'}</button>}
             {!readOnly && isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}><Icon name="print" />Complete<span className="hidden sm:inline"> & print Rx</span></button>}
-            {readOnly && <button className="btn btn-primary" onClick={() => window.open(`/print/${id}`, '_blank')}><Icon name="print" />Print Rx</button>}
+            {readOnly && <button className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" />Print Rx</button>}
           </div>
         </div>
       </section>

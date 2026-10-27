@@ -193,3 +193,6 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
 
 /* The header icons float top right on desktop, so the first row of every page keeps clear of them */
 @media (min-width: 768px) { .page > * > :first-child { padding-right: 9rem; } }
+
+/* Printing a document from the popup: only #print-area is printed */
+@media print { body.printing-doc > *:not(#print-area) { display: none !important; } body.printing-doc #print-area { display: block !important; } }

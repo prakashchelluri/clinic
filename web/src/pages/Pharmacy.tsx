@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
+import { openPrint } from '../printPreview';
 import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, money, toast, MoneyInput, toPaise } from '../ui';
 
 /** Pharmacy counter: today's prescriptions from the doctor, tick items as dispensed, bill once per visit. */
@@ -72,7 +73,7 @@ function RxCard({ r, i, canBill, canDispense }: { r: any; i: number; canBill: bo
         <span className="serif text-lg w-16">{r.opNumber}</span><Avatar name={r.patient.fullName} />
         <div className="min-w-0 flex-1"><div className="font-medium truncate">{r.patient.fullName} <span className="text-xs text-muted font-normal">{r.patient.ageYears ? `${r.patient.ageYears}y` : ''} {r.patient.sex ?? ''}</span></div><div className="text-xs text-muted">{r.patient.patientNo} · Rx {fmtTime(r.completedAt)}</div></div>
         {r.bill ? <Chip tone="sage">billed {money(r.bill.amountPaise)}</Chip> : allDone ? <Chip tone="amber">dispensed · bill pending</Chip> : <Chip>{r.items.filter((x: any) => !x.dispensed).length} to give</Chip>}
-        <button className="btn btn-ghost btn-icon" title="Print Rx" onClick={() => window.open(`/print/${r.encounterId}?auto=0`, '_blank')}><Icon name="print" /></button>
+        <button className="btn btn-ghost btn-icon" title="Print Rx" onClick={() => openPrint({ title: 'Prescription', rx: r.encounterId })}><Icon name="print" /></button>
       </div>
       {r.patient.allergies && <div className="mt-2 text-xs text-rose bg-rose-soft rounded-lg px-2.5 py-1.5">Allergies: {r.patient.allergies}</div>}
       <div className="mt-3 divide-y divide-line/70">
@@ -139,20 +140,19 @@ const esc = (x: unknown) => String(x ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&
 
 /** Tax invoice in a print window. GST is shown as CGST + SGST halves of the GST contained in the prices. */
 async function printSale(id: string) {
-  const w = window.open('', '_blank', 'width=420,height=700'); if (!w) { toast('Allow pop-ups to print the receipt', 'err'); return; }
   try {
     const x = await get(`/pharmacy/sale/${id}`);
     const taxable = x.totalPaise - x.gstPaise; const half = Math.floor(x.gstPaise / 2);
-    w.document.write(`<!doctype html><title>${esc(x.invoiceNo)}</title><style>body{font:13px system-ui,sans-serif;margin:18px;color:#111}h1{font-size:17px;margin:0}table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:4px 2px;text-align:right;border-bottom:1px dashed #bbb}th:first-child,td:first-child{text-align:left}.m{color:#555;font-size:12px}.t td{border:0;padding:2px}.b{font-weight:700;font-size:15px}</style>
+    const html = `<!doctype html><title>${esc(x.invoiceNo)}</title><style>body{font:13px system-ui,sans-serif;margin:18px;color:#111}h1{font-size:17px;margin:0}table{width:100%;border-collapse:collapse;margin:10px 0}th,td{padding:4px 2px;text-align:right;border-bottom:1px dashed #bbb}th:first-child,td:first-child{text-align:left}.m{color:#555;font-size:12px}.t td{border:0;padding:2px}.b{font-weight:700;font-size:15px}</style>
 <h1>${esc(x.clinic.name)} · Pharmacy</h1><div class="m">${esc(x.clinic.address ?? '')}${x.clinic.gstin ? ' · GSTIN ' + esc(x.clinic.gstin) : ''}</div><hr>
 <div><b>Tax invoice ${esc(x.invoiceNo)}</b><br><span class="m">${new Date(x.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })}</span></div>
 <div class="m">${esc(x.patient.fullName)} · ${esc(x.patient.patientNo)} · ${esc(x.patient.phone)}</div>
 <table><tr><th>Item</th><th>Qty</th><th>MRP</th><th>GST</th><th>Amount</th></tr>${x.items.map((l: any) => `<tr><td>${esc(l.name)}${l.hsn ? '<div class="m">HSN ' + esc(l.hsn) + '</div>' : ''}</td><td>${l.qty}</td><td>${rupees(l.mrpPaise)}</td><td>${l.gstBp / 100}%</td><td>${rupees(l.amountPaise)}</td></tr>`).join('')}</table>
 <table class="t"><tr><td>Items total</td><td>${rupees(x.grossPaise)}</td></tr>${x.discountPaise ? `<tr><td>Discount</td><td>-${rupees(x.discountPaise)}</td></tr>` : ''}<tr><td>Taxable value</td><td>${rupees(taxable)}</td></tr><tr><td>CGST</td><td>${rupees(half)}</td></tr><tr><td>SGST</td><td>${rupees(x.gstPaise - half)}</td></tr><tr class="b"><td>Total</td><td>₹${rupees(x.totalPaise)}</td></tr>
 <tr><td>Paid by ${esc(x.method.toUpperCase())}${x.reference ? ' · ' + esc(x.reference) : ''}</td><td></td></tr>${x.method === 'cash' && x.receivedPaise > x.totalPaise ? `<tr><td>Received ${rupees(x.receivedPaise)}</td><td>Change ${rupees(x.receivedPaise - x.totalPaise)}</td></tr>` : ''}</table>
-<div class="m">Prices include GST. Thank you.</div><script>onload=()=>setTimeout(print,200)<\/script>`);
-    w.document.close();
-  } catch (e: any) { w.close(); toast(errText(e), 'err'); }
+<div class="m">Prices include GST. Thank you.</div>`;
+    openPrint({ title: `Receipt ${x.invoiceNo}`, html });
+  } catch (e: any) { toast(errText(e), 'err'); }
 }
 
 /**
