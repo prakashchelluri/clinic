@@ -37,7 +37,7 @@ export function Worklist() {
       )}
       <Section>
         {list.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <Empty icon="check" title="Nothing pending" hint="New recommendations appear here the moment the doctor completes an encounter." /> :
-          rows.map((r, i) => <Row key={r.id} r={r} i={i} today={t} canWrite={can(perms, 'worklist.write')} onUpdate={(b) => upd.mutate({ id: r.id, ...b })} onOpen={() => nav(`/patients/${r.patient.id}`, { viewTransition: true })} onSchedule={() => setScheduling(r)} />)}
+          rows.map((r, i) => <Row key={r.id} r={r} i={i} today={t} canWrite={can(perms, 'worklist.write')} onUpdate={(b) => upd.mutate({ id: r.id, ...b })} onOpen={() => nav(`/patients/${r.patient.id}`, { viewTransition: true })} onBook={() => nav(`?book=1&patient=${r.patient.id}&pname=${encodeURIComponent(r.patient.fullName)}&rec=${r.id}`)} onSchedule={() => setScheduling(r)} />)}
       </Section>
       {cap && <PhotoCapture patient={{ id: cap.patient.id, fullName: cap.patient.fullName }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
       {scheduling && <ScheduleModal rec={scheduling} onClose={() => { setScheduling(null); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['psessions-upcoming'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
@@ -45,7 +45,7 @@ export function Worklist() {
   );
 }
 
-function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule }: { r: any; i: number; today: string; canWrite: boolean; onUpdate: (b: any) => void; onOpen: () => void; onSchedule: () => void }) {
+function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onBook }: { r: any; i: number; today: string; canWrite: boolean; onUpdate: (b: any) => void; onOpen: () => void; onSchedule: () => void; onBook: () => void }) {
   const [outcome, setOutcome] = useState(OUTCOMES[0]); const [note, setNote] = useState(''); const [due, setDue] = useState(r.dueOn ?? ''); const [open, setOpen] = useState(false);
   const [result, setResult] = useState('');
   const late = r.dueOn && r.dueOn < today && r.status !== 'scheduled';
@@ -69,8 +69,8 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule }: { r: any; 
           <div className="flex items-center gap-1.5">
             {isTest ? <button className="btn btn-sm btn-primary" onClick={() => setOpen(!open)}><Icon name="check" className="h-3.5 w-3.5" />Result received</button>
               : r.kind === 'procedure' ? <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />Schedule</button>
-              : <button className="btn btn-sm btn-primary" onClick={() => onUpdate({ status: 'scheduled' })}>Booked</button>}
-            <MoreMenu items={[{ label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }, { label: 'Log a call', hidden: isTest, onClick: () => setOpen(!open) }, { label: 'Mark done', hidden: isTest, onClick: () => onUpdate({ status: 'done' }) }]} />
+              : r.status === 'scheduled' ? <Chip tone="sage">booked</Chip> : <button className="btn btn-sm btn-primary" onClick={onBook}><Icon name="calendar" className="h-3.5 w-3.5" />Book visit</button>}
+            <MoreMenu items={[{ label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }, { label: 'Log a call', hidden: isTest, onClick: () => setOpen(!open) }, { label: 'Mark as booked (already done elsewhere)', hidden: isTest || r.kind === 'procedure' || r.status === 'scheduled', onClick: () => onUpdate({ status: 'scheduled' }) }, { label: 'Mark done', hidden: isTest, onClick: () => onUpdate({ status: 'done' }) }]} />
           </div>
         )}
       </div>

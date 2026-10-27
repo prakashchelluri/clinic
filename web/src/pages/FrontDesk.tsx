@@ -155,7 +155,7 @@ export function FrontDesk() {
           </table></div>
         </div>}
       </>)}
-      {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visits.filter((v) => ['waiting', 'intake'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); refresh(); }} />}
+      {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visits.filter((v) => ['waiting', 'intake'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); refresh(); }} />}
     </div>
   );
 }
@@ -264,7 +264,7 @@ export const DEFAULT_VITALS = ['weight_kg', 'height_cm', 'temp_f', 'bp', 'spo2']
 type Complaint = { text: string; duration: string };
 
 /** Arrival: who they are, why this fee, vitals, complaints, which doctor. One screen, one button. */
-function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string }; cfg: any; perms: string[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
+function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [patientId, setPatientId] = useState(init.patientId);
   const [newP, setNewP] = useState<null | { fullName: string; phone: string; ageYears: string; sex: string }>(null);
@@ -276,10 +276,13 @@ function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { 
   const [draft, setDraft] = useState<Complaint>({ text: '', duration: '' });
   const [method, setMethod] = useState('cash'); const [amount, setAmount] = useState('');
   const [waive, setWaive] = useState('');
-  const [practitionerId, setPractitionerId] = useState('');
+  const [pickedDoc, setPractitionerId] = useState('');
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: !patientId && q.length >= 2 });
   const sug = useQuery({ queryKey: ['suggest', patientId], queryFn: () => get(`/patients/${patientId}/suggest-category`), enabled: !!patientId });
   const tl = useQuery({ queryKey: ['timeline', patientId], queryFn: () => get(`/patients/${patientId}/timeline`), enabled: !!patientId });
+  // Checking in from the top button: still link the patient's booking for today, and default to that booking's doctor (else the shortest queue). Tap another doctor to change.
+  const appt = todayAppts.find((a) => a.id === init.appointmentId) ?? (patientId ? todayAppts.find((a) => a.patientId === patientId) : undefined);
+  const practitionerId = pickedDoc || appt?.window?.practitionerId || [...(cfg?.practitioners ?? [])].sort((a: any, b: any) => (waitingByDoctor[a.id] ?? 0) - (waitingByDoctor[b.id] ?? 0))[0]?.id || '';
   const fallbackCat = cfg?.feeCategories.find((c: any) => c.code === 'GEN')?.code ?? cfg?.feeCategories[0]?.code ?? '';
   const chosen = cat || sug.data?.suggested?.code || (patientId && sug.isLoading ? '' : fallbackCat);
   const [dup, setDup] = useState<null | { id: string; patientNo: string }>(null); const [forceNew, setForceNew] = useState(false);
@@ -298,7 +301,7 @@ function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { 
       const complaints = [...list, ...(draft.text.trim() ? [{ text: draft.text.trim(), duration: draft.duration.trim() }] : [])];
       const vitals: Record<string, any> = {};
       for (const f of VITAL_FIELDS) if (enabled.includes(f.key) && vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
-      return post('/visits', { patientId: pid, appointmentId: init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
+      return post('/visits', { patientId: pid, appointmentId: appt?.id ?? init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
         details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: complaints.map((c) => c.text).join(', ') },
         payment: !waive && fee > 0 ? { method, amountPaise: toPaise(amount || String(fee / 100)) } : undefined, waive: waive ? { reason: waive } : undefined, idempotencyKey: uuid() });
     },
@@ -374,7 +377,7 @@ function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { 
             <div><label htmlFor="locality" className="label">Location</label><input id="locality" className="input" placeholder={p?.locality ?? ''} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="label">Doctor</label><div className="flex flex-wrap gap-1.5">{cfg?.practitioners.map((x: any) => <button key={x.id} type="button" className={`toggle-opt !py-2.5 ${practitionerId === x.id ? 'on' : ''}`} onClick={() => setPractitionerId(practitionerId === x.id ? '' : x.id)}>{x.name} · {waitingByDoctor[x.id] ?? 0} waiting</button>)}</div></div>
+            <div><label className="label">Doctor <span className="font-normal text-muted">· tap to change</span></label><div className="flex flex-wrap gap-1.5">{cfg?.practitioners.map((x: any) => <button key={x.id} type="button" className={`toggle-opt !py-2.5 ${practitionerId === x.id ? 'on' : ''}`} onClick={() => setPractitionerId(x.id)}>{x.name} · {waitingByDoctor[x.id] ?? 0} waiting</button>)}</div></div>
             <div><label className="label">Payment</label>
               {fee === 0 ? <div className="text-sm text-muted pt-2.5">Nothing to collect for {catRow?.name?.split(' (')[0] ?? 'this visit'}.</div> : waive ? <div className="text-sm text-amber pt-2.5">Waived · {waive}</div> : (
                 <div className="flex gap-1.5 items-center flex-wrap">{['cash', 'upi', 'card'].map((m) => <button key={m} type="button" className={`toggle-opt !py-2.5 uppercase ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{m}</button>)}<MoneyInput className="!w-28" value={amount === '' ? String(fee / 100) : amount} onChange={setAmount} /></div>)}

@@ -17,7 +17,6 @@ export function Patients() {
   return (
     <div>
       <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
-        {can(perms, 'patient.write') && <button className="btn btn-primary" onClick={() => setShowNew(true)}><Icon name="plus" />Register</button>}
       </PageHeader>
       <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5">
         <div className="space-y-3">

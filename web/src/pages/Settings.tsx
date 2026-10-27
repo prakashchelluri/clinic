@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
-import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, ask } from '../ui';
+import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, ask } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
@@ -237,13 +237,13 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Medicines ---------------- */
 function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null); const [q, setQ] = useState('');
-  const save = useMutation({ mutationFn: (m: any) => m.id ? patch(`/admin/medicines/${m.id}`, m) : post('/admin/medicines', m), onSuccess: () => { toast('Medicine saved'); setEdit(null); onSaved(); } });
+  const save = useMutation({ mutationFn: ({ mrp, id, ...m }: any) => { const b = { ...m, mrpPaise: mrp !== undefined ? toPaise(mrp || '0') : m.mrpPaise, gstBp: m.gstBp ?? 1200, hsn: m.hsn || null }; delete b.createdAt; delete b.tenantId; return id ? patch(`/admin/medicines/${id}`, b) : post('/admin/medicines', b); }, onSuccess: () => { toast('Medicine saved'); setEdit(null); onSaved(); } });
   const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/admin/medicines/${id}`), onSuccess: () => { toast('Removed', 'info'); setEdit(null); onSaved(); }, onError: () => toast('In use by a prescription; cannot delete', 'err') });
   const list = cfg.medicines.filter((m: any) => m.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <Section title={<>Favourites <span className="text-muted font-normal">· {cfg.medicines.length}</span></>} aside={<><input className="input !w-48 !py-1.5" placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} /><button className="btn btn-sm btn-primary" onClick={() => setEdit({ name: '', form: 'tab', scheduleClass: 'H', defaults: {} })}><Icon name="plus" className="h-3.5 w-3.5" />Add</button></>}>
-      <table className="table"><thead><tr><th className="pl-4">Name</th><th>Form</th><th>Schedule</th><th>Default</th><th /></tr></thead>
-        <tbody>{list.map((m: any) => <tr key={m.id}><td className="pl-4 font-medium">{m.name}</td><td className="text-muted">{m.form}</td><td><Chip tone={m.scheduleClass === 'OTC' ? '' : 'amber'}>{m.scheduleClass ?? '—'}</Chip></td><td className="text-xs text-muted">{[m.defaults?.dose, m.defaults?.frequency, m.defaults?.durationDays ? `${m.defaults.durationDays}d` : null].filter(Boolean).join(' · ')}</td><td className="text-right pr-3"><button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...m, defaults: m.defaults ?? {} })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
+      <table className="table"><thead><tr><th className="pl-4">Name</th><th>Form</th><th>Schedule</th><th>Price</th><th>Default</th><th /></tr></thead>
+        <tbody>{list.map((m: any) => <tr key={m.id}><td className="pl-4 font-medium">{m.name}</td><td className="text-muted">{m.form}</td><td><Chip tone={m.scheduleClass === 'OTC' ? '' : 'amber'}>{m.scheduleClass ?? '—'}</Chip></td><td className={m.mrpPaise ? '' : 'text-rose text-xs'}>{m.mrpPaise ? `${money(m.mrpPaise)} · ${m.gstBp / 100}%` : 'not set'}</td><td className="text-xs text-muted">{[m.defaults?.dose, m.defaults?.frequency, m.defaults?.durationDays ? `${m.defaults.durationDays}d` : null].filter(Boolean).join(' · ')}</td><td className="text-right pr-3"><button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...m, defaults: m.defaults ?? {} })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
         <Modal title={edit.id ? 'Edit medicine' : 'New medicine'} onClose={() => setEdit(null)} width="max-w-lg">
           <div className="space-y-3">
@@ -251,6 +251,12 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             <div className="grid grid-cols-2 gap-2">
               <div><label className="label">Form</label><div className="flex flex-wrap gap-1">{['tab', 'cap', 'cream', 'gel', 'lotion', 'syrup', 'inj', 'soap'].map((x) => <button key={x} className={`toggle-opt ${edit.form === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, form: x })}>{x}</button>)}</div></div>
               <div><label className="label">Schedule</label><div className="flex gap-1">{['OTC', 'H', 'H1', 'X'].map((x) => <button key={x} className={`toggle-opt ${edit.scheduleClass === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, scheduleClass: x })}>{x}</button>)}</div></div>
+            </div>
+            <div className="text-[11px] uppercase tracking-wider text-muted">Pharmacy counter</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div><label className="label">Price per unit (MRP, GST included)</label><MoneyInput value={edit.mrp ?? String((edit.mrpPaise ?? 0) / 100 || '')} onChange={(v: string) => setEdit({ ...edit, mrp: v })} /></div>
+              <div><label className="label">GST</label><div className="flex flex-wrap gap-1">{[0, 500, 1200, 1800].map((x) => <button key={x} className={`toggle-opt ${(edit.gstBp ?? 1200) === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, gstBp: x })}>{x / 100}%</button>)}</div></div>
+              <div><label className="label">HSN code</label><input className="input" inputMode="numeric" maxLength={8} value={edit.hsn ?? ''} onChange={(e) => setEdit({ ...edit, hsn: e.target.value.replace(/\D/g, '') })} /></div>
             </div>
             <div className="text-[11px] uppercase tracking-wider text-muted">Defaults filled into the prescription</div>
             <div className="grid grid-cols-4 gap-2">
@@ -331,7 +337,7 @@ function TestDataCard() {
   const run = async () => {
     const r = await ask({
       title: result ? 'Top up the test data?' : 'Load test data into this clinic?',
-      body: "It adds sample patients (once) and fills every doctor's bookings for this week, tomorrow, the rest of the month and the next two weeks, with online requests, repeat visits, messages and procedure courses with photos. It switches online booking on. Running it again only tops up quiet days. It cannot be removed in one step, so use it on a test clinic only.",
+      body: "It adds sample patients (once) and one week of data around today (six days back, six ahead): every doctor's bookings, visits and prescriptions, pharmacy bills and counter sales, expenses, online requests, repeat visits, messages and procedure courses with photos. It switches online booking on. Running it again adds nothing twice. It cannot be removed in one step, so use it on a test clinic only.",
       confirmLabel: result ? 'Top up' : 'Load test data',
     });
     if (r) load.mutate();
@@ -339,8 +345,8 @@ function TestDataCard() {
   return (
     <div className="card space-y-3">
       <div className="text-[11px] uppercase tracking-wider text-muted">Test data</div>
-      <div className="text-sm text-ink-2">Fills the clinic with realistic bookings for this week and the whole month, tomorrow included, plus online requests, repeat visits, patient messages and two procedure courses with before/after photos. Use it on a test clinic, not one with real patients.</div>
-      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">{result.topUp ? 'Topped up' : 'Loaded'} {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled{result.topUp ? '' : `, ${result.requested} online requests, ${result.series} repeat visits, ${result.sittings} procedure sittings, ${result.photos} photos`}.</div>}
+      <div className="text-sm text-ink-2">Fills the clinic with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, online requests, repeat visits, patient messages and two procedure courses with before/after photos. Use it on a test clinic, not one with real patients.</div>
+      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">{result.topUp ? 'Topped up' : 'Loaded'} {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses{result.topUp ? '' : `, ${result.requested} online requests, ${result.series} repeat visits, ${result.sittings} procedure sittings, ${result.photos} photos`}.</div>}
       <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : result ? 'Top up again' : 'Load test data'}</button>
     </div>
   );

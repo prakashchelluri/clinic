@@ -114,7 +114,7 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => { const b = sent(FeeIn.partial().parse(req.body), req.body); checkRule(b.eligibility); return upd(tx, feeCategory, req, b); });
 
   // --- medicines ---
-  const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });
+  const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), mrpPaise: z.number().int().min(0).max(100000000).optional(), gstBp: z.number().int().min(0).max(2800).optional(), hsn: z.string().max(10).optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });
   route(app, 'post', '/admin/medicines', 'config.write', async (req, tx) => {
     const b = MedIn.parse(req.body);
     const dup = await tx.select({ id: medicine.id }).from(medicine).where(and(eq(medicine.tenantId, req.ctx.tenantId), sql`lower(${medicine.name}) = ${b.name.toLowerCase()}`, sql`coalesce(${medicine.strength},'') = ${b.strength ?? ''}`)).limit(1);

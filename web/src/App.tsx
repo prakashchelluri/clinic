@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { useMe, useConfig, post, get, qc } from './api';
+import { useMe, useConfig, post, get, patch, qc } from './api';
 import { Avatar, Icon, NoAccess, ToastHost, useScrollLock } from './ui';
-import { CommandPalette } from './palette';
+import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
 import { refreshBookings } from './apptDrawer';
 
@@ -85,10 +85,11 @@ export function App() {
   const me = useMe(); const cfg = useConfig(); const nav = useNavigate(); const loc = useLocation();
   const [palette, setPalette] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
+  const [plus, setPlus] = useState(false);
   const [drawer, setDrawer] = useState(false);
   useScrollLock(drawer);
   const [params, setParams] = useSearchParams();
-  const closeBook = () => { const p = new URLSearchParams(params); ['book', 'patient', 'pname'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); };
+  const closeBook = () => { const p = new URLSearchParams(params); ['book', 'patient', 'pname', 'rec'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); };
   const perms: string[] = me.data?.perms ?? [];
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
@@ -132,14 +133,17 @@ export function App() {
             <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
             <span className="truncate text-[17px] font-semibold md:hidden">{clinic}</span>
             {!platform && <button onClick={() => setPalette(true)} className="hidden h-10 min-w-[280px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white lg:flex">
-              <Icon name="search" className="h-4 w-4" />Search patients or actions<span className="kbd ml-auto">⌘K</span></button>}
+              <Icon name="search" className="h-4 w-4" />Search patients<span className="kbd ml-auto">⌘K</span></button>}
             <span className="ml-auto" />
             {!platform && <button onClick={() => setPalette(true)} aria-label="Search" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
             {!platform && c('appointment.read') && <Link to="/bookings?tab=requests" aria-label={requests ? `${requests} booking requests` : 'Booking requests'} data-tip="Online requests" className="tip relative btn btn-ghost btn-icon">
               <Icon name="bell" />{requests > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests}</span>}</Link>}
-            {!platform && (c('visit.write')
-              ? <button onClick={() => nav('/queue?arrive=1')} aria-label="Check in" className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Check in</span></button>
-              : <button onClick={() => setPalette(true)} aria-label="Create" className="btn btn-accent !py-2.5 shrink-0"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">Create</span></button>)}
+            {!platform && (() => { const acts = createActions(c, loc.pathname); return acts.length > 0 && (
+              <div className="relative shrink-0">
+                <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-accent btn-icon !h-11 !w-11 !rounded-full"><Icon name="plus" className={`h-5 w-5 transition-transform duration-200 ${plus ? 'rotate-45' : ''}`} /></button>
+                {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
+                  <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
+              </div>); })()}
             <div className="relative md:hidden">
               <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-10 w-10 text-sm" /></button>
               {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
@@ -149,7 +153,7 @@ export function App() {
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>
-      {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} onClose={closeBook} onDone={() => { refreshBookings(); closeBook(); }} />}
+      {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} onClose={closeBook} onDone={() => { refreshBookings(); const rec = params.get('rec'); if (rec) patch(`/worklist/${rec}`, { status: 'scheduled' }).then(() => qc.invalidateQueries({ queryKey: ['worklist'] }), () => {}); closeBook(); }} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />
     </div>

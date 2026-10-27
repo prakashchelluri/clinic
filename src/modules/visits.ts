@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc, desc, gte, lte, ilike, or } from 'drizzle-orm';
+import { and, eq, sql, asc, desc, gte, lte, ilike, or, inArray } from 'drizzle-orm';
 import jsonLogic from 'json-logic-js';
 import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter, session, procedureCatalog } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
@@ -65,6 +65,12 @@ export function visitRoutes(app: FastifyInstance) {
     const n = await nextNumber(tx, t, 'op_number', scope);
     const opNumber = settings.numbering?.opNumberScope === 'day' ? String(n) : `${cat.code}-${n}`;
     const [{ maxPos }] = await tx.select({ maxPos: sql<string>`coalesce(max(${visit.queuePosition}), 0)` }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.day, day)));
+    // No booking given (checked in from the top button): use the patient's open booking for today, if any
+    if (!body.appointmentId) {
+      const mine = await tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+        .where(and(eq(appointment.tenantId, t), eq(appointment.patientId, body.patientId), eq(session.day, day), inArray(appointment.status, ['requested', 'booked', 'confirmed']))).limit(1);
+      body.appointmentId = mine[0]?.id;
+    }
     const [v] = await tx.insert(visit).values({
       tenantId: t, branchId, patientId: body.patientId, appointmentId: body.appointmentId, practitionerId: body.practitionerId ?? null,
       feeCategoryId: cat.id, day, opNumber, details: body.details, queuePosition: String(Number(maxPos) + 1), priority: cat.priority, idempotencyKey: body.idempotencyKey,

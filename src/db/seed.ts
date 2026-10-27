@@ -38,16 +38,16 @@ export const DERM_INTAKE: FormSchema = {
   ] }],
 };
 const DERM_MEDICINES = [
-  { name: 'Adapalene 0.1% gel', form: 'gel', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'at night', durationDays: 56, instructions: 'thin layer on affected area' } },
-  { name: 'Clindamycin 1% gel', form: 'gel', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'morning', durationDays: 28 } },
-  { name: 'Doxycycline 100 mg', form: 'cap', scheduleClass: 'H', defaults: { dose: '1 cap', route: 'oral', frequency: 'once daily after food', durationDays: 28 } },
-  { name: 'Isotretinoin 20 mg', form: 'cap', scheduleClass: 'H', defaults: { dose: '1 cap', route: 'oral', frequency: 'once daily with food', durationDays: 30, instructions: 'avoid pregnancy; lipid/LFT monitoring' } },
-  { name: 'Cetirizine 10 mg', form: 'tab', scheduleClass: 'OTC', defaults: { dose: '1 tab', route: 'oral', frequency: 'at night', durationDays: 7 } },
-  { name: 'Mometasone 0.1% cream', form: 'cream', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'once daily', durationDays: 14 } },
-  { name: 'Ketoconazole 2% cream', form: 'cream', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'twice daily', durationDays: 21 } },
-  { name: 'Terbinafine 250 mg', form: 'tab', scheduleClass: 'H', defaults: { dose: '1 tab', route: 'oral', frequency: 'once daily', durationDays: 14 } },
-  { name: 'Sunscreen SPF 50', form: 'lotion', scheduleClass: 'OTC', defaults: { route: 'topical', frequency: 'morning, reapply 3-hourly', durationDays: 90 } },
-  { name: 'Moisturiser (ceramide)', form: 'cream', scheduleClass: 'OTC', defaults: { route: 'topical', frequency: 'twice daily', durationDays: 90 } },
+  { name: 'Adapalene 0.1% gel', mrpPaise: 21000, gstBp: 1200, form: 'gel', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'at night', durationDays: 56, instructions: 'thin layer on affected area' } },
+  { name: 'Clindamycin 1% gel', mrpPaise: 14500, gstBp: 1200, form: 'gel', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'morning', durationDays: 28 } },
+  { name: 'Doxycycline 100 mg', mrpPaise: 9500, gstBp: 1200, form: 'cap', scheduleClass: 'H', defaults: { dose: '1 cap', route: 'oral', frequency: 'once daily after food', durationDays: 28 } },
+  { name: 'Isotretinoin 20 mg', mrpPaise: 32000, gstBp: 1200, form: 'cap', scheduleClass: 'H', defaults: { dose: '1 cap', route: 'oral', frequency: 'once daily with food', durationDays: 30, instructions: 'avoid pregnancy; lipid/LFT monitoring' } },
+  { name: 'Cetirizine 10 mg', mrpPaise: 3000, gstBp: 1200, form: 'tab', scheduleClass: 'OTC', defaults: { dose: '1 tab', route: 'oral', frequency: 'at night', durationDays: 7 } },
+  { name: 'Mometasone 0.1% cream', mrpPaise: 11000, gstBp: 1200, form: 'cream', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'once daily', durationDays: 14 } },
+  { name: 'Ketoconazole 2% cream', mrpPaise: 12500, gstBp: 1200, form: 'cream', scheduleClass: 'H', defaults: { route: 'topical', frequency: 'twice daily', durationDays: 21 } },
+  { name: 'Terbinafine 250 mg', mrpPaise: 16500, gstBp: 1200, form: 'tab', scheduleClass: 'H', defaults: { dose: '1 tab', route: 'oral', frequency: 'once daily', durationDays: 14 } },
+  { name: 'Sunscreen SPF 50', mrpPaise: 45000, gstBp: 1800, form: 'lotion', scheduleClass: 'OTC', defaults: { route: 'topical', frequency: 'morning, reapply 3-hourly', durationDays: 90 } },
+  { name: 'Moisturiser (ceramide)', mrpPaise: 38000, gstBp: 1800, form: 'cream', scheduleClass: 'OTC', defaults: { route: 'topical', frequency: 'twice daily', durationDays: 90 } },
 ];
 const DERM_PROCEDURES = [
   { name: 'Chemical peel', typicalMinutes: 30, pricePaise: 250000, typicalSittings: 6, requiredCapability: 'procedure' },

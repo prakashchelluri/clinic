@@ -78,8 +78,6 @@ export function Today() {
         <div className="min-w-0"><h1 className="text-[28px] font-semibold leading-tight">{hello}, {me.name.split(' ').slice(0, 2).join(' ')}</h1>
           <div className="text-sm text-muted">{dateLabel}{myHours ? ` · ${doc ? 'your day' : 'clinic hours'} ${myHours}` : doc ? ' · not working today' : ''}{changes.length ? ` · ${changes.map((b: any) => b.note ?? b.kind).join(', ')}` : ''}</div></div>
         <span className="ml-auto" />
-        <button className="btn" onClick={() => nav('/calendar')}><Icon name="calendar" />Calendar</button>
-        {can(perms, 'appointment.write') && <button className="btn btn-accent" onClick={() => nav('/calendar?book=1')}><Icon name="plus" />New booking</button>}
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 stagger">

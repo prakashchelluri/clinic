@@ -77,6 +77,9 @@ export const medicine = pgTable('medicine', {
   form: text('form'),            // tab | cap | cream | gel | lotion | syrup | inj
   strength: text('strength'),
   scheduleClass: text('schedule_class'), // H | H1 | X | OTC
+  mrpPaise: integer('mrp_paise').notNull().default(0), // price per unit, GST included
+  gstBp: integer('gst_bp').notNull().default(1200),   // 1200 = 12%
+  hsn: text('hsn'),
   defaults: jsonb('defaults').$type<{ dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string }>(),
 });
 
@@ -296,6 +299,23 @@ export const payment = pgTable('payment', {
   idempotencyKey: text('idempotency_key'),
 }, (t) => [uniqueIndex('pay_idem').on(t.tenantId, t.idempotencyKey), index('pay_at').on(t.tenantId, t.receivedAt)]);
 
+// A pharmacy counter sale: prices come from the medicine catalogue, GST is inside the price, one invoice number per sale.
+export const pharmacySale = pgTable('pharmacy_sale', {
+  ...tenantCols,
+  invoiceNo: text('invoice_no').notNull(),
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  chargeId: uuid('charge_id').references(() => charge.id),
+  items: jsonb('items').$type<{ medicineId: string; name: string; hsn: string | null; qty: number; mrpPaise: number; gstBp: number; amountPaise: number }[]>().notNull(),
+  grossPaise: integer('gross_paise').notNull(),      // sum of lines at MRP
+  discountPaise: integer('discount_paise').notNull().default(0),
+  gstPaise: integer('gst_paise').notNull(),          // GST contained in the total
+  totalPaise: integer('total_paise').notNull(),
+  method: text('method').notNull(),
+  reference: text('reference'),
+  receivedPaise: integer('received_paise'),          // cash handed over, for change
+  createdBy: uuid('created_by').notNull(),
+}, (t) => [uniqueIndex('pharmacy_invoice').on(t.tenantId, t.invoiceNo), index('pharmacy_sale_at').on(t.tenantId, t.createdAt)]);
+
 export const expense = pgTable('expense', {
   ...tenantCols,
   day: date('day').notNull(),
@@ -351,7 +371,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

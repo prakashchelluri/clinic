@@ -20,7 +20,7 @@ const login = async (email: string) => (await app.inject({ method: 'POST', url: 
 before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); app = await buildApp(); });
 after(async () => { await app.close(); });
 
-test('test data fills the month, tomorrow and the courses, and can be topped up', async () => {
+test('test data fills the week, pharmacy and courses, and can be topped up', async () => {
   const owner = await login('owner@demo.clinic'); const reception = await login('reception@demo.clinic');
   const call = (c: string, method: 'GET' | 'POST', url: string) => app.inject({ method, url: '/api' + url, cookies: { cc_session: c } });
 
@@ -46,27 +46,32 @@ test('test data fills the month, tomorrow and the courses, and can be topped up'
   assert.equal(file.statusCode, 200); assert.equal(file.headers['content-type'], 'image/png');
   assert.deepEqual([...file.rawPayload.subarray(0, 4)], [137, 80, 78, 71], 'a real PNG');
 
-  // every working day of this month is filled (today aside: it only gets windows still ahead), and tomorrow is busy
+  // the week around today is filled (today aside: it only gets windows still ahead), and tomorrow is busy
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-  const [Y, M] = today.split('-').map(Number);
-  const monthEnd = new Date(Date.UTC(Y, M, 0)).toISOString().slice(0, 10);
   const doc = (await call(owner, 'GET', '/config')).json().practitioners[0].id;
   const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
-  const days: any[] = [];
-  for (let from = `${Y}-${String(M).padStart(2, '0')}-01`; from <= monthEnd; from = addDays(from, 14)) days.push(...(await call(owner, 'GET', `/calendar/range?from=${from}&days=14&practitionerId=${doc}`)).json());
-  const month = days.filter((d) => d.day >= `${Y}-${String(M).padStart(2, '0')}-01` && d.day <= monthEnd);
-  const working = month.filter((d) => d.windows.length && d.day !== today);
-  assert.ok(working.length >= 15, 'a month of working days');
-  const empty = working.filter((d) => d.windows.every((w: any) => !w.appointments.length)).map((d) => d.day);
-  assert.deepEqual(empty, [], 'no working day this month is left empty');
-  const tomorrow = month.find((d) => d.day === addDays(today, 1)) ?? days.find((d) => d.day === addDays(today, 1));
+  const days: any[] = (await call(owner, 'GET', `/calendar/range?from=${addDays(today, -6)}&days=13&practitionerId=${doc}`)).json();
+  const working = days.filter((d) => d.windows.length && d.day !== today);
+  assert.ok(working.length >= 9, 'a week either side of working days');
+  assert.deepEqual(working.filter((d) => d.windows.every((w: any) => !w.appointments.length)).map((d) => d.day), [], 'no working day in the week is left empty');
+  const tomorrow = days.find((d) => d.day === addDays(today, 1));
   if (tomorrow?.windows.length) assert.ok(tomorrow.windows.reduce((n: number, w: any) => n + w.appointments.length, 0) >= 3, 'tomorrow has bookings');
+
+  // pharmacy: prescription bills and counter sales over the week, with totals; expenses and visits exist too
+  assert.ok(s.visits > 0 && s.pharmacyBills > 0 && s.counterSales >= 18 && s.expenses >= 14, JSON.stringify(s));
+  const hr = await call(owner, 'GET', `/pharmacy/history?from=${addDays(today, -6)}&to=${today}`); assert.equal(hr.statusCode, 200, hr.body); const hist = hr.json();
+  assert.ok(hist.rows.some((r: any) => r.kind === 'Counter sale') && hist.rows.some((r: any) => r.kind === 'Prescription'), 'both kinds in history');
+  assert.equal(hist.totals.total, hist.totals.cash + hist.totals.upi + hist.totals.card, 'method totals add up');
+  const oneDay = (await call(owner, 'GET', `/pharmacy/history?from=${today}&to=${today}`)).json();
+  assert.ok(oneDay.rows.length > 0 && oneDay.rows.length < hist.rows.length, 'a single day is a subset');
+  assert.equal((await call(owner, 'GET', `/expenses?from=${addDays(today, -6)}&to=${today}`)).statusCode, 200);
 
   // running it again tops up only what is quiet: next to nothing is added, and nothing is refused
   const again = await call(owner, 'POST', '/dev/sample-bookings');
   assert.equal(again.statusCode, 200, again.body);
   const a = again.json();
   assert.equal(a.topUp, true); assert.equal(a.requested, 0); assert.equal(a.photos, 0); assert.equal(a.sittings, 0);
+  assert.equal(a.counterSales + a.expenses, 0, 'counter sales and expenses are not added twice');
   assert.ok(a.booked + a.confirmed + a.arrived + a.no_show + a.cancelled <= 5, JSON.stringify(a));
 
 });

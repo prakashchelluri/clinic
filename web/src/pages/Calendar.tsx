@@ -62,6 +62,7 @@ export function Calendar() {
   const [svc, setSvc] = useState(''); const [status, setStatus] = useState('');
   const [avail, setAvail] = useState<string | null>(null); // day being changed in the availability dialog
   const [routine, setRoutine] = useState(false);
+  const [editDay, setEditDay] = useState<string | null>(null);
   const canEditDays = canBook || !!me.practitionerId;
   /** Remove a day change (break, late start, away). Undo puts it back exactly as it was. */
   const removeBlock = async (b: any) => {
@@ -71,11 +72,11 @@ export function Calendar() {
   const grid = { svc, setSvc, status, setStatus, services: cfg?.services ?? [], show, setShow, canBook, onRemoveBlock: canEditDays ? removeBlock : undefined, onOpen: (id: string) => setOpenId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => onMove(a, { ...w, doctor: view === 'team' ? docName(w.practitionerId) : undefined }) };
 
   const title = view === 'week' ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 6), { day: 'numeric', month: 'short' })}`
-    : view === 'team' ? fullDay(day) : practitioner ? `${practitioner.name} · ${fullDay(day)}` : fullDay(day);
+    : fullDay(day);
 
   return (
     <div>
-      <PageHeader title={title} subtitle={view === 'week' && practitioner ? practitioner.name : view === 'team' ? 'All doctors and procedure rooms' : undefined}>
+      <PageHeader title={title}>
         <Segmented<View> value={view} onChange={setView} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'team', label: 'All doctors' }, { value: 'list', label: 'List' }]} />
         <div className="flex items-center gap-1 card !p-1 !rounded-full">
           <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Previous week' : 'Previous day'} onClick={() => setDay(shift(day, -step))}><Icon name="chevL" /></button>
@@ -83,14 +84,14 @@ export function Calendar() {
           <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" /></button>
         </div>
         {day !== today() && <button className="btn btn-sm" onClick={() => setDay(today())}>Today</button>}
-        {canEditDays && view !== 'team' && doc && <button className="btn" onClick={() => setAvail(day < today() ? today() : day)}><Icon name="clock" />Change availability</button>}
-        {canBook && <button className="btn btn-accent" onClick={() => navTo("?book=1")}><Icon name="plus" />New booking</button>}
         {view !== 'team' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+        {canEditDays && view !== 'team' && doc && <button className="btn" onClick={() => setAvail(day < today() ? today() : day)}><Icon name="clock" />Change availability</button>}
       </PageHeader>
 
       {view === 'day' && <DayView day={day} doc={doc} practitioner={practitioner} cfg={cfg} perms={perms} me={me} grid={grid} />}
       {view === 'week' && <WeekView from={weekStart} doc={doc} docName={practitioner?.name} grid={grid} onOpenDay={(d) => { setDay(d); setView('day'); }} onAvailability={(d) => setAvail(d)} />}
-      {avail && doc && <AvailabilityModal day={avail} doc={doc} docName={practitioner?.name ?? 'Doctor'} onRoutine={() => { setAvail(null); setRoutine(true); }} onClose={() => setAvail(null)} />}
+      {avail && doc && <AvailabilityModal day={avail} doc={doc} docName={practitioner?.name ?? 'Doctor'} onRoutine={() => { setAvail(null); setRoutine(true); }} onEditDay={(d) => { setAvail(null); setEditDay(d); }} onClose={() => setAvail(null)} />}
+      {editDay && doc && <EditDayModal day={editDay} practitionerId={doc} cfg={cfg} onClose={() => { setEditDay(null); refresh(); }} />}
       {routine && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setRoutine(false)} />}
       {view === 'team' && <TeamView day={day} cfg={cfg} grid={grid} />}
       {view === 'list' && <ListView day={day} doc={doc} grid={grid} />}
@@ -116,11 +117,9 @@ const Legend = ({ hint, days, grid }: { hint?: string; days?: any[]; grid?: Grid
     {grid.services.length > 0 && grid.show !== 'procs' && <select aria-label="Visit type" className="input !w-auto !py-2" value={grid.svc} onChange={(e) => grid.setSvc(e.target.value)}><option value="">All visit types</option>{grid.services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
     {grid.show !== 'procs' && <select aria-label="Status" className="input !w-auto !py-2" value={grid.status} onChange={(e) => grid.setStatus(e.target.value)}><option value="">All statuses</option>{[['requested', 'Requested'], ['booked', 'Booked'], ['confirmed', 'Confirmed'], ['arrived', 'Arrived'], ['no_show', 'No-show']].map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>}
     {(grid.svc || grid.status || grid.show !== 'all') && <button className="btn btn-ghost btn-sm" onClick={() => { grid.setSvc(''); grid.setStatus(''); grid.setShow('all'); }}>Clear filters</button>}
+    <details className="relative"><summary className="btn btn-ghost btn-sm list-none cursor-pointer">Key</summary>
+      <div className="menu anim-menu !left-0 !right-auto !w-56 p-3 space-y-1.5 text-xs">{[['Requested', DOT.requested], ['Booked', DOT.booked], ['Confirmed', DOT.confirmed], ['Arrived', DOT.arrived], ['No-show', DOT.no_show], ['Procedure', '#9DB5CC']].map(([l, c]) => <div key={l} className="flex items-center gap-2"><i className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</div>)}{hint && <div className="pt-1.5 border-t border-line text-muted">{hint}</div>}</div></details>
   </div>}
-  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted mb-3">
-    {[['Requested', DOT.requested], ['Booked', DOT.booked], ['Confirmed', DOT.confirmed], ['Arrived', DOT.arrived], ['No-show', DOT.no_show], ['Procedure', '#9DB5CC']].map(([l, c]) => <span key={l} className="inline-flex items-center gap-1.5"><i className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>)}
-    {hint && <span className="ml-auto">{hint}</span>}
-  </div>
   </>);
 };
 
@@ -141,12 +140,12 @@ function TimeGrid({ cols: allCols, grid, px = 1.15, minCol = 140, wide = false }
   return (
     <div className="glass overflow-x-auto overflow-y-hidden anim-fade-up">
       <div className="grid" style={{ gridTemplateColumns: `52px repeat(${cols.length}, minmax(${minCol}px, 1fr))`, minWidth: 52 + cols.length * minCol }}>
-        <div><div className="h-16 border-b border-line/70" /><div className="relative" style={{ height }}>{hours.map((m) => <span key={m} className="absolute right-2 text-[11px] text-muted" style={{ top: (m - start) * px - 7 }}>{toHHMM(m)}</span>)}</div></div>
+        <div><div className={`${cols.some((c) => c.head) ? 'h-16' : 'h-2'} border-b border-line/70`} /><div className="relative" style={{ height }}>{hours.map((m) => <span key={m} className="absolute right-2 text-[11px] text-muted" style={{ top: (m - start) * px - 7 }}>{toHHMM(m)}</span>)}</div></div>
         {cols.map((c) => {
           const longLeave = c.blocks.find(isLongLeave);
           return (
             <div key={c.key} className="border-l border-line/60 min-w-0" style={{ background: c.tint }}>
-              <div className="h-16 border-b border-line/70 px-3 flex items-center gap-2 min-w-0">{c.head}</div>
+              <div className={`${cols.some((x) => x.head) ? 'h-16' : 'h-2'} border-b border-line/70 px-3 flex items-center gap-2 min-w-0`}>{c.head}</div>
               <div className="relative" style={{ height }}>
                 {hours.map((m) => <div key={m} className="absolute inset-x-0 border-t border-dashed border-line/70" style={{ top: (m - start) * px }} />)}
                 {longLeave && <div className="absolute inset-1 rounded-xl px-2 py-1.5 text-xs text-muted" style={{ background: 'repeating-linear-gradient(135deg, var(--color-paper-2) 0 6px, var(--color-paper) 6px 12px)', border: '1px dashed var(--color-line-2)' }}><b className="text-ink-2">Away</b> {longLeave.note && longLeave.note !== 'Away' ? `· ${longLeave.note}` : ''}{c.windows.reduce((n, w) => n + w.allocated, 0) > 0 && <div className="mt-0.5 text-rose">{c.windows.reduce((n, w) => n + w.allocated, 0)} booked to call</div>}{grid.onRemoveBlock && <button className="btn btn-sm mt-2" onClick={() => grid.onRemoveBlock!(longLeave)}>Not away after all</button>}</div>}
@@ -216,90 +215,22 @@ function WindowBox({ w, grid, style, wide }: { w: any; grid: Grid; style: CSSPro
 
 function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string; doc: string; practitioner: any; cfg: any; perms: string[]; me: any; grid: Grid }) {
   const cal = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 15000, enabled: !!doc });
-  const [modal, setModal] = useState<null | 'routine' | 'break' | 'early' | 'late' | 'editday'>(null);
-  const [cap, setCap] = useState<any>(null);
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); };
-  const addBlock = useMutation({ mutationFn: (b: any) => post('/calendar/blocks', { practitionerId: doc, day, ...b }), onSuccess: (r: any, b: any) => { refresh(); toast(b.kind === 'leave' ? 'Marked away · reception sees it now' : `${b.note ?? 'Change'} added · places adjusted`, 'ok', { label: 'Undo', run: () => delBlock.mutate(r.id) }); }, onError: (e: any) => toast(errText(e), 'err') });
-  const delBlock = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { refresh(); toast('Undone', 'info'); }, onError: (e: any) => toast(errText(e), 'err') });
-  const setState = useMutation({ mutationFn: ({ id, state, reason }: any) => patch(`/procedure-sessions/${id}`, { state, reason }), onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
+  const [routine, setRoutine] = useState(false);
   const writable = can(perms, 'appointment.write') || me.practitionerId === doc;
   const d = cal.data;
-  const totals = d ? d.windows.reduce((s: any, w: any) => ({ a: s.a + w.allocated, c: s.c + w.effectiveCapacity }), { a: 0, c: 0 }) : null;
-  const firstStart = d?.windows[0]?.startTime; const lastEnd = d?.windows[d.windows.length - 1]?.endTime;
-  const awayToday = d?.blocks.some(isLongLeave);
-  const dayLabel = fullDay(day);
-  const exceptions = d ? [...d.blocks.map((b: any) => ({ ...b, type: 'block' })), ...d.procedures.filter((p: any) => p.practitionerId === doc).map((p: any) => ({ ...p, type: 'procedure' }))].sort((a, b) => toMin(a.startTime) - toMin(b.startTime)) : [];
 
   return (
-    <>
-      <div className="text-sm text-muted -mt-3 mb-4">{practitioner?.routine ? <>Routine: {routineSummary(practitioner.routine)}</> : <span className="text-amber">No weekly routine yet</span>}{totals ? <> · <b className="text-ink">{totals.a}</b> of {totals.c} OP places taken{d.procedures.length ? ` · ${d.procedures.length} procedure${d.procedures.length === 1 ? '' : 's'}` : ''}</> : null}</div>
-      {writable && d && (
-        <div className="anim-fade-up flex flex-wrap items-center gap-2 mb-5">
-          <span className="text-xs uppercase tracking-wider text-muted mr-1">Today is different?</span>
-          {!awayToday && <button className="btn" onClick={async () => { const r = await ask({ title: `Mark ${practitioner?.name} away on ${dayLabel}?`, body: `Every window that day drops to zero places. The ${totals?.a ?? 0} booked patient${totals?.a === 1 ? '' : 's'} stay booked, so reception can call them. You can undo this.`, confirmLabel: 'Mark away', cancelLabel: 'Keep working' }); if (r) addBlock.mutate({ kind: 'leave', startTime: '00:00', endTime: '23:59', note: 'Away' }); }}><Icon name="door" />Away today</button>}
-          {firstStart && !awayToday && <button className="btn" onClick={() => setModal('late')}><Icon name="clock" />Starting late</button>}
-          {lastEnd && !awayToday && <button className="btn" onClick={() => setModal('early')}><Icon name="chevR" />Leaving early</button>}
-          {!awayToday && <button className="btn btn-primary" onClick={() => setModal('break')}><Icon name="plus" />Add a break</button>}
-          <span className="ml-auto" />
-          <button className="btn btn-ghost btn-sm" onClick={() => setModal('editday')}>Edit this day's windows</button>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5">
-        <div className="min-w-0">
-          <Legend days={d ? [d] : []} grid={grid} hint={grid.canBook ? 'Click a window to book · drag a name to move it' : undefined} />
-          {cal.isLoading || !d ? <Skeleton rows={6} /> : d.windows.length === 0 && d.blocks.length === 0 && d.procedures.length === 0 ? (
-            <div className="card"><Empty icon="calendar" title={practitioner?.routine ? 'Not a working day in the routine' : 'No routine set for this doctor'} hint={writable ? (practitioner?.routine ? 'Use “Edit this day’s windows” for a one-off day.' : 'Set the weekly routine once; every day fills itself.') : undefined} />
-              {writable && !practitioner?.routine && <div className="flex justify-center pb-6"><button className="btn btn-primary" onClick={() => setModal('routine')}><Icon name="spark" />Set weekly routine</button></div>}</div>
-          ) : <TimeGrid wide px={1.3} minCol={320} grid={grid} cols={[{ key: day, day, head: <span className="text-sm font-semibold">{practitioner?.name ?? 'OP windows'}</span>, windows: d.windows, blocks: d.blocks, procs: d.procedures.filter((p: any) => p.practitionerId === doc) }]} />}
-        </div>
-
-        <div className="space-y-4">
-          <div className="card anim-fade-up" style={{ animationDelay: '60ms' }}>
-            <div className="text-[11px] uppercase tracking-wider text-muted">Your routine</div>
-            <div className="serif text-xl mt-1.5">{routineSummary(practitioner?.routine)}</div>
-            {practitioner?.routine && <div className="text-sm text-muted mt-1">{practitioner.routine.capacity} places per {practitioner.routine.windowMinutes === 30 ? 'half hour' : 'hour'}. Windows for every day come from this automatically.</div>}
-            {writable && <button className="btn btn-sm mt-3" onClick={() => setModal('routine')}><Icon name="edit" className="h-3.5 w-3.5" />{practitioner?.routine ? 'Change routine' : 'Set routine'}</button>}
-          </div>
-          <Section title="Changes to this day" aside={<span className="text-[11px] text-muted">differences from the weekly routine</span>} delay={90}>
-            {!d ? <Skeleton rows={2} /> : awayToday ? <div className="p-4 text-sm flex items-center gap-2"><Chip tone="rose">away</Chip>Whole day. {writable && <button className="btn btn-sm btn-ghost ml-auto" onClick={() => delBlock.mutate(d.blocks.find(isLongLeave).id)}>Undo</button>}</div>
-              : exceptions.length === 0 ? <div className="p-4 text-sm text-muted">None. Nothing to do today.</div>
-              : exceptions.map((x: any) => (
-                <div key={x.id} className="row text-sm">
-                  <Chip tone={x.type === 'procedure' ? 'sky' : x.kind === 'leave' ? 'rose' : 'amber'}>{x.type === 'procedure' ? 'procedure' : x.kind === 'leave' ? 'away' : x.kind === 'other' ? 'change' : x.kind}</Chip>
-                  <div className="flex-1 min-w-0 truncate">{x.type === 'procedure' ? `${x.procedure ?? 'Procedure'} · ${x.patient}` : (x.note ?? x.kind)} <span className="text-muted">{x.startTime}–{x.endTime}</span></div>
-                  {x.type === 'block' && writable && <button className="btn btn-ghost btn-icon" onClick={() => delBlock.mutate(x.id)}>Undo</button>}
-                </div>
-              ))}
-          </Section>
-          <Section title={<>Procedures today <span className="text-muted font-normal">· {d?.procedures.length ?? 0}</span></>} delay={120}>
-            {!d ? <Skeleton rows={2} /> : d.procedures.length === 0 ? <div className="p-4 text-sm text-muted">Nothing in the rooms today.</div> :
-              d.procedures.map((p: any) => (
-                <div key={p.id} className="px-4 py-3 border-t border-line first:border-t-0 text-sm">
-                  <div className="flex items-center gap-2"><span className="font-mono text-xs text-muted">{p.startTime}</span><span className="font-medium flex-1 truncate">{p.patient}</span><Chip tone={p.state === 'completed' ? 'sage' : p.state === 'in_progress' ? 'amber' : 'sky'}>{p.state.replace('_', ' ')}</Chip></div>
-                  <div className="text-xs text-muted mt-0.5">{p.procedure} · sitting {p.sittingNo} · {p.room ?? 'no room'}{p.doctor ? ` · ${p.doctor}` : ''}</div>
-                  {can(perms, 'worklist.write') && !['completed', 'cancelled'].includes(p.state) && (
-                    <div className="flex gap-1 mt-2 flex-wrap">
-                      {p.state === 'confirmed' && <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'in_progress' })}>Start</button>}
-                      <button className="btn btn-sm btn-primary" onClick={() => setState.mutate({ id: p.id, state: 'completed' })}>Completed</button>
-                      <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'missed', reason: 'did not attend' })}>Missed</button>
-                      <button className="btn btn-sm btn-ghost" onClick={async () => { const r = await ask({ title: 'Postpone this sitting?', body: `${p.patient} · ${p.procedure ?? 'procedure'}. The doctor's time is freed and the course stays open.`, confirmLabel: 'Postpone', field: { label: 'Reason', placeholder: 'e.g. patient has fever', maxLength: 200 } }); if (r) setState.mutate({ id: p.id, state: 'postponed', reason: r.value || undefined }); }}>Postpone</button>
-                    </div>
-                  )}
-                  {can(perms, 'document.write') && !['cancelled', 'postponed'].includes(p.state) && <button className="btn btn-sm mt-2" onClick={() => setCap(p)}><Icon name="spark" className="h-3.5 w-3.5" />Photos</button>}
-                </div>
-              ))}
-          </Section>
-        </div>
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5">
+      <div className="min-w-0">
+        <Legend days={d ? [d] : []} grid={grid} hint={grid.canBook ? 'Click a window to book · drag a name to move it' : undefined} />
+        {cal.isLoading || !d ? <Skeleton rows={6} /> : d.windows.length === 0 && d.blocks.length === 0 && d.procedures.length === 0 ? (
+          <div className="card"><Empty icon="calendar" title={practitioner?.routine ? 'Not a working day in the routine' : 'No routine set for this doctor'} hint={writable ? (practitioner?.routine ? 'Use Change availability for a one-off day.' : 'Set the weekly routine once; every day fills itself.') : undefined} />
+            {writable && !practitioner?.routine && <div className="flex justify-center pb-6"><button className="btn btn-primary" onClick={() => setRoutine(true)}><Icon name="spark" />Set weekly routine</button></div>}</div>
+        ) : <TimeGrid wide px={1.3} minCol={320} grid={grid} cols={[{ key: day, day, head: null, windows: d.windows, blocks: d.blocks, procs: d.procedures.filter((p: any) => p.practitionerId === doc) }]} />}
       </div>
-
-      {cap && <PhotoCapture patient={{ id: cap.patientId, fullName: cap.patient }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
-      {modal === 'routine' && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setModal(null)} />}
-      {modal === 'break' && <QuickBlock title="Add a break" defaultStart={firstStart ? toHHMM(Math.max(toMin(firstStart), 13 * 60)) : '13:00'} minutes={30} onSave={(s, e, note) => { addBlock.mutate({ kind: 'break', startTime: s, endTime: e, note: note || 'Break' }); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal === 'late' && firstStart && lastEnd && <StartLate firstStart={firstStart} lastEnd={lastEnd} onSave={(t) => { addBlock.mutate({ kind: 'other', startTime: firstStart, endTime: t, note: `Starts at ${t}` }); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal === 'early' && lastEnd && <QuickBlock title="Leaving early" subtitle="From what time are you not available?" defaultStart={toHHMM(toMin(lastEnd) - 60)} fixedEnd={lastEnd} onSave={(s, e) => { addBlock.mutate({ kind: 'other', startTime: s, endTime: e, note: 'Leaving early' }); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal === 'editday' && <EditDayModal day={day} practitionerId={doc} cfg={cfg} onClose={() => { setModal(null); refresh(); }} />}
-    </>
+      {d && <DayPanel d={d} grid={grid} />}
+      {routine && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setRoutine(false)} />}
+    </div>
   );
 }
 
@@ -341,7 +272,7 @@ function WeekView({ from, doc, docName, grid, onOpenDay, onAvailability }: { fro
 }
 
 /** The picked day: hours (routine or changed, with undo), then everything booked, in time order. */
-function DayPanel({ d, grid, onOpenDay, onAvailability }: { d: any; grid: Grid; onOpenDay: (day: string) => void; onAvailability: (day: string) => void }) {
+function DayPanel({ d, grid, onOpenDay, onAvailability }: { d: any; grid: Grid; onOpenDay?: (day: string) => void; onAvailability?: (day: string) => void }) {
   const items = [
     ...d.windows.flatMap((w: any) => (w.appointments ?? []).map((a: any) => ({ t: w.startTime, key: a.id, name: a.name, sub: [a.service, a.status.replace('_', '-')].filter(Boolean).join(' · '), color: a.color, open: () => grid.onOpen(a.id), muted: a.status === 'no_show' }))),
     ...d.procedures.map((p: any) => ({ t: p.startTime, key: p.id, name: p.patient, sub: `${p.procedure ?? 'Procedure'} · sitting ${p.sittingNo}${p.of ? ` of ${p.of}` : ''}`, color: '#6D5E86', open: null, muted: false })),
@@ -357,7 +288,7 @@ function DayPanel({ d, grid, onOpenDay, onAvailability }: { d: any; grid: Grid; 
         <div className="font-semibold">{away ? 'Away all day' : hours || 'Not working'}</div>
         <div className="text-xs text-muted">{d.blocks.length ? 'Changed for this day' : 'From the weekly routine'}</div>
         {d.blocks.map((b: any) => <div key={b.id} className="mt-1 flex items-center gap-2 text-xs"><span className="flex-1 truncate">{b.note ?? b.kind} · {b.startTime}–{b.endTime}</span>{grid.onRemoveBlock && <button className="font-semibold underline" onClick={() => grid.onRemoveBlock!(b)}>Undo</button>}</div>)}
-        {grid.onRemoveBlock && d.day >= today() && <button className="btn btn-sm mt-2" onClick={() => onAvailability(d.day)}>Change availability</button>}
+        {onAvailability && grid.onRemoveBlock && d.day >= today() && <button className="btn btn-sm mt-2" onClick={() => onAvailability(d.day)}>Change availability</button>}
       </div>
       <div className="mt-3 text-xs text-muted">{n} appointment{n === 1 ? '' : 's'} · {d.procedures.length} procedure{d.procedures.length === 1 ? '' : 's'}</div>
       <div className="mt-1 max-h-[420px] overflow-y-auto">
@@ -369,13 +300,13 @@ function DayPanel({ d, grid, onOpenDay, onAvailability }: { d: any; grid: Grid; 
           </button>
         ))}
       </div>
-      <button className="btn btn-sm mt-3 w-full justify-center" onClick={() => onOpenDay(d.day)}>Open this day</button>
+      {onOpenDay && <button className="btn btn-sm mt-3 w-full justify-center" onClick={() => onOpenDay(d.day)}>Open this day</button>}
     </aside>
   );
 }
 
 /** One place to change a doctor's hours for a date: start late, leave early, a break, or away. Each change can be undone. */
-function AvailabilityModal({ day: initial, doc, docName, onRoutine, onClose }: { day: string; doc: string; docName: string; onRoutine: () => void; onClose: () => void }) {
+function AvailabilityModal({ day: initial, doc, docName, onRoutine, onEditDay, onClose }: { day: string; doc: string; docName: string; onRoutine: () => void; onEditDay: (day: string) => void; onClose: () => void }) {
   const [day, setDay] = useState(initial);
   const [kind, setKind] = useState<'late' | 'early' | 'break' | 'away'>('late');
   const q = useQuery({ queryKey: ['calendar', day, doc], queryFn: () => get(`/calendar?day=${day}&practitionerId=${doc}`) });
@@ -398,13 +329,13 @@ function AvailabilityModal({ day: initial, doc, docName, onRoutine, onClose }: {
     if (kind === 'break') add.mutate({ kind: 'break', startTime: t, endTime: toHHMM(Math.min(toMin(t) + mins, toMin(last))), note: 'Break' });
   };
   return (
-    <Modal title="Change availability" subtitle={`${docName} · one date only; the weekly routine stays as it is`} onClose={onClose} width="max-w-lg">
+    <Modal title="Change availability" subtitle={docName} onClose={onClose} width="max-w-lg">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2"><label className="label !mb-0" htmlFor="av-day">Date</label><input id="av-day" type="date" min={today()} className="input !w-auto" value={day} onChange={(e) => e.target.value >= today() && setDay(e.target.value)} />
           <span className="text-sm text-muted">{q.isLoading ? '…' : away ? 'Away all day' : working ? `Hours ${hoursOf(d.windows)}` : 'Not a working day'}</span></div>
         {d?.blocks.length > 0 && <div className="rounded-2xl bg-paper px-3 py-2 text-sm"><div className="text-xs font-bold uppercase tracking-wider text-muted">Already changed</div>
           {d.blocks.map((b: any) => <div key={b.id} className="mt-1 flex items-center gap-2"><span className="flex-1">{b.note ?? b.kind} · {b.startTime}–{b.endTime}</span><button className="text-sm font-semibold underline" onClick={() => del.mutate(b.id)}>Undo</button></div>)}</div>}
-        {!q.isLoading && !away && !working && <div className="text-sm text-muted">{docName} does not work on this date in the routine. To add hours for a one-off day, open the day and use “Edit this day's windows”.</div>}
+        {!q.isLoading && !away && !working && <div className="text-sm text-muted">{docName} does not work on this date in the routine. Use “Different hours for this date” to add some.</div>}
         {!away && working && <>
           <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="What changes">
             {([['late', 'Starts late'], ['early', 'Leaves early'], ['break', 'Break'], ['away', 'Away all day']] as const).map(([k, l]) => <button key={k} role="radio" aria-checked={kind === k} className={`toggle-opt ${kind === k ? 'on' : ''}`} onClick={() => { setKind(k); setTime(''); }}>{l}</button>)}
@@ -418,7 +349,7 @@ function AvailabilityModal({ day: initial, doc, docName, onRoutine, onClose }: {
           {kind === 'away' && <div className="text-sm text-muted">Every window that day drops to zero places. Booked patients stay booked so reception can call them.</div>}
         </>}
         <div className="modal-foot">
-          <button className="btn btn-ghost btn-sm" onClick={onRoutine}>Change the weekly routine instead</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => onEditDay(day)}>Different hours for this date</button><button className="btn btn-ghost btn-sm" onClick={onRoutine}>Weekly routine</button>
           <span className="ml-auto" /><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={add.isPending || away || !working || (kind !== 'away' && !valid)} onClick={save}><Icon name="check" />Save</button>
         </div>
@@ -487,39 +418,6 @@ function ListView({ day, doc, grid }: { day: string; doc: string; grid: Grid }) 
 }
 
 /** Doctor starts later than the routine: pick the new start (presets every 15 minutes, or any time). */
-function StartLate({ firstStart, lastEnd, onSave, onClose }: { firstStart: string; lastEnd: string; onSave: (t: string) => void; onClose: () => void }) {
-  const presets = [15, 30, 45, 60, 90, 120].map((m) => toHHMM(toMin(firstStart) + m)).filter((t) => toMin(t) < toMin(lastEnd));
-  const [t, setT] = useState(presets[1] ?? presets[0] ?? firstStart);
-  const bad = !/^\d{2}:\d{2}$/.test(t) || toMin(t) <= toMin(firstStart) || toMin(t) >= toMin(lastEnd);
-  return (
-    <Modal title="Starting late" subtitle={`The routine starts at ${firstStart}. Places before the new start are removed; reception sees why.`} onClose={onClose} width="max-w-md">
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="New start time">{presets.map((p) => <button key={p} role="radio" aria-checked={t === p} className={`toggle-opt ${t === p ? 'on' : ''}`} onClick={() => setT(p)}>{p}</button>)}</div>
-        <div className="flex items-center gap-2"><label className="label !mb-0" htmlFor="late-at">Or starts at</label><input id="late-at" type="time" step={300} className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={t} onChange={(e) => setT(e.target.value)} /></div>
-        {bad && <div className="text-xs text-rose">Pick a time after {firstStart} and before {lastEnd}.</div>}
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={bad} onClick={() => onSave(t)}><Icon name="check" />Start at {bad ? '…' : t}</button></div>
-      </div>
-    </Modal>
-  );
-}
-
-function QuickBlock({ title, subtitle, defaultStart, minutes = 30, fixedEnd, onSave, onClose }: { title: string; subtitle?: string; defaultStart: string; minutes?: number; fixedEnd?: string; onSave: (s: string, e: string, note?: string) => void; onClose: () => void }) {
-  const [start, setStart] = useState(defaultStart); const [len, setLen] = useState(minutes); const [note, setNote] = useState('');
-  const end = fixedEnd ?? toHHMM(toMin(start) + len);
-  return (
-    <Modal title={title} subtitle={subtitle ?? 'OP places in the affected window drop automatically; reception sees why.'} onClose={onClose} width="max-w-md">
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 flex-wrap"><label className="label !mb-0">From</label><input type="time" className="input !w-auto" value={start} onChange={(e) => setStart(e.target.value)} />
-          {!fixedEnd && <><span className="text-muted text-sm">for</span><div className="flex gap-1">{[15, 30, 45, 60].map((m) => <button key={m} className={`toggle-opt ${len === m ? 'on' : ''}`} onClick={() => setLen(m)}>{m} min</button>)}</div></>}
-          <span className="text-sm text-muted">→ until {end}</span></div>
-        {!fixedEnd && <input className="input" placeholder="Note (optional), e.g. Lunch" value={note} onChange={(e) => setNote(e.target.value)} />}
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={() => onSave(start, end, note)}><Icon name="check" />Save</button></div>
-      </div>
-    </Modal>
-  );
-}
-
-/** Rare one-off override of a single day (the routine stays as it is). */
 function EditDayModal({ day, practitionerId, cfg, onClose }: { day: string; practitionerId: string; cfg: any; onClose: () => void }) {
   const [ranges, setRanges] = useState([{ startTime: '10:00', endTime: '13:00' }]);
   const [capacity, setCapacity] = useState(cfg?.tenant.settings.scheduling?.defaultCapacity ?? 7);
