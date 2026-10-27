@@ -36,7 +36,7 @@ function OnboardModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3 text-sm">
         <div className="card !p-3"><div className="font-medium">{f.name}</div><div className="text-muted text-xs">sign-in name <b>{done.slug}</b></div></div>
         <p>The owner signs in with <b>{f.ownerEmail}</b> and the password you set. {f.isDoctor ? 'They are set up as owner and doctor.' : 'They are set up as owner (not a doctor).'} First things to do in their Settings: add staff, check fee amounts, add rooms and medicines.</p>
-        <div className="flex justify-end"><button className="btn btn-primary" onClick={onClose}>Done</button></div>
+        <div className="modal-foot"><button className="btn btn-primary" onClick={onClose}>Done</button></div>
       </div>
     </Modal>
   );
@@ -57,7 +57,7 @@ function OnboardModal({ onClose }: { onClose: () => void }) {
           <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={f.isDoctor} onChange={(e) => setF({ ...f, isDoctor: e.target.checked })} /> Owner is also a consulting doctor</label>
           {f.isDoctor && <><div><label className="label">Registration no.</label><input className="input" value={f.regNo} onChange={set('regNo')} /></div><div><label className="label">Qualification</label><input className="input" value={f.qualification} onChange={set('qualification')} /></div></>}
         </div>
-        <div className="flex justify-end gap-2 pt-2 border-t border-line"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !f.name || !f.slug || !f.ownerName || !f.ownerEmail || f.password.length < 6} onClick={() => save.mutate()}><Icon name="check" />Create clinic</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !f.name || !f.slug || !f.ownerName || !f.ownerEmail || f.password.length < 6} onClick={() => save.mutate()}><Icon name="check" />Create clinic</button></div>
       </div>
     </Modal>
   );

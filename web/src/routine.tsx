@@ -62,7 +62,7 @@ export function RoutineModal({ practitionerId, name, initial, onClose }: { pract
   return (
     <Modal title="Weekly routine" subtitle={`${name} · set once; every day's OP windows are made from this`} onClose={onClose} width="max-w-xl">
       <RoutineEditor value={r} onChange={setR} />
-      <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-line"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !Object.values(r.days).some((v) => v.length)} onClick={() => save.mutate()}><Icon name="check" />Save routine</button></div>
+      <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !Object.values(r.days).some((v) => v.length)} onClick={() => save.mutate()}><Icon name="check" />Save routine</button></div>
     </Modal>
   );
 }

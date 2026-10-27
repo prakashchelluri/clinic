@@ -86,7 +86,7 @@ export function Expenses() {
       </>)}
 
       {edit && (
-        <Modal title="Edit expense" onClose={() => setEdit(null)} width="max-w-md">
+        <Modal title="Edit expense" onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div><label className="label">What was paid for</label><input className="input" maxLength={200} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
@@ -96,7 +96,7 @@ export function Expenses() {
             <div><label className="label">Category</label><select className="input" value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })}>{(d?.categories ?? []).map((c: string) => <option key={c}>{c}</option>)}</select></div>
             <div className="flex gap-1">{METHODS.map(([m, l]) => <button type="button" key={m} className={'toggle-opt ' + (edit.method === m ? 'on' : '')} onClick={() => setEdit({ ...edit, method: m })}>{l}</button>)}</div>
             <div><label className="label">Note (optional)</label><input className="input" maxLength={500} value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })} /></div>
-            <div className="flex items-center justify-end gap-2 pt-2"><span className="text-xs text-muted mr-auto">{why(edit)}</span><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!valid(edit) || save.isPending} onClick={() => save.mutate()}>Save</button></div>
+            <div className="modal-foot"><span className="text-xs text-muted mr-auto">{why(edit)}</span><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!valid(edit) || save.isPending} onClick={() => save.mutate()}>Save</button></div>
           </div>
         </Modal>)}
       {voiding && (
@@ -104,7 +104,7 @@ export function Expenses() {
           <div className="space-y-3">
             <div className="text-sm text-muted">It leaves the totals but stays in the audit trail with your name.</div>
             <div><label className="label">Reason (optional)</label><input className="input" maxLength={200} autoFocus placeholder="e.g. entered twice" value={voiding.reason} onChange={(e) => setVoiding({ ...voiding, reason: e.target.value })} /></div>
-            <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={() => setVoiding(null)}>Keep it</button><button className="btn btn-primary !bg-rose !border-rose" disabled={remove.isPending} onClick={() => remove.mutate()}>Remove expense</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setVoiding(null)}>Keep it</button><button className="btn btn-primary !bg-rose !border-rose" disabled={remove.isPending} onClick={() => remove.mutate()}>Remove expense</button></div>
           </div>
         </Modal>)}
     </div>

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, qc } from './api';
-import { Avatar, Icon, NoAccess, ToastHost } from './ui';
+import { Avatar, Icon, NoAccess, ToastHost, useScrollLock } from './ui';
 import { CommandPalette } from './palette';
 import { NewBooking } from './pages/Booking';
 import { refreshBookings } from './apptDrawer';
@@ -86,6 +86,7 @@ export function App() {
   const [palette, setPalette] = useState(false);
   const [userMenu, setUserMenu] = useState(false);
   const [drawer, setDrawer] = useState(false);
+  useScrollLock(drawer);
   const [params, setParams] = useSearchParams();
   const closeBook = () => { const p = new URLSearchParams(params); ['book', 'patient', 'pname'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); };
   const perms: string[] = me.data?.perms ?? [];

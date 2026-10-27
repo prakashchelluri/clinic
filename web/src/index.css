@@ -171,3 +171,22 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
   .stack-on-phone td:empty { display: none; }
   .stack-on-phone td:last-child { margin-top: 10px; }
 }
+
+/* ---------- Dialogs: one standard (see Modal in ui.tsx) ---------- */
+.modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(28, 27, 25, 0.35); backdrop-filter: blur(6px); animation: fade-in 0.3s var(--ease) both; overscroll-behavior: contain; }
+.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 28px; border: 1px solid #fff; background: #FBFAF7; box-shadow: var(--shadow-lift); animation: scale-in 0.32s var(--ease) both; outline: none; }
+.modal-head { flex: none; display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.25rem 1.5rem 0.75rem; }
+.modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 1.5rem 1.5rem; }
+/* Buttons row of a dialog: pinned to the bottom of the scrolling area, so Save never hides below the fold. */
+.modal-foot { position: sticky; bottom: -1.5rem; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; margin: 1rem -1.5rem -1.5rem; padding: 0.875rem 1.5rem; background: #FBFAF7; border-top: 1px solid rgba(23, 25, 26, 0.08); box-shadow: 0 -14px 14px -14px rgba(40, 25, 10, 0.2); }
+.modal-grab { display: none; flex: none; width: 40px; height: 5px; margin: 8px auto 0; border-radius: 5px; background: rgba(23, 25, 26, 0.2); }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@media (max-width: 639px) {
+  .modal-back { align-items: flex-end; padding: 0; }
+  .modal-panel { border-radius: 28px 28px 0 0; border-bottom: 0; max-height: 92dvh; animation: sheet-up 0.35s var(--ease) both; }
+  .modal-grab { display: block; }
+  .modal-head { padding-top: 0.75rem; }
+  .modal-foot { padding-bottom: max(0.875rem, env(safe-area-inset-bottom)); }
+  .modal-foot > .btn-primary, .modal-foot > .btn-accent { flex: 1 1 auto; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) { .modal-back, .modal-panel { animation: none; } }

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get } from './api';
-import { Avatar, Icon } from './ui';
+import { Avatar, Icon, useScrollLock } from './ui';
 
 type Action = { key: string; label: string; icon: string; hint: string; to: string };
 
 /** ⌘K: find any patient, or do the common things from anywhere. The same list powers the Create button. */
 export function CommandPalette({ open, onClose, can }: { open: boolean; onClose: () => void; can: (p: string) => boolean }) {
+  useScrollLock(open);
   const nav = useNavigate();
   const [q, setQ] = useState('');
   const [i, setI] = useState(0);

@@ -130,7 +130,7 @@ function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
         <div><label className="label">Location</label><input className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={f.referralCard} onChange={(e) => setF({ ...f, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
         {dup && <div className="text-sm text-amber bg-amber-soft rounded-xl p-3 anim-fade-up">A patient with this name and phone exists ({dup.patientNo}). <button className="underline font-medium" onClick={() => create.mutate(true)}>Register anyway</button> (family member) or <button className="underline font-medium" onClick={() => onClose({ id: dup.id })}>open the existing record</button>.</div>}
-        <div className="flex gap-2 justify-end pt-2"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn btn-primary" disabled={!f.fullName || create.isPending} onClick={() => create.mutate(false)}><Icon name="check" />Register</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn btn-primary" disabled={!f.fullName || create.isPending} onClick={() => create.mutate(false)}><Icon name="check" />Register</button></div>
       </div>
     </Modal>
   );

@@ -1,7 +1,7 @@
 import { deflateSync } from 'node:zlib';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { patient, appointment, service, practitioner, recommendation, procedureSession, procedureCatalog, room, calendarBlock, document, tenant, OPEN_STATUSES } from '../db/schema.js';
+import { patient, appointment, session, service, practitioner, recommendation, procedureSession, procedureCatalog, room, calendarBlock, document, tenant, OPEN_STATUSES } from '../db/schema.js';
 import { todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { newToken, queueMessage, planReminders } from '../lib/booking.js';
@@ -12,13 +12,13 @@ import { windowsForDay } from './scheduling.js';
  * Test data for the booking and photo features, on top of the base sample (patients, visits, today's queue):
  * three weeks of bookings across every doctor with visit types and statuses, online requests waiting for approval,
  * repeat series, queued patient messages, and two procedure courses with sittings and before/after photos.
- * Refuses to run twice.
+ * Run it again to top up: bookings only fill windows below their target; the one-off parts (requests, series, courses, photos) are made once.
  */
 const MARKER = 'sample-bookings-marker';
 
 export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: string, origin: string) {
-  if ((await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.idempotencyKey, MARKER))).limit(1)).length)
-    throw new HttpError(409, 'SAMPLE_ALREADY_LOADED');
+  const first = !(await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.idempotencyKey, MARKER))).limit(1)).length;
+  const ten = (await tx.select().from(tenant).where(eq(tenant.id, t)))[0];
   const pts = await tx.select().from(patient).where(and(eq(patient.tenantId, t), eq(patient.legacyId, 'SAMPLE')));
   if (pts.length < 10) throw new HttpError(400, 'LOAD_BASE_SAMPLE_FIRST');
   const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
@@ -32,32 +32,47 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
   /** First window with room on the day or the next working days (no doctor works on Sunday). */
   const nextWindow = async (day: string, docId: string) => { for (let i = 0; i < 7; i++) { const w = (await windowsForDay(tx, t, addDays(day, i), docId)).find((x) => x.free > 0); if (w) return w; } return null; };
 
-  // 1. Bookings: 7 days back and 14 ahead (not today, which the base sample fills). Windows come from each doctor's routine.
-  for (let off = -7; off <= 14; off++) {
-    if (off === 0) continue;
-    const day = addDays(today, off);
+  // 1. Bookings for every doctor on every working day: the whole month (past days included), this week, tomorrow and the next two weeks.
+  // Today only gets the windows still ahead. Each window has a fixed target, so running this again only tops up quiet windows.
+  const [Y, M] = today.split('-').map(Number);
+  const monthStart = `${Y}-${String(M).padStart(2, '0')}-01`;
+  const monthEnd = new Date(Date.UTC(Y, M, 0)).toISOString().slice(0, 10);
+  const from = monthStart < addDays(today, -7) ? monthStart : addDays(today, -7);
+  const to = monthEnd > addDays(today, 14) ? monthEnd : addDays(today, 14);
+  const nowHM = new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+  const hash = (s: string) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    const off = Math.round((Date.parse(day + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000);
+    const have = new Map((await tx.select({ id: appointment.sessionId, n: sql<number>`count(*)::int` }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+      .where(and(eq(appointment.tenantId, t), eq(session.day, day))).groupBy(appointment.sessionId)).map((r) => [r.id, r.n] as const));
     for (const d of docs) {
-      const ws = await windowsForDay(tx, t, day, d.id);
-      for (const w of ws) {
-        const room = Math.max(0, w.effectiveCapacity - w.allocated);
-        const fill = Math.min(room, Math.round(w.effectiveCapacity * (off < 0 ? 0.7 : off <= 3 ? 0.6 : 0.3) * (0.6 + rnd(60) / 100)));
-        const used = new Set<string>();
+      for (const w of await windowsForDay(tx, t, day, d.id)) {
+        if (off === 0 && w.startTime <= nowHM) continue;
+        const ratio = off < 0 ? 0.7 : off === 0 ? 0.6 : off === 1 ? 0.8 : off <= 7 ? 0.6 : 0.4;
+        const target = Math.round(w.effectiveCapacity * ratio * (0.6 + (hash(w.id) % 60) / 100));
+        const fill = Math.min(Math.max(0, target - (have.get(w.id) ?? 0)), Math.max(0, w.effectiveCapacity - w.allocated));
+        const used = new Set<string>(); const rows: (typeof appointment.$inferInsert)[] = [];
         for (let i = 0; i < fill; i++) {
           let p = pts[rnd(pts.length)]; for (let k = 0; k < 5 && used.has(p.id); k++) p = pts[rnd(pts.length)];
           if (used.has(p.id)) continue; used.add(p.id);
           const roll = rnd(100);
           const status = off < 0 ? (roll < 78 ? 'arrived' : roll < 90 ? 'no_show' : 'cancelled') : (roll < 55 ? 'booked' : roll < 92 ? 'confirmed' : 'cancelled');
           const svc = svcFor(d.id);
-          const [a] = await tx.insert(appointment).values({ tenantId: t, patientId: p.id, sessionId: w.id, serviceId: svc?.id ?? null, status, source: rnd(10) === 0 ? 'walk_in' : 'phone',
+          rows.push({ tenantId: t, patientId: p.id, sessionId: w.id, serviceId: svc?.id ?? null, status, source: rnd(10) === 0 ? 'walk_in' : 'phone',
             note: NOTES[rnd(NOTES.length)], publicToken: newToken(), confirmedAt: status === 'confirmed' ? new Date().toISOString() : null,
-            cancelReason: status === 'cancelled' ? ['patient travelling', 'feeling better', 'exam at college'][rnd(3)] : null }).returning();
-          counts[status as keyof typeof counts]++;
-          if (off > 0 && status !== 'cancelled') made.push(a.id);
+            cancelReason: status === 'cancelled' ? ['patient travelling', 'feeling better', 'exam at college'][rnd(3)] : null });
+        }
+        if (!rows.length) continue;
+        for (const a of await tx.insert(appointment).values(rows).returning({ id: appointment.id, status: appointment.status })) {
+          counts[a.status as keyof typeof counts]++;
+          if (off > 0 && a.status !== 'cancelled') made.push(a.id);
         }
       }
     }
   }
 
+  // The rest is set up once: requests, repeat series, messages, procedure courses with photos, online booking switched on.
+  if (first) {
   // 2. Online requests waiting in Bookings → Requests
   const online = svcs.filter((s) => s.onlineBookable);
   const reqNotes = ['acne for 3 months', 'hair fall after fever', 'itchy rash on hands', null];
@@ -125,15 +140,15 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
   }
 
   // 6. Online booking switched on (approval required) so the public page can be tried straight away
-  const ten = (await tx.select().from(tenant).where(eq(tenant.id, t)))[0];
   const settings = { ...ten.settings, online: { requireApproval: true, minNoticeHours: 2, maxDaysAhead: 30, dailyCap: 0, intro: '', ...(ten.settings?.online ?? {}), enabled: true } };
   await tx.update(tenant).set({ settings }).where(eq(tenant.id, t));
 
   // marker so a second run is refused (a cancelled booking that holds no place)
   const anyWindow = (await windowsForDay(tx, t, addDays(today, 1)))[0];
   if (anyWindow) await tx.insert(appointment).values({ tenantId: t, patientId: pts[0].id, sessionId: anyWindow.id, status: 'cancelled', source: 'phone', cancelReason: 'test data marker', idempotencyKey: MARKER });
+  } // end of the one-off parts
   const open = await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), inArray(appointment.status, [...OPEN_STATUSES])));
-  return { ...counts, openBookings: open.length, bookingPage: `${origin}/book/${ten.slug}` };
+  return { ...counts, topUp: !first, from, to, openBookings: open.length, bookingPage: `${origin}/book/${ten.slug}` };
 }
 
 /* ---------- Generated "skin" photos: a warm tone with dark spots that fade over the sittings, so before/after shows a change ---------- */

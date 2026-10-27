@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, toast, NumInput } from '../ui';
+import { Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, ask, toast, NumInput } from '../ui';
 import { RoutineModal, routineSummary } from '../routine';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -49,7 +49,7 @@ export function Calendar() {
     onSuccess: (_r, { appt, to }: any) => { refresh(); toast(`${appt.name} moved to ${label(to.day, { weekday: 'short' })} ${to.startTime}${to.doctor ? ` · ${to.doctor}` : ''}`); },
     onError: (e: any, vars: any) => {
       if (e instanceof ApiError && e.body?.code === 'WINDOW_FULL' && can(perms, 'appointment.overbook') && !vars.overbook) {
-        if (confirm(`${vars.to.startTime} is full. Overbook ${vars.appt.name} into it anyway?`)) move.mutate({ ...vars, overbook: true });
+        ask({ title: `${vars.to.startTime} is full`, body: `Move ${vars.appt.name} into it anyway? It will go over the places set for that window.`, confirmLabel: 'Overbook', cancelLabel: 'Leave it' }).then((r) => { if (r) move.mutate({ ...vars, overbook: true }); });
         return;
       }
       toast(e?.body?.code === 'WINDOW_FULL' ? 'That window is full' : errText(e), 'err');
@@ -236,7 +236,7 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
       {writable && d && (
         <div className="anim-fade-up flex flex-wrap items-center gap-2 mb-5">
           <span className="text-xs uppercase tracking-wider text-muted mr-1">Today is different?</span>
-          {!awayToday && <button className="btn" onClick={() => { if (confirm(`Mark ${practitioner?.name} away for the whole of ${dayLabel}? Reception will see every window at zero and can call the ${totals?.a ?? 0} booked patients.`)) addBlock.mutate({ kind: 'leave', startTime: '00:00', endTime: '23:59', note: 'Away' }); }}><Icon name="door" />Away today</button>}
+          {!awayToday && <button className="btn" onClick={async () => { const r = await ask({ title: `Mark ${practitioner?.name} away on ${dayLabel}?`, body: `Every window that day drops to zero places. The ${totals?.a ?? 0} booked patient${totals?.a === 1 ? '' : 's'} stay booked, so reception can call them. You can undo this.`, confirmLabel: 'Mark away', cancelLabel: 'Keep working' }); if (r) addBlock.mutate({ kind: 'leave', startTime: '00:00', endTime: '23:59', note: 'Away' }); }}><Icon name="door" />Away today</button>}
           {firstStart && !awayToday && <button className="btn" onClick={() => setModal('late')}><Icon name="clock" />Starting late</button>}
           {lastEnd && !awayToday && <button className="btn" onClick={() => setModal('early')}><Icon name="chevR" />Leaving early</button>}
           {!awayToday && <button className="btn btn-primary" onClick={() => setModal('break')}><Icon name="plus" />Add a break</button>}
@@ -283,7 +283,7 @@ function DayView({ day, doc, practitioner, cfg, perms, me, grid }: { day: string
                       {p.state === 'confirmed' && <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'in_progress' })}>Start</button>}
                       <button className="btn btn-sm btn-primary" onClick={() => setState.mutate({ id: p.id, state: 'completed' })}>Completed</button>
                       <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'missed', reason: 'did not attend' })}>Missed</button>
-                      <button className="btn btn-sm btn-ghost" onClick={() => { const r = prompt('Reason for postponing?'); if (r !== null) setState.mutate({ id: p.id, state: 'postponed', reason: r }); }}>Postpone</button>
+                      <button className="btn btn-sm btn-ghost" onClick={async () => { const r = await ask({ title: 'Postpone this sitting?', body: `${p.patient} · ${p.procedure ?? 'procedure'}. The doctor's time is freed and the course stays open.`, confirmLabel: 'Postpone', field: { label: 'Reason', placeholder: 'e.g. patient has fever', maxLength: 200 } }); if (r) setState.mutate({ id: p.id, state: 'postponed', reason: r.value || undefined }); }}>Postpone</button>
                     </div>
                   )}
                   {can(perms, 'document.write') && !['cancelled', 'postponed'].includes(p.state) && <button className="btn btn-sm mt-2" onClick={() => setCap(p)}><Icon name="spark" className="h-3.5 w-3.5" />Photos</button>}
@@ -417,7 +417,7 @@ function AvailabilityModal({ day: initial, doc, docName, onRoutine, onClose }: {
           {kind !== 'away' && !valid && <div className="text-xs text-rose">Pick a time inside {first}–{last}.</div>}
           {kind === 'away' && <div className="text-sm text-muted">Every window that day drops to zero places. Booked patients stay booked so reception can call them.</div>}
         </>}
-        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+        <div className="modal-foot">
           <button className="btn btn-ghost btn-sm" onClick={onRoutine}>Change the weekly routine instead</button>
           <span className="ml-auto" /><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={add.isPending || away || !working || (kind !== 'away' && !valid)} onClick={save}><Icon name="check" />Save</button>
@@ -497,7 +497,7 @@ function StartLate({ firstStart, lastEnd, onSave, onClose }: { firstStart: strin
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="New start time">{presets.map((p) => <button key={p} role="radio" aria-checked={t === p} className={`toggle-opt ${t === p ? 'on' : ''}`} onClick={() => setT(p)}>{p}</button>)}</div>
         <div className="flex items-center gap-2"><label className="label !mb-0" htmlFor="late-at">Or starts at</label><input id="late-at" type="time" step={300} className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={t} onChange={(e) => setT(e.target.value)} /></div>
         {bad && <div className="text-xs text-rose">Pick a time after {firstStart} and before {lastEnd}.</div>}
-        <div className="flex justify-end gap-2 pt-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={bad} onClick={() => onSave(t)}><Icon name="check" />Start at {bad ? '…' : t}</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={bad} onClick={() => onSave(t)}><Icon name="check" />Start at {bad ? '…' : t}</button></div>
       </div>
     </Modal>
   );
@@ -513,7 +513,7 @@ function QuickBlock({ title, subtitle, defaultStart, minutes = 30, fixedEnd, onS
           {!fixedEnd && <><span className="text-muted text-sm">for</span><div className="flex gap-1">{[15, 30, 45, 60].map((m) => <button key={m} className={`toggle-opt ${len === m ? 'on' : ''}`} onClick={() => setLen(m)}>{m} min</button>)}</div></>}
           <span className="text-sm text-muted">→ until {end}</span></div>
         {!fixedEnd && <input className="input" placeholder="Note (optional), e.g. Lunch" value={note} onChange={(e) => setNote(e.target.value)} />}
-        <div className="flex justify-end gap-2 pt-2"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={() => onSave(start, end, note)}><Icon name="check" />Save</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={() => onSave(start, end, note)}><Icon name="check" />Save</button></div>
       </div>
     </Modal>
   );
@@ -530,7 +530,7 @@ function EditDayModal({ day, practitionerId, cfg, onClose }: { day: string; prac
       <div className="space-y-3">
         {ranges.map((r, i) => <div key={i} className="flex items-center gap-2"><input type="time" className="input !w-auto" value={r.startTime} onChange={(e) => setRanges(ranges.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))} /><span className="text-muted">to</span><input type="time" className="input !w-auto" value={r.endTime} onChange={(e) => setRanges(ranges.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))} /><button className="btn btn-ghost btn-icon" onClick={() => setRanges(ranges.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button></div>)}
         <div className="flex gap-2 items-center"><button className="btn btn-sm" onClick={() => setRanges([...ranges, { startTime: '16:00', endTime: '20:00' }])}><Icon name="plus" className="h-3.5 w-3.5" />Add hours</button><span className="ml-auto text-sm text-muted">Places per window</span><NumInput max={99} className="input !w-20" value={capacity} onChange={(e) => setCapacity(e.target.value as any)} /></div>
-        <div className="flex justify-end gap-2 pt-2 border-t border-line"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !ranges.length} onClick={() => save.mutate()}><Icon name="check" />Save for this day</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !ranges.length} onClick={() => save.mutate()}><Icon name="check" />Save for this day</button></div>
       </div>
     </Modal>
   );

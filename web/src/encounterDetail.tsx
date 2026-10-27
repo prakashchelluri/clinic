@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { get, post } from './api';
-import { Chip, Icon, Modal, Skeleton, fmtDate } from './ui';
+import { Chip, Icon, Modal, Skeleton, fmtDate, toast } from './ui';
 
 /** Form values may be a string (old encounters) or an array (tags fields). */
 const label = (x: any) => (x && typeof x === 'object' ? `${x.name}${x.severity ? ` (${x.severity})` : ''}` : String(x));
@@ -73,7 +73,7 @@ export function UploadButton({ patientId, encounterId, recommendationId, kind = 
         const f = ev.target.files?.[0]; if (!f) return;
         const dataBase64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
         try { await post('/documents', { patientId, encounterId, recommendationId, kind, title: f.name, mime: f.type, dataBase64 }); onDone(); }
-        catch (e: any) { alert(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF are accepted' : 'Upload failed'); }
+        catch (e: any) { toast(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF files can be added.' : e?.body?.code === 'TOO_LARGE' ? 'That file is too large (10 MB at most).' : 'Upload failed. Please try again.', 'err'); }
         ev.target.value = '';
       }} />
     </label>

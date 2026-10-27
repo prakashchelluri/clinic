@@ -381,7 +381,7 @@ function ArrivalSheet({ init, cfg, perms, waitingByDoctor, onClose }: { init: { 
               {fee > 0 && can(perms, 'payment.waive') && <input className="input mt-2 !py-1.5 text-xs" placeholder="Waive? type the reason (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
             </div>
           </div>
-          <div className="flex items-center gap-2 justify-end pt-3 border-t border-line"><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{fee > 0 && !waive && !blocker ? ` · collect ${money(toPaise(amount === '' ? String(fee / 100) : amount))}` : ''}</button></div>
         </div>
       )}

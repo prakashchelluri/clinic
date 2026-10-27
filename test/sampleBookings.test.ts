@@ -20,7 +20,7 @@ const login = async (email: string) => (await app.inject({ method: 'POST', url: 
 before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); app = await buildApp(); });
 after(async () => { await app.close(); });
 
-test('test data loads everything the booking and photo screens need, once', async () => {
+test('test data fills the month, tomorrow and the courses, and can be topped up', async () => {
   const owner = await login('owner@demo.clinic'); const reception = await login('reception@demo.clinic');
   const call = (c: string, method: 'GET' | 'POST', url: string) => app.inject({ method, url: '/api' + url, cookies: { cc_session: c } });
 
@@ -46,5 +46,27 @@ test('test data loads everything the booking and photo screens need, once', asyn
   assert.equal(file.statusCode, 200); assert.equal(file.headers['content-type'], 'image/png');
   assert.deepEqual([...file.rawPayload.subarray(0, 4)], [137, 80, 78, 71], 'a real PNG');
 
-  assert.equal((await call(owner, 'POST', '/dev/sample-bookings')).json().code, 'SAMPLE_ALREADY_LOADED');
+  // every working day of this month is filled (today aside: it only gets windows still ahead), and tomorrow is busy
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+  const [Y, M] = today.split('-').map(Number);
+  const monthEnd = new Date(Date.UTC(Y, M, 0)).toISOString().slice(0, 10);
+  const doc = (await call(owner, 'GET', '/config')).json().practitioners[0].id;
+  const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const days: any[] = [];
+  for (let from = `${Y}-${String(M).padStart(2, '0')}-01`; from <= monthEnd; from = addDays(from, 14)) days.push(...(await call(owner, 'GET', `/calendar/range?from=${from}&days=14&practitionerId=${doc}`)).json());
+  const month = days.filter((d) => d.day >= `${Y}-${String(M).padStart(2, '0')}-01` && d.day <= monthEnd);
+  const working = month.filter((d) => d.windows.length && d.day !== today);
+  assert.ok(working.length >= 15, 'a month of working days');
+  const empty = working.filter((d) => d.windows.every((w: any) => !w.appointments.length)).map((d) => d.day);
+  assert.deepEqual(empty, [], 'no working day this month is left empty');
+  const tomorrow = month.find((d) => d.day === addDays(today, 1)) ?? days.find((d) => d.day === addDays(today, 1));
+  if (tomorrow?.windows.length) assert.ok(tomorrow.windows.reduce((n: number, w: any) => n + w.appointments.length, 0) >= 3, 'tomorrow has bookings');
+
+  // running it again tops up only what is quiet: next to nothing is added, and nothing is refused
+  const again = await call(owner, 'POST', '/dev/sample-bookings');
+  assert.equal(again.statusCode, 200, again.body);
+  const a = again.json();
+  assert.equal(a.topUp, true); assert.equal(a.requested, 0); assert.equal(a.photos, 0); assert.equal(a.sittings, 0);
+  assert.ok(a.booked + a.confirmed + a.arrived + a.no_show + a.cancelled <= 5, JSON.stringify(a));
+
 });

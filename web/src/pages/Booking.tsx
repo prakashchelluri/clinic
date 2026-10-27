@@ -76,7 +76,7 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
   });
   const arriveBy = minus(session.startTime, arriveEarly);
   return (
-    <div className="card anim-slide-in space-y-3 !border-clay/30">
+    <div className="space-y-3">
       <div className="flex items-baseline gap-2"><div className="serif text-xl">Book {session.startTime}–{session.endTime}</div><Chip tone="clay">{session.free} free</Chip></div>
       <div className="text-xs text-muted bg-paper rounded-xl p-3 flex gap-2"><Icon name="phone" className="h-4 w-4 shrink-0 text-clay" /><span>Tell the caller: <b className="text-ink">arrive by {arriveBy}</b>, the wait can be 30–45 minutes. No exact time is promised.</span></div>
       {services.length > 0 && (
@@ -100,9 +100,8 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
         <label className="flex items-center gap-2"><input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />Send confirmation</label>
       </div>
       {repeatBad && <div className="text-xs text-rose -mt-1">Repeat between 2 and 26 visits.</div>}
-      <div className="flex gap-2 items-center"><button className="btn btn-primary" disabled={book.isPending || (!patientId && name.trim().length < 2) || phoneBad || repeatBad} onClick={() => book.mutate(false)}><Icon name="check" />Book</button>
-        {err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}</div>
       {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.free})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
+      <div className="modal-foot">{err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}<button className="btn btn-primary" disabled={book.isPending || (!patientId && name.trim().length < 2) || phoneBad || repeatBad} onClick={() => book.mutate(false)}><Icon name="check" />Book</button></div>
     </div>
   );
 }

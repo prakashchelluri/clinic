@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 
 /* ---------- Icons (inline, stroke) ---------- */
@@ -177,15 +177,112 @@ export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?:
   );
 }
 
-export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl' }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string }) {
-  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
-  return (
-    <div className="fixed inset-0 z-40 grid place-items-center p-4 anim-fade-in" style={{ background: 'rgba(28,27,25,0.35)', backdropFilter: 'blur(6px)' }} onClick={onClose}>
-      <div className={`rounded-[28px] border border-white bg-[#FBFAF7] anim-scale-in w-full ${width} max-h-[94vh] overflow-auto !p-0`} style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start gap-3 px-6 pt-5 pb-3"><div className="mr-auto"><h2 className="text-xl font-medium">{title}</h2>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
-        <div className="px-6 pb-6">{children}</div>
+/* ---------- Dialogs: one standard ----------
+ * Header and footer stay put, only the middle scrolls (put the buttons in a `modal-foot` row and they never leave the screen).
+ * Sizes by content, a bottom sheet on phones, focus kept inside, Esc closes, the page behind does not scroll.
+ * Rendered into document.body: an ancestor with an entrance animation would otherwise become the "screen" for position:fixed. */
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+let scrollLocks = 0;
+/** Locks page scroll while an overlay is open. Counted, so stacked overlays unlock only when the last one closes. */
+export function useScrollLock(active = true) {
+  useEffect(() => {
+    if (!active) return;
+    const el = document.documentElement;
+    if (scrollLocks++ === 0) { const bar = window.innerWidth - el.clientWidth; el.style.overflow = 'hidden'; if (bar > 0) el.style.paddingRight = `${bar}px`; }
+    return () => { if (--scrollLocks === 0) { el.style.overflow = ''; el.style.paddingRight = ''; } };
+  }, [active]);
+}
+/** Keep Tab inside a panel. Returns true when it handled the key. */
+function trapTab(panel: HTMLElement, e: KeyboardEvent) {
+  const els = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.offsetParent !== null);
+  if (!els.length) { e.preventDefault(); return true; }
+  const a = els[0], z = els[els.length - 1], cur = document.activeElement;
+  if (e.shiftKey && (cur === a || cur === panel || !panel.contains(cur))) { e.preventDefault(); z.focus(); return true; }
+  if (!e.shiftKey && (cur === z || !panel.contains(cur))) { e.preventDefault(); a.focus(); return true; }
+  return false;
+}
+/** Focus the first field (not on touch screens, where it would open the keyboard); remember and restore the previous focus. */
+function useDialogFocus(panel: React.RefObject<HTMLDivElement | null>, active = true) {
+  useEffect(() => {
+    if (!active || !panel.current) return;
+    const p = panel.current; const prev = document.activeElement as HTMLElement | null;
+    const first = matchMedia('(pointer: coarse)').matches ? null : p.querySelector<HTMLElement>('[data-autofocus],input:not([type=checkbox]):not([type=radio]):not([type=hidden]):not([disabled]),textarea:not([disabled]),select:not([disabled])');
+    if (!p.contains(document.activeElement)) (first ?? p).focus({ preventScroll: true });
+    return () => { if (prev && document.contains(prev)) prev.focus({ preventScroll: true }); };
+  }, [active]);
+}
+const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]' };
+
+export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean }) {
+  const panel = useRef<HTMLDivElement>(null); const close = useRef(onClose); close.current = onClose; const id = useId();
+  useScrollLock(); useDialogFocus(panel);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const p = panel.current; if (!p) return;
+      if (e.key === 'Escape') close.current();
+      else if (e.key === 'Tab') trapTab(p, e);
+      else if (e.key === 'Enter' && submitOnEnter && e.target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'submit'].includes(e.target.type)) {
+        const go = p.querySelector<HTMLButtonElement>('.modal-foot .btn-primary:not(:disabled),.modal-foot .btn-accent:not(:disabled)'); if (go) { e.preventDefault(); go.click(); }
+      }
+    };
+    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
+  }, [submitOnEnter]);
+  return createPortal(
+    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby={id} onClick={onClose}>
+      <div ref={panel} tabIndex={-1} className={`modal-panel ${SIZE[width] ?? 'sm:max-w-[720px]'}`} onClick={(e) => e.stopPropagation()}>
+        <span className="modal-grab" aria-hidden />
+        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-xl font-medium">{title}</h2>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
+        <div className="modal-body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
+  );
+}
+
+/* ---------- Confirm and short questions, in the app's own style (replaces the browser's confirm / prompt / alert) ---------- */
+type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; initial?: string; maxLength?: number } };
+type Pending = AskOpts & { resolve: (v: { value: string } | null) => void };
+let pending: Pending | null = null; const askSubs = new Set<() => void>();
+const setPending = (p: Pending | null) => { pending = p; askSubs.forEach((s) => s()); };
+/** Resolves { value } when confirmed (value is the typed text when there is a field), null when cancelled. */
+export const ask = (o: AskOpts) => new Promise<{ value: string } | null>((resolve) => { pending?.resolve(null); setPending({ ...o, resolve }); });
+
+export function DialogHost() {
+  const p = useSyncExternalStore((cb) => { askSubs.add(cb); return () => askSubs.delete(cb); }, () => pending);
+  const panel = useRef<HTMLDivElement>(null); const [val, setVal] = useState(''); const id = useId();
+  useEffect(() => setVal(p?.field?.initial ?? ''), [p]);
+  useScrollLock(!!p); useDialogFocus(panel, !!p);
+  const done = (v: { value: string } | null) => { if (!p) return; p.resolve(v); setPending(null); };
+  const bad = !!p?.field?.required && !val.trim();
+  useEffect(() => {
+    if (!p) return;
+    // Capture phase: this dialog sits on top, so Esc must not also close whatever is underneath.
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); p.resolve(null); setPending(null); }
+      else if (e.key === 'Tab' && panel.current) trapTab(panel.current, e);
+    };
+    window.addEventListener('keydown', k, true); return () => window.removeEventListener('keydown', k, true);
+  }, [p]);
+  if (!p) return null;
+  const danger = p.tone === 'danger';
+  return createPortal(
+    <div className="modal-back" style={{ zIndex: 60 }} role="alertdialog" aria-modal="true" aria-labelledby={id} onClick={() => done(null)}>
+      <div ref={panel} tabIndex={-1} className="modal-panel sm:max-w-[420px]" onClick={(e) => e.stopPropagation()}>
+        <span className="modal-grab" aria-hidden />
+        <div className="modal-body !pt-6">
+          {!p.field && <span className={`mb-3 grid h-11 w-11 place-items-center rounded-full text-lg font-bold ${danger ? 'bg-rose-soft text-rose' : 'bg-amber-soft text-amber'}`} aria-hidden>!</span>}
+          <h2 id={id} className="text-xl font-semibold leading-snug">{p.title}</h2>
+          {p.body && <div className="mt-2 text-[14.5px] leading-snug text-ink-2">{p.body}</div>}
+          {p.field && <div className="mt-4"><label className="label" htmlFor={id + 'f'}>{p.field.label}{p.field.required ? '' : ' (optional)'}</label>
+            <input id={id + 'f'} data-autofocus className="input" maxLength={p.field.maxLength ?? 200} placeholder={p.field.placeholder} value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !bad) done({ value: val.trim() }); }} /></div>}
+          <div className="modal-foot">
+            <button className="btn" onClick={() => done(null)}>{p.cancelLabel ?? 'Cancel'}</button>
+            <button data-autofocus={p.field ? undefined : ''} className={danger ? 'btn !border-rose !bg-rose !text-white' : 'btn btn-primary'} disabled={bad} onClick={() => done({ value: val.trim() })}>{p.confirmLabel ?? 'OK'}</button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -202,6 +299,8 @@ const dismiss = (id: number) => { toasts = toasts.filter((t) => t.id !== id); no
 export function ToastHost() {
   const list = useSyncExternalStore((cb) => { subs.add(cb); return () => subs.delete(cb); }, () => toasts);
   return (
+    <>
+    <DialogHost />
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
       {list.map((t) => (
         <div key={t.id} className={`anim-scale-in pointer-events-auto rounded-full px-4 py-2 text-sm font-medium shadow-lg flex items-center gap-2 ${t.tone === 'err' ? 'bg-rose text-white' : t.tone === 'info' ? 'bg-ink text-paper' : 'bg-sage text-white'}`}>
@@ -210,6 +309,7 @@ export function ToastHost() {
         </div>
       ))}
     </div>
+    </>
   );
 }
 

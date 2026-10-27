@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, qc, errText } from './api';
-import { Chip, Empty, Icon, Section, Skeleton, toast } from './ui';
+import { Chip, Empty, Icon, Section, Skeleton, ask, toast, useScrollLock } from './ui';
 
 /* Clinical photos: consent, capture with a faint copy of the last photo, timeline by area and sitting, before/after compare. */
 
@@ -49,6 +49,7 @@ type Shot = { id: string; dataUrl: string; area: string; view: string };
 
 /** Full-screen camera for the clinic phone. The last photo of the same area and view is shown faintly over the live picture. */
 export function PhotoCapture({ patient, sitting, onClose }: { patient: { id: string; fullName: string }; sitting?: { id: string; label: string } | null; onClose: () => void }) {
+  useScrollLock();
   const q = usePhotos(patient.id);
   const video = useRef<HTMLVideoElement>(null); const stream = useRef<MediaStream | null>(null);
   const [camErr, setCamErr] = useState<string | null>(null); const [ready, setReady] = useState(false);
@@ -179,7 +180,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
       <div className="space-y-3 p-4">
         {q.isLoading ? <Skeleton rows={2} /> : (<>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={() => { if (confirm('Withdraw photo consent? Existing photos stay; no new photos can be taken.')) withdraw.mutate(); }}>withdraw</button>}</>
+            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the record. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>withdraw</button>}</>
               : <><Chip tone="amber">no photo consent yet</Chip><span>Asked when you first take photos.</span></>}
             {photos.length > 1 && <span className="ml-auto">Pick two photos to compare</span>}
           </div>
@@ -221,6 +222,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
 
 /* ---------------- Compare ---------------- */
 export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b: any; onClose: () => void }) {
+  useScrollLock();
   const [mode, setMode] = useState<'side' | 'slider'>('side'); const [x, setX] = useState(50);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (mode === 'slider' && e.key === 'ArrowLeft') setX((v) => Math.max(0, v - 5)); if (mode === 'slider' && e.key === 'ArrowRight') setX((v) => Math.min(100, v + 5)); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [mode, onClose]);
   const tag = (p: any, which: string) => <div className="absolute left-3 top-3 rounded-xl bg-black/55 px-3 py-2 text-sm leading-tight text-white"><b>{which}</b> · {shortDay(p.takenAt)}<div className="text-xs text-white/70">{p.sitting ? `sitting ${p.sitting.sittingNo}${p.sitting.of ? ` of ${p.sitting.of}` : ''}` : 'no sitting'} · {viewLabel(p.view)}</div></div>;
@@ -251,6 +253,7 @@ export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b:
 
 /* ---------------- One photo: view, re-tag, remove ---------------- */
 function PhotoViewer({ photo, list, areas, canWrite, patientId, onClose, onMove }: { photo: any; list: any[]; areas: string[]; canWrite: boolean; patientId: string; onClose: () => void; onMove: (p: any) => void }) {
+  useScrollLock();
   const i = list.findIndex((p) => p.id === photo.id);
   const [area, setArea] = useState(photo.area ?? ''); const [view, setView] = useState(photo.view ?? 'front'); const [note, setNote] = useState(photo.note ?? '');
   useEffect(() => { setArea(photo.area ?? ''); setView(photo.view ?? 'front'); setNote(photo.note ?? ''); }, [photo.id]);
@@ -272,7 +275,7 @@ function PhotoViewer({ photo, list, areas, canWrite, patientId, onClose, onMove 
           <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60" htmlFor="pv-area">Area</label><input id="pv-area" list="pv-areas" maxLength={40} className="w-full rounded-xl bg-white/10 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-white/40" value={area} onChange={(e) => setArea(e.target.value)} /><datalist id="pv-areas">{areas.map((a) => <option key={a} value={a} />)}</datalist></div>
           <div><span className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60">View</span><div className="flex flex-wrap gap-1.5">{VIEWS.map(([k, l]) => <button key={k} onClick={() => setView(k)} className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${view === k ? 'bg-white text-ink' : 'bg-white/10'}`}>{l}</button>)}</div></div>
           <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60" htmlFor="pv-note">Note</label><textarea id="pv-note" maxLength={500} className="min-h-[72px] w-full rounded-xl bg-white/10 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-white/40" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. mild redness after the session" /></div>
-          <div className="flex flex-wrap gap-2"><button className="btn btn-accent" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button><button className="btn !border-white/20 !bg-white/10 !text-white" onClick={() => { if (confirm('Remove this photo from the record?')) del.mutate(); }}>Remove</button></div>
+          <div className="flex flex-wrap gap-2"><button className="btn btn-accent" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button><button className="btn !border-white/20 !bg-white/10 !text-white" onClick={async () => { const r = await ask({ title: 'Remove this photo?', body: 'It is deleted from the patient record and cannot be brought back.', confirmLabel: 'Remove photo', tone: 'danger' }); if (r) del.mutate(); }}>Remove</button></div>
         </>) : <div className="text-sm text-white/80">{photo.area ?? 'Untagged'} · {viewLabel(photo.view)}{photo.note ? <div className="mt-2">{photo.note}</div> : null}</div>}
       </div>
     </div>

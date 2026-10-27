@@ -133,7 +133,7 @@ function ScheduleModal({ rec, onClose }: { rec: any; onClose: () => void }) {
         <details className="text-sm"><summary className="cursor-pointer text-muted">Set time and room manually</summary>
           <div className="flex gap-2 mt-2 items-center"><input type="time" className="input !w-auto" value={manual.startTime} onChange={(e) => { setManual({ ...manual, startTime: e.target.value }); setPick(null); }} /><select className="input !w-auto" value={manual.roomId} onChange={(e) => setManual({ ...manual, roomId: e.target.value })}><option value="">No room</option>{cfg.rooms.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div></details>
         {conf && <div className="rounded-xl bg-amber-soft text-amber text-sm p-3 anim-fade-up"><div className="font-medium mb-1">This slot clashes:</div>{conf.map((c, i) => <div key={i}>• {c.kind}: {c.who} ({c.startTime}–{c.endTime})</div>)}<button className="btn btn-sm mt-2" onClick={() => save.mutate(true)}>Schedule anyway</button></div>}
-        <div className="flex justify-end gap-2 pt-2 border-t border-line"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || (!pick && !manual.startTime)} onClick={() => save.mutate(false)}><Icon name="check" />Confirm {pick?.startTime ?? manual.startTime}</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || (!pick && !manual.startTime)} onClick={() => save.mutate(false)}><Icon name="check" />Confirm {pick?.startTime ?? manual.startTime}</button></div>
       </div>
     </Modal>
   );

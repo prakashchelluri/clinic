@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, errText, ApiError, today } from './api';
-import { Chip, Icon, Skeleton, toast } from './ui';
+import { Chip, Icon, Skeleton, toast, useScrollLock } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
   requested: { label: 'requested', tone: 'clay' }, booked: { label: 'booked', tone: '' }, confirmed: { label: 'confirmed', tone: 'sage' },
@@ -19,6 +19,7 @@ export const refreshBookings = () => ['calendar', 'sessions', 'appointments', 'q
 
 /** One booking, opened from anywhere (calendar, bookings list). Every action on a booking lives here. */
 export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; cfg: any; canWrite: boolean; onClose: () => void }) {
+  useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['appointment', id], queryFn: () => get(`/appointments/${id}`) });
   const [mode, setMode] = useState<null | 'cancel' | 'move' | 'decline'>(null);
