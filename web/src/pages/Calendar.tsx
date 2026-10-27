@@ -39,7 +39,8 @@ export function Calendar() {
   const setView = (v: View) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage blocked */ } };
   const [booking, setBooking] = useState<any>(null);
   const canBook = can(perms, 'appointment.write');
-  const step = view === 'week' ? 7 : 1;
+  const [roomSel, setRoomSel] = useState(''); // Rooms view: '' = every room for the day, otherwise one room for the week
+  const step = view === 'week' || (view === 'rooms' && roomSel) ? 7 : 1;
   const practitioner = cfg?.practitioners.find((p: any) => p.id === doc);
   const weekStart = monday(day);
 
@@ -71,7 +72,7 @@ export function Calendar() {
   };
   const grid = { svc, setSvc, status, setStatus, services: cfg?.services ?? [], show, setShow, canBook, onRemoveBlock: canEditDays ? removeBlock : undefined, onOpen: (id: string) => setOpenId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => onMove(a, { ...w, doctor: view === 'team' ? docName(w.practitionerId) : undefined }) };
 
-  const title = view === 'week' ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 6), { day: 'numeric', month: 'short' })}`
+  const title = view === 'week' || (view === 'rooms' && roomSel) ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 6), { day: 'numeric', month: 'short' })}`
     : fullDay(day);
 
   return (
@@ -79,11 +80,12 @@ export function Calendar() {
       <PageHeader title={title}>
         <Segmented<View> value={view} onChange={setView} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'team', label: 'All doctors' }, { value: 'rooms', label: 'Rooms' }, { value: 'list', label: 'List' }]} />
         <div className="flex items-center gap-1 card !p-1 !rounded-full">
-          <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Previous week' : 'Previous day'} onClick={() => setDay(shift(day, -step))}><Icon name="chevL" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label={step === 7 ? 'Previous week' : 'Previous day'} onClick={() => setDay(shift(day, -step))}><Icon name="chevL" /></button>
           <input type="date" aria-label="Date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />
-          <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" /></button>
+          <button className="btn btn-ghost btn-icon" aria-label={step === 7 ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" /></button>
         </div>
         {day !== today() && <button className="btn btn-sm" onClick={() => setDay(today())}>Today</button>}
+        {view === 'rooms' && <select aria-label="Room" className="input !w-auto" value={roomSel} onChange={(e) => setRoomSel(e.target.value)}><option value="">All rooms (one day)</option>{(cfg?.rooms ?? []).filter((r: any) => r.active !== false).map((r: any) => <option key={r.id} value={r.id}>{r.name} (week)</option>)}</select>}
         {view !== 'team' && view !== 'rooms' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
       </PageHeader>
 
@@ -93,7 +95,7 @@ export function Calendar() {
       {editDay && doc && <EditDayModal day={editDay} practitionerId={doc} cfg={cfg} onClose={() => { setEditDay(null); refresh(); }} />}
       {routine && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setRoutine(false)} />}
       {view === 'team' && <TeamView day={day} cfg={cfg} grid={grid} />}
-      {view === 'rooms' && <RoomsView day={day} cfg={cfg} grid={grid} canEdit={canEditDays} />}
+      {view === 'rooms' && <RoomsView day={day} weekStart={weekStart} roomId={roomSel} cfg={cfg} grid={grid} canEdit={canEditDays} onOpenDay={(d) => { setDay(d); setRoomSel(''); }} />}
       {view === 'list' && <ListView day={day} doc={doc} grid={grid} />}
 
       {openId && <AppointmentDrawer id={openId} cfg={cfg} canWrite={canBook} onClose={() => setOpenId(null)} />}
@@ -436,7 +438,12 @@ function EditDayModal({ day, practitionerId, cfg, onClose }: { day: string; prac
 }
 
 /** Which rooms are free: who is using each room now, a finder for a time and length, and the day laid out room by room. */
-function RoomsView({ day, cfg, grid, canEdit }: { day: string; cfg: any; grid: Grid; canEdit: boolean }) {
+function RoomsView({ day, weekStart, roomId, cfg, grid, canEdit, onOpenDay }: { day: string; weekStart: string; roomId: string; cfg: any; grid: Grid; canEdit: boolean; onOpenDay: (d: string) => void }) {
+  if (roomId) return <RoomWeek from={weekStart} roomId={roomId} cfg={cfg} grid={grid} canEdit={canEdit} onOpenDay={onOpenDay} />;
+  return <RoomsDay day={day} cfg={cfg} grid={grid} canEdit={canEdit} />;
+}
+
+function RoomsDay({ day, cfg, grid, canEdit }: { day: string; cfg: any; grid: Grid; canEdit: boolean }) {
   const q = useQuery({ queryKey: ['calendar', day, 'all'], queryFn: () => get(`/calendar?day=${day}`), refetchInterval: 15000 });
   const rooms: any[] = (cfg?.rooms ?? []).filter((r: any) => r.active !== false);
   const caps = [...new Set<string>(rooms.flatMap((r) => r.capabilities ?? []))];
@@ -487,7 +494,8 @@ function RoomsView({ day, cfg, grid, canEdit }: { day: string; cfg: any; grid: G
 }
 
 /** Take a room out for a while (cleaning, repair). Procedures cannot be scheduled into it; undo removes the block. */
-function BlockRoomModal({ day, rooms, onClose }: { day: string; rooms: any[]; onClose: () => void }) {
+function BlockRoomModal({ day: initialDay, rooms, onClose }: { day: string; rooms: any[]; onClose: () => void }) {
+  const [day, setDay] = useState(initialDay);
   const [roomId, setRoomId] = useState(rooms[0]?.id ?? ''); const [from, setFrom] = useState(toHHMM(day === today() ? Math.min(Math.ceil(nowMin() / 15) * 15, 19 * 60) : 10 * 60)); const [to, setTo] = useState(''); const [why, setWhy] = useState('Cleaning'); const [tried, setTried] = useState(false);
   const end = to || toHHMM(Math.min(toMin(from) + 60, 23 * 60 + 59));
   const bad = !/^\d{2}:\d{2}$/.test(from) || !/^\d{2}:\d{2}$/.test(end) || toMin(end) <= toMin(from);
@@ -495,9 +503,10 @@ function BlockRoomModal({ day, rooms, onClose }: { day: string; rooms: any[]; on
   const add = useMutation({ mutationFn: () => post('/calendar/blocks', { roomId, day, startTime: from, endTime: end, kind: 'other', note: why.trim() || 'Not available' }),
     onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['calendar'] }); toast(`${rooms.find((x) => x.id === roomId)?.name} blocked ${from}–${end}`, 'ok', { label: 'Undo', run: () => del.mutate(r.id) }); onClose(); }, onError: (e) => toast(errText(e), 'err') });
   return (
-    <Modal title="Block a room" subtitle={label(day, { weekday: 'long', day: 'numeric', month: 'long' })} onClose={onClose} width="max-w-md" submitOnEnter>
+    <Modal title="Block a room" onClose={onClose} width="max-w-md" submitOnEnter>
       <div className="space-y-4">
-        <div><label className="label" htmlFor="br-room">Room</label><select id="br-room" className="input" value={roomId} onChange={(e) => setRoomId(e.target.value)}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+        <div className="grid grid-cols-2 gap-3"><div><label className="label" htmlFor="br-date">Date</label><input id="br-date" type="date" min={today()} className="input" value={day} onChange={(e) => e.target.value >= today() && setDay(e.target.value)} /></div>
+        <div><label className="label" htmlFor="br-room">Room</label><select id="br-room" className="input" value={roomId} onChange={(e) => setRoomId(e.target.value)}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div></div>
         <div className="grid grid-cols-2 gap-3">
           <div><label className="label" htmlFor="br-from">From</label><input id="br-from" type="time" step={900} className={`input ${tried && bad ? '!border-rose' : ''}`} value={from} onChange={(e) => setFrom(e.target.value)} /></div>
           <div><label className="label" htmlFor="br-to">To</label><input id="br-to" type="time" step={900} className={`input ${tried && bad ? '!border-rose' : ''}`} value={end} onChange={(e) => setTo(e.target.value)} /></div>
@@ -509,5 +518,38 @@ function BlockRoomModal({ day, rooms, onClose }: { day: string; rooms: any[]; on
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={add.isPending} onClick={() => { setTried(true); if (!bad && roomId) add.mutate(); }}><Icon name="check" />Block room</button></div>
       </div>
     </Modal>
+  );
+}
+
+/** One room across the week: how busy each day is, when it is free, blocks for cleaning or repair. */
+function RoomWeek({ from, roomId, cfg, grid, canEdit, onOpenDay }: { from: string; roomId: string; cfg: any; grid: Grid; canEdit: boolean; onOpenDay: (d: string) => void }) {
+  const q = useQuery({ queryKey: ['calendar', 'range', from, 'rooms'], queryFn: () => get(`/calendar/range?from=${from}&days=7`), refetchInterval: 30000 });
+  const [blocking, setBlocking] = useState(false);
+  const room = (cfg?.rooms ?? []).find((r: any) => r.id === roomId);
+  if (q.isLoading || !q.data || !room) return <Skeleton rows={8} />;
+  const mine = (d: any) => ({ procs: d.procedures.filter((p: any) => p.roomId === roomId), blocks: d.blocks.filter((b: any) => b.roomId === roomId && !b.practitionerId) });
+  // Sunday only shows when something is on it.
+  const days = q.data.filter((d: any, i: number) => i < 6 || mine(d).procs.length || mine(d).blocks.length);
+  const total = days.reduce((n: number, d: any) => n + mine(d).procs.length, 0);
+  const mins = (d: any) => mine(d).procs.reduce((n: number, p: any) => n + toMin(p.endTime) - toMin(p.startTime), 0);
+  const dur = (m: number) => m >= 60 ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`;
+  return (
+    <div className="space-y-3">
+      <div className="glass p-4 flex flex-wrap items-center gap-3 anim-fade-up">
+        <span className="h-9 w-9 rounded-full grid place-items-center text-xs font-bold shrink-0 bg-sky-soft text-sky">R</span>
+        <div className="min-w-0 flex-1"><div className="font-semibold">{room.name}</div><div className="text-sm text-muted">{(room.capabilities ?? []).join(' · ') || 'room'} · {total} procedure{total === 1 ? '' : 's'} this week</div></div>
+        {canEdit && <button className="btn btn-sm" onClick={() => setBlocking(true)}><Icon name="door" className="h-3.5 w-3.5" />Block this room</button>}
+      </div>
+      <TimeGrid grid={grid} px={1.25} minCol={140} range={[9 * 60, 20 * 60]} cols={days.map((d: any) => {
+        const m = mine(d); const isToday = d.day === today();
+        return { key: d.day, day: d.day, windows: [], blocks: m.blocks, procs: m.procs,
+          head: <button type="button" className="text-left min-w-0" onClick={() => onOpenDay(d.day)} aria-label={`Open ${fullDay(d.day)} for all rooms`}>
+            <div className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-clay' : 'text-muted'}`}>{label(d.day, { weekday: 'short' })}</div>
+            <div className="flex items-baseline gap-1.5"><span className="text-lg font-semibold">{label(d.day, { day: 'numeric' })}</span><span className="text-[11px] text-muted truncate">{m.procs.length ? `${m.procs.length} booked · ${dur(mins(d))}` : m.blocks.length ? 'blocked' : 'free'}</span></div>
+          </button> };
+      })} />
+      <div className="text-xs text-muted">Empty means free. Striped means blocked. Click a day to see every room on that day.</div>
+      {blocking && <BlockRoomModal day={from < today() ? today() : from} rooms={[room]} onClose={() => setBlocking(false)} />}
+    </div>
   );
 }
