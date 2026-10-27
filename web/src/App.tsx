@@ -128,15 +128,13 @@ export function App() {
       )}
 
       <div className={`md:pl-[244px] ${fit ? 'md:h-full' : ''}`}>
-        <div className={`mx-auto max-w-[1440px] px-4 pt-4 md:px-8 md:pt-6 ${fit ? 'pb-16 md:h-full md:flex md:flex-col md:pb-5' : 'pb-16'}`}>
-          <header className="no-print mb-5 flex items-center gap-2.5 md:mb-6 md:gap-4">
+        <div className={`relative mx-auto max-w-[1440px] px-4 pt-4 md:px-8 md:pt-6 ${fit ? 'pb-16 md:h-full md:flex md:flex-col md:pb-5' : 'pb-16'}`}>
+          <header className="no-print mb-5 flex items-center gap-2.5 md:absolute md:right-8 md:top-6 md:z-30 md:mb-0 md:gap-2">
             <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
             <span className="truncate text-[17px] font-semibold md:hidden">{clinic}</span>
-            {!platform && <button onClick={() => setPalette(true)} className="hidden h-10 min-w-[280px] items-center gap-2.5 rounded-full border border-white/80 bg-white/65 px-4 text-sm text-muted transition-colors duration-200 hover:bg-white lg:flex">
-              <Icon name="search" className="h-4 w-4" />Search patients<span className="kbd ml-auto">⌘K</span></button>}
             <span className="ml-auto" />
-            {!platform && <button onClick={() => setPalette(true)} aria-label="Search" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
-            {!platform && c('appointment.read') && <Link to="/bookings?tab=requests" aria-label={requests ? `${requests} booking requests` : 'Booking requests'} data-tip="Online requests" className="tip relative btn btn-ghost btn-icon">
+            {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (⌘K)" className="btn btn-ghost btn-icon"><Icon name="search" /></button>}
+            {!platform && c('appointment.read') && <Link to="/bookings?tab=requests" aria-label={requests ? `${requests} booking requests` : 'Booking requests'} title="Online requests" className="relative btn btn-ghost btn-icon">
               <Icon name="bell" />{requests > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests}</span>}</Link>}
             {!platform && (() => { const acts = createActions(c, loc.pathname); return acts.length > 0 && (
               <div className="relative shrink-0">

@@ -190,3 +190,6 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
   .modal-foot > .btn-primary, .modal-foot > .btn-accent { flex: 1 1 auto; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) { .modal-back, .modal-panel { animation: none; } }
+
+/* The header icons float top right on desktop, so the first row of every page keeps clear of them */
+@media (min-width: 768px) { .page > * > :first-child { padding-right: 9rem; } }
