@@ -20,10 +20,10 @@ const isLongLeave = (b: any) => b.kind === 'leave' && toMin(b.endTime) - toMin(b
 const DOT: Record<string, string> = { requested: 'var(--color-clay)', booked: 'var(--color-ink)', confirmed: 'var(--color-sky)', arrived: 'var(--color-sage)', no_show: 'var(--color-rose)' };
 const OPEN = ['requested', 'booked', 'confirmed'];
 
-type View = 'day' | 'week' | 'team' | 'list';
+type View = 'day' | 'week' | 'team' | 'rooms' | 'list';
 const VIEW_KEY = 'cal.view';
 const savedView = (isDoctor: boolean): View => {
-  try { const v = localStorage.getItem(VIEW_KEY) as View | null; if (v && ['day', 'week', 'team', 'list'].includes(v)) return v; } catch { /* storage blocked */ }
+  try { const v = localStorage.getItem(VIEW_KEY) as View | null; if (v && ['day', 'week', 'team', 'rooms', 'list'].includes(v)) return v; } catch { /* storage blocked */ }
   return typeof window !== 'undefined' && window.innerWidth < 768 ? 'list' : isDoctor ? 'week' : 'team';
 };
 
@@ -77,14 +77,14 @@ export function Calendar() {
   return (
     <div>
       <PageHeader title={title}>
-        <Segmented<View> value={view} onChange={setView} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'team', label: 'All doctors' }, { value: 'list', label: 'List' }]} />
+        <Segmented<View> value={view} onChange={setView} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'team', label: 'All doctors' }, { value: 'rooms', label: 'Rooms' }, { value: 'list', label: 'List' }]} />
         <div className="flex items-center gap-1 card !p-1 !rounded-full">
           <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Previous week' : 'Previous day'} onClick={() => setDay(shift(day, -step))}><Icon name="chevL" /></button>
           <input type="date" aria-label="Date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />
           <button className="btn btn-ghost btn-icon" aria-label={view === 'week' ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" /></button>
         </div>
         {day !== today() && <button className="btn btn-sm" onClick={() => setDay(today())}>Today</button>}
-        {view !== 'team' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
+        {view !== 'team' && view !== 'rooms' && (cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
       </PageHeader>
 
       {view === 'day' && <DayView day={day} doc={doc} practitioner={practitioner} cfg={cfg} perms={perms} me={me} grid={grid} onAvailability={canEditDays && doc ? (d) => setAvail(d < today() ? today() : d) : undefined} />}
@@ -93,6 +93,7 @@ export function Calendar() {
       {editDay && doc && <EditDayModal day={editDay} practitionerId={doc} cfg={cfg} onClose={() => { setEditDay(null); refresh(); }} />}
       {routine && practitioner && <RoutineModal practitionerId={doc} name={practitioner.name} initial={practitioner.routine} onClose={() => setRoutine(false)} />}
       {view === 'team' && <TeamView day={day} cfg={cfg} grid={grid} />}
+      {view === 'rooms' && <RoomsView day={day} cfg={cfg} grid={grid} canEdit={canEditDays} />}
       {view === 'list' && <ListView day={day} doc={doc} grid={grid} />}
 
       {openId && <AppointmentDrawer id={openId} cfg={cfg} canWrite={canBook} onClose={() => setOpenId(null)} />}
@@ -126,11 +127,13 @@ type Grid = { svc: string; setSvc: (s: string) => void; status: string; setStatu
 type Col = { key: string; head: ReactNode; windows: any[]; blocks: any[]; procs: any[]; day: string; tint?: string };
 
 /** Shared time grid: one column per day or per doctor/room. */
-function TimeGrid({ cols: allCols, grid, px = 1.15, minCol = 140, wide = false }: { cols: Col[]; grid: Grid; px?: number; minCol?: number; wide?: boolean }) {
+function TimeGrid({ cols: allCols, grid, px = 1.15, minCol = 140, wide = false, range }: { cols: Col[]; grid: Grid; px?: number; minCol?: number; wide?: boolean; range?: [number, number] }) {
   const cols = allCols.map((c) => grid.show === 'procs' ? { ...c, windows: [] } : grid.show === 'appts' ? { ...c, procs: [] } : c);
   const all = cols.flatMap((c) => [...c.windows, ...c.blocks.filter((b) => !isLongLeave(b)), ...c.procs]);
-  const start = all.length ? Math.floor(Math.min(...all.map((x) => toMin(x.startTime))) / 60) * 60 : 10 * 60;
-  const end = all.length ? Math.ceil(Math.max(...all.map((x) => toMin(x.endTime))) / 60) * 60 : 19 * 60;
+  const lo = all.length ? Math.floor(Math.min(...all.map((x) => toMin(x.startTime))) / 60) * 60 : 10 * 60;
+  const hi = all.length ? Math.ceil(Math.max(...all.map((x) => toMin(x.endTime))) / 60) * 60 : 19 * 60;
+  const start = range ? Math.min(range[0], lo) : lo;
+  const end = range ? Math.max(range[1], hi) : hi;
   const y = (t: string) => (toMin(t) - start) * px;
   const h = (s: string, e: string) => Math.max(20, (toMin(e) - toMin(s)) * px);
   const height = (end - start) * px + 8;
@@ -427,6 +430,83 @@ function EditDayModal({ day, practitionerId, cfg, onClose }: { day: string; prac
         {ranges.map((r, i) => <div key={i} className="flex items-center gap-2"><input type="time" className="input !w-auto" value={r.startTime} onChange={(e) => setRanges(ranges.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))} /><span className="text-muted">to</span><input type="time" className="input !w-auto" value={r.endTime} onChange={(e) => setRanges(ranges.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))} /><button className="btn btn-ghost btn-icon" onClick={() => setRanges(ranges.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button></div>)}
         <div className="flex gap-2 items-center"><button className="btn btn-sm" onClick={() => setRanges([...ranges, { startTime: '16:00', endTime: '20:00' }])}><Icon name="plus" className="h-3.5 w-3.5" />Add hours</button><span className="ml-auto text-sm text-muted">Places per window</span><NumInput max={99} className="input !w-20" value={capacity} onChange={(e) => setCapacity(e.target.value as any)} /></div>
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !ranges.length} onClick={() => save.mutate()}><Icon name="check" />Save for this day</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Which rooms are free: who is using each room now, a finder for a time and length, and the day laid out room by room. */
+function RoomsView({ day, cfg, grid, canEdit }: { day: string; cfg: any; grid: Grid; canEdit: boolean }) {
+  const q = useQuery({ queryKey: ['calendar', day, 'all'], queryFn: () => get(`/calendar?day=${day}`), refetchInterval: 15000 });
+  const rooms: any[] = (cfg?.rooms ?? []).filter((r: any) => r.active !== false);
+  const caps = [...new Set<string>(rooms.flatMap((r) => r.capabilities ?? []))];
+  const isToday = day === today();
+  const roundUp = (m: number) => Math.ceil(m / 15) * 15;
+  const [mins, setMins] = useState(45); const [cap, setCap] = useState('');
+  const [at, setAt] = useState(() => toHHMM(isToday ? Math.min(roundUp(nowMin()), 19 * 60) : 10 * 60));
+  const [blocking, setBlocking] = useState(false);
+  if (q.isLoading || !q.data) return <Skeleton rows={6} />;
+  const d = q.data;
+  // everything occupying a room: procedures and blocks (cleaning, maintenance), as minute ranges
+  const busy = (rid: string) => [
+    ...d.procedures.filter((p: any) => p.roomId === rid).map((p: any) => ({ s: toMin(p.startTime), e: toMin(p.endTime), what: p.procedure ?? 'Procedure', who: p.patient })),
+    ...d.blocks.filter((b: any) => b.roomId === rid && !b.practitionerId).map((b: any) => ({ s: toMin(b.startTime), e: toMin(b.endTime), what: b.note ?? 'Not available', who: '' })),
+  ].sort((a, b) => a.s - b.s);
+  const status = (r: any) => {
+    const now = nowMin(); const list = busy(r.id);
+    if (!isToday) return { free: true, text: list.length ? `${list.length} booked` : 'free all day' };
+    const cur = list.find((x) => x.s <= now && now < x.e);
+    if (cur) { let end = cur.e; for (const x of list) if (x.s <= end && x.e > end) end = x.e; return { free: false, text: `busy until ${toHHMM(end)} · ${cur.what}` }; }
+    const next = list.find((x) => x.s > now);
+    return { free: true, text: next ? `free until ${toHHMM(next.s)}` : 'free for the rest of the day' };
+  };
+  const wantS = toMin(at); const wantE = wantS + mins;
+  const freeFor = rooms.filter((r) => (!cap || (r.capabilities ?? []).includes(cap)) && !busy(r.id).some((x) => x.s < wantE && x.e > wantS));
+  const cols: Col[] = rooms.map((r: any) => ({ key: r.id, day, windows: [], blocks: d.blocks.filter((b: any) => b.roomId === r.id && !b.practitionerId), tint: 'rgba(221,231,242,.18)', procs: d.procedures.filter((p: any) => p.roomId === r.id),
+    head: (<><span className="h-8 w-8 rounded-full grid place-items-center text-[11px] font-bold shrink-0 bg-sky-soft text-sky">R</span><div className="min-w-0"><div className="text-sm font-semibold truncate">{r.name}</div><div className="text-[11px] text-muted truncate">{(r.capabilities ?? []).join(' · ') || 'room'} · {busy(r.id).length} booked</div></div></>) }));
+  if (rooms.length === 0) return <div className="card"><Empty icon="door" title="No rooms yet" hint="Add procedure rooms under Settings → Rooms." /></div>;
+  return (
+    <div className="space-y-3">
+      <div className="glass p-4 space-y-3 anim-fade-up">
+        <div className="flex items-center gap-2"><div className="text-[11px] uppercase tracking-wider text-muted">{isToday ? `Right now · ${toHHMM(nowMin())}` : 'Rooms on this day'}</div><span className="ml-auto" />{canEdit && <button className="btn btn-sm" onClick={() => setBlocking(true)}><Icon name="door" className="h-3.5 w-3.5" />Block a room</button>}</div>
+        <div className="flex flex-wrap gap-2">{rooms.map((r) => { const st = status(r); return <span key={r.id} className={`chip !text-[13px] !px-3 !py-2 ${st.free ? 'chip-sage' : 'chip-rose'}`}><i className="h-2 w-2 rounded-full bg-current" />{r.name} · {st.text}</span>; })}</div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <b className="text-sm">Find a room</b>
+          <select aria-label="How long" className="input !w-auto !py-1.5" value={mins} onChange={(e) => setMins(Number(e.target.value))}>{[15, 30, 45, 60, 90, 120].map((m) => <option key={m} value={m}>{m} min</option>)}</select>
+          <span className="text-sm text-muted">from</span>
+          <input aria-label="Start time" type="time" step={900} className="input !w-auto !py-1.5" value={at} onChange={(e) => e.target.value && setAt(e.target.value)} />
+          {caps.length > 0 && <select aria-label="Room type" className="input !w-auto !py-1.5" value={cap} onChange={(e) => setCap(e.target.value)}><option value="">Any room type</option>{caps.map((c) => <option key={c} value={c}>{c}</option>)}</select>}
+          <span className="text-sm">{freeFor.length ? <>Free: {freeFor.map((r, i) => <b key={r.id}>{i ? ', ' : ''}{r.name}</b>)}</> : <span className="text-rose">No room is free then. Try another time.</span>}</span>
+        </div>
+      </div>
+      <TimeGrid grid={grid} px={1.25} minCol={190} cols={cols} range={[9 * 60, 20 * 60]} />
+      <div className="text-xs text-muted">Empty means free. Striped means blocked. A blocked room is refused when a procedure is scheduled in it.</div>
+      {blocking && <BlockRoomModal day={day} rooms={rooms} onClose={() => setBlocking(false)} />}
+    </div>
+  );
+}
+
+/** Take a room out for a while (cleaning, repair). Procedures cannot be scheduled into it; undo removes the block. */
+function BlockRoomModal({ day, rooms, onClose }: { day: string; rooms: any[]; onClose: () => void }) {
+  const [roomId, setRoomId] = useState(rooms[0]?.id ?? ''); const [from, setFrom] = useState(toHHMM(day === today() ? Math.min(Math.ceil(nowMin() / 15) * 15, 19 * 60) : 10 * 60)); const [to, setTo] = useState(''); const [why, setWhy] = useState('Cleaning'); const [tried, setTried] = useState(false);
+  const end = to || toHHMM(Math.min(toMin(from) + 60, 23 * 60 + 59));
+  const bad = !/^\d{2}:\d{2}$/.test(from) || !/^\d{2}:\d{2}$/.test(end) || toMin(end) <= toMin(from);
+  const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/calendar/blocks/${id}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['calendar'] }); toast('Block removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
+  const add = useMutation({ mutationFn: () => post('/calendar/blocks', { roomId, day, startTime: from, endTime: end, kind: 'other', note: why.trim() || 'Not available' }),
+    onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['calendar'] }); toast(`${rooms.find((x) => x.id === roomId)?.name} blocked ${from}–${end}`, 'ok', { label: 'Undo', run: () => del.mutate(r.id) }); onClose(); }, onError: (e) => toast(errText(e), 'err') });
+  return (
+    <Modal title="Block a room" subtitle={label(day, { weekday: 'long', day: 'numeric', month: 'long' })} onClose={onClose} width="max-w-md" submitOnEnter>
+      <div className="space-y-4">
+        <div><label className="label" htmlFor="br-room">Room</label><select id="br-room" className="input" value={roomId} onChange={(e) => setRoomId(e.target.value)}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="label" htmlFor="br-from">From</label><input id="br-from" type="time" step={900} className={`input ${tried && bad ? '!border-rose' : ''}`} value={from} onChange={(e) => setFrom(e.target.value)} /></div>
+          <div><label className="label" htmlFor="br-to">To</label><input id="br-to" type="time" step={900} className={`input ${tried && bad ? '!border-rose' : ''}`} value={end} onChange={(e) => setTo(e.target.value)} /></div>
+        </div>
+        {tried && bad && <div className="text-xs text-rose">End must be after the start.</div>}
+        <div><label className="label" htmlFor="br-why">Reason</label>
+          <div className="mb-2 flex flex-wrap gap-1.5">{['Cleaning', 'Maintenance', 'Not available'].map((x) => <button key={x} type="button" className={`toggle-opt ${why === x ? 'on' : ''}`} onClick={() => setWhy(x)}>{x}</button>)}</div>
+          <input id="br-why" className="input" maxLength={80} value={why} onChange={(e) => setWhy(e.target.value)} /></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={add.isPending} onClick={() => { setTried(true); if (!bad && roomId) add.mutate(); }}><Icon name="check" />Block room</button></div>
       </div>
     </Modal>
   );

@@ -64,6 +64,15 @@ test('photos need consent, carry area/view/sitting, and form a timeline', async 
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() + 2 * 86400000));
     const ps = await doctor('POST', '/procedure-sessions', { recommendationId: recs[0].id, day, startTime: '11:00', minutes: 30, force: true });
     assert.equal(ps.status, 200, JSON.stringify(ps.body)); sittingId = ps.body.id;
+    // a room taken out for cleaning refuses a procedure, and works again once the block is removed
+    const room = docs.rooms[0];
+    const blk = await doctor('POST', '/calendar/blocks', { roomId: room.id, day, startTime: '16:00', endTime: '17:00', kind: 'other', note: 'Cleaning' });
+    assert.equal(blk.status, 200, JSON.stringify(blk.body));
+    const clash = await doctor('POST', '/procedure-sessions', { recommendationId: recs[0].id, day, startTime: '16:15', minutes: 30, roomId: room.id });
+    assert.equal(clash.status, 409, JSON.stringify(clash.body)); assert.ok(JSON.stringify(clash.body).includes('room_blocked'), 'says the room is blocked');
+    assert.equal((await doctor('DELETE', `/calendar/blocks/${blk.body.id}`)).status, 200);
+    const ok = await doctor('POST', '/procedure-sessions', { recommendationId: recs[0].id, day, startTime: '16:15', minutes: 30, roomId: room.id });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
   }
 
   const a = await doctor('POST', '/documents', { ...shot, procedureSessionId: sittingId });

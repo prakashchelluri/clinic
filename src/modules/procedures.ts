@@ -24,6 +24,10 @@ async function conflicts(tx: Tx, t: string, day: string, start: string, end: str
     if (roomId && r.ps.roomId === roomId) out.push({ kind: 'room', who: `${r.roomName} · ${r.patient}`, startTime: r.ps.startTime, endTime: r.ps.endTime });
     if (practitionerId && r.ps.practitionerId === practitionerId) out.push({ kind: 'doctor', who: r.patient, startTime: r.ps.startTime, endTime: r.ps.endTime });
   }
+  if (roomId) {
+    const rb = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), eq(calendarBlock.roomId, roomId), sql`${calendarBlock.kind} in ('break','leave','other')`, sql`${calendarBlock.practitionerId} is null`));
+    for (const b of rb) if (toMin(b.startTime) < e && toMin(b.endTime) > s) out.push({ kind: 'room_blocked', who: b.note ?? 'room not available', startTime: b.startTime, endTime: b.endTime });
+  }
   if (practitionerId) {
     const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), eq(calendarBlock.practitionerId, practitionerId), sql`${calendarBlock.kind} in ('break','leave','other')`));
     for (const b of blocks) if (toMin(b.startTime) < e && toMin(b.endTime) > s) out.push({ kind: b.kind, who: b.note ?? b.kind, startTime: b.startTime, endTime: b.endTime });
