@@ -18,6 +18,7 @@ import { billingRoutes } from './modules/billing.js';
 import { sampleRoutes } from './modules/sample.js';
 import { documentRoutes } from './modules/documents.js';
 import { pharmacyRoutes } from './modules/pharmacy.js';
+import { broadcastRoutes } from './modules/broadcasts.js';
 import { adminRoutes } from './modules/admin.js';
 import { procedureRoutes } from './modules/procedures.js';
 import { platformRoutes } from './modules/platform.js';
@@ -48,7 +49,7 @@ export async function buildApp() {
   app.addHook('onSend', async (_req, reply) => {
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'same-origin');
     reply.header('permissions-policy', 'camera=(self), microphone=(), geolocation=()');
-    reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self'; frame-src blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     if (process.env.NODE_ENV === 'production') reply.header('strict-transport-security', 'max-age=15552000');
   });
 
@@ -69,7 +70,7 @@ export async function buildApp() {
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
+    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

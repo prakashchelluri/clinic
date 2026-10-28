@@ -7,6 +7,7 @@ import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
 import { refreshBookings } from './apptDrawer';
 import { PrintHost } from './printPreview';
+import { ViewerHost } from './viewer';
 
 export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
@@ -103,6 +104,8 @@ export function App() {
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
   const counts = useQuery({ queryKey: ['bookings', 'counts'], queryFn: () => get('/bookings/counts'), enabled: !!me.data && !platform && c('appointment.read'), refetchInterval: 30000 });
   const requests = counts.data?.requests ?? 0;
+  const plansNew = c('worklist.read') ? counts.data?.plans ?? 0 : 0; // plans the doctor made today that nobody has acted on yet
+  const [bell, setBell] = useState(false);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
@@ -135,8 +138,13 @@ export function App() {
             <span className="truncate text-[17px] font-semibold md:hidden">{clinic}</span>
             <span className="ml-auto" />
             {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (⌘K)" className="btn btn-ghost btn-icon"><Icon name="search" /></button>}
-            {!platform && c('appointment.read') && <Link to="/bookings?tab=requests" aria-label={requests ? `${requests} booking requests` : 'Booking requests'} title="Online requests" className="relative btn btn-ghost btn-icon">
-              <Icon name="bell" />{requests > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests}</span>}</Link>}
+            {!platform && c('appointment.read') && <div className="relative">
+              <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-ghost btn-icon"><Icon name="bell" />{requests + plansNew > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests + plansNew}</span>}</button>
+              {bell && <><div className="fixed inset-0 z-30" onClick={() => setBell(false)} /><div className="menu anim-menu z-40 !w-[270px]" role="menu">
+                {requests + plansNew === 0 && <div className="px-3 py-2.5 text-sm text-muted">Nothing new.</div>}
+                {requests > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/bookings?tab=requests'); }}><Icon name="inbox" className="h-4 w-4" />{requests} online booking request{requests === 1 ? '' : 's'}</button>}
+                {plansNew > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/worklist?tab=plans'); }}><Icon name="stetho" className="h-4 w-4" />{plansNew} new plan{plansNew === 1 ? '' : 's'} from the doctor</button>}
+              </div></>}</div>}
             {!platform && (() => { const acts = createActions(c, loc.pathname); return acts.length > 0 && (
               <div className="relative shrink-0">
                 <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-accent btn-icon !h-11 !w-11 !rounded-full"><Icon name="plus" className={`h-5 w-5 transition-transform duration-200 ${plus ? 'rotate-45' : ''}`} /></button>
@@ -153,6 +161,7 @@ export function App() {
         </div>
       </div>
       <PrintHost />
+      <ViewerHost />
       {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} onClose={closeBook} onDone={() => { refreshBookings(); const rec = params.get('rec'); if (rec) patch(`/worklist/${rec}`, { status: 'scheduled' }).then(() => qc.invalidateQueries({ queryKey: ['worklist'] }), () => {}); closeBook(); }} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />

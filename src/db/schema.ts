@@ -180,7 +180,21 @@ export const message = pgTable('message', {
   attempts: integer('attempts').notNull().default(0),
   error: text('error'),
   providerRef: text('provider_ref'),
+  broadcastId: uuid('broadcast_id'),   // set when the message belongs to a bulk send
 }, (t) => [index('msg_due').on(t.status, t.sendAfter), index('msg_appt').on(t.tenantId, t.appointmentId)]);
+
+// A bulk message to many patients: what was said, to whom (as messages), by whom. Demo until WhatsApp is connected.
+export const broadcast = pgTable('broadcast', {
+  ...tenantCols,
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  audience: text('audience').notNull(),            // all | recent | lapsed | followup | course | pick
+  audienceLabel: text('audience_label').notNull(),
+  recipients: integer('recipients').notNull(),
+  skipped: integer('skipped').notNull().default(0), // matched but had no valid mobile number
+  mode: text('mode').notNull().default('demo'),     // demo: recorded, not sent
+  createdBy: uuid('created_by').notNull(),
+}, (t) => [index('broadcast_at').on(t.tenantId, t.createdAt)]);
 
 export const visit = pgTable('visit', {
   ...tenantCols,
@@ -259,6 +273,7 @@ export const procedureSession = pgTable('procedure_session', {
   stateReason: text('state_reason'),
   notes: text('notes'),
   outcome: jsonb('outcome').$type<Record<string, any>>(),
+  patientConfirmedAt: ts('patient_confirmed_at'), // the coordinator spoke to the patient; cleared when the sitting moves
 }, (t) => [index('psession_day').on(t.tenantId, t.day)]);
 
 // doctor's plan → worklists. One table serves both follow-up and procedure recommendations.
@@ -335,6 +350,8 @@ export const document = pgTable('document', {
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   encounterId: uuid('encounter_id').references(() => encounter.id),
   recommendationId: uuid('recommendation_id').references(() => recommendation.id),
+  recommendationIds: uuid('recommendation_ids').array().notNull().default([]), // every test this file is the result of (recommendationId is the first)
+  reviewedAt: ts('reviewed_at'),                                              // the doctor has opened this result
   kind: text('kind').notNull().default('report'), // report | photo | prescription | consent | other
   title: text('title').notNull(),
   mime: text('mime').notNull(),
@@ -371,7 +388,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

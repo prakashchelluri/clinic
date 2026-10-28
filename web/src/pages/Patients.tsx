@@ -3,7 +3,8 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, money, toast, NumInput } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, money, toast, NumInput } from '../ui';
+import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
 
@@ -12,13 +13,17 @@ export function Patients() {
   const [q, setQ] = useState('');
   const list = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`) });
   const [showNew, setShowNew] = useState(false);
+  const canMsg = can(perms, 'message.broadcast');
+  const [view, setView] = useState<'patients' | 'sent'>('patients'); const [bulk, setBulk] = useState(false);
   const [sp, setSp] = useSearchParams();
   useEffect(() => { if (sp.get('new')) { setShowNew(true); setSp({}, { replace: true }); } }, [sp]);
   return (
     <div>
       <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
+        {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
+        {canMsg && <button className="btn" onClick={() => setBulk(true)}><Icon name="message" className="h-4 w-4" />Message patients</button>}
       </PageHeader>
-      <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5">
+      {canMsg && view === 'sent' ? <SentMessages /> : <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5">
         <div className="space-y-3">
           <div className="relative anim-fade-up"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10 !py-3" placeholder="Phone, name or patient ID" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <Section delay={60}>
@@ -32,7 +37,8 @@ export function Patients() {
           </Section>
         </div>
         <div>{id ? <Timeline key={id} id={id} /> : <div className="card border-dashed anim-fade-in"><Empty icon="users" title="Select a patient" hint="Their visits, prescriptions, plans, reports and payments appear here as one timeline." /></div>}</div>
-      </div>
+      </div>}
+      {bulk && <BroadcastDialog onClose={() => setBulk(false)} onSent={() => setView('sent')} />}
       {showNew && <NewPatient onClose={(p) => { setShowNew(false); if (p) { qc.invalidateQueries({ queryKey: ['patients'] }); nav(`/patients/${p.id}`); } }} />}
     </div>
   );
@@ -42,6 +48,9 @@ function Timeline({ id }: { id: string }) {
   const t = useQuery({ queryKey: ['timeline', id], queryFn: () => get(`/patients/${id}/timeline`) });
   const docs = useQuery({ queryKey: ['documents', id], queryFn: () => get(`/patients/${id}/documents`) });
   const { perms } = useOutletContext<any>();
+  const waitingTests = useQuery({ queryKey: ['worklist', 'investigation'], queryFn: () => get('/worklist?kind=investigation'), enabled: can(perms, 'worklist.read') });
+  const pendingTests: any[] = (waitingTests.data ?? []).filter((r: any) => r.patient.id === id);
+  const [forTest, setForTest] = useState('');
   const [edit, setEdit] = useState<any>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); } });
@@ -84,9 +93,10 @@ function Timeline({ id }: { id: string }) {
             openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
         </Section>
         <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>} delay={90}
-          aside={can(perms, 'document.write') && <UploadButton patientId={id} onDone={() => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Uploaded'); }} />}>
+          aside={can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}>
           <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos above.</div> : <DocList docs={reports} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
         </Section>
+        {can(perms, 'appointment.read') && <PatientMessages id={id} />}
       </div>
 
       <div className="relative pl-6">

@@ -16,7 +16,7 @@ export type Ctx = { tenantId: string; userId: string; role: string; roles: strin
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {
   owner: ['*'],
-  admin: ['config.*', 'user.*', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'document.read'],
+  admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'document.read'],
   doctor: ['patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
   receptionist: ['patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
@@ -59,6 +59,7 @@ export const PERMISSIONS: { key: string; group: string; label: string; hint: str
   { key: 'expense.read', group: 'Money', label: 'See expenses', hint: 'Expenses page' },
   { key: 'expense.write', group: 'Money', label: 'Add, edit and remove expenses', hint: '' },
   { key: 'finance.read', group: 'Money', label: 'See clinic overview and finance', hint: 'Overview page' },
+  { key: 'message.broadcast', group: 'Patients', label: 'Send messages to many patients', hint: 'Patients page' },
   { key: 'pharmacy.read', group: 'Pharmacy', label: 'See the pharmacy queue', hint: 'Pharmacy page' },
   { key: 'pharmacy.dispense', group: 'Pharmacy', label: 'Dispense medicines', hint: '' },
   { key: 'pharmacy.bill', group: 'Pharmacy', label: 'Bill pharmacy sales', hint: '' },

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, gte, lte, ilike, or, inArray } from 'drizzle-orm';
 import jsonLogic from 'json-logic-js';
-import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter, session, procedureCatalog } from '../db/schema.js';
+import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter, session, procedureCatalog, prescriptionItem } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, daysBetween, addDays } from '../lib/core.js';
@@ -141,6 +141,7 @@ export function visitRoutes(app: FastifyInstance) {
     const vids = visits.map((x) => x.v.id);
     const encIds = visits.map((x) => x.encounterId).filter(Boolean) as string[];
     const recs = encIds.length ? await tx.select({ r: recommendation, procedure: procedureCatalog.name }).from(recommendation).leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), sql`${recommendation.encounterId} in ${encIds}`)) : [];
+    const rxRows = encIds.length ? await tx.select({ encounterId: prescriptionItem.encounterId, n: sql<number>`count(*)::int` }).from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), sql`${prescriptionItem.encounterId} in ${encIds}`)).groupBy(prescriptionItem.encounterId) : [];
     const dues = vids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), sql`${charge.visitId} in ${vids}`)) : [];
     const pays = vids.length ? await tx.select({ method: payment.method, total: sql<number>`sum(${payment.amountPaise})::int` }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId)).where(and(eq(payment.tenantId, t), sql`${charge.visitId} in ${vids}`)).groupBy(payment.method) : [];
     const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
@@ -149,7 +150,7 @@ export function visitRoutes(app: FastifyInstance) {
       day,
       appointments: appts.map((x) => ({ ...x.a, patient: x.p, window: x.w })),
       visits: visits.map((x) => ({ ...x.v, patient: x.p, category: x.cat, doctor: x.doctor, encounterId: x.encounterId, encounterStatus: x.encounterStatus, completedAt: x.completedAt,
-        recommendations: recs.filter((r) => r.r.encounterId === x.encounterId).map((r) => ({ ...r.r, procedure: r.procedure })), due: dues.filter((d) => d.visitId === x.v.id) })),
+        rxCount: rxRows.find((r) => r.encounterId === x.encounterId)?.n ?? 0, recommendations: recs.filter((r) => r.r.encounterId === x.encounterId).map((r) => ({ ...r.r, procedure: r.procedure })), due: dues.filter((d) => d.visitId === x.v.id) })),
       payments: can(req.perms, 'report.daily') || can(req.perms, 'finance.read') ? pays : [],
       doctors: docs.map((d) => ({ id: d.id, name: d.name, from: windows.find((w) => w.practitionerId === d.id)?.startTime ?? null, until: [...windows].reverse().find((w) => w.practitionerId === d.id)?.endTime ?? null })),
     };

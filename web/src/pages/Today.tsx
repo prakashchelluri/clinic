@@ -5,6 +5,7 @@ import { get, patch, post, qc, today, errText } from '../api';
 import { can } from '../App';
 import { Chip, Empty, Icon, Num, Segmented, Skeleton, toast } from '../ui';
 import { PhotoCapture } from '../photos';
+import { openViewer } from '../viewer';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -13,7 +14,7 @@ const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h
 const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const last = out[out.length - 1]; if (last && last[1] === w.startTime) last[1] = w.endTime; else out.push([w.startTime, w.endTime]); return out; }, []).map(([a, b]) => `${a}–${b}`).join(', ');
 
 type Row = { key: string; time: string; sort: number; rank: number; patient: any; type?: { name: string; color: string } | null; label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky'; visit?: any; note?: string };
-type Tab = 'all' | 'now' | 'later' | 'done';
+type Tab = 'now' | 'done';
 
 /** The doctor's landing page: the whole day at a glance, who is next, the day's procedures, and what still needs them. No money. */
 export function Today() {
@@ -24,9 +25,16 @@ export function Today() {
   const cal = useQuery({ queryKey: ['calendar', today(), doc ?? 'all'], queryFn: () => get(`/calendar?day=${today()}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 30000 });
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), enabled: can(perms, 'worklist.read') });
   const fus = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), enabled: can(perms, 'worklist.read') });
+  const [pmode, setPmode] = useState<'today' | 'tomorrow' | 'date'>('today'); const [pdate, setPdate] = useState(today());
+  const tomorrow = (() => { const x = new Date(today() + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); })();
+  const day = pmode === 'today' ? today() : pmode === 'tomorrow' ? tomorrow : pdate;
+  const pq = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
+  const todays = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
+  const pcount = useQuery({ queryKey: ['pcounts', today(), 'two'], queryFn: () => get(`/procedure-sessions/counts?from=${today()}&days=2`), refetchInterval: 60000, enabled: can(perms, 'worklist.read') });
+  const resq = useQuery({ queryKey: ['results'], queryFn: () => get('/results?days=7'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
   const open = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }), onError: (e) => toast(errText(e), 'err') });
-  const setState = useMutation({ mutationFn: ({ id, state }: any) => patch(`/procedure-sessions/${id}`, { state }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['calendar'] }); toast('Updated'); }, onError: (e) => toast(errText(e), 'err') });
-  const [tab, setTab] = useState<Tab>('all');
+  const setState = useMutation({ mutationFn: ({ id, state }: any) => patch(`/procedure-sessions/${id}`, { state }), onSuccess: () => { ['calendar', 'psessions', 'pcounts'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Updated'); }, onError: (e) => toast(errText(e), 'err') });
+  const [tab, setTab] = useState<Tab>('now');
   const [cap, setCap] = useState<any>(null);
   const d = fd.data; const c = cal.data;
   if (!d || !c) return <div className="space-y-4"><Skeleton rows={2} /><Skeleton rows={6} /></div>;
@@ -54,11 +62,16 @@ export function Today() {
   }
   for (const v of visits) if (!v.appointmentId) rows.push(rowOfVisit(v, hhmm(v.arrivedAt), { name: v.category === 'NGT' ? 'Emergency' : 'Walk-in', color: '#8A877E' }, v.id));
   rows.sort((a, b) => a.rank - b.rank || a.sort - b.sort);
-  const shown = rows.filter((r) => tab === 'all' || (tab === 'now' && r.rank <= 1) || (tab === 'later' && r.rank === 2) || (tab === 'done' && r.rank >= 3));
+  const shown = rows.filter((r) => (tab === 'now' && r.rank <= 1) || (tab === 'done' && r.rank >= 3));
+  const later = rows.filter((r) => r.rank === 2).length; // booked, not arrived yet
   const firstWaiting = rows.find((r) => r.rank === 1);
 
-  const procs = c.procedures.filter((p: any) => mine(p.practitionerId));
+  const procs: any[] = todays.data ?? [];
   const procsDone = procs.filter((p: any) => p.state === 'completed').length;
+  const plist: any[] = pq.data ?? [];
+  const noDoc = (p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId;
+  const needsYou = (p: any) => !!doc && p.requiresMainDoctor && p.practitionerId === doc && ['confirmed', 'in_progress'].includes(p.state);
+  const procFlags = plist.filter((p) => noDoc(p) || needsYou(p)).length;
   const waiting = rows.filter((r) => r.rank === 1);
   const done = rows.filter((r) => r.rank === 3).length;
   const apptCount = rows.filter((r) => r.label !== 'no-show').length;
@@ -69,7 +82,10 @@ export function Today() {
   const hello = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening';
   const myHours = hoursOf(c.windows.filter((w: any) => !doc || w.practitionerId === doc));
   const changes = c.blocks.filter((b: any) => !doc || b.practitionerId === doc);
-  const attention = drafts.length + review.length + (overdue.length ? 1 : 0);
+  // test results nobody on the clinical side has opened yet, one line per patient
+  const resultGroups = (() => { const m = new Map<string, any>(); for (const r of (resq.data ?? []).filter((x: any) => x.documents.some((d: any) => !d.reviewedAt))) { const g = m.get(r.patient.id) ?? { patient: r.patient, tests: [] as string[], docs: new Map<string, any>(), at: r.at }; g.tests.push(r.test); for (const d of r.documents) g.docs.set(d.id, d); m.set(r.patient.id, g); } return [...m.values()]; })();
+  const openResults = (g: any) => { const docs = [...g.docs.values()]; openViewer({ docs, who: g.patient.fullName, canDelete: can(perms, 'document.write') }); post('/documents/review', { ids: docs.map((d: any) => d.id) }).then(() => qc.invalidateQueries({ queryKey: ['results'] }), () => {}); };
+  const attention = drafts.length + review.length + (overdue.length ? 1 : 0) + procFlags + resultGroups.length;
   const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kolkata' });
 
   return (
@@ -81,7 +97,7 @@ export function Today() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 stagger">
-        <Kpi i={0} icon="calendar" tint="var(--color-clay-soft)" n={apptCount + procs.length} label="Appointments today" sub={`${apptCount} consultations · ${procs.length} procedures`} onClick={() => setTab('all')} />
+        <Kpi i={0} icon="calendar" tint="var(--color-clay-soft)" n={apptCount + procs.length} label="Appointments today" sub={`${apptCount} consultations · ${procs.length} procedures`} onClick={() => setTab('now')} />
         <Kpi i={1} icon="check" tint="var(--color-sage-soft)" n={done} label="Consultations done" sub={drafts.length ? `${drafts.length} note${drafts.length === 1 ? '' : 's'} unfinished` : 'all notes finished'} onClick={() => setTab('done')} />
         <Kpi i={2} icon="stetho" tint="var(--color-sky-soft)" n={procs.length} label="Procedure sittings" sub={procs.length ? `${procsDone} done · ${procs.length - procsDone} to go` : 'none today'} onClick={() => document.getElementById('today-procs')?.scrollIntoView({ behavior: 'smooth' })} />
         <Kpi i={3} icon="clock" tint="var(--color-amber-soft)" n={waiting.length} label="Waiting now" sub={waiting.length ? `longest ${Math.max(...waiting.map((r) => minsSince(r.visit.arrivedAt)))} min` : 'nobody waiting'} onClick={() => setTab('now')} />
@@ -93,9 +109,10 @@ export function Today() {
             <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3">
               <b className="text-[16px]">{doc ? 'Your patients today' : 'Patients today'}</b>
               {waiting.length > 0 && <Chip tone="amber">{waiting.length} waiting</Chip>}
-              <span className="ml-auto"><Segmented<Tab> value={tab} onChange={setTab} options={[{ value: 'all', label: 'All', count: rows.length }, { value: 'now', label: 'Now', count: rows.filter((r) => r.rank <= 1).length }, { value: 'later', label: 'Later', count: rows.filter((r) => r.rank === 2).length }, { value: 'done', label: 'Done', count: rows.filter((r) => r.rank >= 3).length }]} /></span>
+              <span className="ml-auto"><Segmented<Tab> value={tab} onChange={setTab} options={[{ value: 'now', label: 'Waiting', count: rows.filter((r) => r.rank <= 1).length }, { value: 'done', label: 'Completed', count: rows.filter((r) => r.rank >= 3).length }]} /></span>
             </div>
-            {shown.length === 0 ? <Empty icon="users" title={tab === 'now' ? 'Nobody waiting' : tab === 'later' ? 'No more bookings today' : tab === 'done' ? 'Nobody seen yet' : 'No patients today'} hint={tab === 'all' ? 'Bookings and walk-ins for today appear here.' : undefined} /> : (
+            <div className="px-5 pb-2 text-sm text-muted">{later > 0 ? `${later} more booked today` : 'No more bookings today'} · {apptCount} appointment{apptCount === 1 ? '' : 's'}</div>
+            {shown.length === 0 ? <Empty icon="users" title={tab === 'now' ? 'Nobody waiting' : 'Nobody seen yet'} hint={tab === 'now' && later > 0 ? 'Patients appear here when they arrive.' : undefined} /> : (
               <div className="overflow-x-auto">
                 <table className="table min-w-[560px]">
                   <thead><tr><th>Time</th><th>Patient</th><th>Visit</th><th>Status</th><th /></tr></thead>
@@ -121,38 +138,35 @@ export function Today() {
             )}
           </section>
 
-          <section id="today-procs" className="card-flat overflow-hidden anim-fade-up scroll-mt-4" style={{ animationDelay: '60ms' }}>
-            <div className="flex items-center gap-2 px-5 pt-4 pb-3"><b className="text-[16px]">Today's procedures</b><span className="text-sm text-muted">{procs.length} sitting{procs.length === 1 ? '' : 's'}</span>
-              <button className="btn btn-ghost btn-sm ml-auto" onClick={() => nav('/worklist')}>All procedures<Icon name="chevR" className="h-3.5 w-3.5" /></button></div>
-            {procs.length === 0 ? <div className="px-5 pb-5 text-sm text-muted">No procedures {doc ? 'on you ' : ''}today.</div> : (
-              <div className="overflow-x-auto">
-                <table className="table min-w-[560px]">
-                  <thead><tr><th>Time</th><th>Patient</th><th>Procedure</th><th>Sitting</th><th>Status</th><th /></tr></thead>
-                  <tbody>{procs.map((p: any) => (
-                    <tr key={p.id}>
-                      <td className="whitespace-nowrap font-semibold">{p.startTime}</td>
-                      <td><button className="text-left font-medium hover:underline" onClick={() => nav(`/patients/${p.patientId}`)}>{p.patient}</button></td>
-                      <td>{p.procedure ?? 'Procedure'}<div className="text-xs text-muted">{p.room ?? 'no room'}{!doc && p.doctor ? ` · ${p.doctor}` : ''}</div></td>
-                      <td className="whitespace-nowrap">{p.sittingNo}{p.of ? ` of ${p.of}` : ''}</td>
-                      <td><Chip tone={p.state === 'completed' ? 'sage' : p.state === 'in_progress' ? 'amber' : p.state === 'missed' ? 'rose' : 'sky'}>{p.state.replace('_', ' ')}</Chip></td>
-                      <td className="whitespace-nowrap text-right">
-                        {can(perms, 'worklist.write') && p.state === 'confirmed' && <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'in_progress' })}>Start</button>}{' '}
-                        {can(perms, 'worklist.write') && p.state === 'in_progress' && <button className="btn btn-sm btn-primary" onClick={() => setState.mutate({ id: p.id, state: 'completed' })}>Done</button>}{' '}
-                        {can(perms, 'document.write') && !['cancelled', 'postponed'].includes(p.state) && <button className="btn btn-sm" onClick={() => setCap(p)}><Icon name="spark" className="h-3.5 w-3.5" />Photos</button>}
-                      </td>
-                    </tr>))}</tbody>
-                </table>
-              </div>
-            )}
-          </section>
         </div>
 
-        <section className="card-flat self-start p-5 anim-fade-up" style={{ animationDelay: '90ms' }}>
+        <section id="today-procs" className="card-flat self-start p-5 anim-fade-up scroll-mt-4" style={{ animationDelay: '90ms' }}>
           <div className="flex items-center gap-2"><b className="text-[16px]">Needs your attention</b>{attention > 0 && <Chip tone="clay">{attention}</Chip>}</div>
-          {attention === 0 ? <div className="py-6 text-sm text-muted">All clear. Nothing waiting on you.</div> : <div className="mt-2">
+
+          <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[11px] font-bold uppercase tracking-wider text-muted">Procedures</span>
+            <span className="ml-auto"><Segmented<'today' | 'tomorrow' | 'date'> value={pmode} onChange={setPmode} options={[{ value: 'today', label: 'Today', count: pcount.data?.[today()] ?? 0 }, { value: 'tomorrow', label: 'Tomorrow', count: pcount.data?.[tomorrow] ?? 0 }, { value: 'date', label: 'Date' }]} /></span></div>
+          {pmode === 'date' && <input type="date" aria-label="Procedures on" className="input mt-2 !py-2" value={pdate} onChange={(e) => e.target.value && setPdate(e.target.value)} />}
+          {pq.isLoading ? <div className="py-3"><Skeleton rows={2} /></div> : plist.length === 0 ? <div className="py-3 text-sm text-muted">No procedures {pmode === 'today' ? 'today' : pmode === 'tomorrow' ? 'tomorrow' : 'on this date'}.</div> : (
+            <div className="mt-1">{plist.map((p: any) => (
+              <div key={p.id} className="flex items-center gap-2.5 border-t border-line/60 py-2.5 first:border-t-0">
+                <b className="w-11 shrink-0 text-[13px]">{p.startTime}</b>
+                <div className="min-w-0 flex-1"><button className="block max-w-full truncate text-left text-sm font-medium hover:underline" onClick={() => nav(`/patients/${p.patient.id}`)}>{p.patient.fullName}</button>
+                  <div className="truncate text-xs text-muted">{p.procedure ?? 'Procedure'} · {p.sittingNo}{p.of ? ` of ${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.doctor && p.practitionerId !== doc ? ` · ${p.doctor}` : ''}</div></div>
+                {p.state === 'completed' ? <Chip tone="sage">done</Chip> : p.state === 'missed' ? <Chip tone="rose">missed</Chip>
+                  : noDoc(p) ? <Chip tone="rose">no doctor</Chip> : needsYou(p) && p.state === 'confirmed' && day !== today() ? <Chip tone="amber">needs you</Chip> : null}
+                {can(perms, 'worklist.write') && p.state === 'confirmed' && day === today() && <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'in_progress' })}>Start</button>}
+                {can(perms, 'worklist.write') && p.state === 'in_progress' && <button className="btn btn-sm btn-primary" onClick={() => setState.mutate({ id: p.id, state: 'completed' })}>Done</button>}
+                {can(perms, 'document.write') && !['cancelled', 'postponed'].includes(p.state) && <button className="btn btn-ghost btn-icon !h-8 !w-8" title="Photos" aria-label={`Photos for ${p.patient.fullName}`} onClick={() => setCap({ ...p, patientId: p.patient.id, patient: p.patient.fullName })}><Icon name="spark" className="h-3.5 w-3.5" /></button>}
+              </div>))}</div>
+          )}
+          <div className="mt-2 text-right"><button className="text-sm font-semibold underline" onClick={() => nav(`/worklist?tab=schedule&day=${day}`)}>Open procedure schedule →</button></div>
+
+          <div className="mt-4 text-[11px] font-bold uppercase tracking-wider text-muted">Other</div>
+          {drafts.length + review.length + (overdue.length ? 1 : 0) + resultGroups.length === 0 ? <div className="py-3 text-sm text-muted">Nothing else waiting on you.</div> : <div>
+            {resultGroups.map((g: any) => <Attn key={g.patient.id} tone="sky" tag="result" title="Results received" sub={`${g.patient.fullName} · ${[...new Set(g.tests)].join(', ')} · ${g.docs.size} file${g.docs.size === 1 ? '' : 's'}`} action="Open" onClick={() => openResults(g)} />)}
             {drafts.map((v: any) => <Attn key={v.id} tone="amber" tag="note" title="Finish consultation note" sub={`${v.patient.fullName} · arrived ${hhmm(v.arrivedAt)} · note not completed`} action="Open" onClick={() => open.mutate(v.id)} />)}
             {review.slice(0, 4).map((r: any) => <Attn key={r.id} tone="sky" tag="plan" title="Review procedure plan" sub={`${r.procedure} for ${r.patient.fullName}${r.sittings ? ` · ${r.sittings} sittings` : ''}`} action="Open" onClick={() => nav(`/patients/${r.patient.id}`)} />)}
-            {overdue.length > 0 && <Attn tone="clay" tag="follow-up" title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them from Procedures → Follow-ups" action="See" onClick={() => nav('/worklist')} />}
+            {overdue.length > 0 && <Attn tone="clay" tag="follow-up" title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them from Procedures → Plans to schedule" action="See" onClick={() => nav('/worklist?tab=plans')} />}
           </div>}
         </section>
       </div>

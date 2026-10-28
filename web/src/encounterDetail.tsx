@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { get, post } from './api';
 import { Chip, Icon, Modal, Skeleton, fmtDate, toast } from './ui';
+import { openViewer } from './viewer';
 import { openPrint } from './printPreview';
 
 /** Form values may be a string (old encounters) or an array (tags fields). */
@@ -52,28 +53,28 @@ export function EncounterModal({ id, onClose }: { id: string; onClose: () => voi
   return <Modal title="Previous consultation" onClose={onClose} width="max-w-3xl"><EncounterDetail id={id} /></Modal>;
 }
 
-export function DocList({ docs, onDelete }: { docs: any[]; onDelete?: (id: string) => void }) {
+export function DocList({ docs, onDelete, who }: { docs: any[]; onDelete?: (id: string) => void; who?: string }) {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-      {docs.map((d) => (
-        <a key={d.id} href={`/api/documents/${d.id}/file`} target="_blank" rel="noreferrer" className="card card-hover !p-2 flex gap-2 items-center group">
+      {docs.map((d, i) => (
+        <div key={d.id} role="button" tabIndex={0} aria-label={`Open ${d.title}`} onClick={() => openViewer({ docs, index: i, who, canDelete: !!onDelete })} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openViewer({ docs, index: i, who, canDelete: !!onDelete }); } }} className="card card-hover !p-2 flex cursor-pointer gap-2 items-center group">
           {d.mime.startsWith('image/') ? <img src={`/api/documents/${d.id}/file`} alt="" className="h-12 w-12 rounded-lg object-cover bg-paper-2" loading="lazy" /> : <div className="h-12 w-12 rounded-lg bg-clay-soft text-clay grid place-items-center text-[10px] font-bold">PDF</div>}
           <div className="min-w-0 flex-1"><div className="text-xs font-medium truncate">{d.title}</div><div className="text-[10px] text-muted">{d.kind} · {fmtDate(d.createdAt)}</div></div>
-          {onDelete && <button className="btn btn-ghost btn-icon opacity-0 group-hover:opacity-100" onClick={(e) => { e.preventDefault(); onDelete(d.id); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
-        </a>
+          {onDelete && <button className="btn btn-ghost btn-icon opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); onDelete(d.id); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+        </div>
       ))}
     </div>
   );
 }
 
 /** Upload button: reads the file, posts base64. Works with phone camera (accept image) and PDFs. */
-export function UploadButton({ patientId, encounterId, recommendationId, kind = 'report', onDone, label = 'Upload' }: { patientId: string; encounterId?: string; recommendationId?: string; kind?: string; onDone: () => void; label?: string }) {
+export function UploadButton({ patientId, encounterId, recommendationId, recommendationIds, kind = 'report', onDone, label = 'Upload' }: { patientId: string; encounterId?: string; recommendationId?: string; recommendationIds?: string[]; kind?: string; onDone: () => void; label?: string }) {
   return (
     <label className="btn btn-sm cursor-pointer whitespace-nowrap"><Icon name="plus" className="h-3.5 w-3.5" />{label}
       <input type="file" accept="image/*,application/pdf" className="hidden" onChange={async (ev) => {
         const f = ev.target.files?.[0]; if (!f) return;
         const dataBase64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
-        try { await post('/documents', { patientId, encounterId, recommendationId, kind, title: f.name, mime: f.type, dataBase64 }); onDone(); }
+        try { await post('/documents', { patientId, encounterId, recommendationId, recommendationIds, kind, title: f.name, mime: f.type, dataBase64 }); onDone(); }
         catch (e: any) { toast(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF files can be added.' : e?.body?.code === 'TOO_LARGE' ? 'That file is too large (10 MB at most).' : 'Upload failed. Please try again.', 'err'); }
         ev.target.value = '';
       }} />

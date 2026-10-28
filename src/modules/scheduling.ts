@@ -381,14 +381,16 @@ export function schedulingRoutes(app: FastifyInstance) {
     const today = todayIn(req.ctx.timezone);
     const [c] = await tx.select({ requests: sql<number>`count(*) filter (where ${appointment.status} = 'requested')::int`, unconfirmed: sql<number>`count(*) filter (where ${appointment.status} = 'booked' and ${session.day} >= ${today})::int` })
       .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(eq(appointment.tenantId, req.ctx.tenantId));
-    return c;
+    // plans the doctor made today that nobody has acted on yet (the coordinator's "new")
+    const [p] = await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.tenantId, req.ctx.tenantId), eq(recommendation.status, 'open'), sql`(${recommendation.createdAt} at time zone ${req.ctx.timezone})::date = ${today}`));
+    return { ...c, plans: p.n };
   });
 
   /** Message outbox, newest first: what went out, what is waiting, what failed. */
   route(app, 'get', '/messages', 'appointment.read', async (req, tx) => {
-    const q = z.object({ status: z.enum(['pending', 'sent', 'logged', 'failed', 'skipped']).optional(), limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query);
+    const q = z.object({ status: z.enum(['pending', 'sent', 'logged', 'failed', 'skipped']).optional(), patientId: z.string().uuid().optional(), limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query);
     return tx.select({ m: message, patient: patient.fullName }).from(message).leftJoin(patient, eq(patient.id, message.patientId))
-      .where(and(eq(message.tenantId, req.ctx.tenantId), ...(q.status ? [eq(message.status, q.status)] : []))).orderBy(desc(message.sendAfter)).limit(q.limit)
+      .where(and(eq(message.tenantId, req.ctx.tenantId), ...(q.status ? [eq(message.status, q.status)] : []), ...(q.patientId ? [eq(message.patientId, q.patientId)] : []))).orderBy(desc(message.sendAfter)).limit(q.limit)
       .then((r) => r.map((x) => ({ ...x.m, patient: x.patient })));
   });
 }

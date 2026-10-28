@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc } from 'drizzle-orm';
+import { and, eq, sql, asc, gte, lte } from 'drizzle-orm';
 import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, todayIn } from '../lib/core.js';
+import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
 
@@ -76,16 +76,83 @@ export function procedureRoutes(app: FastifyInstance) {
     return { ...ps, warnings: c };
   });
 
+  /** Sittings per day for the date strip. Cancelled and postponed ones are not counted. */
+  route(app, 'get', '/procedure-sessions/counts', 'worklist.read', async (req, tx) => {
+    const q = z.object({ from: DAY, days: z.coerce.number().int().min(1).max(31).default(7) }).parse(req.query);
+    const to = addDays(q.from, q.days - 1);
+    const rows = await tx.select({ day: procedureSession.day, n: sql<number>`count(*)::int` }).from(procedureSession)
+      .where(and(eq(procedureSession.tenantId, req.ctx.tenantId), gte(procedureSession.day, q.from), lte(procedureSession.day, to), sql`${procedureSession.state} not in ('cancelled','postponed')`)).groupBy(procedureSession.day);
+    return Object.fromEntries(rows.map((r) => [r.day, r.n]));
+  });
+
+  /** The coordinator spoke to the patient (or undoes that). */
+  route(app, 'post', '/procedure-sessions/:id/confirm', 'worklist.write', async (req, tx) => {
+    const body = z.object({ confirmed: z.boolean() }).parse(req.body);
+    const [ps] = await tx.update(procedureSession).set({ patientConfirmedAt: body.confirmed ? new Date().toISOString() : null }).where(and(eq(procedureSession.id, (req.params as any).id), eq(procedureSession.tenantId, req.ctx.tenantId))).returning();
+    if (!ps) throw new HttpError(404, 'NOT_FOUND');
+    await emit(tx, req.ctx, body.confirmed ? 'procedure_session.patient_confirmed' : 'procedure_session.patient_unconfirmed', 'procedure_session', ps.id, {});
+    return ps;
+  });
+
+  /** Put a doctor on a sitting that has none (or change the doctor). The doctor's OP time is blocked like when scheduling. */
+  route(app, 'post', '/procedure-sessions/:id/assign', 'worklist.write', async (req, tx) => {
+    const body = z.object({ practitionerId: z.string().uuid().nullable(), force: z.boolean().default(false) }).parse(req.body);
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+    if (!ps) throw new HttpError(404, 'NOT_FOUND');
+    if (ps.state !== 'confirmed') throw new HttpError(409, 'NOT_CHANGEABLE', { state: ps.state });
+    const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
+    if (proc?.requiresMainDoctor && !body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED');
+    if (body.practitionerId) {
+      const c = (await conflicts(tx, t, ps.day, ps.startTime, ps.endTime, null, body.practitionerId, id));
+      if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
+    }
+    const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId }).where(eq(procedureSession.id, id)).returning();
+    await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
+    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: ps.roomId, day: ps.day, startTime: ps.startTime, endTime: ps.endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
+    await emit(tx, req.ctx, 'procedure_session.doctor_assigned', 'procedure_session', id, { practitionerId: body.practitionerId });
+    return row;
+  });
+
   route(app, 'get', '/procedure-sessions', 'worklist.read', async (req, tx) => {
     const q = req.query as any; const t = req.ctx.tenantId;
     const where = [eq(procedureSession.tenantId, t)];
     if (q.day) where.push(eq(procedureSession.day, String(q.day)));
+    if (q.from) where.push(gte(procedureSession.day, String(q.from)));
+    if (q.to) where.push(lte(procedureSession.day, String(q.to)));
+    if (q.practitionerId) where.push(eq(procedureSession.practitionerId, String(q.practitionerId)));
+    if (q.active) where.push(sql`${procedureSession.state} not in ('cancelled','postponed')`);
     if (q.recommendationId) where.push(eq(procedureSession.recommendationId, String(q.recommendationId)));
-    if (!q.day && !q.recommendationId) where.push(eq(procedureSession.day, todayIn(req.ctx.timezone)));
-    return tx.select({ ps: procedureSession, patient: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo }, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name })
-      .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
+    if (!q.day && !q.from && !q.recommendationId) where.push(eq(procedureSession.day, todayIn(req.ctx.timezone)));
+    return tx.select({ ps: procedureSession, patient: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex }, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, mainDoctor: procedureCatalog.requiresMainDoctor, review: procedureCatalog.requiresReview })
+      .from(procedureSession).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
       .where(and(...where)).orderBy(asc(procedureSession.day), asc(procedureSession.startTime))
-      .then((rows) => rows.map((r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor })));
+      .then((rows) => rows.map((r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor, of: r.of, requiresMainDoctor: r.mainDoctor, requiresReview: r.review })));
+  });
+
+  /** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */
+  route(app, 'post', '/procedure-sessions/:id/reschedule', 'worklist.write', async (req, tx) => {
+    const body = ScheduleIn.omit({ recommendationId: true }).extend({ reason: z.string().trim().max(200).optional() }).parse(req.body);
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+    if (!ps) throw new HttpError(404, 'NOT_FOUND');
+    if (!['confirmed', 'postponed', 'missed'].includes(ps.state)) throw new HttpError(409, 'NOT_RESCHEDULABLE', { state: ps.state });
+    const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
+    if (proc?.requiresMainDoctor && !body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED');
+    if (proc?.requiredCapability && body.roomId) {
+      const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
+      if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
+    }
+    const endTime = toHHMM(toMin(body.startTime) + body.minutes + (proc?.bufferMinutes ?? 0));
+    const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId, id);
+    if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
+    const [moved] = await tx.update(procedureSession).set({ day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, notes: body.notes ?? ps.notes }).where(eq(procedureSession.id, id)).returning();
+    await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
+    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
+    const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
+    if (rec) await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Sitting rescheduled', note: `${ps.day} ${ps.startTime} → ${body.day} ${body.startTime}${body.reason ? ` · ${body.reason}` : ''}` }] }).where(eq(recommendation.id, rec.id));
+    await emit(tx, req.ctx, 'procedure_session.rescheduled', 'procedure_session', id, { from: { day: ps.day, startTime: ps.startTime, roomId: ps.roomId }, to: { day: body.day, startTime: body.startTime, roomId: body.roomId }, reason: body.reason, forced: c.length > 0 });
+    return { ...moved, warnings: c };
   });
 
   /** State changes keep history: postponing records the reason and frees the doctor's time; the course stays open. */

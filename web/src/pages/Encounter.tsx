@@ -27,6 +27,7 @@ export function Encounter() {
   const [savedAt, setSavedAt] = useState<string>('');
   const [viewing, setViewing] = useState<string | null>(null);
   const [side, setSide] = useState<'visits' | 'docs'>('visits');
+  const [testDraft, setTestDraft] = useState('');
   const loaded = useRef(false); const dirty = useRef(false);
   useEffect(() => {
     if (enc.data && !loaded.current) {
@@ -57,6 +58,7 @@ export function Encounter() {
   for (const x of [...previous].reverse()) for (const i of x.prescription ?? []) priorMeds.set(i.name, x.createdAt);
   const lastRx = previous.find((x: any) => x.prescription?.length)?.prescription;
   const myDocs = (docs.data ?? []);
+  const addTest = (name: string) => { const v = name.trim(); setTestDraft(''); if (v && !recs.some((r) => r.kind === 'investigation' && r.notes?.toLowerCase() === v.toLowerCase())) setRecs((cur) => [...cur, { kind: 'investigation', notes: v }]); };
   const addRx = (name: string) => { const m = cfg?.medicines.find((x: any) => x.name === name); setRx((cur) => [...cur.filter((r) => r.name), { name, medicineId: m?.id ?? null, dose: m?.defaults?.dose, route: m?.defaults?.route, frequency: m?.defaults?.frequency, durationDays: m?.defaults?.durationDays, instructions: m?.defaults?.instructions }]); };
 
   return (
@@ -134,21 +136,31 @@ export function Encounter() {
             {e.form.sections.filter((x: any) => x.key === 'plan').flatMap((x: any) => x.fields).map((f: Field) => (
               <div key={f.key} className="mb-4"><label className="label">{f.label}</label><FieldInput f={f} value={data.plan?.[f.key]} onChange={(v) => set('plan', f.key, v)} disabled={readOnly} invalid={false} /></div>
             ))}
-            <div className="flex items-center gap-2 mb-3 flex-wrap"><div className="label !mb-0">Follow-up, procedures and tests</div>
+            <div className="mb-4">
+              <label className="label" htmlFor="tests-in">Tests</label>
+              <div className={`input flex flex-wrap items-center gap-1.5 !py-1.5 ${readOnly ? 'bg-paper' : ''}`} onClick={(ev) => (ev.currentTarget.querySelector('input') as HTMLInputElement | null)?.focus()}>
+                {recs.map((r, k) => r.kind === 'investigation' && r.notes ? <span key={k} className="chip chip-clay !text-xs !py-1 anim-scale-in">{r.notes}{!readOnly && <button type="button" aria-label={`Remove ${r.notes}`} className="ml-0.5 hover:text-ink" onClick={() => setRecs(recs.filter((_, j) => j !== k))}><Icon name="x" className="h-3 w-3" /></button>}</span> : null)}
+                {!readOnly && <input id="tests-in" list="tests" className="min-w-40 flex-1 bg-transparent py-0.5 text-sm outline-none" placeholder={recs.some((r) => r.kind === 'investigation') ? 'Add another test, press Enter…' : 'Type a test, press Enter. Add as many as you need'} value={testDraft}
+                  onChange={(ev) => { if (TESTS.includes(ev.target.value)) { addTest(ev.target.value); } else setTestDraft(ev.target.value); }}
+                  onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ',') { ev.preventDefault(); addTest(testDraft); } else if (ev.key === 'Backspace' && !testDraft) { const last = [...recs].map((r, k) => ({ r, k })).reverse().find((x) => x.r.kind === 'investigation'); if (last) setRecs(recs.filter((_, j) => j !== last.k)); } }}
+                  onBlur={() => testDraft && addTest(testDraft)} />}
+              </div>
+              {!readOnly && <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="text-xs text-muted">Tap to add</span>{TESTS.filter((x) => !recs.some((r) => r.kind === 'investigation' && r.notes?.toLowerCase() === x.toLowerCase())).slice(0, 12).map((x) => <button key={x} type="button" className="toggle-opt !py-1 !text-xs" onClick={() => addTest(x)}>{x}</button>)}</div>}
+            </div>
+            <div className="flex items-center gap-2 mb-3 flex-wrap"><div className="label !mb-0">Follow-up and procedures</div>
               {!readOnly && <div className="ml-auto flex gap-1 flex-wrap">
                 {[7, 14, 30].map((d) => <button key={d} className={`toggle-opt ${recs.some((r) => r.kind === 'followup' && r.intervalDays === d) ? 'on' : ''}`} onClick={() => setRecs([...recs.filter((r) => r.kind !== 'followup'), { kind: 'followup', intervalDays: d }])}>Review in {d}d</button>)}
                 <button className="toggle-opt" onClick={() => setRecs([...recs, { kind: 'procedure', procedureId: cfg?.procedures[0]?.id, sittings: cfg?.procedures[0]?.typicalSittings }])}><Icon name="plus" className="h-3 w-3 inline -mt-0.5" /> Procedure</button>
-                <button className="toggle-opt" onClick={() => setRecs([...recs, { kind: 'investigation', notes: '' }])}><Icon name="plus" className="h-3 w-3 inline -mt-0.5" /> Test</button></div>}</div>
+              </div>}</div>
             <datalist id="tests">{TESTS.map((x) => <option key={x} value={x} />)}</datalist>
-            {recs.length === 0 ? <div className="text-sm text-muted">No follow-up, procedure or test. Reception, the coordinator and the lab desk see exactly what you add here.</div> :
-              recs.map((r, k) => (
+            {!recs.some((r) => r.kind !== 'investigation') ? <div className="text-sm text-muted">No follow-up or procedure. Reception, the coordinator and the lab desk see exactly what you add here.</div> :
+              recs.map((r, k) => r.kind === 'investigation' ? null : (
                 <div key={k} className="flex items-center gap-2 text-sm py-2 border-t border-line first:border-t-0 flex-wrap anim-fade-up">
                   <Chip tone={r.kind === 'followup' ? 'amber' : r.kind === 'procedure' ? 'sky' : 'clay'}>{r.kind === 'followup' ? 'follow-up' : r.kind === 'procedure' ? 'procedure' : 'test'}</Chip>
                   {r.kind === 'followup' && <span className="flex items-center gap-1">Review in <NumInput max={365} className="input !w-16 !py-1" value={r.intervalDays ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, intervalDays: Number(ev.target.value), dueOn: undefined } : x))} /> days{r.dueOn && <span className="text-muted">(due {fmtDate(r.dueOn)})</span>}</span>}
                   {r.kind === 'procedure' && <><select className="input !w-auto !py-1" value={r.procedureId ?? ''} disabled={readOnly} onChange={(ev) => { const pr = cfg.procedures.find((x: any) => x.id === ev.target.value); setRecs(recs.map((x, j) => j === k ? { ...x, procedureId: ev.target.value, sittings: pr?.typicalSittings } : x)); }}>{cfg?.procedures.map((pr: any) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}</select>
                     <NumInput max={50} className="input !w-16 !py-1" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, sittings: Number(ev.target.value) } : x))} /><span className="text-muted">sittings</span></>}
-                  {r.kind === 'investigation' ? <input list="tests" className="input flex-1 min-w-40 !py-1" placeholder="Test name, e.g. CBC" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, notes: ev.target.value } : x))} />
-                    : <input className="input flex-1 min-w-40 !py-1" placeholder="notes for the coordinator" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, notes: ev.target.value } : x))} />}
+                  <input className="input flex-1 min-w-40 !py-1" placeholder="notes for the coordinator" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => j === k ? { ...x, notes: ev.target.value } : x))} />
                   {!readOnly && <button className="btn btn-ghost btn-icon" onClick={() => setRecs(recs.filter((_, j) => j !== k))}><Icon name="x" className="h-3.5 w-3.5" /></button>}
                 </div>
               ))}

@@ -72,6 +72,22 @@ test('full OP slice', async () => {
   const loaded = await doctor('GET', `/encounters/${open.body.id}`);
   const resave = await doctor('PATCH', `/encounters/${open.body.id}`, { data: {}, prescription: loaded.body.prescription, recommendations: loaded.body.recommendations.map((r: any) => ({ kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes })) });
   assert.equal(resave.status, 200, JSON.stringify(resave.body));
+  // several tests at once: each is its own item on the Tests list so every result can be recorded
+  const multi = await doctor('PATCH', `/encounters/${open.body.id}`, { data: {}, recommendations: ['CBC', 'LFT', 'TSH'].map((notes) => ({ kind: 'investigation', notes })) });
+  assert.equal(multi.status, 200, JSON.stringify(multi.body));
+  assert.deepEqual((await reception('GET', '/worklist?kind=investigation')).body.map((r: any) => r.notes).sort(), ['CBC', 'LFT', 'TSH']);
+  // one report for two of the tests: both close, the file shows under both, the doctor sees it until opened
+  const tests = (await reception('GET', '/worklist?kind=investigation')).body;
+  const pdf = Buffer.from('%PDF-1.4 test').toString('base64');
+  const up = await reception('POST', '/documents', { patientId: book.body.patientId, recommendationIds: [tests[0].id, tests[1].id], kind: 'report', title: 'CBC and LFT.pdf', mime: 'application/pdf', dataBase64: pdf, note: 'Hb 11.2' });
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  assert.deepEqual((await reception('GET', '/worklist?kind=investigation')).body.map((r: any) => r.id), [tests[2].id], 'the two tests with a result are done');
+  const res = (await doctor('GET', '/results')).body;
+  assert.equal(res.length, 2); assert.ok(res.every((r: any) => r.documents.length === 1 && r.documents[0].reviewedAt === null && r.patient.id === book.body.patientId));
+  assert.equal((await doctor('POST', '/documents/review', { ids: [up.body.id] })).status, 200);
+  assert.ok((await doctor('GET', '/results')).body.every((r: any) => r.documents[0].reviewedAt), 'opened by the doctor');
+  assert.equal((await reception('POST', '/documents', { patientId: book.body.patientId, recommendationIds: [tests[2].id, '00000000-0000-4000-8000-000000000000'], title: 'x.pdf', mime: 'application/pdf', dataBase64: pdf })).status, 400, 'a test of another patient is refused');
+  await doctor('PATCH', `/encounters/${open.body.id}`, { data: {}, recommendations: ['CBC'].map((notes) => ({ kind: 'investigation', notes })) });
 
   // 6. doctor: required field enforced, then completes with Rx + follow-up + procedure recommendation
   const invalid = await doctor('PATCH', `/encounters/${open.body.id}`, { data: { complaint: { chief_complaint: 'acne' } }, complete: true });
@@ -90,6 +106,10 @@ test('full OP slice', async () => {
   assert.equal(queue.body.find((q: any) => q.id === checkin.body.id).status, 'done');
   const fu = await reception('GET', '/worklist?kind=followup'); assert.equal(fu.body.length, 1);
   const pr = await reception('GET', '/worklist?kind=procedure'); assert.equal(pr.body.length, 1);
+  // the coordinator's badge: both plans the doctor made today are new; acting on one lowers it
+  assert.equal((await reception('GET', '/bookings/counts')).body.plans, 2);
+  await reception('PATCH', `/worklist/${fu.body[0].id}`, { status: 'scheduled' });
+  assert.equal((await reception('GET', '/bookings/counts')).body.plans, 1);
   const contact = await reception('PATCH', `/worklist/${pr.body[0].id}`, { status: 'contacted', contact: { outcome: 'will come', note: 'next Monday' } });
   assert.equal(contact.body.contactLog.length, 1);
 

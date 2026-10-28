@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, gte, inArray, isNotNull, isNull } from 'drizzle-orm';
 import path from 'node:path';
 import { document, recommendation, patient, procedureSession, procedureCatalog, practitioner, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
@@ -14,7 +14,7 @@ export const DEFAULT_PHOTO_AREAS = ['Face', 'Forehead', 'Cheeks', 'Chin', 'Upper
 const Area = z.string().trim().min(1).max(40);
 
 const Upload = z.object({
-  patientId: z.string().uuid(), encounterId: z.string().uuid().optional(), recommendationId: z.string().uuid().optional(),
+  patientId: z.string().uuid(), encounterId: z.string().uuid().optional(), recommendationId: z.string().uuid().optional(), recommendationIds: z.array(z.string().uuid()).max(20).optional(),
   kind: z.enum(['report', 'photo', 'prescription', 'consent', 'other']).default('report'),
   title: z.string().min(1).max(200), note: z.string().max(500).optional(),
   area: Area.optional(), view: z.enum(PHOTO_VIEWS).optional(), procedureSessionId: z.string().uuid().optional(),
@@ -70,18 +70,43 @@ export function documentRoutes(app: FastifyInstance) {
       const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, body.procedureSessionId), eq(procedureSession.tenantId, t))).then((r) => r[0]);
       if (!ps || ps.patientId !== body.patientId) throw new HttpError(400, 'SITTING_NOT_FOR_PATIENT');
     }
+    // a result can belong to several tests at once (one report for CBC, TSH and LFT)
+    const recIds = [...new Set([...(body.recommendationIds ?? []), ...(body.recommendationId ? [body.recommendationId] : [])])];
+    const recs = recIds.length ? await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), inArray(recommendation.id, recIds), eq(recommendation.patientId, body.patientId), eq(recommendation.kind, 'investigation'))) : [];
+    if (recs.length !== recIds.length) throw new HttpError(400, 'TEST_NOT_FOR_PATIENT');
     const bytes = Buffer.from(body.dataBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (bytes.length > 10 * 1024 * 1024) throw new HttpError(413, 'TOO_LARGE');
     const ext = body.mime === 'application/pdf' ? 'pdf' : body.mime.split('/')[1];
-    const [row] = await tx.insert(document).values({ tenantId: t, patientId: body.patientId, encounterId: body.encounterId, recommendationId: body.recommendationId, kind: body.kind,
+    const [row] = await tx.insert(document).values({ tenantId: t, patientId: body.patientId, encounterId: body.encounterId, recommendationId: recIds[0], recommendationIds: recIds, kind: body.kind,
       title: body.title, mime: body.mime, sizeBytes: bytes.length, storageKey: 'pending', note: body.note, uploadedBy: req.ctx.userId,
       area: body.kind === 'photo' ? body.area ?? null : null, view: body.kind === 'photo' ? body.view ?? null : null, procedureSessionId: body.procedureSessionId ?? null }).returning();
     const key = path.posix.join(t, body.patientId, `${row.id}.${ext}`);
     await putFile(key, bytes, body.mime); // inside the transaction: if storage fails, no record is left pointing at nothing
     await tx.update(document).set({ storageKey: key }).where(eq(document.id, row.id));
-    if (body.recommendationId) await tx.update(recommendation).set({ status: 'done' }).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'investigation')));
+    for (const r of recs) if (r.status !== 'done') await tx.update(recommendation).set({ status: 'done', contactLog: [...r.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Result received', note: body.note || body.title }] }).where(eq(recommendation.id, r.id));
     await emit(tx, req.ctx, 'document.uploaded', 'document', row.id, { patientId: body.patientId, kind: body.kind, mime: body.mime, sizeBytes: bytes.length, area: body.area, procedureSessionId: body.procedureSessionId });
     return { ...row, storageKey: key };
+  });
+
+  /** Test results from the last days: each test with its files, newest first, so the Tests tab and the doctor can open them. */
+  route(app, 'get', '/results', 'document.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const days = Math.min(60, Math.max(1, Number((req.query as any).days) || 7));
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const docs = await tx.select({ d: document, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo } }).from(document).innerJoin(patient, eq(patient.id, document.patientId))
+      .where(and(eq(document.tenantId, t), eq(document.kind, 'report'), isNotNull(document.recommendationId), gte(document.createdAt, since))).orderBy(desc(document.createdAt));
+    const ids = [...new Set(docs.flatMap((x) => x.d.recommendationIds.length ? x.d.recommendationIds : x.d.recommendationId ? [x.d.recommendationId] : []))];
+    const recs = ids.length ? await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), inArray(recommendation.id, ids))) : [];
+    return recs.map((r) => {
+      const mine = docs.filter((x) => x.d.recommendationId === r.id || x.d.recommendationIds.includes(r.id));
+      return { id: r.id, test: r.notes, status: r.status, patient: mine[0]?.p, at: mine[0]?.d.createdAt, documents: mine.map((x) => ({ id: x.d.id, title: x.d.title, mime: x.d.mime, kind: x.d.kind, sizeBytes: x.d.sizeBytes, createdAt: x.d.createdAt, note: x.d.note, reviewedAt: x.d.reviewedAt })) };
+    }).filter((r) => r.patient).sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  });
+
+  /** The doctor opened these results. */
+  route(app, 'post', '/documents/review', 'document.read', async (req, tx) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).min(1).max(50) }).parse(req.body);
+    await tx.update(document).set({ reviewedAt: new Date().toISOString() }).where(and(eq(document.tenantId, req.ctx.tenantId), inArray(document.id, ids), isNull(document.reviewedAt)));
+    return { ok: true };
   });
 
   /** Re-tag a photo (wrong area, view or sitting) or edit its note. */
