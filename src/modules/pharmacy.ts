@@ -4,6 +4,7 @@ import { and, eq, sql, asc, desc, ilike, gte, lte, lt, or, inArray, gt } from 'd
 import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, tenant, practitioner, stockBatch, message, type SaleLine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
+import { auditView } from '../lib/audit.js';
 import { emit, todayIn, nextNumber, addDays } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { allocate, moveStock, type Actor } from './stock.js';
@@ -60,6 +61,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const [x] = await tx.select({ e: encounter, p: patient, opNumber: visit.opNumber, doctor: practitioner.name }).from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).innerJoin(patient, eq(patient.id, encounter.patientId))
       .leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId)).where(and(eq(encounter.id, (req.params as any).encounterId), eq(encounter.tenantId, t)));
     if (!x) throw new HttpError(404, 'NOT_FOUND');
+    await auditView(tx, req, x.p.id, 'Opened the prescription at the pharmacy counter');
     const its = await tx.select({ i: prescriptionItem, m: medicine }).from(prescriptionItem).leftJoin(medicine, eq(medicine.id, prescriptionItem.medicineId))
       .where(and(eq(prescriptionItem.tenantId, t), eq(prescriptionItem.encounterId, x.e.id))).orderBy(asc(prescriptionItem.sortOrder));
     const medIds = its.map((i) => i.m?.id).filter(Boolean) as string[];

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
 import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, type FormSchema } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { auditView } from '../lib/audit.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 
@@ -52,7 +53,11 @@ export function clinicalRoutes(app: FastifyInstance) {
     return getEncounter(tx, t, enc.id);
   });
 
-  route(app, 'get', '/encounters/:id', 'encounter.intake', async (req, tx) => getEncounter(tx, req.ctx.tenantId, (req.params as any).id));
+  route(app, 'get', '/encounters/:id', 'encounter.intake', async (req, tx) => {
+    const e = await getEncounter(tx, req.ctx.tenantId, (req.params as any).id);
+    await auditView(tx, req, e.patientId, e.status === 'completed' ? 'Read a past consultation' : 'Opened the consultation');
+    return e;
+  });
 
   /** Save draft or complete. Completing validates the form, writes Rx items and recommendations (→ worklists), marks the visit done. */
   route(app, 'patch', '/encounters/:id', 'encounter.intake', async (req, tx) => {

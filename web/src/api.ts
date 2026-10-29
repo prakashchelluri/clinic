@@ -10,6 +10,8 @@ export async function api<T = any>(method: string, url: string, body?: unknown):
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
     if (r.status === 401 && location.pathname !== '/login') location.href = '/login';
+    // Outside the clinic's internet: the sign-in page explains it.
+    if (r.status === 403 && data?.code === 'IP_NOT_ALLOWED' && location.pathname !== '/login') location.href = `/login?blocked=${encodeURIComponent(data.ip ?? '')}`;
     throw new ApiError(r.status, data);
   }
   return data;
@@ -33,6 +35,7 @@ const MESSAGES: Record<string, string> = {
   SAMPLE_ALREADY_LOADED: 'Test data is already loaded in this clinic.', LOAD_BASE_SAMPLE_FIRST: 'Load the sample patients first.',
   PHOTO_CONSENT_REQUIRED: "Record the patient's photo consent first.", SITTING_NOT_FOR_PATIENT: 'That procedure sitting belongs to another patient.', TOO_LARGE: 'That file is too large (10 MB at most).', UNSUPPORTED_TYPE: 'Only JPG, PNG, WebP and PDF files can be added.',
   DUPLICATE: 'That already exists.',
+  IP_NOT_ALLOWED: 'This can be used only from the clinic’s internet. If you are at the clinic, the owner can allow this connection.', ADD_AN_ADDRESS: 'Add the clinic’s internet address first, or nobody but the owner could work.', RANGE_IPV4_ONLY: 'Ranges work only for addresses like 106.51.0.0.', LISTS_OWNER_ONLY: 'Only the owner can print or download lists of patients.', 'FORBIDDEN:owner': 'Only the clinic owner can change this.', 'FORBIDDEN:audit': 'Only the owner and admins can see the audit log.',
   NOT_WORKING: 'The doctor is not working that day.', PAST_DAY: 'That day is over. Pick today or later.', OVERLAPS_HOURS: 'Those hours overlap the doctor’s usual hours. Pick a time after they end.', TIME_REQUIRED: 'Pick a time.', OUTSIDE_HOURS: 'Pick a time inside the doctor’s hours for that day.',
   BAD_RULE: 'That rule is not valid, so it was not saved.',
   TOO_MANY_ATTEMPTS: 'Too many wrong attempts. Please wait a few minutes and try again.',
@@ -84,3 +87,9 @@ export function errText(e: any): string {
   }
   return MESSAGES[code] ?? (b.message && code === 'INTERNAL' ? b.message : code ? 'Something went wrong. Please try again.' : 'Failed');
 }
+
+/** A list of patients leaving the app (print or download): recorded in the audit log first; refused for roles the owner has not allowed. */
+export const listOut = (what: string, count: number | undefined, act: () => void) =>
+  post('/audit/event', { kind: 'print', what, count }).then(act, (e) => alert(errText(e)));
+/** A number the app may dial: hidden numbers (98••• ••345) cannot be called from this account. */
+export const dialable = (phone?: string | null) => !!phone && !phone.includes('•');

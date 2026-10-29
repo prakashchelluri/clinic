@@ -9,6 +9,8 @@ import { db, withTenant } from './db/index.js';
 import { tenant, appUser } from './db/schema.js';
 import { type Ctx, permsFor, HttpError } from './lib/auth.js';
 import { route } from './lib/route.js';
+import { cleanIp, securityOf, privacyFor, ipExempt, ipAllowed, writeAudit, throttleOnce } from './lib/audit.js';
+import { securityRoutes } from './modules/security.js';
 import { identityRoutes } from './modules/identity.js';
 import { patientRoutes } from './modules/patients.js';
 import { schedulingRoutes } from './modules/scheduling.js';
@@ -27,11 +29,12 @@ import { overviewRoutes } from './modules/overview.js';
 import { publicRoutes } from './modules/public.js';
 
 declare module 'fastify' {
-  interface FastifyRequest { ctx: Ctx; perms: string[] }
+  interface FastifyRequest { ctx: Ctx; perms: string[]; privacy?: ReturnType<typeof privacyFor>; auditBefore?: unknown; audited?: boolean }
 }
 
 export async function buildApp() {
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 15 * 1024 * 1024 });
+  // TRUST_PROXY: set when running behind a proxy (e.g. 1 for one hop) so the real client address is used; never trust a forwarded address otherwise.
+  const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 15 * 1024 * 1024, trustProxy: process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY === 'true') as any : false });
   await app.register(cookie, { secret: process.env.COOKIE_SECRET ?? 'dev-secret-change-me' });
 
   app.setErrorHandler((err: any, _req, reply) => {
@@ -66,12 +69,25 @@ export async function buildApp() {
     const user = await withTenant(t, u, (tx) => tx.select().from(appUser).where(and(eq(appUser.id, u), eq(appUser.tenantId, t))).then((r) => r[0]));
     if (!ten || !user?.active) throw new HttpError(401, 'UNAUTHENTICATED');
     const roles = user.roles?.length ? user.roles : [user.role];
-    req.ctx = { tenantId: t, userId: u, role: user.role, roles, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone, tenantKind: ten.kind };
+    req.ctx = { tenantId: t, userId: u, role: user.role, roles, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone, tenantKind: ten.kind, ip: cleanIp(req.ip) };
     req.perms = permsFor(roles, ten.settings?.roles);
+    const sec = securityOf(ten.settings);
+    req.privacy = privacyFor(req.ctx, sec);
+    // Work only from the clinic: checked on every request, so a laptop taken home is stopped mid-session.
+    if (sec.ipLock.enabled && !ipExempt(req.ctx, sec) && !ipAllowed(req.ctx.ip!, sec.ipLock.allowed) && !req.url.startsWith('/api/auth/logout')) {
+      if (throttleOnce(`stop|${u}|${req.ctx.ip}`, 10 * 60_000)) await withTenant(t, u, (tx) => writeAudit(tx, req.ctx, { kind: 'signin', action: 'signin.stopped', summary: `Stopped: not on the clinic's internet (${req.ctx.ip})` }));
+      throw new HttpError(403, 'IP_NOT_ALLOWED', { ip: req.ctx.ip });
+    }
+  });
+
+  // Phone numbers are hidden in every answer for roles the owner has not ticked; the server still has them for WhatsApp and calls.
+  app.addHook('onSend', async (req, _reply, payload) => {
+    if (!req.privacy || req.privacy.seePhones || typeof payload !== 'string' || !req.url.startsWith('/api/') || req.url.startsWith('/api/me')) return payload;
+    return payload.replace(/"(phone|toPhone)":"(\d{2})\d{5}(\d{3})"/g, '"$1":"$2••• ••$3"');
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); stockRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
+    identityRoutes(api); securityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); stockRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

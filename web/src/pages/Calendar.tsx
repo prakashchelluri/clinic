@@ -1,7 +1,7 @@
 import { useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, post, patch, api, qc, today, errText, ApiError, uuid } from '../api';
+import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
 import { Chip, Empty, Icon, Modal, Segmented, Skeleton, ask, toast } from '../ui';
 import { RoutineModal } from '../routine';
@@ -292,7 +292,7 @@ function AttentionStrip({ onOpen, onBook }: { onOpen: (id: string) => void; onBo
   return (<>
     {items.length > 0 && <div className="flex flex-wrap gap-2">{items}</div>}
     {show === 'call' && <Modal title="Patients to call" subtitle="Their doctor is away or leaves early when they are booked" onClose={() => setShow(null)} width="max-w-xl">
-      <div>{d.toCall.map((x: any) => <div key={x.id} className="flex flex-wrap items-center gap-2 border-t border-line/60 py-2.5 text-sm first:border-t-0"><b className="w-32 shrink-0">{label(x.day, { weekday: 'short', day: 'numeric', month: 'short' })} {x.startTime}</b><span className="min-w-0 flex-1">{x.name}<span className="block text-xs text-muted">{x.why}</span></span>{x.phone && <a className="btn btn-sm" href={`tel:${x.phone}`}><Icon name="phone" className="h-3.5 w-3.5" />{x.phone}</a>}<button className="btn btn-sm" onClick={() => { setShow(null); onOpen(x.id); }}>Move or cancel</button></div>)}</div>
+      <div>{d.toCall.map((x: any) => <div key={x.id} className="flex flex-wrap items-center gap-2 border-t border-line/60 py-2.5 text-sm first:border-t-0"><b className="w-32 shrink-0">{label(x.day, { weekday: 'short', day: 'numeric', month: 'short' })} {x.startTime}</b><span className="min-w-0 flex-1">{x.name}<span className="block text-xs text-muted">{x.why}</span></span>{dialable(x.phone) && <a className="btn btn-sm" href={`tel:${x.phone}`}><Icon name="phone" className="h-3.5 w-3.5" />{x.phone}</a>}<button className="btn btn-sm" onClick={() => { setShow(null); onOpen(x.id); }}>Move or cancel</button></div>)}</div>
     </Modal>}
     {show === 'wait' && <WaitlistModal onClose={() => setShow(null)} onBook={(p) => { setShow(null); onBook(p); }} />}
   </>);
@@ -306,7 +306,7 @@ function WaitlistModal({ onClose, onBook }: { onClose: () => void; onBook: (pati
       {q.isLoading ? <Skeleton rows={3} /> : (q.data ?? []).length === 0 ? <Empty icon="users" title="Nobody waiting" /> : q.data.map((w: any) => (
         <div key={w.id} className="flex flex-wrap items-center gap-2 border-t border-line/60 py-2.5 text-sm first:border-t-0">
           <span className="min-w-0 flex-1"><b>{w.patient.fullName}</b><span className="block text-xs text-muted">{[w.doctor ?? 'any doctor', w.note, w.untilDay ? `before ${label(w.untilDay, { day: 'numeric', month: 'short' })}` : null, `since ${label(w.createdAt.slice(0, 10), { day: 'numeric', month: 'short' })}`].filter(Boolean).join(' · ')}</span></span>
-          {w.patient.phone && <a className="btn btn-sm" href={`tel:${w.patient.phone}`}><Icon name="phone" className="h-3.5 w-3.5" />Call</a>}
+          {dialable(w.patient.phone) && <a className="btn btn-sm" href={`tel:${w.patient.phone}`}><Icon name="phone" className="h-3.5 w-3.5" />Call</a>}
           <button className="btn btn-sm btn-primary" onClick={() => onBook(w.patient)}>Book</button>
           <button className="btn btn-ghost btn-sm" disabled={rm.isPending} onClick={() => rm.mutate(w.id)}>Remove</button>
         </div>))}

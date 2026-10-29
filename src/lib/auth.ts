@@ -11,7 +11,7 @@ export function verifyPassword(pw: string, stored: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export type Ctx = { tenantId: string; userId: string; role: string; roles: string[]; name: string; practitionerId: string | null; timezone: string; tenantKind: string };
+export type Ctx = { tenantId: string; userId: string; role: string; roles: string[]; name: string; practitionerId: string | null; timezone: string; tenantKind: string; ip?: string };
 
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {

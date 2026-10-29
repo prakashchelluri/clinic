@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, patch, post, qc, today, errText, ApiError } from '../api';
+import { get, patch, post, qc, today, errText, ApiError, dialable } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, Segmented, Skeleton, ask, toast } from '../ui';
 import { ScheduleModal } from './Worklist';
@@ -95,7 +95,7 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
                 { label: 'Reschedule', hidden: !['confirmed', 'postponed', 'missed'].includes(s.state), onClick: () => setMoving(s) },
                 { label: s.practitionerId ? 'Change doctor' : 'Assign doctor', hidden: s.state !== 'confirmed', onClick: () => setAssigning(s) },
                 { label: s.patientConfirmedAt ? 'Undo patient confirmation' : 'Mark patient confirmed', hidden: s.state !== 'confirmed', onClick: () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }) },
-                { label: 'Call patient', href: `tel:${s.patient.phone ?? ''}` },
+                { label: 'Call patient', href: `tel:${s.patient.phone ?? ''}`, hidden: !dialable(s.patient.phone) },
                 { label: 'Start', hidden: !(s.state === 'confirmed' && s.day === t), onClick: () => setState.mutate({ id: s.id, state: 'in_progress' }) },
                 { label: 'Mark done', hidden: s.state !== 'in_progress', onClick: () => setState.mutate({ id: s.id, state: 'completed' }) },
                 { label: 'Mark as missed', hidden: s.state !== 'confirmed', onClick: () => setState.mutate({ id: s.id, state: 'missed' }) },

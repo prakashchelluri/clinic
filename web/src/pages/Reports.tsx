@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useOutletContext, useSearchParams } from 'react-router';
-import { get, today, fmtTime } from '../api';
+import { get, today, fmtTime, listOut } from '../api';
 import { can } from '../App';
 import { Chip, Empty, Icon, PageHeader, Section, Skeleton, Stat, money, toast } from '../ui';
 
 /** Daily collections + expenses: replaces the two-page printout and the handwritten ledger. */
 export function Reports() {
-  const { perms } = useOutletContext<any>();
+  const { perms, me } = useOutletContext<any>();
   const [day, setDay] = useState(today());
   const r = useQuery({ queryKey: ['daily', day], queryFn: () => get(`/reports/daily?day=${day}`) });
   const d = r.data;
   const [sp, setSp] = useSearchParams();
-  useEffect(() => { if (d && sp.get('print')) { setSp({}, { replace: true }); setTimeout(() => window.print(), 400); } }, [d, sp]);
+  useEffect(() => { if (d && sp.get('print')) { setSp({}, { replace: true }); if (me?.privacy?.canExport) listOut(`Printed the daily report ${day}`, undefined, () => setTimeout(() => window.print(), 400)); } }, [d, sp]);
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return (
     <div>
@@ -22,7 +22,7 @@ export function Reports() {
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
           <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => d && setDay(d.nextDay)}><Icon name="chevR" /></button>
         </div>
-        <button className="btn no-print" onClick={() => window.print()}><Icon name="print" />Print</button>
+        {me?.privacy?.canExport && <button className="btn no-print" onClick={() => listOut(`Printed the daily report ${day}`, undefined, () => window.print())}><Icon name="print" />Print</button>}
       </PageHeader>
       {!d ? <Skeleton rows={3} /> : (<>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

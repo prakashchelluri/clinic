@@ -16,7 +16,9 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/clinic', 'config.write', async (req, tx) => {
     const body = z.object({ name: Name.optional(), settings: z.record(z.string(), z.any()).optional() }).parse(req.body);
     if (body.settings?.photos?.areas !== undefined) body.settings.photos.areas = z.array(z.string().trim().min(1).max(40)).min(1).max(40).parse(body.settings.photos.areas);
+    if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
+    req.auditBefore = { name: cur.name, settings: Object.fromEntries(Object.keys(body.settings ?? {}).map((k) => [k, (cur.settings as any)?.[k]])) };
     const [row] = await tx.update(tenant).set({ ...(body.name ? { name: body.name } : {}), ...(body.settings ? { settings: deepMerge(cur.settings, body.settings) } : {}) }).where(eq(tenant.id, req.ctx.tenantId)).returning();
     await emit(tx, req.ctx, 'clinic.updated', 'tenant', row.id, body);
     return { id: row.id, name: row.name, settings: row.settings };
@@ -159,6 +161,9 @@ export function adminRoutes(app: FastifyInstance) {
 }
 
 async function upd(tx: any, table: any, req: any, set: any) {
+  // The audit log shows what each changed field was before.
+  const cur = await tx.select().from(table).where(and(eq(table.id, req.params.id), eq(table.tenantId, req.ctx.tenantId))).then((r: any[]) => r[0]);
+  if (cur) req.auditBefore = Object.fromEntries(Object.keys(set).map((k) => [k, cur[k]]));
   const [row] = await tx.update(table).set(set).where(and(eq(table.id, req.params.id), eq(table.tenantId, req.ctx.tenantId))).returning();
   if (!row) throw new HttpError(404, 'NOT_FOUND');
   return row;

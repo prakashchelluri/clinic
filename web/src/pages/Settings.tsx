@@ -6,9 +6,10 @@ import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInpu
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
+import { PrivacyTab } from './Privacy';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'medicines' | 'procedures' | 'photos' | 'fees';
+type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
 type TabDef = [Tab, string, string, string];
 const GROUPS: [string, TabDef[]][] = [
   ['Practice', [
@@ -16,6 +17,7 @@ const GROUPS: [string, TabDef[]][] = [
     ['people', 'Team members', 'users', 'Staff accounts and doctors'],
     ['roles', 'Roles and access', 'lock', 'What each role can see and do'],
     ['rooms', 'Rooms', 'door', 'Rooms and what each can do'],
+    ['privacy', 'Privacy & access', 'lock', 'Work only from the clinic, audit log'],
   ]],
   ['Scheduling', [
     ['availability', 'Availability', 'clock', 'Each doctor’s weekly hours'],
@@ -39,7 +41,8 @@ const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'L
 
 /** Owner's control panel. Everything here is data: no deploy needed to change it. */
 export function Settings() {
-  const { cfg } = useOutletContext<any>();
+  const { cfg, me } = useOutletContext<any>();
+  const owner = (me?.roles ?? []).includes('owner');
   const [params, setParams] = useSearchParams();
   const tab: Tab = TABS.some((t) => t[0] === params.get('tab')) ? (params.get('tab') as Tab) : 'clinic';
   const setTab = (k: Tab) => setParams({ tab: k }, { replace: true });
@@ -54,7 +57,7 @@ export function Settings() {
           {GROUPS.map(([g, tabs]) => (
             <div key={g}>
               <div className="px-3 pb-1 pt-3 text-[10.5px] font-bold uppercase tracking-[.1em] text-muted first:pt-1">{g}</div>
-              {tabs.map(([k, label, icon, hint]) => (
+              {tabs.filter(([k]) => k !== 'privacy' || owner).map(([k, label, icon, hint]) => (
                 <button key={k} onClick={() => { setTab(k); if (innerWidth < 1024) setTimeout(() => document.getElementById('settings-body')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); }} aria-current={tab === k ? 'page' : undefined} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
               ))}
             </div>
@@ -76,6 +79,7 @@ export function Settings() {
           {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'procedures' && <ProceduresTab cfg={cfg} onSaved={refresh} />}
           {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'privacy' && owner && <PrivacyTab />}
         </div>
       </div>
     </div>

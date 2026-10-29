@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { useMe, useConfig, post, get, patch, qc } from './api';
+import { useMe, useConfig, post, get, patch, qc, ApiError } from './api';
 import { Avatar, Icon, NoAccess, ToastHost, useScrollLock } from './ui';
 import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
@@ -27,6 +27,7 @@ export const NAV: NavItem[] = [
   { to: '/reports', label: 'Reports', icon: 'chart', group: 'clinic', show: (c) => c('report.daily') || c('finance.read') },
   { to: '/expenses', label: 'Expenses', icon: 'wallet', group: 'clinic', show: (c) => c('expense.read') },
   { to: '/settings', label: 'Settings', icon: 'gear', group: 'clinic', show: (c) => c('config.write') },
+  { to: '/audit', label: 'Audit log', icon: 'lock', group: 'clinic', show: (c) => c('user.write') },
   { to: '/platform', label: 'Clinics', icon: 'home', show: (c) => c('platform.read') },
 ];
 
@@ -112,9 +113,26 @@ export function App() {
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, []);
   useEffect(() => setDrawer(false), [loc.pathname]);
+  // Sign out when idle (owner's setting) on shared computers. A doctor in a consultation is left alone; anything unsaved is saved first.
+  const idleMin: number = me.data?.privacy?.idleMinutes ?? 0;
+  const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
+  useEffect(() => {
+    if (!idleMin || inConsult) return;
+    let last = Date.now();
+    const bump = () => { last = Date.now(); };
+    const evs = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    evs.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const t = setInterval(async () => {
+      if (Date.now() - last < idleMin * 60_000) return;
+      clearInterval(t); window.dispatchEvent(new Event('app:save-now'));
+      await new Promise((r) => setTimeout(r, 800));
+      await post('/auth/logout').catch(() => {}); qc.clear(); location.href = `/login?idle=${idleMin}`;
+    }, 15_000);
+    return () => { clearInterval(t); evs.forEach((e) => window.removeEventListener(e, bump)); };
+  }, [idleMin, inConsult]);
 
   if (me.isLoading) return <div className="min-h-dvh grid place-items-center text-muted text-sm anim-fade-in">Opening clinic…</div>;
-  if (me.isError) { location.href = '/login'; return null; }
+  if (me.isError) { if (!(me.error instanceof ApiError && me.error.body?.code === 'IP_NOT_ALLOWED')) location.href = '/login'; return null; }
   const signOut = async () => { await post('/auth/logout'); qc.clear(); nav('/login'); };
   const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
   const roles: string[] = me.data.roles ?? [me.data.role];

@@ -487,6 +487,26 @@ export const numberingSequence = pgTable('numbering_sequence', {
   nextValue: bigint('next_value', { mode: 'number' }).notNull().default(1),
 }, (t) => [uniqueIndex('numseq_pk').on(t.tenantId, t.key, t.scope)]);
 
+// Audit log: every action by every user, written by the server and never changed (a trigger refuses updates and deletes).
+export const auditLog = pgTable('audit_log', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  tenantId: uuid('tenant_id').notNull(),
+  at: ts('at').notNull().defaultNow(),
+  userId: uuid('user_id'),
+  userName: text('user_name'),
+  role: text('role'),
+  ip: text('ip'),
+  kind: text('kind').notNull(),     // money | change | cancel | view | print | signin | settings
+  action: text('action').notNull(), // e.g. POST /appointments, patient.viewed, signin.stopped
+  summary: text('summary').notNull(),
+  entity: text('entity'),
+  entityId: text('entity_id'),
+  patientId: uuid('patient_id'),
+  before: jsonb('before'),
+  after: jsonb('after'),
+  unusual: boolean('unusual').notNull().default(false),
+}, (t) => [index('audit_t_at').on(t.tenantId, t.at), index('audit_t_patient').on(t.tenantId, t.patientId)]);
+
 export const domainEvent = pgTable('domain_event', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   tenantId: uuid('tenant_id').notNull(),
@@ -502,7 +522,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'rx_template', 'waitlist', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'rx_template', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

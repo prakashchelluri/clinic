@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, withTenant } from '../db/index.js';
+import { cleanIp, securityOf, ipExempt, ipAllowed, writeAudit, throttleOnce } from '../lib/audit.js';
 import { tenant, appUser, practitioner, feeCategory, formDefinition, medicine, procedureCatalog, branch, specialty, room, service } from '../db/schema.js';
 import { whatsappReady } from '../lib/messaging.js';
 import { verifyPassword, HttpError } from '../lib/auth.js';
@@ -28,6 +29,15 @@ export function identityRoutes(app: FastifyInstance) {
     const hit = candidates[0];
     if (!hit || !verifyPassword(body.password, hit.u.passwordHash)) return fail();
     fails.delete(fk);
+    // Work only from the clinic: a right password from outside is stopped too, and the owner sees it.
+    const roles = hit.u.roles?.length ? hit.u.roles : [hit.u.role];
+    const who = { tenantId: hit.t.id, userId: hit.u.id, name: hit.u.name, role: hit.u.role, roles, ip: cleanIp(req.ip) };
+    const sec = securityOf(hit.t.settings);
+    if (sec.ipLock.enabled && !ipExempt(who, sec) && !ipAllowed(who.ip, sec.ipLock.allowed)) {
+      if (throttleOnce(`stop|${who.userId}|${who.ip}`, 10 * 60_000)) await withTenant(hit.t.id, hit.u.id, (tx) => writeAudit(tx, who, { kind: 'signin', action: 'signin.stopped', summary: `Stopped: not on the clinic's internet (${who.ip})` }));
+      throw new HttpError(403, 'IP_NOT_ALLOWED', { ip: who.ip });
+    }
+    await withTenant(hit.t.id, hit.u.id, (tx) => writeAudit(tx, who, { kind: 'signin', action: 'signin', summary: 'Signed in' }));
     reply.setCookie('cc_session', JSON.stringify({ u: hit.u.id, t: hit.t.id }), {
       path: '/', httpOnly: true, sameSite: 'lax', signed: true, secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 * 14,
     });
@@ -36,7 +46,7 @@ export function identityRoutes(app: FastifyInstance) {
 
   app.post('/auth/logout', async (_req, reply) => { reply.clearCookie('cc_session', { path: '/' }); return { ok: true }; });
 
-  route(app, 'get', '/me', null, async (req) => ({ ...req.ctx, perms: req.perms }));
+  route(app, 'get', '/me', null, async (req) => ({ ...req.ctx, perms: req.perms, privacy: req.privacy }));
 
   // Everything the UI needs to render forms, pickers and prices, in one call.
   route(app, 'get', '/config', null, async (req, tx) => {
@@ -53,7 +63,9 @@ export function identityRoutes(app: FastifyInstance) {
       tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true))),
       tx.select().from(service).where(and(eq(service.tenantId, t), eq(service.active, true))).orderBy(service.sortOrder, service.name),
     ]);
-    return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings: ten.settings },
+    // The clinic's allowed addresses and privacy rules are for the owner only.
+    const settings = req.ctx.roles.includes('owner') ? ten.settings : { ...ten.settings, security: undefined };
+    return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings },
       branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms, services, whatsappReady: whatsappReady() };
   });
 

@@ -19,6 +19,7 @@ import { Pharmacy } from './pages/Pharmacy';
 import { Settings } from './pages/Settings';
 import { Calendar } from './pages/Calendar';
 import { Platform } from './pages/Platform';
+import { AuditLog } from './pages/Privacy';
 import { Expenses } from './pages/Expenses';
 import { Bookings } from './pages/Bookings';
 import { PublicBook } from './pages/PublicBook';
@@ -51,6 +52,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/bookings" element={<Bookings />} />
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/platform" element={<Platform />} />
+            <Route path="/audit" element={<AuditLog />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

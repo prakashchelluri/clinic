@@ -17,11 +17,15 @@ export function Login() {
   const [f, setF] = useState({ email: '', password: 'demo1234', tenant: '' });
   const [clinics, setClinics] = useState<{ slug: string; name: string }[] | null>(null);
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const sp = new URLSearchParams(location.search);
+  const [blocked, setBlocked] = useState<string | null>(sp.get('blocked'));
+  const idle = sp.get('idle');
   const submit = async (e?: React.FormEvent, email = f.email, tenant = f.tenant) => {
     e?.preventDefault(); setErr(''); setBusy(true);
     try { await post('/auth/login', { email, password: f.password, tenant: tenant || undefined }); qc.clear(); nav('/', { viewTransition: true }); }
     catch (x: any) {
       if (x instanceof ApiError && x.body.code === 'CHOOSE_CLINIC') setClinics(x.body.clinics);
+      else if (x instanceof ApiError && x.body.code === 'IP_NOT_ALLOWED') setBlocked(x.body.ip ?? '');
       else setErr(x instanceof ApiError && x.body.code === 'TOO_MANY_ATTEMPTS' ? `Too many wrong attempts. Try again in ${Math.ceil((x.body.retryAfterSeconds ?? 600) / 60)} minutes.` : 'That email or password is not right.');
     } finally { setBusy(false); }
   };
@@ -38,6 +42,13 @@ export function Login() {
       <form onSubmit={submit} className="glass p-8 w-full max-w-[480px] justify-self-center lg:justify-self-end anim-scale-in" style={{ boxShadow: 'var(--shadow-lift)' }}>
         <div className="lg:hidden mb-5 text-lg font-semibold">CUBOTT Clinical</div>
         <h2 className="text-[26px] font-semibold">Sign in</h2>
+        {blocked !== null && <div className="mt-4 rounded-2xl bg-amber-soft p-4 text-center anim-fade-up" role="alert">
+          <Icon name="lock" className="mx-auto h-6 w-6" />
+          <b className="mt-2 block text-[16px]">Not available from here</b>
+          <p className="mt-1 text-sm text-ink-2">This clinic's app can be used only from the clinic's internet. If you are at the clinic, the owner has been told and can allow this connection.</p>
+          {blocked && <div className="mt-2 font-mono text-xs text-muted">Your address: {blocked}</div>}
+        </div>}
+        {idle && blocked === null && <div className="mt-4 rounded-2xl bg-white/70 px-4 py-3 text-sm text-ink-2 anim-fade-up">Signed out after {idle} minutes without use, to keep patient details safe on a shared computer.</div>}
         <div className="mt-5 space-y-3.5">
           <div><label className="label">Email</label><input autoFocus className="input !py-3" type="email" placeholder="you@clinic.in" value={f.email} onChange={(e) => { setF({ ...f, email: e.target.value }); setClinics(null); }} /></div>
           <div><label className="label">Password</label><input className="input !py-3" type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>

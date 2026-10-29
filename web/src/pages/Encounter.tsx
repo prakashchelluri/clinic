@@ -88,6 +88,8 @@ export function Encounter() {
   });
   useEffect(() => { if (loaded.current) dirty.current = true; }, [data, rx, recs]);
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate({ complete: false }); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
+  // Signed out for being idle: save what is typed first.
+  useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('app:save-now', f); return () => window.removeEventListener('app:save-now', f); }, [enc.data?.status]);
   const saveTpl = useMutation({ mutationFn: (name: string) => post('/rx-templates', { name, data, prescription: rx.filter((i) => i.name), recommendations: recs }), onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['rx-templates'] }); toast(`Saved as template “${r.name}”`); }, onError: (e) => toast(errText(e), 'err') });
 
   if (!enc.data || !timeline.data) return <div className="card"><Skeleton rows={5} /></div>;

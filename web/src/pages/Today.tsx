@@ -36,6 +36,7 @@ export function Today() {
   const fus = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), enabled: can(perms, 'worklist.read') });
   const allProcs = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
   const resq = useQuery({ queryKey: ['results'], queryFn: () => get('/results?days=7'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
+  const secq = useQuery({ queryKey: ['security'], queryFn: () => get('/security'), enabled: (me.roles ?? []).includes('owner'), refetchInterval: 60000 });
   const open = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }), onError: (e) => toast(errText(e), 'err') });
   const take = useMutation({ mutationFn: (id: string) => post(`/procedure-sessions/${id}/assign`, { practitionerId: doc }), onSuccess: () => { ['calendar', 'psessions'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('The sitting is yours'); }, onError: (e) => toast(errText(e), 'err') });
   const [change, setChange] = useState<{ kind: ChangeKind; day?: string } | null>(null);
@@ -104,7 +105,8 @@ export function Today() {
   const noDoc = (allProcs.data ?? []).filter((p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId);
   const resultGroups = (() => { const m = new Map<string, any>(); for (const r of (resq.data ?? []).filter((x: any) => x.documents.some((dd: any) => !dd.reviewedAt))) { const g = m.get(r.patient.id) ?? { patient: r.patient, tests: [] as string[], docs: new Map<string, any>() }; g.tests.push(r.test); for (const dd of r.documents) g.docs.set(dd.id, dd); m.set(r.patient.id, g); } return [...m.values()]; })();
   const openResults = (g: any) => { const docs = [...g.docs.values()]; openViewer({ docs, who: g.patient.fullName, canDelete: can(perms, 'document.write') }); post('/documents/review', { ids: docs.map((x: any) => x.id) }).then(() => qc.invalidateQueries({ queryKey: ['results'] }), () => {}); };
-  const leaveCount = resultGroups.length + drafts.length + review.length + noDoc.length + (overdue.length ? 1 : 0);
+  const stopped: any[] = secq.data?.security?.ipLock?.enabled ? secq.data.stopped : [];
+  const leaveCount = stopped.length + resultGroups.length + drafts.length + review.length + noDoc.length + (overdue.length ? 1 : 0);
 
   // --- next patient's story ---
   const lastEnc = (nextTl.data?.encounters ?? []).find((e: any) => e.status === 'completed');
@@ -165,6 +167,7 @@ export function Today() {
               {review.slice(0, 4).map((r: any) => <Attn key={r.id} tag="plan" title={`${r.procedure} for ${r.patient.fullName}`} sub={r.sittings ? `approve ${r.sittings} sittings` : 'approve the plan'} action="Open" onClick={() => nav(`/patients/${r.patient.id}`)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} tag="no doctor" title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}
               {overdue.length > 0 && <Attn tag="follow-up" title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them" action="See" onClick={() => nav('/worklist?tab=plans')} />}
+              {stopped.map((x: any) => <Attn key={x.id} tag="sign-in" title={`${x.name} was stopped`} sub={`new internet address ${x.ip}: at the clinic? allow it`} action="Open" onClick={() => nav('/settings?tab=privacy')} />)}
             </div>}
           </section>
           <section className="card-flat order-4 p-4 sm:p-5 anim-fade-up">

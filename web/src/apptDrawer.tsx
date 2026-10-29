@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { get, patch, post, qc, errText, ApiError, today } from './api';
+import { get, patch, post, qc, errText, ApiError, today, dialable } from './api';
 import { Chip, Icon, Skeleton, toast, useScrollLock } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
@@ -109,7 +109,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
             <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${a.patient.id}`); }}><Icon name="user" />Open record</button>
-            {a.patient.phone && <a className="btn btn-sm" href={`tel:${a.patient.phone}`}><Icon name="phone" />Call</a>}
+            {dialable(a.patient.phone) && <a className="btn btn-sm" href={`tel:${a.patient.phone}`}><Icon name="phone" />Call</a>}
           </div>
         </>)}
         {q.isError && <div className="text-sm text-rose">{errText(q.error)}</div>}

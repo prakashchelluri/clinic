@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { patient, visit, encounter, prescriptionItem, recommendation, charge, payment } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { auditView } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 
@@ -43,7 +44,11 @@ export function patientRoutes(app: FastifyInstance) {
   });
 
   route(app, 'patch', '/patients/:id', 'patient.write', async (req, tx) => {
-    const body = sent(PatientIn.partial().parse(req.body), req.body);
+    // A hidden number (98••• ••345) comes back unchanged from roles that cannot see phones: keep the stored one.
+    const raw: any = { ...(req.body as any) }; if (typeof raw.phone === 'string' && raw.phone.includes('•')) delete raw.phone;
+    const body = sent(PatientIn.partial().parse(raw), raw);
+    const cur = await tx.select().from(patient).where(and(eq(patient.id, (req.params as any).id), eq(patient.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (cur) req.auditBefore = Object.fromEntries(Object.keys(body).map((k) => [k, (cur as any)[k]]));
     const [row] = await tx.update(patient).set(body).where(and(eq(patient.id, (req.params as any).id), eq(patient.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     return row;
@@ -54,6 +59,7 @@ export function patientRoutes(app: FastifyInstance) {
     const id = (req.params as any).id; const t = req.ctx.tenantId;
     const p = await tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]);
     if (!p) throw new HttpError(404, 'NOT_FOUND');
+    await auditView(tx, req, id, 'Opened the patient record');
     const visits = await tx.select().from(visit).where(and(eq(visit.patientId, id), eq(visit.tenantId, t))).orderBy(desc(visit.arrivedAt)).limit(20);
     const encounters = await tx.select().from(encounter).where(and(eq(encounter.patientId, id), eq(encounter.tenantId, t))).orderBy(desc(encounter.createdAt)).limit(10);
     const rx = encounters.length

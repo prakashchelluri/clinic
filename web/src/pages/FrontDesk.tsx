@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, post, patch, qc, uuid, ApiError, today, errText } from '../api';
+import { get, post, patch, qc, uuid, ApiError, today, errText, listOut, dialable } from '../api';
 import { openPrint } from '../printPreview';
 import { ScheduleModal } from './Worklist';
 import { can } from '../App';
@@ -28,6 +28,7 @@ function downloadCsv(filename: string, rows: (string | number | null | undefined
 /** The receptionist's home as one board: every patient is a row, the stage is a tab, Waiting is the default. */
 export function FrontDesk() {
   const { perms, cfg, me } = useOutletContext<Ctx>();
+  const canList = !!(me as any)?.privacy?.canExport; // lists of patients: roles the owner allows
   const nav = useNavigate();
   const day = today(); const isToday = true;
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
@@ -93,7 +94,7 @@ export function FrontDesk() {
         <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">waited {minsSince(v.arrivedAt)} min</div></td>
         <td>{v.status === 'intake' ? <Chip tone="sky">intake</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : <Chip>waiting</Chip>}</td>
         <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
-        <td className="text-right pr-4 whitespace-nowrap">{isClinical && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>{me.role === 'assistant' ? 'Intake' : 'Call in'}</button>} {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}` }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}</td></tr>); }
+        <td className="text-right pr-4 whitespace-nowrap">{isClinical && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>{me.role === 'assistant' ? 'Intake' : 'Call in'}</button>} {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}</td></tr>); }
     if (r.type === 'doctor') { const v = r.v; return (
       <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
         <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></td>
@@ -123,7 +124,7 @@ export function FrontDesk() {
             { label: 'Collect by UPI', hidden: !(canDesk && v.due[0]), onClick: () => collect.mutate({ c: v.due[0], method: 'upi' }) },
             { label: 'Print prescription', hidden: !(v.encounterId && !left), onClick: () => openPrint({ title: 'Prescription', rx: v.encounterId }) },
             { label: 'Mark as explained', hidden: !(canDesk && !left && !handled && v.recommendations.length > 0 && v.due.length > 0), onClick: () => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } }) },
-            { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}` },
+            { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) },
           ]} />
         </td></tr>);
   };
@@ -135,7 +136,7 @@ export function FrontDesk() {
           <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
         {tab === 'history'
           ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab('waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
-          : <div className="flex items-center gap-1.5 no-print">{canDesk && <button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button>}<button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => window.print()}><Icon name="print" /></button>{canDesk && <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={exportRows}><Icon name="export" /></button>}</div>}
+          : <div className="flex items-center gap-1.5 no-print">{canDesk && <button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button>}{canList && <button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => listOut(`Printed the front desk list (${tab})`, undefined, () => window.print())}><Icon name="print" /></button>}{canDesk && canList && <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={() => listOut(`Downloaded the front desk list (${tab})`, undefined, exportRows)}><Icon name="export" /></button>}</div>}
       </div>
 
       {!d ? <Skeleton rows={3} /> : (<>
@@ -194,7 +195,8 @@ const weekdayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateStrin
 const PERIODS: [string, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']];
 const SHOWS: [string, string][] = [['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']];
 function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; onBook: (p?: any) => void; slot: HTMLElement | null }) {
-  const { perms } = useOutletContext<Ctx>();
+  const { perms, me } = useOutletContext<Ctx>();
+  const canList = !!(me as any)?.privacy?.canExport;
   const nav = useNavigate();
   const [period, setPeriod] = useState('7');
   const [custom, setCustom] = useState({ from: shiftDay(today(), -13), to: today() });
@@ -226,8 +228,8 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
         {SHOWS.map(([k, l]) => <Opt key={k} on={filter === k} onClick={() => { setFilter(k); setOpen(false); }}>{l}</Opt>)}
         {(period !== '7' || filter !== 'all') && <><div className="my-1.5 h-px bg-ink/8" /><button type="button" onClick={() => { setPeriod('7'); setFilter('all'); setOpen(false); }} className="!text-muted">Reset filters</button></>}
       </Floating>
-      <button className="btn btn-icon" title="Print or save as PDF" aria-label="Print or save as PDF" onClick={() => window.print()}><Icon name="print" /></button>
-      <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" disabled={!rows.length} onClick={exportCsv}><Icon name="export" /></button>
+      {canList && <button className="btn btn-icon" title="Print or save as PDF" aria-label="Print or save as PDF" onClick={() => listOut(`Printed front desk history ${from} to ${to}`, rows.length, () => window.print())}><Icon name="print" /></button>}
+      {canList && <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" disabled={!rows.length} onClick={() => listOut(`Downloaded front desk history ${from} to ${to}`, rows.length, exportCsv)}><Icon name="export" /></button>}
     </>
   );
   return (

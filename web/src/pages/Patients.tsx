@@ -1,3 +1,4 @@
+import { SeenBy } from './Privacy';
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
@@ -69,6 +70,7 @@ function Timeline({ id }: { id: string }) {
             <div className="text-sm text-muted mt-1 flex items-center gap-2 flex-wrap"><span>{p.patientNo}</span><span>·</span><span>{p.phone ?? 'no phone'}</span>{p.locality && <><span>·</span><span>{p.locality}</span></>}{p.referralCard && <Chip tone="sky">Special card</Chip>}</div>
             {p.allergies && <div className="mt-2 inline-flex items-center gap-1.5 text-sm text-rose bg-rose-soft rounded-full px-3 py-1"><Icon name="spark" className="h-3.5 w-3.5" />Allergies: {p.allergies}</div>}
             {p.notes && <div className="text-sm text-ink-2 mt-2">{p.notes}</div>}
+            {can(perms, 'user.write') && <div className="mt-2"><SeenBy patientId={id} /></div>}
           </div>
           <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-muted">Visits</div><div className="serif text-2xl">{visits.length}</div>{outstandingPaise > 0 && <div className="text-sm text-rose font-medium mt-1">Due {money(outstandingPaise)}</div>}</div>
           {can(perms, 'patient.write') && <button className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard })}><Icon name="edit" /></button>}

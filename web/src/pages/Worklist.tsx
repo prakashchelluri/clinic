@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, patch, post, qc, today, errText } from '../api';
+import { get, patch, post, qc, today, errText, dialable } from '../api';
 import { can } from '../App';
 import { PhotoCapture } from '../photos';
 import { ProcSchedule } from './ProcSchedule';
@@ -96,7 +96,7 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onReschedule
             {isTest ? <button className="btn btn-sm btn-primary" onClick={onResult}><Icon name="check" className="h-3.5 w-3.5" />Result received</button>
               : r.kind === 'procedure' ? (r.next ? <button className="btn btn-sm btn-primary" onClick={onReschedule}><Icon name="calendar" className="h-3.5 w-3.5" />Reschedule</button> : <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />{r.status === 'scheduled' ? 'Schedule next' : 'Schedule'}</button>)
               : r.status === 'scheduled' ? <Chip tone="sage">booked</Chip> : <button className="btn btn-sm btn-primary" onClick={onBook}><Icon name="calendar" className="h-3.5 w-3.5" />Book visit</button>}
-            <MoreMenu items={[{ label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }, { label: 'Schedule another sitting', hidden: !(r.kind === 'procedure' && r.next), onClick: onSchedule }, { label: 'Cancel the booked sitting', danger: true, hidden: !(r.kind === 'procedure' && r.next), onClick: onCancelSitting }, { label: 'Log a call', hidden: isTest, onClick: () => setOpen(!open) }, { label: 'Mark as booked (already done elsewhere)', hidden: isTest || r.kind === 'procedure' || r.status === 'scheduled', onClick: () => onUpdate({ status: 'scheduled' }) }, { label: 'Mark done', hidden: isTest, onClick: () => onUpdate({ status: 'done' }) }]} />
+            <MoreMenu items={[{ label: 'Call patient', href: `tel:${r.patient.phone ?? ''}`, hidden: !dialable(r.patient.phone) }, { label: 'Schedule another sitting', hidden: !(r.kind === 'procedure' && r.next), onClick: onSchedule }, { label: 'Cancel the booked sitting', danger: true, hidden: !(r.kind === 'procedure' && r.next), onClick: onCancelSitting }, { label: 'Log a call', hidden: isTest, onClick: () => setOpen(!open) }, { label: 'Mark as booked (already done elsewhere)', hidden: isTest || r.kind === 'procedure' || r.status === 'scheduled', onClick: () => onUpdate({ status: 'scheduled' }) }, { label: 'Mark done', hidden: isTest, onClick: () => onUpdate({ status: 'done' }) }]} />
           </div>
         )}
       </div>
