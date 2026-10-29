@@ -6,8 +6,9 @@ import { can } from '../App';
 import { openPrint } from '../printPreview';
 import { Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
 import { StockTab, OrdersTab, VendorsTab } from './pharmacyStock';
+import { RegisterTab } from './pharmacyRegister';
 
-type Tab = 'counter' | 'bills' | 'stock' | 'orders' | 'vendors';
+type Tab = 'counter' | 'bills' | 'register' | 'stock' | 'orders' | 'vendors';
 const REASONS = ['Has at home', 'Will buy later', 'Bought outside', 'Out of stock', 'Too costly', 'Doctor said not needed'];
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
 const rupees2 = (p: number) => (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,13 +19,13 @@ const setPref = (k: string, v: boolean) => { try { localStorage.setItem(k, v ? '
 
 /** Pharmacy: the counter (prescriptions to pick from, issue what the patient buys), bills and returns, and stock. */
 export function Pharmacy() {
-  const { perms } = useOutletContext<any>();
+  const { perms, cfg } = useOutletContext<any>();
   const [sp, setSp] = useSearchParams();
   const tab = (sp.get('tab') as Tab) || 'counter';
   const go = (next: Record<string, string>) => setSp(next);
   useEffect(() => { if (sp.get('sale')) go({ tab: 'counter', rx: 'walkin' }); }, [sp]);
   const stock = can(perms, 'stock.read');
-  const tabs: { value: Tab; label: string }[] = [{ value: 'counter', label: 'Counter' }, { value: 'bills', label: 'Bills' }, ...(stock ? [{ value: 'stock' as Tab, label: 'Stock' }, { value: 'orders' as Tab, label: 'Orders' }, { value: 'vendors' as Tab, label: 'Vendors' }] : [])];
+  const tabs: { value: Tab; label: string }[] = [{ value: 'counter', label: 'Counter' }, { value: 'bills', label: 'Bills' }, { value: 'register', label: 'Register' }, ...(stock ? [{ value: 'stock' as Tab, label: 'Stock' }, { value: 'orders' as Tab, label: 'Orders' }, { value: 'vendors' as Tab, label: 'Vendors' }] : [])];
   return (
     <div>
       <PageHeader title="Pharmacy">
@@ -33,6 +34,7 @@ export function Pharmacy() {
       </PageHeader>
       {tab === 'counter' && <Counter sel={sp.get('rx')} pick={(rx) => go(rx ? { tab: 'counter', rx } : { tab: 'counter' })} />}
       {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => go(bill ? { tab: 'bills', bill } : { tab: 'bills' })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
+      {tab === 'register' && <RegisterTab clinic={cfg?.tenant?.name ?? ''} licence={cfg?.tenant?.settings?.print?.drugLicence ?? cfg?.tenant?.settings?.drugLicence} />}
       {tab === 'stock' && stock && <StockTab sp={sp} go={go} />}
       {tab === 'orders' && stock && <OrdersTab sp={sp} go={go} />}
       {tab === 'vendors' && stock && <VendorsTab sp={sp} go={go} />}

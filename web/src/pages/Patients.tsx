@@ -6,7 +6,7 @@ import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, money, toast, NumInput } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
-import { EncounterModal, DocList, UploadButton, joinList } from '../encounterDetail';
+import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
 
 export function Patients() {
@@ -111,7 +111,7 @@ function Timeline({ id }: { id: string }) {
               <div className="flex items-center gap-2 text-sm"><span className="font-semibold">{new Date(e.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span><Chip tone={e.status === 'completed' ? 'sage' : 'amber'}>{e.status}</Chip>
                 <span className="ml-auto text-xs text-muted flex items-center gap-1">Open details <Icon name="chevR" className="h-3 w-3" /></span></div>
               <div className="mt-2 text-[15px]"><span className="font-medium">{joinList(e.data?.complaint?.chief_complaint) || 'Consultation'}</span>{joinList(e.data?.assessment?.diagnosis) && <span className="text-ink-2"> → {joinList(e.data.assessment.diagnosis)}{e.data.assessment?.severity ? ` (${e.data.assessment.severity})` : ''}</span>}</div>
-              {e.prescription.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{e.prescription.map((i: any) => <Chip key={i.id}><Icon name="pill" className="h-3 w-3" />{i.name}{i.durationDays ? ` · ${i.durationDays}d` : ''}</Chip>)}</div>}
+              {e.prescription.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{e.prescription.map((i: any) => { const s = rxState(i, e); return <Chip key={i.id} tone={s?.tone ?? ''}><Icon name="pill" className="h-3 w-3" />{i.name}{i.durationDays ? ` · ${i.durationDays}d` : ''}{s ? ` · ${s.text}` : ''}</Chip>; })}</div>}
             </button>
           </div>
         ))}

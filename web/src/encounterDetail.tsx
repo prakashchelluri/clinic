@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { get, post } from './api';
+import { get, post, today } from './api';
 import { Chip, Icon, Modal, Skeleton, fmtDate, toast } from './ui';
 import { openViewer } from './viewer';
 import { openPrint } from './printPreview';
@@ -8,6 +8,14 @@ import { openPrint } from './printPreview';
 const label = (x: any) => (x && typeof x === 'object' ? `${x.name}${x.severity ? ` (${x.severity})` : ''}` : String(x));
 export const asList = (v: any): string[] => (Array.isArray(v) ? v.map(label) : v === undefined || v === null || v === '' ? [] : [label(v)]);
 export const joinList = (v: any) => asList(v).join(', ');
+
+/** What happened to one prescribed medicine at the pharmacy. Quiet: nothing is shown until the day has passed, and only for medicines the pharmacy stocks. */
+export function rxState(i: any, encounter: { status?: string; createdAt: string }): { text: string; tone: 'sage' | 'amber' | '' } | null {
+  if (i.issuedQty > 0 || i.dispensed) return { text: i.notIssuedReason ? 'bought some' : 'bought', tone: i.notIssuedReason ? 'amber' : 'sage' };
+  if (!i.medicineId || encounter.status !== 'completed') return null;
+  const day = new Date(encounter.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  return day < today() ? { text: i.notIssuedReason ? `not bought · ${i.notIssuedReason.toLowerCase()}` : 'not bought', tone: '' } : null;
+}
 
 /** Full read-only view of one encounter, rendered from the form version it was written with. */
 export function EncounterDetail({ id }: { id: string }) {
@@ -35,7 +43,7 @@ export function EncounterDetail({ id }: { id: string }) {
       })}
       {e.prescription.length > 0 && (
         <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">Prescription</div>
-          <table className="table"><tbody>{e.prescription.map((i: any, k: number) => <tr key={i.id}><td className="w-6 text-muted">{k + 1}</td><td className="font-medium">{i.name} <span className="font-normal text-muted">{i.dose ?? ''}</span></td><td className="text-muted">{[i.frequency, i.route, i.durationDays ? `${i.durationDays} days` : null].filter(Boolean).join(' · ')}</td><td className="text-muted">{i.instructions ?? ''}</td><td>{i.dispensed && <Chip tone="sage">dispensed</Chip>}</td></tr>)}</tbody></table></div>
+          <table className="table"><tbody>{e.prescription.map((i: any, k: number) => <tr key={i.id}><td className="w-6 text-muted">{k + 1}</td><td className="font-medium">{i.name} <span className="font-normal text-muted">{i.dose ?? ''}</span></td><td className="text-muted">{[i.frequency, i.route, i.durationDays ? `${i.durationDays} days` : null].filter(Boolean).join(' · ')}</td><td className="text-muted">{i.instructions ?? ''}</td><td>{(() => { const s = rxState(i, e); return s && <Chip tone={s.tone}>{s.text}</Chip>; })()}</td></tr>)}</tbody></table></div>
       )}
       {e.recommendations.length > 0 && (
         <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted mb-1.5">Plan</div>

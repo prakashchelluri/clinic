@@ -105,6 +105,7 @@ const RULES: Rule[] = [
   ['POST', /^\/pharmacy\/sale\/[^/]+\/return$/, 'money', () => 'Pharmacy return and refund'],
   ['POST', /^\/pharmacy\/sale\/[^/]+\/cancel$/, 'cancel', (b) => `Cancelled a pharmacy bill${b.reason ? ` · ${b.reason}` : ''}`],
   ['POST', /^\/pharmacy\/rx\/[^/]+\/nothing$/, 'change', () => 'Recorded patient bought nothing'],
+  ['POST', /^\/pharmacy\/schedule-register\/export$/, 'print', (b) => `${b.how === 'csv' ? 'Downloaded' : 'Printed'} the Schedule H register ${b.from} to ${b.to}`],
   ['POST', /^\/expenses$/, 'money', (b) => `Added an expense${b.amountPaise ? ` · ₹${b.amountPaise / 100}` : ''}`],
   ['PATCH', /^\/expenses\/[^/]+$/, 'money', () => 'Edited an expense'],
   ['DELETE', /^\/expenses\/[^/]+$/, 'cancel', () => 'Voided an expense'],

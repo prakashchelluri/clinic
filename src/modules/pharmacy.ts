@@ -113,6 +113,34 @@ export function pharmacyRoutes(app: FastifyInstance) {
     return { ...r.sale, patient: r.patient, doctor: doc, notIssued, clinic: { name: tn?.name, address: s.address ?? null, gstin: s.gstin ?? null, drugLicence: s.drugLicence ?? null } };
   });
 
+  /**
+   * Schedule H / H1 / X register, built from the bills: date, bill, patient, prescriber with registration number, medicine, batch, quantity.
+   * Nobody types into it. A sale with no prescription behind it is marked, since these drugs need one.
+   */
+  route(app, 'get', '/pharmacy/schedule-register', 'pharmacy.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone); const tz = req.ctx.timezone;
+    const q = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(addDays(today, -29)), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(today), cls: z.enum(['all', 'H', 'H1', 'X']).default('all') }).parse(req.query);
+    if (q.from > q.to) throw new HttpError(400, 'BAD_RANGE');
+    const meds = await tx.select({ id: medicine.id, cls: medicine.scheduleClass }).from(medicine).where(and(eq(medicine.tenantId, t), inArray(medicine.scheduleClass, ['H', 'H1', 'X'])));
+    const cls = new Map(meds.map((m) => [m.id, m.cls as string]));
+    const on = sql`(${pharmacySale.createdAt} at time zone ${tz})::date`;
+    const rows = await tx.select({ s: pharmacySale, p: { fullName: patient.fullName, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex, locality: patient.locality }, doctor: practitioner.name, regNo: practitioner.regNo })
+      .from(pharmacySale).innerJoin(patient, eq(patient.id, pharmacySale.patientId)).leftJoin(encounter, eq(encounter.id, pharmacySale.encounterId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
+      .where(and(eq(pharmacySale.tenantId, t), gte(on, q.from), lte(on, q.to))).orderBy(asc(pharmacySale.createdAt)).limit(5000);
+    const out: any[] = [];
+    for (const { s, p, doctor, regNo } of rows) s.items.forEach((l, i) => {
+      const c = cls.get(l.medicineId); if (!c || (q.cls !== 'all' && c !== q.cls)) return;
+      const returned = s.returns.reduce((n, r) => n + (r.lines.find((x) => x.line === i)?.qty ?? 0), 0);
+      out.push({ at: s.createdAt, invoiceNo: s.invoiceNo, patient: p.fullName, patientNo: p.patientNo, age: p.ageYears, sex: p.sex, address: p.locality, doctor: doctor ?? null, regNo: regNo ?? null,
+        medicine: l.name, cls: c, batchNo: l.batchNo ?? null, expiry: l.expiry ?? null, qty: l.qty, returned, noRx: !s.encounterId });
+    });
+    return out;
+  });
+  /** Printing or downloading the register is a legal record, so every pharmacist may; it is written to the audit log. */
+  route(app, 'post', '/pharmacy/schedule-register/export', 'pharmacy.read', async (req) => {
+    z.object({ from: z.string(), to: z.string(), how: z.enum(['print', 'csv']) }).parse(req.body); return { ok: true };
+  });
+
   /** Bills in a date range with refunds, and what the drawer should hold. */
   route(app, 'get', '/pharmacy/bills', 'pharmacy.read', async (req, tx) => {
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);

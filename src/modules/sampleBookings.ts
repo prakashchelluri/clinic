@@ -18,6 +18,8 @@ import { receiveStock, schemeFree, type Actor } from './stock.js';
  */
 const MARKER = 'sample-bookings-marker';
 
+/** The sample's deliberately low (Terbinafine) and expiring (Sunscreen) items: no sample sale touches them, so the Stock page always shows both cases. */
+const KEEP_STOCK = /^(Terbinafine|Sunscreen)/;
 export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: string, origin: string) {
   const first = !(await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.idempotencyKey, MARKER))).limit(1)).length;
   const ten = (await tx.select().from(tenant).where(eq(tenant.id, t)))[0];
@@ -234,6 +236,7 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
       const items: any[] = []; const notIssued: any[] = [];
       for (const [k, x] of its.entries()) {
         const want = prescribedQty(x.i, x.m);
+        if (KEEP_STOCK.test(x.m.name)) { notIssued.push({ prescriptionItemId: x.i.id, reason: 'Will buy later' }); continue; } // the demo's low and expiring items stay as set up
         if (k === 1 && h % 4 === 1) { notIssued.push({ prescriptionItemId: x.i.id, reason: (['Has at home', 'Will buy later', 'Bought outside'] as const)[h % 3] }); continue; }
         const qty = h % 5 === 2 && want > 1 ? 1 : want;
         if (qty < want) notIssued.push({ prescriptionItemId: x.i.id, reason: 'Will buy later' });
@@ -249,7 +252,7 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
 
     // C. counter sales without a prescription: real invoices from catalogue prices, a few every day (the first one of the day is the marker)
     const sold = await tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), sql`${pharmacySale.encounterId} is null`, sql`${pharmacySale.createdAt} >= ${at(day, '00:00')} and ${pharmacySale.createdAt} < ${at(addDays(day, 1), '00:00')}`)).limit(1);
-    const priced = meds.filter((m) => m.mrpPaise > 0);
+    const priced = meds.filter((m) => m.mrpPaise > 0 && !KEEP_STOCK.test(m.name));
     if (!sold.length && priced.length) {
       for (let i = 0; i < 3 + rnd(2); i++) {
         const items = Array.from({ length: 1 + rnd(3) }, () => ({ medicineId: priced[rnd(priced.length)].id, qty: 1 + rnd(3) }))
@@ -283,7 +286,7 @@ async function loadStock(tx: Tx, a: Actor, today: string, meds: (typeof medicine
   const priced = meds.filter((m) => m.mrpPaise > 0); if (!priced.length) return;
   const ym = (days: number) => addDays(today, days).slice(0, 7);
   const by = (n: string) => priced.find((m) => m.name === n);
-  await receiveStock(tx, a, { keepOpen: false, lines: priced.map((m, i) => ({ medicineId: m.id, qty: m.name.startsWith('Terbinafine') ? 3 : ['tab', 'cap'].includes(m.form ?? '') ? 40 : 30, freeQty: 0,
+  await receiveStock(tx, a, { keepOpen: false, lines: priced.map((m, i) => ({ medicineId: m.id, qty: m.name.startsWith('Terbinafine') ? 3 : ['tab', 'cap'].includes(m.form ?? '') ? 400 : 300, freeQty: 0,
     ratePaise: Math.round(m.mrpPaise * 0.62), discBp: 0, batchNo: `OPN${String(i + 1).padStart(3, '0')}`, expiry: m.name.startsWith('Sunscreen') ? ym(50) : ym(540) })) }, today);
   const [g] = await tx.insert(vendor).values({ tenantId: t, name: 'Godavari Medical Agencies', phone: '9000000001', address: 'Rajahmundry' }).returning();
   await tx.insert(vendor).values({ tenantId: t, name: 'Sai Pharma Distributors', phone: '9000000002', address: 'Kakinada' });
