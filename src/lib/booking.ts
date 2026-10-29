@@ -19,7 +19,7 @@ export function bookingSettings(settings: any) {
   };
 }
 
-export const MESSAGE_KINDS = ['confirmation', 'requested', 'reminder', 'moved', 'cancelled', 'declined'] as const;
+export const MESSAGE_KINDS = ['confirmation', 'requested', 'reminder', 'moved', 'cancelled', 'declined', 'late', 'reschedule'] as const;
 export type MessageKind = (typeof MESSAGE_KINDS)[number];
 export const DEFAULT_TEMPLATES: Record<MessageKind, string> = {
   confirmation: 'Hello {patient}, your {visitType} at {clinic} is booked for {date}, {time} with {doctor}. Please arrive by {arriveBy}. Confirm, cancel or change: {link}',
@@ -28,6 +28,8 @@ export const DEFAULT_TEMPLATES: Record<MessageKind, string> = {
   moved: 'Hello {patient}, your visit at {clinic} is now on {date}, {time} with {doctor}. Arrive by {arriveBy}. Details: {link}',
   cancelled: 'Hello {patient}, your visit at {clinic} on {date}, {time} has been cancelled. Call us to book again.',
   declined: 'Hello {patient}, sorry, {clinic} could not take the {date}, {time} request. {reason} Please pick another time: {bookLink}',
+  late: 'Hello {patient}, {doctor} at {clinic} is running about {reason} late today. Your {time} visit will start a little later. Sorry for the wait.',
+  reschedule: 'Hello {patient}, {doctor} is not available for your visit on {date}, {time} at {clinic}. {reason} Please pick another time: {link}',
 };
 export const TEMPLATE_VARS = ['patient', 'clinic', 'visitType', 'date', 'time', 'arriveBy', 'doctor', 'link', 'bookLink', 'reason'];
 

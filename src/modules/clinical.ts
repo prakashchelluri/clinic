@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
-import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, type FormSchema } from '../db/schema.js';
+import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, type FormSchema } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
@@ -90,6 +90,41 @@ export function clinicalRoutes(app: FastifyInstance) {
       await tx.update(visit).set({ status: 'waiting' }).where(eq(visit.id, enc.visitId)); // intake done, back to doctor's queue
     }
     return getEncounter(tx, t, id);
+  });
+
+  // --- templates: a doctor's saved starting points (Tinea, Acne moderate...), most used first ---
+  route(app, 'get', '/rx-templates', 'encounter.intake', async (req, tx) => {
+    const t = req.ctx.tenantId; const pid = req.ctx.practitionerId;
+    return tx.select().from(rxTemplate).where(and(eq(rxTemplate.tenantId, t), pid ? sql`(${rxTemplate.practitionerId} = ${pid} or ${rxTemplate.practitionerId} is null)` : sql`true`))
+      .orderBy(desc(rxTemplate.uses), asc(rxTemplate.name));
+  });
+  route(app, 'post', '/rx-templates', 'encounter.complete', async (req, tx) => {
+    const b = z.object({ name: z.string().trim().min(2).max(80), data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]) }).parse(req.body);
+    const t = req.ctx.tenantId; const pid = req.ctx.practitionerId ?? null;
+    // Same name for the same doctor replaces the old one: "Save as template" twice updates it.
+    const old = await tx.select().from(rxTemplate).where(and(eq(rxTemplate.tenantId, t), sql`lower(${rxTemplate.name}) = lower(${b.name})`, pid ? eq(rxTemplate.practitionerId, pid) : sql`${rxTemplate.practitionerId} is null`)).then((r) => r[0]);
+    // Keep only what describes the problem, not this patient's review answers.
+    const { review: _r, ...data } = b.data;
+    const recs = b.recommendations.map(({ dueOn: _d, ...r }) => r);
+    const [row] = old ? await tx.update(rxTemplate).set({ data, prescription: b.prescription, recommendations: recs }).where(eq(rxTemplate.id, old.id)).returning()
+      : await tx.insert(rxTemplate).values({ tenantId: t, practitionerId: pid, name: b.name, data, prescription: b.prescription, recommendations: recs }).returning();
+    await emit(tx, req.ctx, 'rx_template.saved', 'rx_template', row.id, { name: b.name });
+    return row;
+  });
+  route(app, 'post', '/rx-templates/:id/use', 'encounter.intake', async (req, tx) => {
+    const [row] = await tx.update(rxTemplate).set({ uses: sql`${rxTemplate.uses} + 1` }).where(and(eq(rxTemplate.id, (req.params as any).id), eq(rxTemplate.tenantId, req.ctx.tenantId))).returning();
+    if (!row) throw new HttpError(404, 'NOT_FOUND'); return row;
+  });
+  route(app, 'delete', '/rx-templates/:id', 'encounter.complete', async (req, tx) => {
+    const [row] = await tx.delete(rxTemplate).where(and(eq(rxTemplate.id, (req.params as any).id), eq(rxTemplate.tenantId, req.ctx.tenantId))).returning();
+    if (!row) throw new HttpError(404, 'NOT_FOUND'); return { ok: true };
+  });
+
+  /** Units on the shelf per medicine (unexpired), so the doctor sees what the pharmacy can give. No prices. */
+  route(app, 'get', '/encounters-stock', 'encounter.intake', async (req, tx) => {
+    const rows = await tx.select({ m: stockBatch.medicineId, n: sql<number>`sum(${stockBatch.qty})::int` }).from(stockBatch)
+      .where(and(eq(stockBatch.tenantId, req.ctx.tenantId), sql`${stockBatch.qty} > 0`, sql`${stockBatch.expiry} >= ${todayIn(req.ctx.timezone)}`)).groupBy(stockBatch.medicineId);
+    return Object.fromEntries(rows.map((r) => [r.m, r.n]));
   });
 
   /** Everything needed to render the printed prescription. */

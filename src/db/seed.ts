@@ -1,6 +1,6 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { db } from './index.js';
-import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, service, TENANT_TABLES, type FormSchema } from './schema.js';
+import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, service, rxTemplate, TENANT_TABLES, type FormSchema } from './schema.js';
 import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
@@ -71,6 +71,22 @@ const DEFAULT_SERVICES = [
   { name: 'Procedure follow-up', description: 'Check after a procedure sitting', minutes: 30, color: '#2F5D4B', onlineBookable: false, fee: 'FREE' },
 ];
 
+/** Starter consultation templates shared by the clinic's doctors; each doctor's own "Save as template" adds to them. Lines whose medicine is missing are left out. */
+async function insertStarterTemplates(db: any, tid: string) {
+  const meds = await db.select().from(medicine).where(eq(medicine.tenantId, tid));
+  const rx = (name: string, frequency: string, durationDays: number, instructions?: string) => { const m = meds.find((x: any) => x.name === name); return m && { name, medicineId: m.id, dose: m.defaults?.dose, route: m.defaults?.route, frequency, durationDays, instructions }; };
+  await db.insert(rxTemplate).values([
+    { tenantId: tid, name: 'Tinea corporis', data: { complaint: { chief_complaint: ['Itching', 'Rash'] }, exam: { morphology: ['Plaque', 'Scale'] }, assessment: { diagnosis: [{ name: 'Tinea corporis', severity: 'Moderate' }] }, plan: { advice: "Keep the area dry\nDon't share towels\nWash clothes in hot water\nNo steroid creams" } },
+      prescription: [rx('Terbinafine 250 mg', '1-0-0', 14, 'after food'), rx('Ketoconazole 2% cream', '1-0-1', 28, '2 cm beyond the edge'), rx('Cetirizine 10 mg', '0-0-1', 10, 'for itching')].filter(Boolean), recommendations: [{ kind: 'followup', intervalDays: 14 }] },
+    { tenantId: tid, name: 'Acne · moderate', data: { complaint: { chief_complaint: ['Pimples'], site: ['Face'] }, exam: { morphology: ['Papule', 'Pustule', 'Comedone'] }, assessment: { diagnosis: [{ name: 'Acne vulgaris', severity: 'Moderate' }] }, plan: { advice: 'Mild soap only\nAvoid scrubbing\nSunscreen every 3 hours' } },
+      prescription: [rx('Adapalene 0.1% gel', 'at night', 30), rx('Clindamycin 1% gel', 'morning', 30), rx('Doxycycline 100 mg', '1-0-0', 30, 'after food'), rx('Sunscreen SPF 50', 'morning', 30)].filter(Boolean), recommendations: [{ kind: 'followup', intervalDays: 30 }] },
+    { tenantId: tid, name: 'Melasma', data: { complaint: { chief_complaint: ['Dark patches'], site: ['Face'] }, exam: { morphology: ['Hyperpigmentation'], distribution: 'Photo-exposed' }, assessment: { diagnosis: [{ name: 'Melasma' }] }, plan: { advice: 'Sunscreen every 3 hours\nAvoid scrubbing' } },
+      prescription: [rx('Sunscreen SPF 50', 'morning', 60, 'every 3 hours outdoors'), rx('Moisturiser (ceramide)', 'twice daily', 60)].filter(Boolean), recommendations: [{ kind: 'followup', intervalDays: 30 }] },
+    { tenantId: tid, name: 'Urticaria', data: { complaint: { chief_complaint: ['Itching'] }, assessment: { diagnosis: [{ name: 'Urticaria' }] }, plan: { advice: 'Loose cotton clothes' } },
+      prescription: [rx('Cetirizine 10 mg', '0-0-1', 14)].filter(Boolean), recommendations: [{ kind: 'followup', intervalDays: 14 }] },
+  ]);
+}
+
 async function insertDefaultServices(db: any, tid: string) {
   const fees = await db.select().from(feeCategory).where(eq(feeCategory.tenantId, tid));
   const fee = (code: string) => fees.find((f: any) => f.code === code);
@@ -111,6 +127,7 @@ export async function createClinic(input: NewClinic) {
     { tenantId: tid, code: 'ONL', name: 'Online consultation', amountPaise: 50000, affectsCapacity: false },
   ]);
   await db.insert(medicine).values(DERM_MEDICINES.map((m) => ({ ...m, packSize: ['tab', 'cap'].includes(m.form) ? 10 : 1, reorderLevel: 5, tenantId: tid })));
+  await insertStarterTemplates(db, tid);
   await db.insert(procedureCatalog).values(DERM_PROCEDURES.map((p) => ({ ...p, tenantId: tid, specialtyId: derm.id })));
   await db.insert(room).values(DERM_ROOMS.map((r) => ({ ...r, tenantId: tid, branchId: b.id })));
   await insertDefaultServices(db, tid);
@@ -129,6 +146,7 @@ export async function ensureFormsCurrent() {
     for (const p of DERM_PROCEDURES) await db.execute(sql`update procedure_catalog set required_capability = ${p.requiredCapability}, buffer_minutes = ${(p as any).bufferMinutes ?? 0} where name = ${p.name} and required_capability is null`);
     // Visit types arrived with online booking: give every clinic a sensible starting set once.
     if (!(await db.select({ id: service.id }).from(service).where(eq(service.tenantId, t.id)).limit(1)).length) await insertDefaultServices(db, t.id);
+    if (!(await db.select({ id: rxTemplate.id }).from(rxTemplate).where(eq(rxTemplate.tenantId, t.id)).limit(1)).length) await insertStarterTemplates(db, t.id);
 
     const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r: any) => r[0]);
     // Only auto-upgrade clinics still on the stock pack (no owner-edited versions beyond it).

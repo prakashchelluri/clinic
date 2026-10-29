@@ -16,6 +16,8 @@ const KINDS: [string, string, string][] = [
   ['moved', 'Booking moved', 'Sent when reception moves a booking'],
   ['cancelled', 'Booking cancelled', 'Sent when reception cancels'],
   ['declined', 'Request declined', 'Sent when reception declines an online request'],
+  ['late', 'Doctor running late', 'Sent when the doctor taps Running late; {reason} is the delay, e.g. 30 minutes'],
+  ['reschedule', 'Please pick another time', 'Sent when the doctor is not available and the patient is asked to choose a new time'],
 ];
 const VARS = ['patient', 'clinic', 'visitType', 'date', 'time', 'arriveBy', 'doctor', 'link', 'bookLink', 'reason'];
 const SAMPLE: Record<string, string> = { patient: 'Lakshmi Devi', clinic: 'Your clinic', visitType: 'New consultation', date: 'Thu, 22 Oct', time: '11:00–12:00', arriveBy: '10:25', doctor: 'Dr. Main', link: 'https://…/a/…', bookLink: 'https://…/book/…', reason: 'Doctor on leave.' };

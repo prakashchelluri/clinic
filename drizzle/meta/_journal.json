@@ -85,6 +85,13 @@
       "when": 1792900000000,
       "tag": "0011_stock",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793000000000,
+      "tag": "0012_doctor_day",
+      "breakpoints": true
     }
   ]
 }

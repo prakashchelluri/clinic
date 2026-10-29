@@ -256,7 +256,7 @@ export const calendarBlock = pgTable('calendar_block', {
   day: date('day').notNull(),
   startTime: text('start_time').notNull(), // HH:MM local
   endTime: text('end_time').notNull(),
-  kind: text('kind').notNull(), // break | leave | procedure | other
+  kind: text('kind').notNull(), // break | leave | procedure | other | late (zero length: running late, no places lost) | stop (no new bookings)
   note: text('note'),
   procedureSessionId: uuid('procedure_session_id'),
 }, (t) => [index('block_day').on(t.tenantId, t.day)]);
@@ -423,6 +423,28 @@ export const vendorOwed = pgTable('vendor_owed', {
   decidedBy: text('decided_by').notNull(),
 }, (t) => [index('vendor_owed_v').on(t.tenantId, t.vendorId, t.status)]);
 
+// A doctor's saved starting point for a consultation: every row of the note, the medicines and the plan.
+export const rxTemplate = pgTable('rx_template', {
+  ...tenantCols,
+  practitionerId: uuid('practitioner_id'),
+  name: text('name').notNull(),
+  data: jsonb('data').$type<Record<string, any>>().notNull().default({}),
+  prescription: jsonb('prescription').$type<any[]>().notNull().default([]),
+  recommendations: jsonb('recommendations').$type<any[]>().notNull().default([]),
+  uses: integer('uses').notNull().default(0),
+}, (t) => [index('rx_template_t').on(t.tenantId, t.practitionerId)]);
+
+// Patients who want an earlier place; offered one when a place opens.
+export const waitlist = pgTable('waitlist', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  practitionerId: uuid('practitioner_id'),
+  note: text('note'),
+  untilDay: date('until_day'),
+  status: text('status').notNull().default('waiting'), // waiting | offered | booked | removed
+  offeredAt: ts('offered_at'),
+}, (t) => [index('waitlist_t').on(t.tenantId, t.status)]);
+
 export const expense = pgTable('expense', {
   ...tenantCols,
   day: date('day').notNull(),
@@ -480,7 +502,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'rx_template', 'waitlist', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

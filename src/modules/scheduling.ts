@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, gte, lte, inArray, or, ilike } from 'drizzle-orm';
-import { session, appointment, service, message, recommendation, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, type Routine } from '../db/schema.js';
+import { session, appointment, service, message, recommendation, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, waitlist, type Routine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, sent, todayIn, nextNumber } from '../lib/core.js';
+import { emit, sent, todayIn, nextNumber, addDays } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { newToken, queueMessage, planReminders, dropReminders, originOf, bookingSettings } from '../lib/booking.js';
 
@@ -12,6 +12,8 @@ export const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Numb
 export const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const overlapMin = (aS: number, aE: number, bS: number, bE: number) => Math.max(0, Math.min(aE, bE) - Math.max(aS, bS));
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+/** Current local time as HH:MM in the clinic's timezone. */
+const nowHHMM = (tz: string) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 
 /** 0=Sunday … 6=Saturday for a YYYY-MM-DD day. */
 const weekday = (day: string) => new Date(day + 'T00:00:00Z').getUTCDay();
@@ -167,17 +169,162 @@ export function schedulingRoutes(app: FastifyInstance) {
     await emit(tx, req.ctx, 'calendar.blocked', 'calendar_block', row.id, body);
     return row;
   });
-  route(app, 'delete', '/calendar/blocks/:id', 'appointment.write', async (req, tx) => {
-    const [row] = await tx.delete(calendarBlock).where(and(eq(calendarBlock.id, (req.params as any).id), eq(calendarBlock.tenantId, req.ctx.tenantId), sql`${calendarBlock.kind} <> 'procedure'`)).returning();
-    if (!row) throw new HttpError(404, 'NOT_FOUND'); return { ok: true };
+  route(app, 'delete', '/calendar/blocks/:id', null, async (req, tx) => {
+    const cur = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.id, (req.params as any).id), eq(calendarBlock.tenantId, req.ctx.tenantId), sql`${calendarBlock.kind} <> 'procedure'`)).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    if (!(can(req.perms, 'appointment.write') || (cur.practitionerId && req.ctx.practitionerId === cur.practitionerId))) throw new HttpError(403, 'FORBIDDEN:appointment.write');
+    await tx.delete(calendarBlock).where(eq(calendarBlock.id, cur.id));
+    // Undoing "running late" also stops the late messages that have not gone out yet.
+    if (cur.kind === 'late' && cur.practitionerId) await tx.execute(sql`update message m set status = 'skipped', error = 'undone' from appointment a join session s on s.id = a.session_id
+      where m.appointment_id = a.id and m.tenant_id = ${req.ctx.tenantId} and m.kind = 'late' and m.status = 'pending' and s.practitioner_id = ${cur.practitionerId} and s.day = ${cur.day}`);
+    await emit(tx, req.ctx, 'calendar.unblocked', 'calendar_block', cur.id, cur);
+    return { ok: true };
+  });
+
+  /** Free places for one doctor (or all) over the next days: what the booking panel and "move to" offer. */
+  async function freePlaces(tx: Tx, t: string, from: string, days: number, pid: string | null, minStart?: string) {
+    const out: any[] = [];
+    const docs = new Map((await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(eq(practitioner.tenantId, t))).map((d) => [d.id, d.name]));
+    for (let i = 0; i < days; i++) {
+      const day = addDays(from, i);
+      for (const w of await windowsForDay(tx, t, day, pid)) if (w.free > 0 && !(i === 0 && minStart && w.startTime < minStart))
+        out.push({ sessionId: w.id, day, startTime: w.startTime, endTime: w.endTime, free: w.free, practitionerId: w.practitionerId, doctor: w.practitionerId ? docs.get(w.practitionerId) : null });
+    }
+    return out;
+  }
+  route(app, 'get', '/calendar/free', 'appointment.read', async (req, tx) => {
+    const q = z.object({ from: DAY.optional(), days: z.coerce.number().int().min(1).max(21).default(7), practitionerId: z.string().uuid().optional() }).parse(req.query);
+    const today = todayIn(req.ctx.timezone); const from = q.from && q.from > today ? q.from : today;
+    return freePlaces(tx, req.ctx.tenantId, from, q.days, q.practitionerId ?? null, from === today ? nowHHMM(req.ctx.timezone) : undefined);
+  });
+
+  /**
+   * The doctor's "Change my day": running late, break, leave early, away, stop new bookings, extra hours.
+   * Shows who is affected first (preview), then saves the block and handles the patients: move to the next free place,
+   * ask them to pick a new time, or leave it to the front desk to call. Doctors may change only their own day.
+   */
+  const DayChange = z.object({ practitionerId: z.string().uuid(), day: DAY, kind: z.enum(['late', 'break', 'early', 'away', 'stop', 'extra']),
+    minutes: z.number().int().min(5).max(240).optional(), time: HHMM.optional(), reason: z.string().trim().max(200).optional(),
+    handling: z.enum(['move', 'ask', 'call']).default('move'), preview: z.boolean().default(false) });
+  route(app, 'post', '/calendar/day-change', null, async (req, tx) => {
+    const b = DayChange.parse(req.body); const t = req.ctx.tenantId; const origin = originOf(req);
+    if (!(can(req.perms, 'appointment.write') || req.ctx.practitionerId === b.practitionerId)) throw new HttpError(403, 'FORBIDDEN:appointment.write');
+    const today = todayIn(req.ctx.timezone);
+    if (b.day < today) throw new HttpError(409, 'PAST_DAY');
+    const doc = await tx.select().from(practitioner).where(and(eq(practitioner.id, b.practitionerId), eq(practitioner.tenantId, t))).then((r) => r[0]);
+    if (!doc) throw new HttpError(404, 'NOT_FOUND');
+    const ws = await windowsForDay(tx, t, b.day, b.practitionerId);
+    const now = b.day === today ? nowHHMM(req.ctx.timezone) : '00:00';
+    const first = ws[0]?.startTime; const last = ws[ws.length - 1]?.endTime;
+    if (b.kind !== 'extra' && !ws.length) throw new HttpError(409, 'NOT_WORKING');
+    const need = (x: string | undefined, code: string) => { if (!x) throw new HttpError(400, code); return x; };
+    let block: any = null; let affectedWindows: string[] = []; let lateMins = 0; let extra: any = null;
+    switch (b.kind) {
+      case 'late': { lateMins = b.minutes ?? 30; block = { kind: 'late', startTime: now, endTime: now, note: `Running ${lateMins} min late` }; break; }
+      case 'break': { const s = b.time ?? (now > first! ? now : first!); const e = toHHMM(Math.min(toMin(s) + (b.minutes ?? 15), toMin(last!)));
+        if (toMin(e) <= toMin(s)) throw new HttpError(400, 'OUTSIDE_HOURS'); block = { kind: 'break', startTime: s, endTime: e, note: `Break until ${e}` }; break; }
+      case 'early': { const at = need(b.time, 'TIME_REQUIRED'); if (toMin(at) >= toMin(last!) || toMin(at) <= toMin(first!)) throw new HttpError(400, 'OUTSIDE_HOURS');
+        block = { kind: 'other', startTime: at, endTime: last!, note: `Leaves at ${at}${b.reason ? ` · ${b.reason}` : ''}` }; affectedWindows = ws.filter((w) => w.startTime >= at).map((w) => w.id); break; }
+      case 'away': { block = { kind: 'leave', startTime: '00:00', endTime: '23:59', note: b.reason ? `Away · ${b.reason}` : 'Away' }; affectedWindows = ws.map((w) => w.id); break; }
+      case 'stop': { const s = b.day === today ? now : first!; if (toMin(s) >= toMin(last!)) throw new HttpError(400, 'OUTSIDE_HOURS');
+        block = { kind: 'stop', startTime: s, endTime: last!, note: 'No new bookings' }; break; }
+      case 'extra': { const s = need(b.time, 'TIME_REQUIRED'); const e = toHHMM(toMin(s) + (b.minutes ?? 60));
+        if (toMin(e) > 23 * 60 + 59 || ws.some((w) => toMin(w.startTime) < toMin(e) && toMin(w.endTime) > toMin(s))) throw new HttpError(409, 'OVERLAPS_HOURS');
+        extra = { startTime: s, endTime: e }; break; }
+    }
+    // Who is affected: open bookings in the windows that close, or (running late) everyone still to be seen today.
+    const affectedIds = b.kind === 'late' ? ws.filter((w) => w.endTime > now).map((w) => w.id) : affectedWindows;
+    const appts = affectedIds.length ? await tx.select({ id: appointment.id, status: appointment.status, sessionId: appointment.sessionId, name: patient.fullName, phone: patient.phone, patientId: patient.id })
+      .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId))
+      .where(and(eq(appointment.tenantId, t), inArray(appointment.sessionId, affectedIds), inArray(appointment.status, b.kind === 'late' ? ['booked', 'confirmed', 'arrived'] : [...OPEN_STATUSES]))) : [];
+    const wOf = new Map(ws.map((w) => [w.id, w]));
+    // Next free place for the same doctor, from the next day on, filled in order so two patients never take the last place twice.
+    let pool: any[] | null = null;
+    const proposals = new Map<string, any>();
+    if (b.kind !== 'late' && appts.length && b.handling === 'move') {
+      pool = await freePlaces(tx, t, addDays(b.day, 1), 14, b.practitionerId);
+      // Evening patients go to an evening place and morning to morning where one is free; otherwise the earliest.
+      const half = (hhmm: string) => hhmm < '14:00';
+      for (const a of [...appts].sort((x, y) => wOf.get(x.sessionId)!.startTime.localeCompare(wOf.get(y.sessionId)!.startTime))) {
+        const at = wOf.get(a.sessionId)!.startTime;
+        const p = pool.find((x) => x.free > 0 && half(x.startTime) === half(at)) ?? pool.find((x) => x.free > 0); if (!p) continue; p.free--; proposals.set(a.id, p);
+      }
+    }
+    const affected = appts.map((a) => ({ ...a, time: wOf.get(a.sessionId)?.startTime ?? '', to: proposals.get(a.id) ?? null })).sort((x, y) => x.time.localeCompare(y.time));
+    if (b.preview) return { affected, block, extra };
+
+    let blockRow = null; let sessionRows: any[] = [];
+    if (block) [blockRow] = await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: b.practitionerId, day: b.day, ...block }).returning();
+    if (extra) {
+      const len = (doc.routine as Routine | null)?.windowMinutes || 60; const cap = (doc.routine as Routine | null)?.capacity || 7;
+      const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
+      const vals = []; for (let m = toMin(extra.startTime); m < toMin(extra.endTime); m += len) vals.push({ tenantId: t, branchId: br.id, practitionerId: b.practitionerId, day: b.day, startTime: toHHMM(m), endTime: toHHMM(Math.min(m + len, toMin(extra.endTime))), capacity: cap, note: 'Extra hours', source: 'manual' });
+      sessionRows = await tx.insert(session).values(vals).returning();
+    }
+    let moved = 0;
+    for (const a of affected) {
+      if (b.kind === 'late') { await queueMessage(tx, t, a.id, 'late', origin, { extra: { reason: `${lateMins} minutes` } }); continue; }
+      if (b.handling === 'move' && a.to) {
+        await tx.update(appointment).set({ sessionId: a.to.sessionId }).where(eq(appointment.id, a.id));
+        await emit(tx, req.ctx, 'appointment.moved', 'appointment', a.id, { from: a.sessionId, sessionId: a.to.sessionId, why: b.kind });
+        await planReminders(tx, t, a.id, origin); await queueMessage(tx, t, a.id, 'moved', origin); moved++;
+      } else if (b.handling === 'ask' || (b.handling === 'move' && !a.to)) await queueMessage(tx, t, a.id, 'reschedule', origin, { extra: { reason: b.reason ? `${b.reason}.` : '' } });
+    }
+    await emit(tx, req.ctx, 'calendar.day_changed', 'practitioner', b.practitionerId, { ...b, affected: affected.length, moved });
+    return { block: blockRow, sessions: sessionRows, affected, moved };
+  });
+
+  /** What the front desk must handle: online requests, patients left in hours a doctor gave up, places that opened for the waiting list. */
+  route(app, 'get', '/calendar/attention', 'appointment.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone); const until = addDays(today, 14);
+    const requests = await tx.select({ id: appointment.id, name: patient.fullName, day: session.day, startTime: session.startTime, practitionerId: session.practitionerId })
+      .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).innerJoin(patient, eq(patient.id, appointment.patientId))
+      .where(and(eq(appointment.tenantId, t), eq(appointment.status, 'requested'), gte(session.day, today))).orderBy(asc(session.day), asc(session.startTime));
+    const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), gte(calendarBlock.day, today), lte(calendarBlock.day, until), inArray(calendarBlock.kind, ['leave', 'other'])));
+    const toCall: any[] = [];
+    for (const bl of blocks.filter((x) => x.practitionerId)) {
+      const rows = await tx.select({ id: appointment.id, name: patient.fullName, phone: patient.phone, day: session.day, startTime: session.startTime, practitionerId: session.practitionerId, status: appointment.status })
+        .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).innerJoin(patient, eq(patient.id, appointment.patientId))
+        .where(and(eq(appointment.tenantId, t), eq(session.practitionerId, bl.practitionerId!), eq(session.day, bl.day), inArray(appointment.status, ['booked', 'confirmed']),
+          sql`${session.startTime} < ${bl.endTime} and ${session.endTime} > ${bl.startTime}`));
+      for (const r of rows) toCall.push({ ...r, why: bl.note ?? bl.kind });
+    }
+    const waiting = await tx.select({ n: sql<number>`count(*)::int` }).from(waitlist).where(and(eq(waitlist.tenantId, t), inArray(waitlist.status, ['waiting', 'offered']))).then((r) => r[0].n);
+    const open = waiting ? (await freePlaces(tx, t, today, 1, null, nowHHMM(req.ctx.timezone))).length : 0;
+    toCall.sort((x, y) => `${x.day}${x.startTime}`.localeCompare(`${y.day}${y.startTime}`));
+    return { requests, toCall, waiting, openToday: open };
+  });
+
+  // --- waiting list: patients who want an earlier place ---
+  route(app, 'get', '/waitlist', 'appointment.read', async (req, tx) =>
+    tx.select({ w: waitlist, p: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo }, doctor: practitioner.name })
+      .from(waitlist).innerJoin(patient, eq(patient.id, waitlist.patientId)).leftJoin(practitioner, eq(practitioner.id, waitlist.practitionerId))
+      .where(and(eq(waitlist.tenantId, req.ctx.tenantId), inArray(waitlist.status, ['waiting', 'offered']))).orderBy(asc(waitlist.createdAt))
+      .then((rows) => rows.map((r) => ({ ...r.w, patient: r.p, doctor: r.doctor }))));
+  route(app, 'post', '/waitlist', 'appointment.write', async (req, tx) => {
+    const b = z.object({ patientId: z.string().uuid(), practitionerId: z.string().uuid().nullable().optional(), note: z.string().trim().max(300).optional(), untilDay: DAY.optional() }).parse(req.body);
+    const [row] = await tx.insert(waitlist).values({ ...b, tenantId: req.ctx.tenantId }).returning();
+    await emit(tx, req.ctx, 'waitlist.added', 'waitlist', row.id, b);
+    return row;
+  });
+  route(app, 'patch', '/waitlist/:id', 'appointment.write', async (req, tx) => {
+    const b = z.object({ status: z.enum(['waiting', 'offered', 'booked', 'removed']) }).parse(req.body);
+    const [row] = await tx.update(waitlist).set({ status: b.status, ...(b.status === 'offered' ? { offeredAt: new Date().toISOString() } : {}) })
+      .where(and(eq(waitlist.id, (req.params as any).id), eq(waitlist.tenantId, req.ctx.tenantId))).returning();
+    if (!row) throw new HttpError(404, 'NOT_FOUND');
+    return row;
   });
 
   // --- appointments ---
   route(app, 'get', '/appointments', 'appointment.read', async (req, tx) => {
-    const day = String((req.query as any).day ?? todayIn(req.ctx.timezone));
-    return tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo }, s: { startTime: session.startTime, endTime: session.endTime, practitionerId: session.practitionerId }, svc: { name: service.name, color: service.color } })
+    const q = z.object({ day: DAY.optional(), patientId: z.string().uuid().optional() }).parse(req.query); const today = todayIn(req.ctx.timezone);
+    const day = String(q.day ?? today);
+    // ?patientId= lists that patient's open bookings from today on (the calendar's search), otherwise one day.
+    const where = q.patientId ? and(eq(appointment.tenantId, req.ctx.tenantId), eq(appointment.patientId, q.patientId), gte(session.day, today), inArray(appointment.status, [...OPEN_STATUSES]))
+      : and(eq(appointment.tenantId, req.ctx.tenantId), eq(session.day, day));
+    return tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo }, s: { day: session.day, startTime: session.startTime, endTime: session.endTime, practitionerId: session.practitionerId }, svc: { name: service.name, color: service.color } })
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(service, eq(service.id, appointment.serviceId))
-      .where(and(eq(appointment.tenantId, req.ctx.tenantId), eq(session.day, day))).orderBy(asc(session.startTime), asc(appointment.createdAt))
+      .where(where).orderBy(asc(session.day), asc(session.startTime), asc(appointment.createdAt))
       .then((rows) => rows.map((r) => ({ ...r.a, patient: r.p, window: r.s, service: r.svc?.name ? r.svc : null })));
   });
 
@@ -228,6 +375,8 @@ export function schedulingRoutes(app: FastifyInstance) {
     }
     const [row] = await tx.insert(appointment).values({ tenantId: t, patientId, sessionId: s.id, serviceId: svc?.id ?? null, note: body.note, source: body.source, overbooked: full, idempotencyKey: body.idempotencyKey, publicToken: newToken() }).returning();
     await emit(tx, req.ctx, 'appointment.booked', 'appointment', row.id, { patientId, sessionId: s.id, day: s.day, window: [s.startTime, s.endTime], overbooked: full, serviceId: svc?.id ?? null });
+    // Booking a patient who was on the waiting list takes them off it.
+    await tx.update(waitlist).set({ status: 'booked' }).where(and(eq(waitlist.tenantId, t), eq(waitlist.patientId, patientId!), inArray(waitlist.status, ['waiting', 'offered'])));
 
     // Repeat: same doctor, same window time, every N weeks. Dates without that window or with no room are reported, not forced.
     const series = { created: [] as string[], skipped: [] as { day: string; reason: string }[] };

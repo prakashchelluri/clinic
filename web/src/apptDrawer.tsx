@@ -10,7 +10,7 @@ export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' 
   arrived: { label: 'arrived', tone: 'sky' }, cancelled: { label: 'cancelled', tone: 'rose' }, no_show: { label: 'no-show', tone: 'rose' },
 };
 export const StatusChip = ({ s }: { s: string }) => <Chip tone={STATUS[s]?.tone ?? ''}>{STATUS[s]?.label ?? s}</Chip>;
-const MSG: Record<string, string> = { confirmation: 'Confirmation', requested: 'Request received', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', declined: 'Declined' };
+const MSG: Record<string, string> = { confirmation: 'Confirmation', requested: 'Request received', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', declined: 'Declined', late: 'Doctor running late', reschedule: 'Asked to pick a new time' };
 const MSG_STATUS: Record<string, string> = { pending: 'due', sent: 'sent', logged: 'ready (WhatsApp not connected)', failed: 'failed', skipped: 'not sent' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });

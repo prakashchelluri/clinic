@@ -5,7 +5,7 @@ import { procedureSession, calendarBlock, recommendation, procedureCatalog, room
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
-import { HttpError } from '../lib/auth.js';
+import { HttpError, can } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -95,11 +95,13 @@ export function procedureRoutes(app: FastifyInstance) {
   });
 
   /** Put a doctor on a sitting that has none (or change the doctor). The doctor's OP time is blocked like when scheduling. */
-  route(app, 'post', '/procedure-sessions/:id/assign', 'worklist.write', async (req, tx) => {
+  // The coordinator assigns anyone; a doctor may take a sitting that has no doctor ("Take it" on Today).
+  route(app, 'post', '/procedure-sessions/:id/assign', null, async (req, tx) => {
     const body = z.object({ practitionerId: z.string().uuid().nullable(), force: z.boolean().default(false) }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
     if (!ps) throw new HttpError(404, 'NOT_FOUND');
+    if (!(can(req.perms, 'worklist.write') || (!ps.practitionerId && !!body.practitionerId && body.practitionerId === req.ctx.practitionerId))) throw new HttpError(403, 'FORBIDDEN:worklist.write');
     if (ps.state !== 'confirmed') throw new HttpError(409, 'NOT_CHANGEABLE', { state: ps.state });
     const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
     if (proc?.requiresMainDoctor && !body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED');

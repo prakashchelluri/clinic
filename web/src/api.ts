@@ -33,6 +33,7 @@ const MESSAGES: Record<string, string> = {
   SAMPLE_ALREADY_LOADED: 'Test data is already loaded in this clinic.', LOAD_BASE_SAMPLE_FIRST: 'Load the sample patients first.',
   PHOTO_CONSENT_REQUIRED: "Record the patient's photo consent first.", SITTING_NOT_FOR_PATIENT: 'That procedure sitting belongs to another patient.', TOO_LARGE: 'That file is too large (10 MB at most).', UNSUPPORTED_TYPE: 'Only JPG, PNG, WebP and PDF files can be added.',
   DUPLICATE: 'That already exists.',
+  NOT_WORKING: 'The doctor is not working that day.', PAST_DAY: 'That day is over. Pick today or later.', OVERLAPS_HOURS: 'Those hours overlap the doctor’s usual hours. Pick a time after they end.', TIME_REQUIRED: 'Pick a time.', OUTSIDE_HOURS: 'Pick a time inside the doctor’s hours for that day.',
   BAD_RULE: 'That rule is not valid, so it was not saved.',
   TOO_MANY_ATTEMPTS: 'Too many wrong attempts. Please wait a few minutes and try again.',
   BAD_CREDENTIALS: 'That email or password is not right.',

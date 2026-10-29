@@ -1,195 +1,220 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
-import { get, patch, post, qc, today, errText } from '../api';
+import { get, post, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Num, Segmented, Skeleton, toast } from '../ui';
-import { PhotoCapture } from '../photos';
+import { Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
 import { openViewer } from '../viewer';
+import { ChangeMyDay, type ChangeKind } from '../dayChange';
+import { joinList } from '../encounterDetail';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+const nowHHMM = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+const addDay = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 /** "10:00–13:00, 16:00–20:00" from back-to-back windows. */
 const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const last = out[out.length - 1]; if (last && last[1] === w.startTime) last[1] = w.endTime; else out.push([w.startTime, w.endTime]); return out; }, []).map(([a, b]) => `${a}–${b}`).join(', ');
 
-type Row = { key: string; time: string; sort: number; rank: number; patient: any; type?: { name: string; color: string } | null; label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky'; visit?: any; note?: string };
-type Tab = 'now' | 'done';
+type Pill = { key: string; label: string; cls: string; sort: number; patientId?: string; title?: string };
+const PILL: Record<string, string> = {
+  done: 'bg-sage-soft text-sage border-transparent', with: 'bg-ink text-white border-transparent', wait: 'bg-amber-soft text-[#6E4D10] border-transparent',
+  booked: 'bg-white border-line', req: 'bg-white border-dashed border-clay text-[#9A3412]', gone: 'border-dashed border-rose/50 text-rose line-through', proc: 'bg-sky-soft text-sky border-transparent',
+};
 
-/** The doctor's landing page: the whole day at a glance, who is next, the day's procedures, and what still needs them. No money. */
+/** The doctor's day: who is with me and who is next, the day as a calendar, what is left before I go, tomorrow in one line. No money. */
 export function Today() {
   const { me, perms, cfg } = useOutletContext<any>();
   const nav = useNavigate();
   const doc: string | null = me.practitionerId ?? null;
+  const docName = cfg?.practitioners?.find((p: any) => p.id === doc)?.name ?? me.name;
+  const tmr = addDay(today(), 1);
   const fd = useQuery({ queryKey: ['frontdesk', 'today-doc'], queryFn: () => get('/frontdesk'), refetchInterval: 5000 });
   const cal = useQuery({ queryKey: ['calendar', today(), doc ?? 'all'], queryFn: () => get(`/calendar?day=${today()}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 30000 });
+  const tom = useQuery({ queryKey: ['calendar', tmr, doc ?? 'all'], queryFn: () => get(`/calendar?day=${tmr}${doc ? `&practitionerId=${doc}` : ''}`) });
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), enabled: can(perms, 'worklist.read') });
   const fus = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), enabled: can(perms, 'worklist.read') });
-  const [pmode, setPmode] = useState<'today' | 'tomorrow' | 'date'>('today'); const [pdate, setPdate] = useState(today());
-  const tomorrow = (() => { const x = new Date(today() + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); })();
-  const day = pmode === 'today' ? today() : pmode === 'tomorrow' ? tomorrow : pdate;
-  const pq = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
-  const todays = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
-  const pcount = useQuery({ queryKey: ['pcounts', today(), 'two'], queryFn: () => get(`/procedure-sessions/counts?from=${today()}&days=2`), refetchInterval: 60000, enabled: can(perms, 'worklist.read') });
+  const allProcs = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
   const resq = useQuery({ queryKey: ['results'], queryFn: () => get('/results?days=7'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
   const open = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }), onError: (e) => toast(errText(e), 'err') });
-  const setState = useMutation({ mutationFn: ({ id, state }: any) => patch(`/procedure-sessions/${id}`, { state }), onSuccess: () => { ['calendar', 'psessions', 'pcounts'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Updated'); }, onError: (e) => toast(errText(e), 'err') });
-  const [tab, setTab] = useState<Tab>('now');
-  const [cap, setCap] = useState<any>(null);
+  const take = useMutation({ mutationFn: (id: string) => post(`/procedure-sessions/${id}/assign`, { practitionerId: doc }), onSuccess: () => { ['calendar', 'psessions'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('The sitting is yours'); }, onError: (e) => toast(errText(e), 'err') });
+  const [change, setChange] = useState<{ kind: ChangeKind; day?: string } | null>(null);
+
   const d = fd.data; const c = cal.data;
-  if (!d || !c) return <div className="space-y-4"><Skeleton rows={2} /><Skeleton rows={6} /></div>;
+  const visits: any[] = (d?.visits ?? []).filter((v: any) => !doc || !v.practitionerId || v.practitionerId === doc);
+  const withYou = visits.find((v) => v.status === 'in_consult');
+  const waiting = visits.filter((v) => v.status === 'waiting' || v.status === 'intake');
+  const next = waiting[0];
+  const nextTl = useQuery({ queryKey: ['timeline', next?.patient?.id], queryFn: () => get(`/patients/${next.patient.id}/timeline`), enabled: !!next });
+  if (!d || !c) return <div className="space-y-4"><Skeleton rows={2} /><Skeleton rows={8} /></div>;
 
-  const mine = (pid: string | null) => !doc || !pid || pid === doc;
-  const visits = d.visits.filter((v: any) => mine(v.practitionerId));
-  const byAppt = new Map(visits.filter((v: any) => v.appointmentId).map((v: any) => [v.appointmentId, v]));
-  const qpos = new Map(visits.map((v: any, i: number) => [v.id, i]));
-  const rowOfVisit = (v: any, time: string, type: Row['type'], key: string): Row => {
-    const st = v.status;
-    if (st === 'in_consult') return { key, time, sort: 0, rank: 0, patient: v.patient, type, label: 'with you', tone: 'clay', visit: v };
-    if (st === 'waiting' || st === 'intake') return { key, time, sort: qpos.get(v.id) as number, rank: 1, patient: v.patient, type, label: `${st === 'intake' ? 'at intake' : 'waiting'} ${minsSince(v.arrivedAt)} min`, tone: 'amber', visit: v };
-    if (st === 'left') return { key, time, sort: toMin(time), rank: 4, patient: v.patient, type, label: 'left', tone: 'rose', visit: v };
-    return { key, time, sort: toMin(time), rank: 3, patient: v.patient, type, label: v.encounterStatus === 'draft' ? 'done · note unfinished' : 'done', tone: v.encounterStatus === 'draft' ? 'amber' : 'sage', visit: v };
+  // --- the day as rows: one per booking window, gaps between windows shown as not working ---
+  const now = nowHHMM();
+  const byAppt = new Map(visits.filter((v) => v.appointmentId).map((v) => [v.appointmentId, v]));
+  const visitPill = (v: any, key: string): Pill => {
+    const st = v.status; const name = v.patient.fullName;
+    if (st === 'in_consult') return { key, label: `${name} · with you`, cls: PILL.with, sort: 0, patientId: v.patient.id };
+    if (st === 'waiting' || st === 'intake') return { key, label: `${name} · ${minsSince(v.arrivedAt)} min`, cls: PILL.wait, sort: 1, patientId: v.patient.id };
+    if (st === 'left') return { key, label: `${name} · left`, cls: PILL.gone, sort: 4, patientId: v.patient.id };
+    return { key, label: v.encounterStatus === 'draft' ? `${name} · note unfinished` : name, cls: PILL.done, sort: 3, patientId: v.patient.id };
   };
-  const nowMin = toMin(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()));
-  const late = (w: any) => toMin(w.endTime) < nowMin; // window over and the patient never came
-  const rows: Row[] = [];
-  for (const w of c.windows) for (const a of w.appointments ?? []) {
-    const type = a.service ? { name: a.service, color: a.color } : null;
-    const v = byAppt.get(a.id);
-    if (v) rows.push(rowOfVisit(v, w.startTime, type, a.id));
-    else rows.push({ key: a.id, time: w.startTime, sort: toMin(w.startTime), rank: a.status === 'no_show' ? 4 : 2, patient: { id: a.patientId, fullName: a.name, phone: a.phone }, type,
-      label: a.status === 'no_show' ? 'no-show' : late(w) ? 'not arrived' : a.status === 'requested' ? 'requested online' : a.status === 'confirmed' ? 'booked · confirmed' : 'booked', tone: a.status === 'no_show' || late(w) ? 'rose' : a.status === 'confirmed' ? 'sky' : '', note: a.note });
+  const windows: any[] = c.windows;
+  const rows: { time: string; end: string; pills: Pill[]; free: number; off?: string }[] = windows.map((w) => {
+    const pills: Pill[] = (w.appointments ?? []).map((a: any) => {
+      const v = byAppt.get(a.id);
+      if (v) return visitPill(v, a.id);
+      const notCome = w.endTime < now;
+      return { key: a.id, label: a.status === 'no_show' ? `${a.name} · no-show` : notCome ? `${a.name} · not arrived` : a.status === 'requested' ? `${a.name} · online request` : a.name,
+        cls: a.status === 'no_show' || notCome ? PILL.gone : a.status === 'requested' ? PILL.req : PILL.booked, sort: 2, patientId: a.patientId, title: [a.service, a.note].filter(Boolean).join(' · ') };
+    });
+    const blk = (w.reductions ?? []).find((r: any) => r.kind === 'leave' || r.kind === 'other' || r.kind === 'stop');
+    return { time: w.startTime, end: w.endTime, pills, free: Math.max(0, w.free), off: blk && w.effectiveCapacity === 0 && !pills.length ? blk.note ?? 'Closed' : undefined };
+  });
+  // walk-ins go into the window they arrived in (or the nearest earlier one)
+  for (const v of visits.filter((x) => !x.appointmentId)) {
+    const at = hhmm(v.arrivedAt); let r = [...rows].reverse().find((x) => x.time <= at) ?? rows[0];
+    if (!r) { r = { time: at, end: at, pills: [], free: 0 }; rows.push(r); }
+    r.pills.push({ ...visitPill(v, v.id), label: `${visitPill(v, v.id).label}${v.category === 'NGT' ? ' · emergency' : ' · walk-in'}` });
   }
-  for (const v of visits) if (!v.appointmentId) rows.push(rowOfVisit(v, hhmm(v.arrivedAt), { name: v.category === 'NGT' ? 'Emergency' : 'Walk-in', color: '#8A877E' }, v.id));
-  rows.sort((a, b) => a.rank - b.rank || a.sort - b.sort);
-  const shown = rows.filter((r) => (tab === 'now' && r.rank <= 1) || (tab === 'done' && r.rank >= 3));
-  const later = rows.filter((r) => r.rank === 2).length; // booked, not arrived yet
-  const firstWaiting = rows.find((r) => r.rank === 1);
+  for (const p of c.procedures ?? []) {
+    let r = rows.find((x) => x.time <= p.startTime && p.startTime < x.end);
+    if (!r) { r = { time: p.startTime, end: p.endTime, pills: [], free: 0 }; rows.push(r); }
+    r.pills.push({ key: p.id, label: `${p.startTime} ${p.patient} · ${p.procedure ?? 'Procedure'} ${p.sittingNo}${p.of ? `/${p.of}` : ''}${p.room ? ` · ${p.room}` : ''}${p.state === 'completed' ? ' ✓' : ''}`, cls: PILL.proc, sort: 1.5, patientId: p.patientId });
+  }
+  rows.sort((a, b) => a.time.localeCompare(b.time));
+  rows.forEach((r) => r.pills.sort((a, b) => a.sort - b.sort));
+  const gaps: { at: string; label: string }[] = [];
+  for (let i = 1; i < rows.length; i++) if (toMin(rows[i].time) - toMin(rows[i - 1].end) >= 30) gaps.push({ at: rows[i - 1].end, label: `${rows[i - 1].end}–${rows[i].time} · not working` });
+  const blocks: any[] = c.blocks ?? [];
+  const late = blocks.find((b) => b.kind === 'late');
+  const breakNow = blocks.find((b) => b.kind === 'break' && b.startTime <= now && now < b.endTime);
+  const away = blocks.find((b) => b.kind === 'leave');
 
-  const procs: any[] = todays.data ?? [];
-  const procsDone = procs.filter((p: any) => p.state === 'completed').length;
-  const plist: any[] = pq.data ?? [];
-  const noDoc = (p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId;
-  const needsYou = (p: any) => !!doc && p.requiresMainDoctor && p.practitionerId === doc && ['confirmed', 'in_progress'].includes(p.state);
-  const procFlags = plist.filter((p) => noDoc(p) || needsYou(p)).length;
-  const waiting = rows.filter((r) => r.rank === 1);
-  const done = rows.filter((r) => r.rank === 3).length;
-  const apptCount = rows.filter((r) => r.label !== 'no-show').length;
-  const drafts = visits.filter((v: any) => v.encounterStatus === 'draft' && v.status !== 'in_consult');
-  // Plans for procedures the clinic marks "needs doctor review", not yet scheduled
+  // --- counts for the header ---
+  const allPills = rows.flatMap((r) => r.pills);
+  const seen = visits.filter((v) => v.status === 'done').length;
+  const toCome = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => !byAppt.has(a.id) && ['booked', 'confirmed', 'requested'].includes(a.status) && w.endTime >= now).length, 0);
+  const apptCount = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => a.status !== 'no_show').length, 0) + visits.filter((v) => !v.appointmentId).length;
+  const lastEnd = windows.length ? windows[windows.length - 1].endTime : null;
+
+  // --- before you leave ---
+  const drafts = visits.filter((v) => v.encounterStatus === 'draft' && v.status !== 'in_consult');
   const review = (plans.data ?? []).filter((r: any) => r.status === 'open' && cfg?.procedures.find((p: any) => p.id === r.procedureId)?.requiresReview);
   const overdue = (fus.data ?? []).filter((r: any) => r.dueOn && r.dueOn < today() && ['open', 'contacted'].includes(r.status));
-  const hello = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening';
-  const myHours = hoursOf(c.windows.filter((w: any) => !doc || w.practitionerId === doc));
-  const changes = c.blocks.filter((b: any) => !doc || b.practitionerId === doc);
-  // test results nobody on the clinical side has opened yet, one line per patient
-  const resultGroups = (() => { const m = new Map<string, any>(); for (const r of (resq.data ?? []).filter((x: any) => x.documents.some((d: any) => !d.reviewedAt))) { const g = m.get(r.patient.id) ?? { patient: r.patient, tests: [] as string[], docs: new Map<string, any>(), at: r.at }; g.tests.push(r.test); for (const d of r.documents) g.docs.set(d.id, d); m.set(r.patient.id, g); } return [...m.values()]; })();
-  const openResults = (g: any) => { const docs = [...g.docs.values()]; openViewer({ docs, who: g.patient.fullName, canDelete: can(perms, 'document.write') }); post('/documents/review', { ids: docs.map((d: any) => d.id) }).then(() => qc.invalidateQueries({ queryKey: ['results'] }), () => {}); };
-  const attention = drafts.length + review.length + (overdue.length ? 1 : 0) + procFlags + resultGroups.length;
+  const noDoc = (allProcs.data ?? []).filter((p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId);
+  const resultGroups = (() => { const m = new Map<string, any>(); for (const r of (resq.data ?? []).filter((x: any) => x.documents.some((dd: any) => !dd.reviewedAt))) { const g = m.get(r.patient.id) ?? { patient: r.patient, tests: [] as string[], docs: new Map<string, any>() }; g.tests.push(r.test); for (const dd of r.documents) g.docs.set(dd.id, dd); m.set(r.patient.id, g); } return [...m.values()]; })();
+  const openResults = (g: any) => { const docs = [...g.docs.values()]; openViewer({ docs, who: g.patient.fullName, canDelete: can(perms, 'document.write') }); post('/documents/review', { ids: docs.map((x: any) => x.id) }).then(() => qc.invalidateQueries({ queryKey: ['results'] }), () => {}); };
+  const leaveCount = resultGroups.length + drafts.length + review.length + noDoc.length + (overdue.length ? 1 : 0);
+
+  // --- next patient's story ---
+  const lastEnc = (nextTl.data?.encounters ?? []).find((e: any) => e.status === 'completed');
+  const tw: any[] = tom.data?.windows ?? [];
+  const tBooked = tw.reduce((n, w) => n + (w.appointments ?? []).length, 0);
+  const firstTomorrow = (() => { for (const w of tw) if (w.appointments?.length) return `${w.startTime} (${w.appointments[0].name})`; return tom.data?.procedures?.[0] ? `${tom.data.procedures[0].startTime} (${tom.data.procedures[0].patient})` : null; })();
   const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Kolkata' });
+  const canChange = !!doc;
+  const quick = (k: ChangeKind) => setChange({ kind: k });
+  const nowIdx = rows.findIndex((r) => r.time > now);
+  const gap = (i: number) => (i > 0 ? gaps.find((g) => g.at === rows[i - 1].end) : undefined);
+
+  const nextCard = (
+    <section className="card-flat order-1 p-4 sm:p-5 anim-fade-up" style={{ background: 'rgba(255,255,255,.75)' }}>
+      {withYou ? <>
+        <div className="text-[11px] font-bold uppercase tracking-wider text-muted">With you now</div>
+        <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{withYou.patient.fullName}</div>
+          <div className="text-xs text-muted">{[withYou.patient.ageYears ? `${withYou.patient.ageYears} ${withYou.patient.sex ?? ''}` : null, withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint, withYou.details?.bp && `BP ${withYou.details.bp}`].filter(Boolean).join(' · ')}</div></div>
+          {can(perms, 'encounter.intake') && <button className="btn btn-accent" disabled={open.isPending} onClick={() => open.mutate(withYou.id)}>Continue</button>}</div>
+        {next && <div className="my-3 border-t border-line" />}
+      </> : null}
+      {next ? <>
+        <div className="text-[11px] font-bold uppercase tracking-wider text-muted">Next</div>
+        <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{next.patient.fullName}</div>
+          <div className="text-xs text-muted">{[next.patient.ageYears ? `${next.patient.ageYears} ${next.patient.sex ?? ''}` : null, next.details?.complaints?.[0]?.text ?? next.details?.complaint, `waiting ${minsSince(next.arrivedAt)} min`].filter(Boolean).join(' · ')}</div>
+          {lastEnc && <div className="mt-1 text-xs text-muted">Last visit {fmtDate(lastEnc.createdAt)}: {joinList(lastEnc.data?.assessment?.diagnosis) || joinList(lastEnc.data?.complaint?.chief_complaint) || 'consultation'}{lastEnc.prescription?.length ? ` · ${lastEnc.prescription.map((i: any) => i.name).slice(0, 2).join(', ')}` : ''}</div>}</div>
+          {can(perms, 'encounter.intake') && <button className={`btn ${withYou ? '' : 'btn-primary'}`} disabled={open.isPending} onClick={() => open.mutate(next.id)}>Call in</button>}</div>
+        <div className="mt-2.5 text-xs text-muted">{waiting[1] ? `Then ${waiting[1].patient.fullName} (${minsSince(waiting[1].arrivedAt)} min). ` : ''}{toCome ? `${toCome} more booked after them.` : 'No more bookings to come.'}</div>
+      </> : !withYou && <div className="py-2 text-sm text-muted">{toCome ? `Nobody waiting. ${toCome} booked still to come.` : 'Nobody waiting, nobody else booked today.'}</div>}
+    </section>
+  );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3 anim-fade-up">
-        <div className="min-w-0"><h1 className="text-[28px] font-semibold leading-tight">{hello}, {me.name.split(' ').slice(0, 2).join(' ')}</h1>
-          <div className="text-sm text-muted">{dateLabel}{myHours ? ` · ${doc ? 'your day' : 'clinic hours'} ${myHours}` : doc ? ' · not working today' : ''}{changes.length ? ` · ${changes.map((b: any) => b.note ?? b.kind).join(', ')}` : ''}</div></div>
-        <span className="ml-auto" />
+        <div className="min-w-0"><h1 className="text-[26px] font-semibold leading-tight">{dateLabel}</h1>
+          <div className="text-sm text-muted"><b className="text-ink">{apptCount} patient{apptCount === 1 ? '' : 's'}{c.procedures?.length ? ` · ${c.procedures.length} procedure${c.procedures.length === 1 ? '' : 's'}` : ''}</b> · {seen} seen · {waiting.length} waiting · {toCome} still to come{lastEnd ? ` · you finish at ${lastEnd}` : doc ? ' · not working today' : ''}</div>
+          {(late || breakNow || away) && <div className="mt-1 flex flex-wrap gap-1.5">{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}</div>}</div>
+        {canChange && <div className="ml-auto hidden flex-wrap gap-2 sm:flex">
+          <button className="btn btn-sm" onClick={() => quick('late')}><Icon name="clock" className="h-3.5 w-3.5" />Running late</button>
+          <button className="btn btn-sm" onClick={() => quick('break')}><Icon name="moon" className="h-3.5 w-3.5" />Break</button>
+          <button className="btn btn-sm" onClick={() => quick('early')}><Icon name="door" className="h-3.5 w-3.5" />Leave early</button>
+          <button className="btn btn-sm btn-primary" onClick={() => quick('early')}>Change my day</button>
+        </div>}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 stagger">
-        <Kpi i={0} icon="calendar" tint="var(--color-clay-soft)" n={apptCount + procs.length} label="Appointments today" sub={`${apptCount} consultations · ${procs.length} procedures`} onClick={() => setTab('now')} />
-        <Kpi i={1} icon="check" tint="var(--color-sage-soft)" n={done} label="Consultations done" sub={drafts.length ? `${drafts.length} note${drafts.length === 1 ? '' : 's'} unfinished` : 'all notes finished'} onClick={() => setTab('done')} />
-        <Kpi i={2} icon="stetho" tint="var(--color-sky-soft)" n={procs.length} label="Procedure sittings" sub={procs.length ? `${procsDone} done · ${procs.length - procsDone} to go` : 'none today'} onClick={() => document.getElementById('today-procs')?.scrollIntoView({ behavior: 'smooth' })} />
-        <Kpi i={3} icon="clock" tint="var(--color-amber-soft)" n={waiting.length} label="Waiting now" sub={waiting.length ? `longest ${Math.max(...waiting.map((r) => minsSince(r.visit.arrivedAt)))} min` : 'nobody waiting'} onClick={() => setTab('now')} />
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-5">
-          <section className="card-flat overflow-hidden anim-fade-up">
-            <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-3">
-              <b className="text-[16px]">{doc ? 'Your patients today' : 'Patients today'}</b>
-              {waiting.length > 0 && <Chip tone="amber">{waiting.length} waiting</Chip>}
-              <span className="ml-auto"><Segmented<Tab> value={tab} onChange={setTab} options={[{ value: 'now', label: 'Waiting', count: rows.filter((r) => r.rank <= 1).length }, { value: 'done', label: 'Completed', count: rows.filter((r) => r.rank >= 3).length }]} /></span>
-            </div>
-            <div className="px-5 pb-2 text-sm text-muted">{later > 0 ? `${later} more booked today` : 'No more bookings today'} · {apptCount} appointment{apptCount === 1 ? '' : 's'}</div>
-            {shown.length === 0 ? <Empty icon="users" title={tab === 'now' ? 'Nobody waiting' : 'Nobody seen yet'} hint={tab === 'now' && later > 0 ? 'Patients appear here when they arrive.' : undefined} /> : (
-              <div className="overflow-x-auto">
-                <table className="table min-w-[560px]">
-                  <thead><tr><th>Time</th><th>Patient</th><th>Visit</th><th>Status</th><th /></tr></thead>
-                  <tbody>{shown.map((r) => {
-                    const v = r.visit; const complaint = v?.details?.complaints?.[0]?.text ?? v?.details?.complaint;
-                    const vit = v ? [v.details?.bp && `BP ${v.details.bp}`, v.details?.weight_kg && `${v.details.weight_kg} kg`].filter(Boolean).join(' · ') : '';
-                    return (
-                      <tr key={r.key} className={r.rank === 0 ? 'bg-white/70' : r.rank >= 3 ? 'opacity-75' : ''}>
-                        <td className="whitespace-nowrap font-semibold">{r.time}</td>
-                        <td className="min-w-0"><button className="text-left font-medium hover:underline" onClick={() => nav(`/patients/${r.patient.id}`)}>{r.patient.fullName}</button>
-                          <div className="text-xs text-muted">{[r.patient.patientNo, r.patient.ageYears ? `${r.patient.ageYears} ${r.patient.sex ?? ''}` : null, complaint, vit, r.note].filter(Boolean).join(' · ')}</div></td>
-                        <td className="whitespace-nowrap">{r.type ? <span className="inline-flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: r.type.color }} />{r.type.name}</span> : <span className="text-muted">—</span>}</td>
-                        <td><Chip tone={r.tone}>{r.label}</Chip></td>
-                        <td className="whitespace-nowrap text-right">
-                          {v && r.rank === 0 && can(perms, 'encounter.intake') && <button className="btn btn-accent btn-sm" disabled={open.isPending} onClick={() => open.mutate(v.id)}>Continue</button>}
-                          {v && r.rank === 1 && can(perms, 'encounter.intake') && <button className={`btn btn-sm ${r === firstWaiting ? 'btn-primary' : ''}`} disabled={open.isPending} onClick={() => open.mutate(v.id)}>Call in</button>}
-                          {v && r.rank === 3 && v.encounterStatus === 'draft' && <button className="btn btn-sm" onClick={() => open.mutate(v.id)}>Finish note</button>}
-                        </td>
-                      </tr>);
-                  })}</tbody>
-                </table>
-              </div>
-            )}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        {/* on a phone: next first, then the change buttons, then the day */}
+        <div className="flex flex-col gap-4 xl:order-2">
+          {nextCard}
+          {canChange && <div className="order-2 grid grid-cols-4 gap-2 sm:hidden">{([['late', 'clock', 'Late'], ['break', 'moon', 'Break'], ['early', 'door', 'Leave early'], ['away', 'x', 'Not coming']] as const).map(([k, i, l]) =>
+            <button key={k} className="card !rounded-2xl !p-2.5 text-center text-xs font-semibold" onClick={() => quick(k)}><Icon name={i} className="mx-auto mb-1 h-4 w-4" />{l}</button>)}</div>}
+          <section className="card-flat order-3 p-4 sm:p-5 anim-fade-up">
+            <div className="flex items-center gap-2"><b className="text-[15px]">Before you leave</b>{leaveCount > 0 && <Chip tone="amber">{leaveCount}</Chip>}</div>
+            {leaveCount === 0 ? <div className="py-2 text-sm text-muted">Nothing waiting on you.</div> : <div className="mt-1">
+              {resultGroups.map((g: any) => <Attn key={g.patient.id} tag="result" title={g.patient.fullName} sub={`${[...new Set(g.tests)].join(', ')} · ${g.docs.size} file${g.docs.size === 1 ? '' : 's'}`} action="Open" onClick={() => openResults(g)} />)}
+              {drafts.map((v: any) => <Attn key={v.id} tag="note" title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
+              {review.slice(0, 4).map((r: any) => <Attn key={r.id} tag="plan" title={`${r.procedure} for ${r.patient.fullName}`} sub={r.sittings ? `approve ${r.sittings} sittings` : 'approve the plan'} action="Open" onClick={() => nav(`/patients/${r.patient.id}`)} />)}
+              {noDoc.map((p: any) => <Attn key={p.id} tag="no doctor" title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}
+              {overdue.length > 0 && <Attn tag="follow-up" title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them" action="See" onClick={() => nav('/worklist?tab=plans')} />}
+            </div>}
           </section>
-
+          <section className="card-flat order-4 p-4 sm:p-5 anim-fade-up">
+            <div className="flex items-baseline"><b className="text-[15px]">Tomorrow</b><span className="ml-auto text-xs text-muted">{new Date(tmr + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}</span></div>
+            <div className="mt-1 text-sm text-muted">{tom.isLoading ? '…' : tw.length ? <>{hoursOf(tw)} · <b className="text-ink">{tBooked} booked{tom.data?.procedures?.length ? ` · ${tom.data.procedures.length} procedure${tom.data.procedures.length === 1 ? '' : 's'}` : ''}</b>{firstTomorrow ? ` · first ${firstTomorrow}` : ''}</> : (tom.data?.blocks ?? []).some((b: any) => b.kind === 'leave') ? 'Away' : 'Not working'}</div>
+            <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-sm" onClick={() => nav(`/calendar?day=${tmr}`)}>See the day</button>{canChange && tw.length > 0 && <button className="btn btn-sm" onClick={() => setChange({ kind: 'away', day: tmr })}>I'm not coming</button>}</div>
+          </section>
         </div>
 
-        <section id="today-procs" className="card-flat self-start p-5 anim-fade-up scroll-mt-4" style={{ animationDelay: '90ms' }}>
-          <div className="flex items-center gap-2"><b className="text-[16px]">Needs your attention</b>{attention > 0 && <Chip tone="clay">{attention}</Chip>}</div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-[11px] font-bold uppercase tracking-wider text-muted">Procedures</span>
-            <span className="ml-auto"><Segmented<'today' | 'tomorrow' | 'date'> value={pmode} onChange={setPmode} options={[{ value: 'today', label: 'Today', count: pcount.data?.[today()] ?? 0 }, { value: 'tomorrow', label: 'Tomorrow', count: pcount.data?.[tomorrow] ?? 0 }, { value: 'date', label: 'Date' }]} /></span></div>
-          {pmode === 'date' && <input type="date" aria-label="Procedures on" className="input mt-2 !py-2" value={pdate} onChange={(e) => e.target.value && setPdate(e.target.value)} />}
-          {pq.isLoading ? <div className="py-3"><Skeleton rows={2} /></div> : plist.length === 0 ? <div className="py-3 text-sm text-muted">No procedures {pmode === 'today' ? 'today' : pmode === 'tomorrow' ? 'tomorrow' : 'on this date'}.</div> : (
-            <div className="mt-1">{plist.map((p: any) => (
-              <div key={p.id} className="flex items-center gap-2.5 border-t border-line/60 py-2.5 first:border-t-0">
-                <b className="w-11 shrink-0 text-[13px]">{p.startTime}</b>
-                <div className="min-w-0 flex-1"><button className="block max-w-full truncate text-left text-sm font-medium hover:underline" onClick={() => nav(`/patients/${p.patient.id}`)}>{p.patient.fullName}</button>
-                  <div className="truncate text-xs text-muted">{p.procedure ?? 'Procedure'} · {p.sittingNo}{p.of ? ` of ${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.doctor && p.practitionerId !== doc ? ` · ${p.doctor}` : ''}</div></div>
-                {p.state === 'completed' ? <Chip tone="sage">done</Chip> : p.state === 'missed' ? <Chip tone="rose">missed</Chip>
-                  : noDoc(p) ? <Chip tone="rose">no doctor</Chip> : needsYou(p) && p.state === 'confirmed' && day !== today() ? <Chip tone="amber">needs you</Chip> : null}
-                {can(perms, 'worklist.write') && p.state === 'confirmed' && day === today() && <button className="btn btn-sm" onClick={() => setState.mutate({ id: p.id, state: 'in_progress' })}>Start</button>}
-                {can(perms, 'worklist.write') && p.state === 'in_progress' && <button className="btn btn-sm btn-primary" onClick={() => setState.mutate({ id: p.id, state: 'completed' })}>Done</button>}
-                {can(perms, 'document.write') && !['cancelled', 'postponed'].includes(p.state) && <button className="btn btn-ghost btn-icon !h-8 !w-8" title="Photos" aria-label={`Photos for ${p.patient.fullName}`} onClick={() => setCap({ ...p, patientId: p.patient.id, patient: p.patient.fullName })}><Icon name="spark" className="h-3.5 w-3.5" /></button>}
-              </div>))}</div>
-          )}
-          <div className="mt-2 text-right"><button className="text-sm font-semibold underline" onClick={() => nav(`/worklist?tab=schedule&day=${day}`)}>Open procedure schedule →</button></div>
-
-          <div className="mt-4 text-[11px] font-bold uppercase tracking-wider text-muted">Other</div>
-          {drafts.length + review.length + (overdue.length ? 1 : 0) + resultGroups.length === 0 ? <div className="py-3 text-sm text-muted">Nothing else waiting on you.</div> : <div>
-            {resultGroups.map((g: any) => <Attn key={g.patient.id} tone="sky" tag="result" title="Results received" sub={`${g.patient.fullName} · ${[...new Set(g.tests)].join(', ')} · ${g.docs.size} file${g.docs.size === 1 ? '' : 's'}`} action="Open" onClick={() => openResults(g)} />)}
-            {drafts.map((v: any) => <Attn key={v.id} tone="amber" tag="note" title="Finish consultation note" sub={`${v.patient.fullName} · arrived ${hhmm(v.arrivedAt)} · note not completed`} action="Open" onClick={() => open.mutate(v.id)} />)}
-            {review.slice(0, 4).map((r: any) => <Attn key={r.id} tone="sky" tag="plan" title="Review procedure plan" sub={`${r.procedure} for ${r.patient.fullName}${r.sittings ? ` · ${r.sittings} sittings` : ''}`} action="Open" onClick={() => nav(`/patients/${r.patient.id}`)} />)}
-            {overdue.length > 0 && <Attn tone="clay" tag="follow-up" title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them from Procedures → Plans to schedule" action="See" onClick={() => nav('/worklist?tab=plans')} />}
-          </div>}
+        <section className="card-flat order-last min-w-0 p-4 sm:p-5 xl:order-1 anim-fade-up">
+          <div className="mb-2 flex flex-wrap items-center gap-2"><b className="text-[15px]">{doc ? 'Your day' : 'The clinic today'}</b>
+            <span className="ml-auto flex flex-wrap gap-1.5 text-[11px]">{([['done', 'seen'], ['with', 'with you'], ['wait', 'waiting'], ['booked', 'booked'], ['proc', 'procedure']] as const).map(([k, l]) => <span key={k} className={`rounded-md border px-1.5 py-0.5 font-semibold ${PILL[k]}`}>{l}</span>)}</span></div>
+          {away && !rows.length ? <div className="py-6 text-center text-sm text-muted">{away.note}</div> : rows.length === 0 ? <div className="py-6 text-center text-sm text-muted">{doc ? 'Not working today.' : 'Nothing booked today.'}</div> : (
+            <div>{rows.map((r, i) => (
+              <div key={r.time + i}>
+                {i === nowIdx && (!gap(i) || now < gap(i)!.at) && <NowLine at={now} />}
+                {gap(i) && <div className="grid grid-cols-[52px_1fr] border-t border-line/60"><span /><div className="my-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-muted" style={{ background: 'repeating-linear-gradient(45deg,rgba(23,25,26,.05) 0 6px,transparent 6px 12px)' }}>{gap(i)!.label}</div></div>}
+                {i === nowIdx && gap(i) && now >= gap(i)!.at && <NowLine at={now} />}
+                <div className="grid min-h-[52px] grid-cols-[52px_1fr] items-start border-t border-line/60">
+                  <b className="pt-2.5 text-xs text-muted">{r.time}</b>
+                  <div className="flex flex-wrap items-center gap-1.5 py-2">
+                    {r.off ? <span className="flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold text-muted" style={{ background: 'repeating-linear-gradient(45deg,rgba(23,25,26,.05) 0 6px,transparent 6px 12px)' }}>{r.off}</span> : null}
+                    {r.pills.map((p) => <button key={p.key} title={p.title} onClick={() => p.patientId && nav(`/patients/${p.patientId}`)} className={`rounded-[10px] border px-2.5 py-1 text-[12.5px] font-semibold ${p.cls}`}>{p.label}</button>)}
+                    {!r.off && r.free > 0 && r.end > now && <span className="text-xs text-muted">· {r.free} free</span>}
+                  </div>
+                </div>
+              </div>))}
+              {nowIdx === -1 && rows.length > 0 && rows[rows.length - 1].end > now && <NowLine at={now} />}
+              <div className="grid grid-cols-[52px_1fr] border-t border-line/60 pt-2 text-xs text-muted"><b>{lastEnd ?? ''}</b><span>{allPills.length ? 'day ends' : ''}</span></div>
+            </div>)}
+          <div className="mt-2 text-xs text-muted">Click a name to open the patient. Times are booking windows, not exact minutes.</div>
         </section>
       </div>
-      {cap && <PhotoCapture patient={{ id: cap.patientId, fullName: cap.patient }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}${cap.of ? ` of ${cap.of}` : ''}` }} onClose={() => setCap(null)} />}
+      {change && doc && <ChangeMyDay practitionerId={doc} name={docName} initialKind={change.kind} initialDay={change.day} onClose={() => setChange(null)} />}
     </div>
   );
 }
 
-function Kpi({ i, icon, tint, n, label, sub, onClick }: { i: number; icon: string; tint: string; n: number; label: string; sub: string; onClick: () => void }) {
-  return (
-    <button style={{ ['--i' as any]: i }} onClick={onClick} className="card card-hover flex items-center gap-3.5 !p-4 text-left">
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl" style={{ background: tint }}><Icon name={icon} className="h-5 w-5" /></span>
-      <span className="min-w-0"><span className="block text-[26px] font-semibold leading-none tracking-tight"><Num value={n} /></span><span className="mt-1 block text-[13px] font-medium">{label}</span><span className="block truncate text-xs text-muted">{sub}</span></span>
-    </button>
-  );
+
+function NowLine({ at }: { at: string }) {
+  return <div className="relative ml-[52px] h-0 border-t-2 border-clay"><span className="absolute -left-[52px] -top-2.5 rounded-full bg-clay px-1.5 py-0.5 text-[10.5px] font-bold text-white">{at}</span></div>;
 }
 
-function Attn({ tone, tag, title, sub, action, onClick }: { tone: 'amber' | 'sky' | 'clay'; tag: string; title: string; sub: string; action: string; onClick: () => void }) {
+function Attn({ tag, title, sub, action, onClick }: { tag: string; title: string; sub: string; action: string; onClick: () => void }) {
   return (
-    <div className="flex items-start gap-3 border-t border-line/60 py-3 first:border-t-0">
-      <Chip tone={tone}>{tag}</Chip>
-      <div className="min-w-0 flex-1"><div className="text-sm font-semibold">{title}</div><div className="text-xs text-muted">{sub}</div></div>
+    <div className="flex items-center gap-3 border-t border-line/60 py-2.5 first:border-t-0">
+      <span className="shrink-0 rounded-full bg-ink/7 px-2 py-0.5 text-[10.5px] font-bold text-ink-2">{tag}</span>
+      <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{title}</div><div className="truncate text-xs text-muted">{sub}</div></div>
       <button className="btn btn-sm" onClick={onClick}>{action}</button>
     </div>
   );
 }
+

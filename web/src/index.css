@@ -118,7 +118,8 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.015em; font-w
 
   .toggle-opt { @apply rounded-full border border-white/80 bg-white/60 px-3.5 py-1.5 text-xs font-semibold text-ink-2; transition: all 0.2s var(--ease); }
   .toggle-opt:hover { @apply bg-white; }
-  .toggle-opt.on { @apply bg-ink text-white border-ink; }
+  .toggle-opt.on { @apply bg-sage-soft text-sage border-[#A9CDB8]; }
+  .toggle-opt.on::before { content: "✓"; margin-right: 5px; font-size: 0.9em; }
 
   /* Segmented control: one dark pill that slides is done in the Seg component; this is the track */
   .seg { @apply relative inline-flex rounded-full bg-white/60 p-[3px] gap-0.5 flex-wrap; }
