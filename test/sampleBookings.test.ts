@@ -58,12 +58,18 @@ test('test data fills the week, pharmacy and courses, and can be topped up', asy
   if (tomorrow?.windows.length) assert.ok(tomorrow.windows.reduce((n: number, w: any) => n + w.appointments.length, 0) >= 3, 'tomorrow has bookings');
 
   // pharmacy: prescription bills and counter sales over the week, with totals; expenses and visits exist too
-  assert.ok(s.visits > 0 && s.pharmacyBills > 0 && s.counterSales >= 18 && s.expenses >= 14, JSON.stringify(s));
-  const hr = await call(owner, 'GET', `/pharmacy/history?from=${addDays(today, -6)}&to=${today}`); assert.equal(hr.statusCode, 200, hr.body); const hist = hr.json();
-  assert.ok(hist.rows.some((r: any) => r.kind === 'Counter sale') && hist.rows.some((r: any) => r.kind === 'Prescription'), 'both kinds in history');
-  assert.equal(hist.totals.total, hist.totals.cash + hist.totals.upi + hist.totals.card, 'method totals add up');
-  const oneDay = (await call(owner, 'GET', `/pharmacy/history?from=${today}&to=${today}`)).json();
+  assert.ok(s.visits > 0 && s.pharmacyBills > 0 && s.counterSales >= 12 && s.expenses >= 14, JSON.stringify(s));
+  const hr = await call(owner, 'GET', `/pharmacy/bills?from=${addDays(today, -6)}&to=${today}`); assert.equal(hr.statusCode, 200, hr.body); const hist = hr.json();
+  assert.ok(hist.rows.some((r: any) => !r.encounterId) && hist.rows.some((r: any) => r.encounterId), 'counter sales and prescription bills');
+  assert.ok(hist.rows.some((r: any) => r.balance.length), 'some prescriptions were short-issued');
+  assert.equal(hist.totals.total - hist.totals.refunds, hist.totals.cash + hist.totals.upi + hist.totals.card, 'method totals add up');
+  const oneDay = (await call(owner, 'GET', `/pharmacy/bills?from=${today}&to=${today}`)).json();
   assert.ok(oneDay.rows.length > 0 && oneDay.rows.length < hist.rows.length, 'a single day is a subset');
+  // stock: opening stock, a delivery waiting for the owner, and the counter's prescriptions for today
+  const st = (await call(owner, 'GET', '/stock')).json();
+  assert.equal(st.reviews.length, 1); assert.equal(st.reviews[0].freeShort, 2); assert.ok(st.reviews[0].extraPaise > 0);
+  assert.ok(st.items.some((i: any) => i.status === 'expiring') && st.items.some((i: any) => i.status === 'low'));
+  assert.ok((await call(owner, 'GET', '/pharmacy/counter')).json().today.length > 0, 'today has prescriptions at the counter');
   assert.equal((await call(owner, 'GET', `/expenses?from=${addDays(today, -6)}&to=${today}`)).statusCode, 200);
 
   // running it again tops up only what is quiet: next to nothing is added, and nothing is refused

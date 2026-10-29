@@ -1,13 +1,14 @@
 import { deflateSync } from 'node:zlib';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { patient, appointment, session, service, practitioner, recommendation, procedureSession, procedureCatalog, room, calendarBlock, document, tenant, OPEN_STATUSES, branch, feeCategory, visit, encounter, prescriptionItem, charge, payment, expense, medicine, formDefinition, pharmacySale } from '../db/schema.js';
+import { patient, appointment, session, service, practitioner, recommendation, procedureSession, procedureCatalog, room, calendarBlock, document, tenant, OPEN_STATUSES, branch, feeCategory, visit, encounter, prescriptionItem, charge, payment, expense, medicine, formDefinition, pharmacySale, stockBatch, stockDoc, vendor } from '../db/schema.js';
 import { todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { newToken, queueMessage, planReminders } from '../lib/booking.js';
 import { putFile } from '../lib/storage.js';
 import { windowsForDay } from './scheduling.js';
-import { recordSale } from './pharmacy.js';
+import { recordSale, prescribedQty } from './pharmacy.js';
+import { receiveStock, schemeFree, type Actor } from './stock.js';
 
 /**
  * Test data for the booking and photo features, on top of the base sample (patients, visits, today's queue):
@@ -28,7 +29,7 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
   let seed = 7; const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; }; // repeatable
   const svcFor = (docId: string | null) => { const ok = svcs.filter((s) => !s.practitionerIds.length || (docId && s.practitionerIds.includes(docId))); return ok.length ? ok[rnd(ok.length)] : null; };
   const NOTES = [null, null, null, 'asked for the main doctor', 'coming from Kadiyam, may be late', 'review of lab reports', 'brings old prescription', null];
-  const counts = { booked: 0, confirmed: 0, arrived: 0, no_show: 0, cancelled: 0, requested: 0, series: 0, messages: 0, sittings: 0, photos: 0, visits: 0, pharmacyBills: 0, counterSales: 0, expenses: 0 };
+  const counts = { booked: 0, confirmed: 0, arrived: 0, no_show: 0, cancelled: 0, requested: 0, series: 0, messages: 0, sittings: 0, photos: 0, visits: 0, pharmacyBills: 0, counterSales: 0, stockReceipts: 0, expenses: 0 };
   const made: string[] = [];
   /** First window with room on the day or the next working days (no doctor works on Sunday). */
   const nextWindow = async (day: string, docId: string) => { for (let i = 0; i < 7; i++) { const w = (await windowsForDay(tx, t, addDays(day, i), docId)).find((x) => x.free > 0); if (w) return w; } return null; };
@@ -193,6 +194,8 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
   if (!br || !gen || !form || !meds.length || !pts.length) return;
   let seed = 11; const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
   const at = (day: string, hhmm: string) => new Date(`${day}T${hhmm}:00+05:30`).toISOString();
+  const sampleActor = { tenantId: t, userId, name: 'Test data' };
+  await loadStock(tx, sampleActor, today, meds, counts);
   const hm = (i: number, base = 10) => `${String(base + Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 14 + 3).padStart(2, '0')}`;
   const COMPLAINTS = [['Pimples on face', 'Acne vulgaris'], ['Itchy rash', 'Eczema'], ['Hair fall', 'Telogen effluvium'], ['Dark patches', 'Melasma'], ['Itchy ring-shaped rash', 'Tinea corporis']];
 
@@ -219,31 +222,43 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
       }
     }
 
-    // B. pharmacy bills for the day's prescriptions: all but a few on past days, every third one today (the rest stay "to dispense")
-    const rx = await tx.select({ enc: encounter.id, visitId: encounter.visitId, patientId: encounter.patientId, at: encounter.completedAt }).from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId))
+    // B. the counter for the day's prescriptions, issued from stock: most in full, some short (a balance to collect), some lines skipped,
+    //    a few bought nothing. Past days only; today's stay for the pharmacist to try.
+    const rx = !past ? [] : await tx.select({ enc: encounter.id, patientId: encounter.patientId }).from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId))
       .where(and(eq(encounter.tenantId, t), eq(visit.day, day), eq(encounter.status, 'completed'), sql`exists (select 1 from prescription_item pi where pi.encounter_id = ${encounter.id})`,
-        sql`not exists (select 1 from charge c where c.visit_id = ${encounter.visitId} and c.description like 'Pharmacy%')`));
+        sql`not exists (select 1 from pharmacy_sale s where s.encounter_id = ${encounter.id})`, sql`not exists (select 1 from prescription_item pi where pi.encounter_id = ${encounter.id} and pi.not_issued_reason is not null)`));
     for (const [i, r] of rx.entries()) {
       const h = parseInt(r.enc.slice(-2), 16); // from the id, so a second run picks the same ones
-      if (past ? h % 6 === 5 : h % 3 !== 0) continue;
-      const amount = (150 + rnd(75) * 10) * 100; const when = at(day, hm(i + 4));
-      const [ch] = await tx.insert(charge).values({ tenantId: t, patientId: r.patientId, visitId: r.visitId, description: 'Pharmacy', amountPaise: amount, status: 'paid', createdAt: when }).returning({ id: charge.id });
+      const its = await tx.select({ i: prescriptionItem, m: medicine }).from(prescriptionItem).innerJoin(medicine, eq(medicine.id, prescriptionItem.medicineId)).where(eq(prescriptionItem.encounterId, r.enc));
+      if (h % 7 === 6) { await tx.update(prescriptionItem).set({ notIssuedReason: 'Bought nothing' }).where(eq(prescriptionItem.encounterId, r.enc)); continue; }
+      const items: any[] = []; const notIssued: any[] = [];
+      for (const [k, x] of its.entries()) {
+        const want = prescribedQty(x.i, x.m);
+        if (k === 1 && h % 4 === 1) { notIssued.push({ prescriptionItemId: x.i.id, reason: (['Has at home', 'Will buy later', 'Bought outside'] as const)[h % 3] }); continue; }
+        const qty = h % 5 === 2 && want > 1 ? 1 : want;
+        if (qty < want) notIssued.push({ prescriptionItemId: x.i.id, reason: 'Will buy later' });
+        items.push({ medicineId: x.m.id, qty, prescriptionItemId: x.i.id });
+      }
+      if (!items.length) continue;
       const method = (['cash', 'upi', 'card'] as const)[rnd(3)];
-      await tx.insert(payment).values({ tenantId: t, patientId: r.patientId, chargeId: ch.id, amountPaise: amount, method, reference: method === 'cash' ? null : `${method === 'upi' ? 'UPI' : 'CARD'}${String(100000 + rnd(900000))}`, receivedBy: userId, receivedAt: when, createdAt: when });
-      await tx.update(prescriptionItem).set({ dispensed: true }).where(eq(prescriptionItem.encounterId, r.enc));
-      counts.pharmacyBills++;
+      try {
+        await recordSale(tx, sampleActor, { patientId: r.patientId, encounterId: r.enc, items, notIssued, discountPaise: 0, method, reference: method === 'cash' ? undefined : `${method === 'upi' ? 'UPI' : 'CARD'}${String(100000 + rnd(900000))}`, whatsapp: false, at: at(day, hm(i + 4)) });
+        counts.pharmacyBills++;
+      } catch { /* out of stock in the sample: leave it for the counter */ }
     }
 
     // C. counter sales without a prescription: real invoices from catalogue prices, a few every day (the first one of the day is the marker)
-    const sold = await tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), sql`${pharmacySale.createdAt} >= ${at(day, '00:00')} and ${pharmacySale.createdAt} < ${at(addDays(day, 1), '00:00')}`)).limit(1);
+    const sold = await tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), sql`${pharmacySale.encounterId} is null`, sql`${pharmacySale.createdAt} >= ${at(day, '00:00')} and ${pharmacySale.createdAt} < ${at(addDays(day, 1), '00:00')}`)).limit(1);
     const priced = meds.filter((m) => m.mrpPaise > 0);
     if (!sold.length && priced.length) {
       for (let i = 0; i < 3 + rnd(2); i++) {
         const items = Array.from({ length: 1 + rnd(3) }, () => ({ medicineId: priced[rnd(priced.length)].id, qty: 1 + rnd(3) }))
           .filter((x, k, arr) => arr.findIndex((y) => y.medicineId === x.medicineId) === k);
         const method = (['cash', 'upi', 'card'] as const)[rnd(3)];
-        await recordSale(tx, t, userId, { patientId: pts[rnd(pts.length)].id, items, discountPaise: rnd(4) === 0 ? 1000 : 0, method, reference: method === 'cash' ? undefined : `${method === 'upi' ? 'UPI' : 'CARD'}${100000 + rnd(900000)}`, at: at(day, hm(i * 3 + 1, 11)) });
-        counts.counterSales++;
+        try {
+          await recordSale(tx, sampleActor, { patientId: pts[rnd(pts.length)].id, items, notIssued: [], discountPaise: rnd(4) === 0 ? 1000 : 0, method, reference: method === 'cash' ? undefined : `${method === 'upi' ? 'UPI' : 'CARD'}${100000 + rnd(900000)}`, whatsapp: false, at: at(day, hm(i * 3 + 1, 11)) });
+          counts.counterSales++;
+        } catch { /* out of stock in the sample */ }
       }
     }
 
@@ -256,4 +271,35 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
       counts.expenses += pick.length;
     }
   }
+}
+
+/**
+ * Stock for the pharmacy, once: opening stock for every priced medicine (one batch close to expiry, one medicine low),
+ * two vendors, a delivery that differs from its order (waiting for the owner) and an order still open.
+ */
+async function loadStock(tx: Tx, a: Actor, today: string, meds: (typeof medicine.$inferSelect)[], counts: Record<string, number>) {
+  const t = a.tenantId;
+  if ((await tx.select({ id: stockBatch.id }).from(stockBatch).where(eq(stockBatch.tenantId, t)).limit(1)).length) return;
+  const priced = meds.filter((m) => m.mrpPaise > 0); if (!priced.length) return;
+  const ym = (days: number) => addDays(today, days).slice(0, 7);
+  const by = (n: string) => priced.find((m) => m.name === n);
+  await receiveStock(tx, a, { keepOpen: false, lines: priced.map((m, i) => ({ medicineId: m.id, qty: m.name.startsWith('Terbinafine') ? 3 : ['tab', 'cap'].includes(m.form ?? '') ? 40 : 30, freeQty: 0,
+    ratePaise: Math.round(m.mrpPaise * 0.62), discBp: 0, batchNo: `OPN${String(i + 1).padStart(3, '0')}`, expiry: m.name.startsWith('Sunscreen') ? ym(50) : ym(540) })) }, today);
+  const [g] = await tx.insert(vendor).values({ tenantId: t, name: 'Godavari Medical Agencies', phone: '9000000001', address: 'Rajahmundry' }).returning();
+  await tx.insert(vendor).values({ tenantId: t, name: 'Sai Pharma Distributors', phone: '9000000002', address: 'Kakinada' });
+  const photo = { mime: 'image/png' as const, dataBase64: samplePhoto(0, 0, 'front').toString('base64') };
+  const iso = by('Isotretinoin 20 mg'), mox = by('Moisturiser (ceramide)'), dox = by('Doxycycline 100 mg');
+  const po = async (lines: { m: typeof priced[number]; qty: number; scheme: string; rate: number }[]) => {
+    const n = await nextNumber(tx, t, 'stock_po', 'tenant');
+    return (await tx.insert(stockDoc).values({ tenantId: t, kind: 'order', docNo: `PO-${String(n).padStart(4, '0')}`, vendorId: g.id, status: 'open', dueDate: addDays(today, 3), createdBy: a.userId, createdByName: a.name,
+      lines: lines.map(({ m, qty, scheme, rate }) => ({ medicineId: m.id, name: m.name, qty, scheme, freeQty: schemeFree(scheme, qty), ratePaise: rate, discBp: 0, gstBp: m.gstBp, amountPaise: qty * rate + Math.round((qty * rate * m.gstBp) / 10000) })) }).returning())[0];
+  };
+  if (iso && mox) {
+    const order = await po([{ m: iso, qty: 50, scheme: '5 free per 50', rate: 19000 }, { m: mox, qty: 12, scheme: '1 free per 12', rate: 23000 }]);
+    const lines = [{ medicineId: iso.id, qty: 50, freeQty: 3, ratePaise: 19600, discBp: 0, batchNo: 'ISO2410A', expiry: ym(700) }, { medicineId: mox.id, qty: 12, freeQty: 1, ratePaise: 23000, discBp: 0, batchNo: 'MX2410B', expiry: ym(600) }];
+    const total = lines.reduce((n, l) => { const m = l.medicineId === iso.id ? iso : mox; const x = l.qty * l.ratePaise; return n + x + Math.round((x * m.gstBp) / 10000); }, 0);
+    await receiveStock(tx, a, { orderId: order.id, billNo: 'GMA/2210', billDate: today, billTotalPaise: total, billPhoto: photo, keepOpen: false, lines }, today);
+    counts.stockReceipts++;
+  }
+  if (dox) await po([{ m: dox, qty: 30, scheme: '10+1', rate: 5800 }]);
 }

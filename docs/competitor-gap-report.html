@@ -1,0 +1,137 @@
+<title>KiviHealth and PatientNow Gaps</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one reading column, two product sections with have/partial/missing tables, then a ranked build list. Colours are CUBOTT's own. */
+:root {
+  --bg: #EBE8E1; --surface: rgba(255,255,255,.62); --line: #DDD7CB; --fg: #17191A; --muted: #5F5E59;
+  --clay: #C23D17; --clay-soft: #F6D9C7; --sage: #2F5D4B; --sage-soft: #DCE9E0; --amber: #7A560F; --amber-soft: #F8E7B9; --rose: #A3322A; --rose-soft: #F7DCD9;
+  --font: "Urbanist", ui-sans-serif, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #161718; --surface: rgba(255,255,255,.05); --line: #34332F; --fg: #EEEBE4; --muted: #A9A59C;
+  --clay: #F08A63; --clay-soft: #4A2A1E; --sage: #8CC4A8; --sage-soft: #1F3329; --amber: #E6C46E; --amber-soft: #3B2F14; --rose: #EE9A92; --rose-soft: #43221F; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #161718; --surface: rgba(255,255,255,.05); --line: #34332F; --fg: #EEEBE4; --muted: #A9A59C;
+  --clay: #F08A63; --clay-soft: #4A2A1E; --sage: #8CC4A8; --sage-soft: #1F3329; --amber: #E6C46E; --amber-soft: #3B2F14; --rose: #EE9A92; --rose-soft: #43221F; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 16px; line-height: 1.55;
+  padding-block: 40px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+main { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 40px }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.15 }
+h1 { font-size: clamp(30px, 5vw, 42px); font-weight: 600; letter-spacing: -.015em }
+h2 { font-size: 24px; font-weight: 600 }
+h3 { font-size: 17px; font-weight: 600 }
+p { margin: 0; max-width: 68ch }
+.eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted) }
+.lede { font-size: 18px; color: var(--fg) }
+.muted { color: var(--muted) }
+section { display: flex; flex-direction: column; gap: 14px }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: 18px 20px }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px }
+.fact { display: flex; flex-direction: column; gap: 2px }
+.fact b { font-size: 20px; font-variant-numeric: tabular-nums }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; background: var(--surface) }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 14.5px }
+th { text-align: left; font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 700; padding: 12px 14px; border-bottom: 1px solid var(--line) }
+td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top }
+tr:last-child td { border-bottom: 0 }
+td:first-child { font-weight: 600; width: 26% }
+.pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap }
+.have { background: var(--sage-soft); color: var(--sage) }
+.part { background: var(--amber-soft); color: var(--amber) }
+.miss { background: var(--rose-soft); color: var(--rose) }
+.skip { background: transparent; color: var(--muted); border: 1px solid var(--line) }
+ol.build { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: b }
+ol.build > li { counter-increment: b; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 4px 14px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface) }
+ol.build > li::before { content: counter(b); grid-row: span 3; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: var(--fg); color: var(--bg) }
+ol.build > li:first-child::before { background: var(--clay); color: #fff }
+.why { font-size: 14.5px; color: var(--muted) }
+ul.tight { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px }
+.note { font-size: 13.5px; color: var(--muted); border-left: 0; background: var(--surface); border: 1px dashed var(--line); border-radius: 14px; padding: 12px 14px }
+a { color: var(--clay) }
+a:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px }
+@media (max-width: 520px) { body { font-size: 15px } ol.build > li { grid-template-columns: 34px minmax(0, 1fr) } }
+</style>
+
+<main>
+  <header style="display:flex;flex-direction:column;gap:12px">
+    <div class="eyebrow">CUBOTT Clinical · competitor research · 22 Oct 2026</div>
+    <h1>What KiviHealth and PatientNow have that we don't</h1>
+    <p class="lede">KiviHealth is the cheap, broad Indian clinic suite. PatientNow is the US aesthetics platform built around clinical photos and treatment series. On the front office we already match or beat KiviHealth. On the procedure side, which is where a dermatology clinic earns its money, PatientNow is far ahead of us. That is where we should build next.</p>
+  </header>
+
+  <section>
+    <div class="facts">
+      <div class="panel fact"><span class="eyebrow">KiviHealth price</span><b>₹12,000 / year</b><span class="muted">One package, unlimited users, plus GST. 7-day trial.</span></div>
+      <div class="panel fact"><span class="eyebrow">KiviHealth rating</span><b>3.2★ iOS</b><span class="muted">From 56 ratings. Almost no third-party reviews.</span></div>
+      <div class="panel fact"><span class="eyebrow">PatientNow rating</span><b>≈3.0 / 5 on G2</b><span class="muted">Praised for scheduling. Criticised for support and “way too many clicks”.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Front office</div>
+    <h2>KiviHealth: registration, appointments, setup, reports</h2>
+    <p class="muted">Owned by Jio (Reliance) since its 2019 sale to Netmeds. It covers OPD, IPD, pharmacy, camps and campaigns, but onboarding looks vendor-assisted rather than self-serve.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Area</th><th>KiviHealth</th><th>CUBOTT today</th></tr></thead>
+      <tbody>
+        <tr><td>Patient registration</td><td>Patient CRM, history, documents. Claims full ABDM support (pull records by ABHA ID or QR).</td><td><span class="pill have">have</span> Registration with duplicate warning, family phones. <span class="pill miss">missing</span> ABHA / ABDM.</td></tr>
+        <tr><td>Booking channels</td><td>Front desk, doctor app, public booking page with QR code, patient app. Google and Justdial listings claimed.</td><td><span class="pill have">have</span> Calendar, phone booking, public booking page per clinic. <span class="pill miss">missing</span> patient app, Google listing.</td></tr>
+        <tr><td>Reminders</td><td>WhatsApp on booking, SMS at ₹0.25 each, automated voice calls, birthday and festival greetings.</td><td><span class="pill part">partial</span> WhatsApp confirmations and reminders are built and queued, not yet connected to Meta. <span class="pill miss">missing</span> SMS, voice calls.</td></tr>
+        <tr><td>Queue</td><td>Marketed as a “queueless practice”. Token screen not confirmed.</td><td><span class="pill have">have</span> Live queue for reception, doctor and assistant, with OP tokens.</td></tr>
+        <tr><td>Clinic setup</td><td>Prescription pad, templates, roles, multi-clinic. Specialty presets for dental, paediatrics and optics.</td><td><span class="pill have">have</span> Owner edits everything: visit types, fees, forms, roles, rooms, availability, messages. Dermatology pack.</td></tr>
+        <tr><td>Prescriptions</td><td>Pick-from-list Rx, stylus and voice entry, PDF shared on WhatsApp, offline mode.</td><td><span class="pill have">have</span> Form-driven Rx with favourites, A5 print. <span class="pill miss">missing</span> share Rx on WhatsApp, voice entry, offline.</td></tr>
+        <tr><td>Billing</td><td>GST invoices, Form 3C, payment links, insurance / TPA, IPD billing.</td><td><span class="pill part">partial</span> Charges, payments, waivers. <span class="pill miss">missing</span> GST invoice documents, payment links.</td></tr>
+        <tr><td>Reports</td><td>“MIS report” and Excel exports. Specific reports not named anywhere.</td><td><span class="pill have">have</span> Daily collections, expenses, owner dashboard. <span class="pill miss">missing</span> Excel export.</td></tr>
+        <tr><td>Pharmacy and stock</td><td>Inventory, vendors, low-stock alerts, lab orders.</td><td><span class="pill part">partial</span> Pharmacy hand-off and dispensing. <span class="pill miss">missing</span> stock.</td></tr>
+        <tr><td>IPD, camps</td><td>Rooms, discharge summaries, camp apps.</td><td><span class="pill skip">not needed</span> Outpatient dermatology does not use these.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">KiviHealth's own site refused every direct read, so the KiviHealth details come from search snippets, store listings and SoftwareSuggest. Treat any single detail as likely rather than confirmed.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Procedures and outcomes</div>
+    <h2>PatientNow: photos, treatment series, follow-ups</h2>
+    <p class="muted">Built for aesthetics and med-spas. Its photo app (RxPhoto) is an add-on, and much of the value is in tying photos, consent and treatment notes into one timeline.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Area</th><th>PatientNow</th><th>CUBOTT today</th></tr></thead>
+      <tbody>
+        <tr><td>Photo capture</td><td>Phone app with a set sequence per body area. A faint overlay of the previous photo, so each new shot matches the pose and distance.</td><td><span class="pill part">partial</span> Photos can be uploaded to a patient's record. <span class="pill miss">missing</span> area tags, capture sequence, overlay.</td></tr>
+        <tr><td>Before / after</td><td>Side-by-side, slider and morph comparisons. Annotations for treated areas and injection sites. Tool to black out the eyes.</td><td><span class="pill miss">missing</span></td></tr>
+        <tr><td>Photo consent</td><td>Consent is attached to the photos. Only consented photos can be shared or published to the clinic website.</td><td><span class="pill miss">missing</span> Consent is a yes/no flag on the patient.</td></tr>
+        <tr><td>Treatment charting</td><td>Face map with units per site. Lot number, expiry and dilution per injection. Laser tab with device and custom parameter fields.</td><td><span class="pill part">partial</span> Free-text notes per procedure sitting. <span class="pill miss">missing</span> device settings, lot tracking, face map.</td></tr>
+        <tr><td>Treatment series</td><td>Plans tracked over time: what was done, what is next.</td><td><span class="pill part">partial</span> Courses with “sitting N”, scheduled into rooms with clash checks. <span class="pill miss">missing</span> one timeline of sittings with photos and settings.</td></tr>
+        <tr><td>Digital consent</td><td>Consent packets sent by SMS before the visit, signed on the phone.</td><td><span class="pill miss">missing</span></td></tr>
+        <tr><td>Follow-up and recall</td><td>“Pathways” that message patients when the next treatment is due. Outreach to lapsed patients. Review requests after each visit.</td><td><span class="pill part">partial</span> Follow-up and procedure work lists with due dates and call log. <span class="pill miss">missing</span> automatic recall messages, review requests.</td></tr>
+        <tr><td>Packages and memberships</td><td>Recurring billing, gift cards, financing.</td><td><span class="pill miss">missing</span> The money ledger can support prepaid sittings.</td></tr>
+        <tr><td>Rooms and devices</td><td>Provider and room schedule. Devices as resources not confirmed.</td><td><span class="pill have">have</span> Rooms with capabilities such as laser or minor OT; the scheduler only offers rooms that fit.</td></tr>
+        <tr><td>Marketing and AI</td><td>Email and SMS campaigns, lead pipeline, AI that answers calls.</td><td><span class="pill skip">later</span> Not what a small Indian clinic needs first.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note">PatientNow's help centre was blocked. Marketing pages were read in full; help articles only through search snippets. Whether it counts “sitting 3 of 8” explicitly could not be confirmed.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Recommendation</div>
+    <h2>What to build next, in order</h2>
+    <p>Ranked by what a busy dermatologist would use every day, and by how far each item puts us ahead of KiviHealth at a similar price.</p>
+    <ol class="build">
+      <li><h3>Procedure photo timeline</h3><p>Take photos on the phone during a sitting, tagged by area (face, scalp, back). See each area's photos across sittings side by side, with an overlay of the last photo to line up the shot.</p><p class="why">The single biggest gap. PatientNow sells this as an add-on. KiviHealth only stores files.</p></li>
+      <li><h3>Treatment course view</h3><p>“Laser hair reduction, sitting 3 of 8” with each sitting's device settings (fluence, spot size, passes), photos and notes, and the next sitting suggested at the right gap.</p><p class="why">Uses the procedure courses and room scheduling we already have.</p></li>
+      <li><h3>Consent signed on the phone</h3><p>One consent template per procedure, signed on the clinic phone or tablet, stored with the sitting. Photo consent controls whether a photo may ever be shared.</p></li>
+      <li><h3>Automatic recall</h3><p>WhatsApp messages when a follow-up or the next sitting is due, and for patients who stopped coming. These replace reception's two calls per procedure patient. The message outbox from the booking work is already in place.</p><p class="why">Needs the clinic's WhatsApp Business account connected.</p></li>
+      <li><h3>Prepaid sitting packages</h3><p>Sell 6 sittings up front and draw one down at each visit, using the existing charges and payments ledger.</p></li>
+      <li><h3>KiviHealth parity</h3><p>Smaller items Indian clinics expect:</p><ul class="tight"><li>GST invoice PDF</li><li>Share prescriptions on WhatsApp</li><li>Excel export of reports</li><li>ABHA / ABDM, later</li></ul></li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="eyebrow">Sources</div>
+    <ul class="tight muted" style="font-size:14px">
+      <li>KiviHealth: kivihealth.com (pricing, for-doctors, terms, case study, via search snippets), Play Store and App Store listings, SoftwareSuggest, Techjockey, Medical Dialogues (Netmeds acquisition, 2019).</li>
+      <li>PatientNow: patientnow.com platform pages (RxPhoto, EMR, scheduling, payments, marketing, Recura AI), help.patientnow.com and kb.rxphoto.com (snippets), G2, Capterra, Software Advice, SoftwareFinder.</li>
+    </ul>
+  </section>
+</main>

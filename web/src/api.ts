@@ -49,6 +49,12 @@ const MESSAGES: Record<string, string> = {
   IN_USE: 'That is in use elsewhere, so it cannot be removed.',
   PASSWORD_REQUIRED: 'Please set a password.',
   PATIENT_REQUIRED: 'Pick or register a patient first.',
+  REFERENCE_REQUIRED: 'UPI and card payments need the reference number (4 characters or more).', RECEIVED_TOO_LOW: 'Cash received is less than the cash part of the bill.', DUPLICATE_METHOD: 'Use each payment mode once.',
+  BATCH_NOT_SELLABLE: 'That batch is empty or expired. Pick another.', RX_NOT_FOR_PATIENT: 'That prescription belongs to another patient.', NOT_ON_THIS_RX: 'That line is not on this prescription.', DISCOUNT_TOO_BIG: 'The discount is more than the bill.', BAD_AMOUNT: 'The bill cannot be zero.',
+  BILL_PHOTO_REQUIRED: "Add a photo of the vendor's bill.", BILL_NO_REQUIRED: "Enter the vendor's bill number.", BILL_TOTAL_REQUIRED: 'Enter the bill total from the paper bill.', BILL_ALREADY_RECEIVED: 'This bill number was already received from this vendor.',
+  ORDER_CLOSED: 'This order is already closed.', NOTHING_RECEIVED: 'A line has no quantity.', ALREADY_DECIDED: 'Someone has already decided on this delivery.', REASON_REQUIRED: 'Please give a reason.',
+  COUNT_OPEN: 'A stock count is already open. Finish it first.', COUNT_NOT_OPEN: 'This count is not open for counting.', NOT_A_GAP: 'That batch has no gap to decide.', CANNOT_CANCEL: 'Only an open order can be cancelled.',
+  DUPLICATE_LINE: 'The same medicine is on the order twice.', VENDOR_NOT_FOUND: 'Pick a vendor.', NOTHING_TO_RETURN: 'Everything on this bill is already returned.', BAD_RANGE: '“From” is after “to”.', PAYMENT_REQUIRED: 'Choose how the patient is paying.',
   BAD_REQUEST: 'That request was not understood.',
   UNAUTHENTICATED: 'Please sign in again.',
 };
@@ -59,6 +65,15 @@ export function errText(e: any): string {
   const code: string = b.code ?? '';
   if (code.startsWith('FORBIDDEN')) return "You don't have permission to do that.";
   if (code === 'ALREADY_CHECKED_IN') return `Already checked in today${b.opNumber ? ` (token ${b.opNumber})` : ''}.`;
+  if (code === 'NOT_ENOUGH_STOCK') return `${b.name ?? b.batchNo ?? 'That item'}: only ${b.onHand ?? 0} in stock.`;
+  if (code === 'BILL_TOTAL_MISMATCH') return `The lines add up to ₹${((b.computedPaise ?? 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}, not the bill total. Check the rates, quantities and discounts.`;
+  if (code === 'EXPIRED_BATCH') return `${b.name}: batch ${b.batchNo} has already expired.`;
+  if (code === 'DISCOUNT_NEEDS_OWNER') return `Discounts above ${b.maxPct}% need the owner.`;
+  if (code === 'PAYMENTS_DO_NOT_ADD_UP') return `The payments must add up to ₹${((b.totalPaise ?? 0) / 100).toLocaleString('en-IN')}.`;
+  if (code === 'NO_PRICE') return `${b.name} has no price. Set it under Settings → Medicines.`;
+  if (code === 'MORE_THAN_SOLD') return `More ${b.name} than was sold on this bill (or already returned).`;
+  if (code === 'BATCH_EXPIRY_DIFFERS') return `Batch ${b.batchNo} is already in stock with a different expiry. Check the batch number.`;
+  if (code === 'COUNT_INCOMPLETE') return `${b.left} batch${b.left === 1 ? '' : 'es'} still to count.`;
   if (code === 'VALIDATION' && Array.isArray(b.errors) && b.errors[0]) {
     const x = b.errors[0]; const key = [...(x.path ?? [])].reverse().find((p: any) => typeof p === 'string'); const f = (key && FIELD_NAMES[key]) ?? (key ? key.replace(/([A-Z])/g, ' $1').replace(/^./, (c: string) => c.toUpperCase()) : 'A field');
     if (x.message === 'PHONE_10_DIGITS' || (key === 'phone' && x.code === 'invalid_string')) return 'Phone must be 10 digits.';

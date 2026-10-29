@@ -325,11 +325,11 @@ export function cleanMoney(raw: string) {
   return f === undefined ? whole : `${whole || '0'}.${f}`;
 }
 export const toPaise = (s: string) => Math.round(Number(s || 0) * 100);
-export function MoneyInput({ value, onChange, className = '', placeholder = '0', id, autoFocus }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; id?: string; autoFocus?: boolean }) {
+export function MoneyInput({ value, onChange, className = '', placeholder = '0', id, autoFocus, label }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; id?: string; autoFocus?: boolean; label?: string }) {
   return (
     <div className={`relative ${className}`}>
       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none">₹</span>
-      <input id={id} autoFocus={autoFocus} className="input !pl-8" inputMode="decimal" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(cleanMoney(e.target.value))} aria-label="Amount in rupees" />
+      <input id={id} autoFocus={autoFocus} className="input !pl-8" inputMode="decimal" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(cleanMoney(e.target.value))} aria-label={label ?? 'Amount in rupees'} />
     </div>
   );
 }

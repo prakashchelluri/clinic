@@ -78,6 +78,13 @@
       "when": 1792850000000,
       "tag": "0010_broadcast",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792900000000,
+      "tag": "0011_stock",
+      "breakpoints": true
     }
   ]
 }

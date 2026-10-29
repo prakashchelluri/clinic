@@ -81,6 +81,8 @@ export const medicine = pgTable('medicine', {
   gstBp: integer('gst_bp').notNull().default(1200),   // 1200 = 12%
   hsn: text('hsn'),
   defaults: jsonb('defaults').$type<{ dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string }>(),
+  packSize: integer('pack_size').notNull().default(1),         // tablets in the strip the MRP is for; 1 for a tube or bottle
+  reorderLevel: integer('reorder_level').notNull().default(0), // low stock below this many packs
 });
 
 export const procedureCatalog = pgTable('procedure_catalog', {
@@ -233,7 +235,9 @@ export const prescriptionItem = pgTable('prescription_item', {
   dose: text('dose'), route: text('route'), frequency: text('frequency'),
   durationDays: integer('duration_days'), instructions: text('instructions'),
   sortOrder: integer('sort_order').notNull().default(0),
-  dispensed: boolean('dispensed').notNull().default(false),
+  dispensed: boolean('dispensed').notNull().default(false), // something was issued at the counter
+  issuedQty: integer('issued_qty').notNull().default(0),   // packs issued so far, across bills
+  notIssuedReason: text('not_issued_reason'),              // why the rest was not issued (optional)
 });
 
 export const room = pgTable('room', {
@@ -320,16 +324,104 @@ export const pharmacySale = pgTable('pharmacy_sale', {
   invoiceNo: text('invoice_no').notNull(),
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   chargeId: uuid('charge_id').references(() => charge.id),
-  items: jsonb('items').$type<{ medicineId: string; name: string; hsn: string | null; qty: number; mrpPaise: number; gstBp: number; amountPaise: number }[]>().notNull(),
+  items: jsonb('items').$type<SaleLine[]>().notNull(),
   grossPaise: integer('gross_paise').notNull(),      // sum of lines at MRP
   discountPaise: integer('discount_paise').notNull().default(0),
   gstPaise: integer('gst_paise').notNull(),          // GST contained in the total
   totalPaise: integer('total_paise').notNull(),
-  method: text('method').notNull(),
+  method: text('method').notNull(),                  // cash | upi | card | split
   reference: text('reference'),
   receivedPaise: integer('received_paise'),          // cash handed over, for change
   createdBy: uuid('created_by').notNull(),
+  encounterId: uuid('encounter_id'),                 // the prescription this bill issued against
+  payments: jsonb('payments').$type<{ method: string; amountPaise: number; reference: string | null }[]>().notNull().default([]),
+  returns: jsonb('returns').$type<SaleReturn[]>().notNull().default([]),
 }, (t) => [uniqueIndex('pharmacy_invoice').on(t.tenantId, t.invoiceNo), index('pharmacy_sale_at').on(t.tenantId, t.createdAt)]);
+
+export type SaleLine = { medicineId: string; name: string; hsn: string | null; qty: number; mrpPaise: number; gstBp: number; amountPaise: number;
+  batchId?: string | null; batchNo?: string | null; expiry?: string | null; prescriptionItemId?: string | null };
+export type SaleReturn = { creditNoteNo: string; at: string; by: string; reason: string; method: string; reference: string | null; refundPaise: number; lines: { line: number; qty: number; amountPaise: number }[] };
+
+// --- pharmacy stock ---
+// Who the clinic buys from.
+export const vendor = pgTable('vendor', {
+  ...tenantCols,
+  name: text('name').notNull(),
+  phone: text('phone'),
+  gstin: text('gstin'),
+  address: text('address'),
+  note: text('note'),
+  active: boolean('active').notNull().default(true),
+});
+
+/**
+ * One stock document: a purchase order (the vendor's promise), a receipt (what the bill and the box say), a return to
+ * the vendor, or a stock count. Lines are kept on the document; stock itself lives in stock_batch and stock_move.
+ */
+export const stockDoc = pgTable('stock_doc', {
+  ...tenantCols,
+  kind: text('kind').notNull(),        // order | receipt | return | count
+  docNo: text('doc_no').notNull(),     // PO-0001 · GRN-0001 · RT-0001 · CNT-0001
+  vendorId: uuid('vendor_id').references(() => vendor.id),
+  orderId: uuid('order_id'),           // receipt against this order
+  status: text('status').notNull(),    // order: open|part|closed|cancelled · receipt: ok|review|settled · return: done · count: open|review|closed
+  billNo: text('bill_no'),
+  billDate: date('bill_date', { mode: 'string' }),
+  billTotalPaise: integer('bill_total_paise'),
+  billPhotoKey: text('bill_photo_key'),
+  dueDate: date('due_date', { mode: 'string' }),
+  vendorRef: text('vendor_ref'),
+  note: text('note'),
+  lines: jsonb('lines').$type<any[]>().notNull().default([]),
+  decision: jsonb('decision').$type<{ choice: string; reason: string | null; by: string; at: string; debitPaise?: number } | null>(),
+  createdBy: uuid('created_by').notNull(),
+  createdByName: text('created_by_name').notNull(),
+}, (t) => [uniqueIndex('stock_doc_no').on(t.tenantId, t.kind, t.docNo), index('stock_doc_at').on(t.tenantId, t.kind, t.createdAt)]);
+
+// A batch on the shelf. Paid and free units sit together; cost is the real cost per pack with free units counted in.
+export const stockBatch = pgTable('stock_batch', {
+  ...tenantCols,
+  medicineId: uuid('medicine_id').notNull().references(() => medicine.id),
+  batchNo: text('batch_no').notNull(),
+  expiry: date('expiry', { mode: 'string' }).notNull(), // last day of the expiry month
+  qty: integer('qty').notNull().default(0),
+  paidQty: integer('paid_qty').notNull().default(0),
+  freeQty: integer('free_qty').notNull().default(0),
+  costPaise: integer('cost_paise').notNull().default(0),
+  mrpPaise: integer('mrp_paise').notNull().default(0),
+  vendorId: uuid('vendor_id'),
+  receiptId: uuid('receipt_id'),
+  receiptNo: text('receipt_no'),
+}, (t) => [uniqueIndex('stock_batch_no').on(t.tenantId, t.medicineId, t.batchNo), index('stock_batch_med').on(t.tenantId, t.medicineId)]);
+
+// Every change to stock, never edited or deleted. balance = the medicine's total on hand after this change.
+export const stockMove = pgTable('stock_move', {
+  ...tenantCols,
+  batchId: uuid('batch_id').notNull().references(() => stockBatch.id),
+  medicineId: uuid('medicine_id').notNull(),
+  change: integer('change').notNull(),
+  balance: integer('balance').notNull(),
+  kind: text('kind').notNull(),        // receive | sale | patient_return | vendor_return | count | adjust
+  docId: uuid('doc_id'),
+  docNo: text('doc_no'),
+  note: text('note'),
+  by: uuid('by').notNull(),
+  byName: text('by_name').notNull(),
+}, (t) => [index('stock_move_med').on(t.tenantId, t.medicineId, t.createdAt), index('stock_move_batch').on(t.tenantId, t.batchId)]);
+
+// Free units a vendor promised but did not deliver; closed when they arrive later or the owner writes them off.
+export const vendorOwed = pgTable('vendor_owed', {
+  ...tenantCols,
+  vendorId: uuid('vendor_id').notNull().references(() => vendor.id),
+  medicineId: uuid('medicine_id').notNull(),
+  name: text('name').notNull(),
+  qty: integer('qty').notNull(),
+  fromDocId: uuid('from_doc_id').notNull(),
+  fromDocNo: text('from_doc_no').notNull(),
+  status: text('status').notNull().default('owed'), // owed | received | written_off
+  settledNote: text('settled_note'),
+  decidedBy: text('decided_by').notNull(),
+}, (t) => [index('vendor_owed_v').on(t.tenantId, t.vendorId, t.status)]);
 
 export const expense = pgTable('expense', {
   ...tenantCols,
@@ -388,7 +480,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

@@ -110,7 +110,7 @@ export async function createClinic(input: NewClinic) {
     { tenantId: tid, code: 'SPL', name: 'RMP/PMP Special Card', amountPaise: 20000, eligibility: { '==': [{ var: 'patient.referralCard' }, true] } },
     { tenantId: tid, code: 'ONL', name: 'Online consultation', amountPaise: 50000, affectsCapacity: false },
   ]);
-  await db.insert(medicine).values(DERM_MEDICINES.map((m) => ({ ...m, tenantId: tid })));
+  await db.insert(medicine).values(DERM_MEDICINES.map((m) => ({ ...m, packSize: ['tab', 'cap'].includes(m.form) ? 10 : 1, reorderLevel: 5, tenantId: tid })));
   await db.insert(procedureCatalog).values(DERM_PROCEDURES.map((p) => ({ ...p, tenantId: tid, specialtyId: derm.id })));
   await db.insert(room).values(DERM_ROOMS.map((r) => ({ ...r, tenantId: tid, branchId: b.id })));
   await insertDefaultServices(db, tid);
