@@ -1,6 +1,6 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { db } from './index.js';
-import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, service, rxTemplate, TENANT_TABLES, type FormSchema } from './schema.js';
+import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, service, rxTemplate, tmpl, TENANT_TABLES, type FormSchema } from './schema.js';
 import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
@@ -87,6 +87,57 @@ async function insertStarterTemplates(db: any, tid: string) {
   ]);
 }
 
+/** Starter sets: each complaint's checklist for the junior doctor, plus small medicine, finding, advice, test and procedure sets that the complaint or diagnosis suggests. The doctor edits them in Settings → Templates. */
+const CHECKLISTS: Record<string, { links: string[]; qs: ([string] | [string, string])[] }> = {
+  Rashes: { links: ['Rash', 'Rashes'], qs: [['Itching worse at night?'], ['Anyone at home itching too?', 'Who, and since when'], ['Applied any cream already?', 'Which cream, how long'], ['New soap, detergent or cosmetic?'], ['Fever in the last month?'], ['Pets or animal contact?'], ['Any new medicine in the last 2 months?', 'Which'], ['Hostel, gym or shared bedding?']] },
+  Itching: { links: ['Itching', 'Itchy'], qs: [['Worse at night?'], ['Rash visible?'], ['Anyone at home itching too?', 'Who'], ['Very dry skin?'], ['Any new medicine in the last 2 months?', 'Which']] },
+  'Hair fall': { links: ['Hair fall'], qs: [['Fever or illness in the last 3 months?'], ['Stomach problem or thyroid?'], ['Any new medicine?', 'Which'], ['Crash diet or weight loss?'], ['Hair fall in the family?'], ['Delivery or surgery in the last year?'], ['Stress or poor sleep?']] },
+  Acne: { links: ['Acne', 'Pimples'], qs: [['Worse before periods?'], ['Using any steroid or face cream?', 'Which'], ['Gym supplements or protein?'], ['Pregnancy planned?'], ['Oily or sweet diet?'], ['Scarring?']] },
+  Pigmentation: { links: ['Pigmentation', 'Dark patches'], qs: [['Long hours in the sun?'], ['Any cream applied?', 'Which'], ['Pregnancy, pills or hormones?'], ['Thyroid problem?'], ['Same in the family?']] },
+  Urticaria: { links: ['Urticaria', 'Hives'], qs: [['Stomach ache?'], ['Swelling of lips or face?'], ['Breathing trouble?'], ['New food or medicine?', 'Which'], ['Fever?'], ['How long does each patch last?', 'Hours']] },
+  Warts: { links: ['Warts'], qs: [['How many, and since when?', 'Number and duration'], ['Anyone at home with warts?'], ['Treated before?', 'How']] },
+  'Nail problem': { links: ['Nail problem', 'Nail changes'], qs: [['Pain or pus?'], ['Diabetes?'], ['Swimming or wet work?']] },
+  Dandruff: { links: ['Dandruff'], qs: [['Itching of the scalp?'], ['Hair fall with it?'], ['Using any medicated shampoo?', 'Which']] },
+  'Dry skin': { links: ['Dry skin'], qs: [['Hot baths or harsh soap?'], ['Thyroid problem?'], ['Winter only, or all year?']] },
+};
+async function insertStarterSets(db: any, tid: string) {
+  const meds = await db.select().from(medicine).where(eq(medicine.tenantId, tid));
+  const procs = await db.select().from(procedureCatalog).where(eq(procedureCatalog.tenantId, tid));
+  const m = (name: string, frequency: string, durationDays: number, instructions?: string) => { const x = meds.find((y: any) => y.name === name); return x && { name, medicineId: x.id, dose: x.defaults?.dose ?? null, route: x.defaults?.route ?? null, frequency, durationDays, instructions: instructions ?? null }; };
+  const rows: any[] = [];
+  Object.entries(CHECKLISTS).forEach(([name, c]) => rows.push({ kind: 'complaint', name, linked: { complaints: c.links }, payload: { questions: c.qs.map(([q, detail]) => ({ q, ...(detail ? { detail } : {}) })) } }));
+  const add = (kind: string, name: string, payload: any, linked: any, mode = 'chip') => rows.push({ kind, name, payload, linked, mode });
+  const med = (name: string, items: any[], linked: any) => { const ok = items.filter(Boolean); if (ok.length) add('medicine', name, { items: ok }, linked); };
+  med('Rashes · itch relief', [m('Cetirizine 10 mg', '0-0-1', 7, 'for itching'), m('Moisturiser (ceramide)', 'twice daily', 30)], { complaints: ['Rash', 'Rashes', 'Itching'], diagnoses: ['Atopic dermatitis', 'Contact dermatitis'] });
+  med('Fungal infection', [m('Terbinafine 250 mg', '1-0-0', 14, 'after food'), m('Ketoconazole 2% cream', '1-0-1', 28, '2 cm beyond the edge'), m('Cetirizine 10 mg', '0-0-1', 10, 'for itching')], { diagnoses: ['Tinea corporis', 'Tinea cruris', 'Pityriasis versicolor'] });
+  med('Acne · moderate', [m('Adapalene 0.1% gel', 'at night', 30), m('Clindamycin 1% gel', 'morning', 30), m('Doxycycline 100 mg', '1-0-0', 30, 'after food'), m('Sunscreen SPF 50', 'morning', 30)], { complaints: ['Acne', 'Pimples'], diagnoses: ['Acne vulgaris'] });
+  med('Pigmentation care', [m('Sunscreen SPF 50', 'morning', 60, 'every 3 hours outdoors'), m('Moisturiser (ceramide)', 'twice daily', 60)], { complaints: ['Pigmentation', 'Dark patches'], diagnoses: ['Melasma', 'Post-inflammatory hyperpigmentation'] });
+  med('Dry skin care', [m('Moisturiser (ceramide)', 'twice daily', 60)], { complaints: ['Dry skin'] });
+  add('advice', 'Itch advice', { lines: ['Loose cotton clothes', 'Moisturise twice daily', 'Avoid scrubbing'] }, { complaints: ['Rash', 'Rashes', 'Itching'] }, 'auto');
+  add('advice', 'Fungal infection advice', { lines: ['Keep the area dry', "Don't share towels", 'Wash clothes in hot water', 'No steroid creams'] }, { diagnoses: ['Tinea corporis', 'Tinea cruris', 'Pityriasis versicolor'] });
+  add('advice', 'Scabies family care', { lines: ['Treat everyone at home on the same night', 'Hot-wash clothes and bedding', 'Cut nails short'] }, { diagnoses: ['Scabies'] });
+  add('advice', 'Acne advice', { lines: ['Mild soap only', 'Avoid scrubbing', 'Sunscreen every 3 hours'] }, { complaints: ['Acne', 'Pimples'], diagnoses: ['Acne vulgaris'] });
+  add('finding', 'Rash findings', { chips: ['Plaque', 'Scale', 'Papule', 'Vesicle', 'Erosion'] }, { complaints: ['Rash', 'Rashes', 'Itching'] });
+  add('finding', 'Acne findings', { chips: ['Comedone', 'Papule', 'Pustule', 'Nodule', 'Scar'] }, { complaints: ['Acne', 'Pimples'], diagnoses: ['Acne vulgaris'] });
+  add('finding', 'Pigment findings', { chips: ['Hyperpigmentation', 'Macule'] }, { complaints: ['Pigmentation', 'Dark patches'], diagnoses: ['Melasma'] });
+  add('tests', 'Acne work-up', { tests: [{ name: 'CBC' }, { name: 'LFT' }, { name: 'Lipid profile' }] }, { diagnoses: ['Acne vulgaris'] });
+  add('tests', 'Hair fall panel', { tests: [{ name: 'CBC' }, { name: 'TSH' }, { name: 'Vitamin D' }, { name: 'Serum ferritin' }] }, { complaints: ['Hair fall'] });
+  add('tests', 'Fungal scraping', { tests: [{ name: 'KOH mount' }] }, { diagnoses: ['Tinea corporis', 'Tinea cruris', 'Pityriasis versicolor'] });
+  add('tests', 'Skin biopsy', { tests: [{ name: 'Skin biopsy', days: 7 }] }, {});
+  const courses: [string, string, { complaints?: string[]; diagnoses?: string[] }][] = [['Chemical peel · course', 'Chemical peel', { diagnoses: ['Acne vulgaris', 'Melasma'] }], ['Laser hair reduction · course', 'Laser hair reduction', {}], ['PRP · hair course', 'PRP (hair)', { complaints: ['Hair fall'], diagnoses: ['Androgenetic alopecia'] }], ['Cryotherapy · warts', 'Cryotherapy (warts)', { complaints: ['Warts'], diagnoses: ['Verruca vulgaris'] }]];
+  for (const [name, pn, link] of courses) {
+    const p = procs.find((x: any) => x.name === pn);
+    if (p) add('procedure', name, { procedureId: p.id, sittings: p.typicalSittings, intervalDays: 28, ...(p.pricePaise ? { pricePaise: p.pricePaise } : {}) }, link);
+  }
+  await db.insert(tmpl).values(rows.map((r, i) => ({ ...r, sortOrder: i, tenantId: tid })));
+  // whole-note protocols are suggested by diagnosis too
+  const link = (name: string, linked: any) => db.update(rxTemplate).set({ linked }).where(and(eq(rxTemplate.tenantId, tid), eq(rxTemplate.name, name)));
+  await link('Tinea corporis', { diagnoses: ['Tinea corporis', 'Tinea cruris'], complaints: ['Rash', 'Rashes', 'Itching'] });
+  await link('Acne · moderate', { diagnoses: ['Acne vulgaris'], complaints: ['Acne', 'Pimples'] });
+  await link('Melasma', { diagnoses: ['Melasma'], complaints: ['Pigmentation', 'Dark patches'] });
+  await link('Urticaria', { diagnoses: ['Acute urticaria', 'Chronic urticaria'], complaints: ['Urticaria'] });
+}
+
 async function insertDefaultServices(db: any, tid: string) {
   const fees = await db.select().from(feeCategory).where(eq(feeCategory.tenantId, tid));
   const fee = (code: string) => fees.find((f: any) => f.code === code);
@@ -129,6 +180,7 @@ export async function createClinic(input: NewClinic) {
   await db.insert(medicine).values(DERM_MEDICINES.map((m) => ({ ...m, packSize: ['tab', 'cap'].includes(m.form) ? 10 : 1, reorderLevel: 5, tenantId: tid })));
   await insertStarterTemplates(db, tid);
   await db.insert(procedureCatalog).values(DERM_PROCEDURES.map((p) => ({ ...p, tenantId: tid, specialtyId: derm.id })));
+  await insertStarterSets(db, tid);
   await db.insert(room).values(DERM_ROOMS.map((r) => ({ ...r, tenantId: tid, branchId: b.id })));
   await insertDefaultServices(db, tid);
   return { tenantId: tid, branchId: b.id, practitionerId: ownerPrac?.id ?? null, specialtyId: derm.id, slug };
@@ -147,6 +199,8 @@ export async function ensureFormsCurrent() {
     // Visit types arrived with online booking: give every clinic a sensible starting set once.
     if (!(await db.select({ id: service.id }).from(service).where(eq(service.tenantId, t.id)).limit(1)).length) await insertDefaultServices(db, t.id);
     if (!(await db.select({ id: rxTemplate.id }).from(rxTemplate).where(eq(rxTemplate.tenantId, t.id)).limit(1)).length) await insertStarterTemplates(db, t.id);
+    // Section templates arrived with Wave 1: give every clinic its starter sets once.
+    if (!(await db.select({ id: tmpl.id }).from(tmpl).where(eq(tmpl.tenantId, t.id)).limit(1)).length) await insertStarterSets(db, t.id);
 
     const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r: any) => r[0]);
     // Only auto-upgrade clinics still on the stock pack (no owner-edited versions beyond it).

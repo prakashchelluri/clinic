@@ -7,9 +7,10 @@ import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
 import { PrivacyTab } from './Privacy';
+import { TemplatesTab } from './SettingsTemplates';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
+type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
 type TabDef = [Tab, string, string, string];
 const GROUPS: [string, TabDef[]][] = [
   ['Practice', [
@@ -28,6 +29,7 @@ const GROUPS: [string, TabDef[]][] = [
   ]],
   ['Clinical', [
     ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses'],
+    ['templates', 'Templates', 'list', 'Sets for medicines, complaints, advice, tests'],
     ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
     ['procedures', 'Procedures', 'stetho', 'Catalogue, duration, room needs'],
     ['photos', 'Photo areas', 'spark', 'Body areas for clinical photos'],
@@ -76,6 +78,7 @@ export function Settings() {
           {tab === 'roles' && <RolesTab onSaved={refresh} />}
           {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
           {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'templates' && <TemplatesTab cfg={cfg} />}
           {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'procedures' && <ProceduresTab cfg={cfg} onSaved={refresh} />}
           {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}

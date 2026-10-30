@@ -111,6 +111,7 @@ export const patient = pgTable('patient', {
   locality: text('locality'),
   referralCard: boolean('referral_card').notNull().default(false),
   allergies: text('allergies'),
+  history: jsonb('history').$type<Record<string, { yes: boolean; note?: string }>>().notNull().default({}), // diabetes, thyroid, bp, other: asked once, confirmed at each visit
   notes: text('notes'),
   legacyId: text('legacy_id'),
   consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string }>>().notNull().default({}),
@@ -290,8 +291,19 @@ export const recommendation = pgTable('recommendation', {
   dueOn: date('due_on'),
   sittings: integer('sittings'),
   notes: text('notes'),
-  status: text('status').notNull().default('open'), // open | contacted | scheduled | done | cancelled
+  status: text('status').notNull().default('open'), // open | contacted | scheduled | done | cancelled (for a test: open = pending, done = report received)
   contactLog: jsonb('contact_log').$type<{ at: string; by: string; outcome: string; note?: string }[]>().notNull().default([]),
+  // Tests only. Tests ordered together share an order number; the doctor reviews an order once, when every test in it is received.
+  orderNo: integer('order_no').notNull().default(1),
+  expectedOn: date('expected_on'),
+  receivedAt: ts('received_at'),
+  reviewedAt: ts('reviewed_at'),
+  reviewOutcome: text('review_outcome'), // normal | change_medicines | needs_visit | will_call
+  reviewNote: text('review_note'),
+  reviewedBy: text('reviewed_by'),
+  informedAt: ts('informed_at'),
+  informedHow: text('informed_how'),     // in_person | phone | whatsapp
+  informedBy: text('informed_by'),
 }, (t) => [index('rec_status').on(t.tenantId, t.kind, t.status)]);
 
 export const charge = pgTable('charge', {
@@ -432,7 +444,24 @@ export const rxTemplate = pgTable('rx_template', {
   prescription: jsonb('prescription').$type<any[]>().notNull().default([]),
   recommendations: jsonb('recommendations').$type<any[]>().notNull().default([]),
   uses: integer('uses').notNull().default(0),
+  linked: jsonb('linked').$type<{ complaints?: string[]; diagnoses?: string[] }>().notNull().default({}), // complaints and diagnoses this protocol is suggested for
 }, (t) => [index('rx_template_t').on(t.tenantId, t.practitionerId)]);
+
+// Small reusable sets for one section of the note: medicines, a complaint's checklist, findings, advice, tests, a procedure package.
+// Suggested by the complaint or diagnosis they are linked to; they stack, so adding one never repeats what is already there.
+export type TemplateKind = 'medicine' | 'complaint' | 'finding' | 'advice' | 'tests' | 'procedure';
+export const tmpl = pgTable('tmpl', {
+  ...tenantCols,
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  linked: jsonb('linked').$type<{ complaints?: string[]; diagnoses?: string[] }>().notNull().default({}),
+  mode: text('mode').notNull().default('chip'),   // chip: shown as a suggestion · auto: added for the doctor when the complaint or diagnosis is picked
+  payload: jsonb('payload').$type<Record<string, any>>().notNull().default({}),
+  uses: integer('uses').notNull().default(0),
+  active: boolean('active').notNull().default(true),
+  draft: boolean('draft').notNull().default(false), // saved from a visit by a doctor, waiting for the owner
+  sortOrder: integer('sort_order').notNull().default(0),
+}, (t) => [index('tmpl_t').on(t.tenantId, t.kind)]);
 
 // Patients who want an earlier place; offered one when a place opens.
 export const waitlist = pgTable('waitlist', {
@@ -522,7 +551,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'rx_template', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 
 export type FormField = {

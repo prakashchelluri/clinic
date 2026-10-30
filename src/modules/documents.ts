@@ -83,7 +83,7 @@ export function documentRoutes(app: FastifyInstance) {
     const key = path.posix.join(t, body.patientId, `${row.id}.${ext}`);
     await putFile(key, bytes, body.mime); // inside the transaction: if storage fails, no record is left pointing at nothing
     await tx.update(document).set({ storageKey: key }).where(eq(document.id, row.id));
-    for (const r of recs) if (r.status !== 'done') await tx.update(recommendation).set({ status: 'done', contactLog: [...r.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Result received', note: body.note || body.title }] }).where(eq(recommendation.id, r.id));
+    for (const r of recs) if (r.status !== 'done') await tx.update(recommendation).set({ status: 'done', receivedAt: new Date().toISOString(), contactLog: [...r.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Result received', note: body.note || body.title }] }).where(eq(recommendation.id, r.id));
     await emit(tx, req.ctx, 'document.uploaded', 'document', row.id, { patientId: body.patientId, kind: body.kind, mime: body.mime, sizeBytes: bytes.length, area: body.area, procedureSessionId: body.procedureSessionId });
     return { ...row, storageKey: key };
   });

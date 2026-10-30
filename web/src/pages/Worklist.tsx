@@ -40,7 +40,7 @@ export function Worklist() {
     <div>
       <PageHeader title="Procedures" subtitle={view === 'schedule' ? 'What is planned, any date' : overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Everything the doctor recommended, nothing re-typed'}>
         <Segmented<'schedule' | 'plans'> value={view} onChange={setView} options={[{ value: 'schedule', label: 'Schedule' }, { value: 'plans', label: newPlans ? `Plans to schedule · ${newPlans} new` : 'Plans to schedule', count: (proc.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length || undefined }]} />
-        {view === 'plans' && <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }, { value: 'investigation', label: 'Tests', count: inv.data?.length }]} />}
+        {view === 'plans' && <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }]} />}
       </PageHeader>
       {view === 'schedule' ? <ProcSchedule onPlans={() => setView('plans')} /> : (<>
       {kind === 'procedure' && (sessions.data ?? []).length > 0 && (

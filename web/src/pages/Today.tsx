@@ -4,7 +4,6 @@ import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
 import { can } from '../App';
 import { Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
-import { openViewer } from '../viewer';
 import { ChangeMyDay, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 
@@ -35,7 +34,7 @@ export function Today() {
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), enabled: can(perms, 'worklist.read') });
   const fus = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), enabled: can(perms, 'worklist.read') });
   const allProcs = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
-  const resq = useQuery({ queryKey: ['results'], queryFn: () => get('/results?days=7'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
+  const ordq = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
   const secq = useQuery({ queryKey: ['security'], queryFn: () => get('/security'), enabled: (me.roles ?? []).includes('owner'), refetchInterval: 60000 });
   const open = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }), onError: (e) => toast(errText(e), 'err') });
   const take = useMutation({ mutationFn: (id: string) => post(`/procedure-sessions/${id}/assign`, { practitionerId: doc }), onSuccess: () => { ['calendar', 'psessions'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('The sitting is yours'); }, onError: (e) => toast(errText(e), 'err') });
@@ -103,10 +102,10 @@ export function Today() {
   const review = (plans.data ?? []).filter((r: any) => r.status === 'open' && cfg?.procedures.find((p: any) => p.id === r.procedureId)?.requiresReview);
   const overdue = (fus.data ?? []).filter((r: any) => r.dueOn && r.dueOn < today() && ['open', 'contacted'].includes(r.status));
   const noDoc = (allProcs.data ?? []).filter((p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId);
-  const resultGroups = (() => { const m = new Map<string, any>(); for (const r of (resq.data ?? []).filter((x: any) => x.documents.some((dd: any) => !dd.reviewedAt))) { const g = m.get(r.patient.id) ?? { patient: r.patient, tests: [] as string[], docs: new Map<string, any>() }; g.tests.push(r.test); for (const dd of r.documents) g.docs.set(dd.id, dd); m.set(r.patient.id, g); } return [...m.values()]; })();
-  const openResults = (g: any) => { const docs = [...g.docs.values()]; openViewer({ docs, who: g.patient.fullName, canDelete: can(perms, 'document.write') }); post('/documents/review', { ids: docs.map((x: any) => x.id) }).then(() => qc.invalidateQueries({ queryKey: ['results'] }), () => {}); };
+  // test orders whose every report is in: the doctor reviews each once
+  const readyOrders = ((ordq.data?.orders ?? []) as any[]).filter((o) => o.state === 'ready');
   const stopped: any[] = secq.data?.security?.ipLock?.enabled ? secq.data.stopped : [];
-  const leaveCount = stopped.length + resultGroups.length + drafts.length + review.length + noDoc.length + (overdue.length ? 1 : 0);
+  const leaveCount = stopped.length + readyOrders.length + drafts.length + review.length + noDoc.length + (overdue.length ? 1 : 0);
 
   // --- next patient's story ---
   const lastEnc = (nextTl.data?.encounters ?? []).find((e: any) => e.status === 'completed');
@@ -162,7 +161,7 @@ export function Today() {
           <section className="card-flat order-3 p-4 sm:p-5 anim-fade-up">
             <div className="flex items-center gap-2"><b className="text-[15px]">Before you leave</b>{leaveCount > 0 && <Chip tone="amber">{leaveCount}</Chip>}</div>
             {leaveCount === 0 ? <div className="py-2 text-sm text-muted">Nothing waiting on you.</div> : <div className="mt-1">
-              {resultGroups.map((g: any) => <Attn key={g.patient.id} tag="result" title={g.patient.fullName} sub={`${[...new Set(g.tests)].join(', ')} · ${g.docs.size} file${g.docs.size === 1 ? '' : 's'}`} action="Open" onClick={() => openResults(g)} />)}
+              {readyOrders.map((o: any) => <Attn key={o.key} tag="reports" title={o.patient.fullName} sub={`${o.tests.map((t: any) => t.name).join(', ')} · all received`} action="Review" onClick={() => nav('/tests?tab=review')} />)}
               {drafts.map((v: any) => <Attn key={v.id} tag="note" title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {review.slice(0, 4).map((r: any) => <Attn key={r.id} tag="plan" title={`${r.procedure} for ${r.patient.fullName}`} sub={r.sittings ? `approve ${r.sittings} sittings` : 'approve the plan'} action="Open" onClick={() => nav(`/patients/${r.patient.id}`)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} tag="no doctor" title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}

@@ -136,7 +136,7 @@ const VERB: Record<string, string> = { POST: 'Added', PATCH: 'Changed', PUT: 'Ch
 export function describe(method: string, url: string, body: any): { kind: string; summary: string } | null {
   const path = url.replace(/^\/api/, '').split('?')[0];
   if (method === 'PATCH' && /^\/encounters\/[^/]+$/.test(path) && !body?.complete) return null;
-  if (/^\/rx-templates\/[^/]+\/use$|^\/documents\/review$|^\/auth\/|^\/broadcasts\/(preview|test)$|^\/audit\//.test(path)) return null;
+  if (/^\/rx-templates\/[^/]+\/use$|^\/templates\/[^/]+\/use$|^\/documents\/review$|^\/auth\/|^\/broadcasts\/(preview|test)$|^\/audit\//.test(path)) return null;
   for (const [m, re, kind, say] of RULES) {
     if ((m === ' ' || m === method) && re.test(path)) {
       if (m === ' ') { const k = path.match(re)![1]; return { kind, summary: `${VERB[method] ?? 'Changed'} ${NOUN[k] ?? k}` }; }

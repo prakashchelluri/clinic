@@ -3,15 +3,17 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Icon, Skeleton, fmtDate, toast, NumInput, ask } from '../ui';
+import { Avatar, Chip, Icon, MoreMenu, Skeleton, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare } from '../photos';
 import { parseRxLine } from '../rxLine';
+import { useTemplates, suggests, norm, isSlow, uniq, type Tmpl } from '../templates';
+import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, type History } from '../screening';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string };
-type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; notes?: string };
+type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; notes?: string; orderNo?: number; status?: string; id?: string };
 
 const FREQ = ['1-0-0', '0-0-1', '1-0-1', '1-1-1', 'at night', 'once daily', 'twice daily', 'alternate days', 'weekly', 'SOS'];
 const TESTS = ['CBC', 'FBS / PPBS', 'HbA1c', 'LFT', 'RFT', 'Lipid profile', 'TSH', 'Vitamin D', 'Vitamin B12', 'Serum ferritin', 'KOH mount', 'Skin biopsy', 'Patch test', 'VDRL', 'HIV', 'HBsAg', 'ANA', 'Urine routine', 'Culture & sensitivity', 'Woods lamp'];
@@ -43,6 +45,7 @@ export function Encounter() {
   const tpls = useQuery({ queryKey: ['rx-templates'], queryFn: () => get('/rx-templates'), enabled: isDoctor });
   const stock = useQuery({ queryKey: ['encounters-stock'], queryFn: () => get('/encounters-stock'), enabled: isDoctor, staleTime: 60_000 });
   const fd = useQuery({ queryKey: ['frontdesk', 'today-doc'], queryFn: () => get('/frontdesk'), refetchInterval: 15000, enabled: isDoctor });
+  const sets = useTemplates();
   const photos = usePhotos(enc.data?.patientId);
   const [data, setData] = useState<Record<string, any>>({});
   const [rx, setRx] = useState<RxItem[]>([]);
@@ -54,6 +57,7 @@ export function Encounter() {
   const [testDraft, setTestDraft] = useState(''); const [rxLine, setRxLine] = useState('');
   const [applied, setApplied] = useState<string | null>(null);
   const [tplQ, setTplQ] = useState(''); const [allTpl, setAllTpl] = useState(false);
+  const [setNote, setSetNote] = useState('');
   const [capture, setCapture] = useState(false); const [compare, setCompare] = useState<[any, any] | null>(null);
   const [, tick] = useState(0); useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
   const loaded = useRef(false); const dirty = useRef(false);
@@ -71,14 +75,14 @@ export function Encounter() {
       loaded.current = true; setData(d); setRx(enc.data.prescription.map(strip));
       // Only the due date is stored; the interval is worked back from the day the consultation opened so "Review in 1 m" shows again.
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
-      setRecs(enc.data.recommendations.map((r: any) => ({ kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
+      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
     }
   }, [enc.data, timeline.data]);
   const nextVisit = (fd.data?.visits ?? []).find((v: any) => (v.status === 'waiting' || v.status === 'intake') && v.id !== enc.data?.visitId && (!me.practitionerId || !v.practitionerId || v.practitionerId === me.practitionerId));
   const callNext = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => { loaded.current = false; nav(`/encounter/${e.id}`, { viewTransition: true }); }, onError: (e) => toast(errText(e), 'err') });
   const save = useMutation({
-    mutationFn: ({ complete }: { complete: boolean; next?: boolean }) => patch(`/encounters/${id}`, { data, prescription: rx.filter((i) => i.name), recommendations: recs.filter((r) => r.kind !== 'investigation' || r.notes), complete }),
+    mutationFn: ({ complete }: { complete: boolean; next?: boolean }) => patch(`/encounters/${id}`, { data, prescription: rx.filter((i) => i.name), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
     onSuccess: (_e, { complete, next }) => {
       setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       ['queue', 'frontdesk', 'timeline'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
@@ -90,6 +94,70 @@ export function Encounter() {
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate({ complete: false }); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
   // Signed out for being idle: save what is typed first.
   useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('app:save-now', f); return () => window.removeEventListener('app:save-now', f); }, [enc.data?.status]);
+  // Sets linked to the complaint or diagnosis in front of the doctor: suggested as chips, or added for her when the owner chose "auto". They stack: nothing already on the note is added twice.
+  const cNames = complaintTexts(enc.data?.visit?.details, data.complaint?.chief_complaint);
+  const dNames = asDx(data.assessment?.diagnosis).map((d) => norm(d.name));
+  const appliedIds: string[] = data.screen?.applied ?? [];
+  const markApplied = (id: string) => setData((d) => ({ ...d, screen: { ...(d.screen ?? {}), applied: uniq([...(d.screen?.applied ?? []), id]) } }));
+  const addTestNamed = (name: string, days?: number) => setRecs((cur) => {
+    const v = name.trim(); if (!v || cur.some((r) => r.kind === 'investigation' && r.notes?.toLowerCase() === v.toLowerCase())) return cur;
+    const top = Math.max(1, ...cur.filter((r) => r.kind === 'investigation').map((r) => r.orderNo ?? 1));
+    return [...cur, { kind: 'investigation', notes: v, orderNo: isSlow(v) || (days ?? 0) >= 3 ? top + 1 : 1 }];
+  });
+  /** Adds one set to the note; returns a plain sentence about what was added and what was already there. */
+  const applySet = (t: Tmpl): string => {
+    const p = t.payload ?? {}; let added = 0, had = 0;
+    if (t.kind === 'medicine') {
+      const have = new Set(rx.filter((r) => r.name).map((r) => r.name.toLowerCase()));
+      const items = (p.items ?? []).filter((i: RxItem) => (have.has(i.name.toLowerCase()) ? (had++, false) : (added++, true)));
+      setRx((cur) => { const h = new Set(cur.filter((r) => r.name).map((r) => r.name.toLowerCase())); return [...cur.filter((r) => r.name), ...items.filter((i: RxItem) => !h.has(i.name.toLowerCase())).map((i: RxItem) => ({ ...i }))]; });
+    } else if (t.kind === 'advice') {
+      const cur = String(data.plan?.advice ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+      const lines = (p.lines ?? []).filter((l: string) => (cur.includes(l) ? (had++, false) : (added++, true)));
+      setData((d) => { const c = String(d.plan?.advice ?? '').split('\n').map((x) => x.trim()).filter(Boolean); return { ...d, plan: { ...(d.plan ?? {}), advice: [...c, ...lines.filter((l: string) => !c.includes(l))].join('\n') } }; });
+    } else if (t.kind === 'finding') {
+      const opts: string[] = enc.data?.form?.sections?.flatMap((s: any) => s.fields).find((f: Field) => f.key === 'morphology')?.options ?? [];
+      const chips = (p.chips ?? []).filter((c: string) => opts.includes(c));
+      const cur: string[] = data.exam?.morphology ?? [];
+      chips.forEach((c: string) => (cur.includes(c) ? had++ : added++));
+      setData((d) => ({ ...d, exam: { ...(d.exam ?? {}), morphology: uniq([...(d.exam?.morphology ?? []), ...chips]) } }));
+    } else if (t.kind === 'tests') {
+      for (const x of p.tests ?? []) { if (recs.some((r) => r.kind === 'investigation' && r.notes?.toLowerCase() === x.name.toLowerCase())) had++; else added++; addTestNamed(x.name, x.days); }
+    } else if (t.kind === 'procedure') {
+      if (recs.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId)) had++; else { added++; setRecs((cur) => (cur.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId) ? cur : [...cur, { kind: 'procedure', procedureId: p.procedureId, sittings: p.sittings, notes: p.intervalDays ? `every ${p.intervalDays} days` : undefined }])); }
+    }
+    markApplied(t.id);
+    return `${t.name}: ${added ? `added ${added}` : 'nothing new'}${had ? `, ${had} already there` : ''}.`;
+  };
+  // a whole-note protocol, stacked: only what is missing is added; her own diagnosis, medicines and plan stay as they are
+  const stackProtocol = (t: any): string => {
+    const have = new Set(rx.filter((r) => r.name).map((r) => r.name.toLowerCase()));
+    const meds: RxItem[] = (t.prescription ?? []).filter((i: RxItem) => !have.has(i.name.toLowerCase()));
+    setRx((cur) => { const h = new Set(cur.filter((r) => r.name).map((r) => r.name.toLowerCase())); return [...cur.filter((r) => r.name), ...meds.filter((i) => !h.has(i.name.toLowerCase())).map((i) => ({ ...i }))]; });
+    setData((d) => {
+      const td = t.data ?? {}; const adv = (x: any) => String(x ?? '').split('\n').map((y) => y.trim()).filter(Boolean);
+      return { ...d, exam: { ...(d.exam ?? {}), ...(td.exam?.morphology ? { morphology: uniq([...(d.exam?.morphology ?? []), ...td.exam.morphology]) } : {}) },
+        assessment: { ...(d.assessment ?? {}), ...(asDx(d.assessment?.diagnosis).length ? {} : td.assessment ?? {}) },
+        plan: { ...(d.plan ?? {}), advice: uniq([...adv(d.plan?.advice), ...adv(td.plan?.advice)]).join('\n') } };
+    });
+    setRecs((cur) => [...cur, ...(t.recommendations ?? []).filter((r: Rec) => !cur.some((c) => c.kind === r.kind && (r.kind === 'followup' || c.procedureId === r.procedureId && c.notes === r.notes))).map((r: Rec) => ({ ...r }))]);
+    markApplied(t.id);
+    return `${t.name}: added ${meds.length} medicine${meds.length === 1 ? '' : 's'}${(t.prescription?.length ?? 0) - meds.length ? `, ${(t.prescription.length) - meds.length} already there` : ''}.`;
+  };
+  const autoKey = (sets.data ?? []).filter((t) => t.mode === 'auto' && !appliedIds.includes(t.id) && suggests(t, cNames, dNames)).map((t) => t.id).join(',');
+  useEffect(() => {
+    if (!loaded.current || !isDoctor || enc.data?.status === 'completed' || !autoKey) return;
+    const notes = (sets.data ?? []).filter((t) => autoKey.split(',').includes(t.id)).map(applySet);
+    if (notes.length) setSetNote(notes.join(' '));
+  }, [autoKey, enc.data?.status, isDoctor]);
+  const saveSection = async (kind: 'medicine' | 'advice' | 'tests') => {
+    const payload = kind === 'medicine' ? { items: rx.filter((i) => i.name).map(strip) } : kind === 'advice' ? { lines: String(data.plan?.advice ?? '').split('\n').map((x) => x.trim()).filter(Boolean) }
+      : { tests: recs.filter((r) => r.kind === 'investigation' && r.notes).map((r) => ({ name: r.notes! })) };
+    if (!Object.values(payload)[0].length) return toast(`There is nothing to save yet: no ${kind === 'medicine' ? 'medicines' : kind === 'advice' ? 'advice' : 'tests'}.`, 'info');
+    const r = await ask({ title: `Save the ${kind === 'medicine' ? 'medicines' : kind === 'advice' ? 'advice' : 'tests'} as a set`, body: 'It is suggested the next time the same complaint or diagnosis comes up.', confirmLabel: 'Save', field: { label: 'Name of the set', required: true, initial: asDx(data.assessment?.diagnosis).map((d) => d.name).join(' + ') || '', maxLength: 80 } });
+    if (!r?.value || r.value.trim().length < 2) return;
+    try { const row: any = await post('/templates', { kind, name: r.value.trim(), linked: { complaints: cNames, diagnoses: dNames }, payload }); qc.invalidateQueries({ queryKey: ['templates'] }); toast(row.draft ? `Saved. The owner approves it before it is suggested.` : `Saved as a set`); } catch (e) { toast(errText(e), 'err'); }
+  };
   const saveTpl = useMutation({ mutationFn: (name: string) => post('/rx-templates', { name, data, prescription: rx.filter((i) => i.name), recommendations: recs }), onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['rx-templates'] }); toast(`Saved as template “${r.name}”`); }, onError: (e) => toast(errText(e), 'err') });
 
   if (!enc.data || !timeline.data) return <div className="card"><Skeleton rows={5} /></div>;
@@ -119,7 +187,7 @@ export function Encounter() {
   const allergyWarnings = rx.filter((i) => i.name).map((i) => [i.name, allergyHit(p.allergies, i.name)] as const).filter(([, w]) => w);
   const followup = recs.find((r) => r.kind === 'followup');
   const setFollowup = (d: number | null) => setRecs([...recs.filter((r) => r.kind !== 'followup'), ...(d ? [{ kind: 'followup' as const, intervalDays: d }] : [])]);
-  const addTest = (name: string) => { const v = name.trim(); setTestDraft(''); if (v && !recs.some((r) => r.kind === 'investigation' && r.notes?.toLowerCase() === v.toLowerCase())) setRecs((cur) => [...cur, { kind: 'investigation', notes: v }]); };
+  const addTest = (name: string) => { setTestDraft(''); addTestNamed(name); };
   const tests = recs.filter((r) => r.kind === 'investigation' && r.notes);
   const adviceText: string = data.plan?.advice ?? '';
   const adviceLines = adviceText.split('\n').map((x) => x.trim()).filter(Boolean);
@@ -132,6 +200,14 @@ export function Encounter() {
   const thenNow: [any, any] | null = sameArea.length >= 2 ? [sameArea[sameArea.length - 1], sameArea[0]] : null;
   const myDocs = docs.data ?? [];
   const label = (s: any) => (s.title === 'Assessment' ? 'Diagnosis' : s.key === 'exam' ? 'Found' : s.title);
+  const lists = checklists(cNames, sets.data ?? []);
+  const answers: Answers = data.screen?.answers ?? {}; const hist: History = data.screen?.history ?? p.history ?? {};
+  const arrivalText = ((e.visit?.details?.complaints ?? []) as { text: string; duration?: string }[]).map((c) => (c.duration ? `${c.text} · ${c.duration}` : c.text)).join(', ');
+  const sugg = (sets.data ?? []).filter((t) => t.kind !== 'complaint' && suggests(t, cNames, dNames));
+  const protoSugg = (tpls.data ?? []).filter((t: any) => suggests(t, cNames, dNames));
+  const size = (t: Tmpl) => (t.kind === 'medicine' ? t.payload.items?.length : t.kind === 'advice' ? t.payload.lines?.length : t.kind === 'finding' ? t.payload.chips?.length : t.kind === 'tests' ? t.payload.tests?.length : 1);
+  const orderNos = uniq(tests.map((r) => r.orderNo ?? 1)).sort((a, b) => a - b);
+  const toggleOrder = (r: Rec) => setRecs(recs.map((x) => (x === r ? { ...x, orderNo: (r.orderNo ?? 1) === 1 ? Math.max(1, ...tests.map((t) => t.orderNo ?? 1)) + 1 : 1 } : x)));
 
   return (
     <div className="space-y-4 pb-24">
@@ -151,6 +227,7 @@ export function Encounter() {
       <div className={`grid grid-cols-1 gap-4 ${isDoctor ? 'lg:grid-cols-[250px_minmax(0,1fr)] xl:grid-cols-[250px_minmax(0,1fr)_300px]' : 'lg:grid-cols-[minmax(0,1fr)_300px]'}`}>
         {/* left: templates and photos */}
         {isDoctor && <aside className="space-y-4 lg:sticky lg:top-24 self-start">
+          <ScreeningCard complaintText={arrivalText} lists={lists} answers={answers} history={hist} />
           {!readOnly && <div className="card-flat p-3.5">
             <div className="text-[11px] font-bold uppercase tracking-wider text-muted">Start from</div>
             <div className="mb-2 mt-0.5 text-xs text-muted">One tap fills every row. Change only what differs.</div>
@@ -174,6 +251,16 @@ export function Encounter() {
         <section className="card-flat min-w-0 overflow-hidden !p-0">
           {applied && !readOnly && <div className="mx-4 mt-3 rounded-xl bg-[#FFF6DD] px-3 py-2 text-[12.5px] text-[#6E4D10] anim-fade-in">Filled from <b>{applied}</b>.{p.allergies ? (allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ` ${p.allergies} allergy checked: no clash found.`) : ''} Change anything below.</div>}
 
+          {setNote && !readOnly && <div className="mx-4 mt-3 rounded-xl bg-[#FFF6DD] px-3 py-2 text-[12.5px] text-[#6E4D10] anim-fade-in" role="status">{setNote}</div>}
+          {isDoctor && !readOnly && (sugg.length > 0 || protoSugg.length > 0) && <div className="flex flex-col gap-2 border-b border-line/70 px-4 py-3 sm:flex-row sm:gap-3" id="sec-suggest">
+            <div className="w-24 shrink-0 pt-1 text-xs font-bold text-muted">Suggested</div>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+              {sugg.map((t) => <button key={t.id} type="button" title={`${t.name}: one tap adds it; anything already on the note is kept once`} className={`toggle-opt !py-1.5 ${appliedIds.includes(t.id) ? 'on' : '!border-dashed !border-ink/25'}`} onClick={() => { setSetNote(applySet(t)); post(`/templates/${t.id}/use`).catch(() => {}); }}>{t.name}<span className="ml-1.5 font-medium text-muted">{size(t)}</span></button>)}
+              {protoSugg.map((t: any) => <button key={t.id} type="button" title="A whole protocol: medicines, advice, tests and review. Only what is missing is added." className={`toggle-opt !py-1.5 ${appliedIds.includes(t.id) ? 'on' : '!border-dashed !border-ink/25'}`} onClick={() => { setSetNote(stackProtocol(t)); post(`/rx-templates/${t.id}/use`).catch(() => {}); }}>{t.name}<span className="ml-1.5 font-medium text-muted">protocol</span></button>)}
+              <span className="text-xs text-muted">· one tap each, nothing is added twice</span>
+            </div>
+          </div>}
+
           {isReview && <div className="border-b border-line/70 px-4 py-3.5">
             <div className="flex flex-wrap items-center gap-2"><b className="text-[15px]">How is it since {fmtDate(lastDone.createdAt)}?</b>
               <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How is it">{RESPONSES.map((r) => <button key={r} type="button" role="radio" aria-checked={data.review?.response === r} disabled={readOnly} className={`toggle-opt ${data.review?.response === r ? 'on' : ''}`} onClick={() => set('review', 'response', data.review?.response === r ? undefined : r)}>{r}</button>)}</div></div>
@@ -194,6 +281,8 @@ export function Encounter() {
                   </div>}
                 </div>); })}</div>
           </div>}
+
+          {(!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open={!isDoctor ? true : undefined} />}
 
           {sections.map((s: any) => (
             <div key={s.key} id={`sec-${s.key}`} className="flex flex-col gap-2 border-b border-line/70 px-4 py-3 sm:flex-row sm:gap-3">
@@ -256,10 +345,11 @@ export function Encounter() {
                   {followup && !REVIEW_IN.some(([d]) => d === followup.intervalDays) && <span className="flex items-center gap-1 text-xs">· <NumInput aria-label="Review in days" max={365} className="input !w-16 !py-1" value={followup.intervalDays ?? ''} disabled={readOnly} onChange={(ev) => setFollowup(Number(ev.target.value) || null)} /> days</span>}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5"><span className="mr-1 text-xs text-muted">Tests</span>
-                  {tests.map((r) => <span key={r.notes} className="toggle-opt on !py-1">{r.notes}{!readOnly && <button type="button" aria-label={`Remove ${r.notes}`} className="ml-1" onClick={() => setRecs(recs.filter((x) => x !== r))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>)}
+                  {tests.map((r) => <span key={r.notes} className="toggle-opt on !py-1">{r.notes}{r.status === 'done' && <span className="ml-1 font-medium">· received</span>}{orderNos.length > 1 && <span className="ml-1 font-medium text-muted">· order {r.orderNo ?? 1}</span>}{!readOnly && r.status !== 'done' && <button type="button" aria-label={(r.orderNo ?? 1) === 1 ? `Review ${r.notes} on its own` : `Review ${r.notes} with the first order`} title={(r.orderNo ?? 1) === 1 ? 'Review this test on its own, so it does not hold the others back' : 'Join the first order'} className="ml-1.5 text-[11px] font-semibold" onClick={() => toggleOrder(r)}>{(r.orderNo ?? 1) === 1 ? <Icon name="repeat" className="inline h-3 w-3" /> : <u>own order</u>}</button>}{!readOnly && r.status !== 'done' && <button type="button" aria-label={`Remove ${r.notes}`} className="ml-1" onClick={() => setRecs(recs.filter((x) => x !== r))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>)}
                   {!readOnly && TESTS.filter((x) => !tests.some((r) => r.notes?.toLowerCase() === x.toLowerCase())).slice(0, 8).map((x) => <button key={x} type="button" className="toggle-opt !py-1" onClick={() => addTest(x)}>{x}</button>)}
                   {!readOnly && <input aria-label="Add a test" list="tests" className="input !w-40 !py-1 text-sm" placeholder="Other test, Enter" value={testDraft} onChange={(ev) => (TESTS.includes(ev.target.value) ? addTest(ev.target.value) : setTestDraft(ev.target.value))} onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addTest(testDraft); } }} />}
                   <datalist id="tests">{TESTS.map((x) => <option key={x} value={x} />)}</datalist>
+                  {orderNos.length > 1 && <div className="basis-full text-xs text-muted">{orderNos.map((o) => `Order ${o}: ${tests.filter((r) => (r.orderNo ?? 1) === o).map((r) => r.notes).join(', ')}`).join(' · ')} · each is reviewed when all its tests are in</div>}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5"><span className="mr-1 text-xs text-muted">Procedure</span>
                   {recs.map((r, k) => r.kind !== 'procedure' ? null : (
@@ -284,6 +374,7 @@ export function Encounter() {
             {!readOnly && !isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save intake &amp; return to queue</button>}
             {!readOnly && isDoctor && <>
               <button className="btn btn-sm" disabled={saveTpl.isPending} onClick={askTpl}>Save as template</button>
+              <MoreMenu label="Save only part of this note as a set" items={[{ label: 'Save only the medicines', onClick: () => saveSection('medicine') }, { label: 'Save only the advice', onClick: () => saveSection('advice') }, { label: 'Save only the tests', onClick: () => saveSection('tests') }]} />
               <button className="btn" disabled={save.isPending} onClick={() => save.mutate({ complete: true })}><Icon name="print" />Complete</button>
               {nextVisit && <button className="btn btn-primary" disabled={save.isPending || callNext.isPending} onClick={() => save.mutate({ complete: true, next: true })}>Complete &amp; call {nextVisit.patient.fullName.split(' ')[0]} →</button>}
             </>}

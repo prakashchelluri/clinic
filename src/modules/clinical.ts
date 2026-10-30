@@ -6,11 +6,12 @@ import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
+import { expectedDays } from '../lib/tests.js';
 
 const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
   frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
-  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish() });
+  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
 
 /** Validate submitted data against the form definition: required fields and option membership only. */
@@ -82,8 +83,15 @@ export function clinicalRoutes(app: FastifyInstance) {
       const rows = await tx.insert(recommendation).values(body.recommendations.map((r) => ({
         tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
         dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : null), sittings: r.sittings, notes: r.notes,
+        ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
       }))).returning();
       if (body.complete) for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
+    }
+    // Medical history is asked once and belongs to the patient, not to this visit: keep it on the patient record so every later visit starts from it.
+    const hist = body.data?.screen?.history;
+    if (hist && typeof hist === 'object') {
+      const clean = Object.fromEntries(Object.entries(hist as Record<string, any>).slice(0, 12).map(([k, v]) => [k.slice(0, 30), { yes: !!v?.yes, ...(typeof v?.note === 'string' && v.note.trim() ? { note: v.note.trim().slice(0, 120) } : {}) }]));
+      await tx.update(patient).set({ history: clean, ...(clean.allergy?.yes && clean.allergy.note ? { allergies: clean.allergy.note } : {}) }).where(and(eq(patient.id, enc.patientId), eq(patient.tenantId, t)));
     }
     const set: any = { data, provenance: { ...enc.provenance, lastEditedBy: req.ctx.userId, lastEditedRole: req.ctx.role } };
     if (body.complete) { set.status = 'completed'; set.completedAt = new Date().toISOString(); if (req.ctx.practitionerId) set.practitionerId = req.ctx.practitionerId; }
@@ -115,6 +123,12 @@ export function clinicalRoutes(app: FastifyInstance) {
       : await tx.insert(rxTemplate).values({ tenantId: t, practitionerId: pid, name: b.name, data, prescription: b.prescription, recommendations: recs }).returning();
     await emit(tx, req.ctx, 'rx_template.saved', 'rx_template', row.id, { name: b.name });
     return row;
+  });
+  /** Which complaints and diagnoses a protocol is suggested for; also renames it. */
+  route(app, 'patch', '/rx-templates/:id', 'encounter.complete', async (req, tx) => {
+    const b = z.object({ name: z.string().trim().min(2).max(80).optional(), linked: z.object({ complaints: z.array(z.string().trim().min(1).max(120)).max(20).optional(), diagnoses: z.array(z.string().trim().min(1).max(120)).max(20).optional() }).optional() }).parse(req.body);
+    const [row] = await tx.update(rxTemplate).set(b).where(and(eq(rxTemplate.id, (req.params as any).id), eq(rxTemplate.tenantId, req.ctx.tenantId))).returning();
+    if (!row) throw new HttpError(404, 'NOT_FOUND'); return row;
   });
   route(app, 'post', '/rx-templates/:id/use', 'encounter.intake', async (req, tx) => {
     const [row] = await tx.update(rxTemplate).set({ uses: sql`${rxTemplate.uses} + 1` }).where(and(eq(rxTemplate.id, (req.params as any).id), eq(rxTemplate.tenantId, req.ctx.tenantId))).returning();

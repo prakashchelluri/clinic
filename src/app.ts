@@ -19,6 +19,8 @@ import { clinicalRoutes } from './modules/clinical.js';
 import { billingRoutes } from './modules/billing.js';
 import { sampleRoutes } from './modules/sample.js';
 import { documentRoutes } from './modules/documents.js';
+import { templateRoutes } from './modules/templates.js';
+import { orderRoutes } from './modules/orders.js';
 import { pharmacyRoutes } from './modules/pharmacy.js';
 import { stockRoutes } from './modules/stock.js';
 import { broadcastRoutes } from './modules/broadcasts.js';
@@ -87,7 +89,7 @@ export async function buildApp() {
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); securityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); pharmacyRoutes(api); stockRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
+    identityRoutes(api); securityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); templateRoutes(api); orderRoutes(api); pharmacyRoutes(api); stockRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.

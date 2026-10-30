@@ -7,6 +7,7 @@ import { openPrint } from '../printPreview';
 import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Segmented, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty } from '../ui';
+import { useTemplates, norm } from '../templates';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -281,6 +282,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const [locality, setLocality] = useState('');
   const [list, setList] = useState<Complaint[]>([]);
   const [draft, setDraft] = useState<Complaint>({ text: '', duration: '' });
+  const comp = useTemplates('complaint');
   const [method, setMethod] = useState('cash'); const [amount, setAmount] = useState('');
   const [waive, setWaive] = useState('');
   const [pickedDoc, setPractitionerId] = useState('');
@@ -362,7 +364,8 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
           </div>
 
           <div>
-            <span className="label">Complaints</span>
+            <span className="label">Complaints <span className="font-normal normal-case tracking-normal text-muted">· tap what brings them in; each opens its checklist for the doctors</span></span>
+            {(comp.data ?? []).length > 0 && <div className="mb-2.5 flex flex-wrap gap-1.5" role="group" aria-label="Common complaints">{(comp.data ?? []).map((t) => { const on = list.some((c) => norm(c.text) === norm(t.name)); return <button key={t.id} type="button" aria-pressed={on} className={`toggle-opt !py-2 ${on ? 'on' : ''}`} onClick={() => setList(on ? list.filter((c) => norm(c.text) !== norm(t.name)) : [...list, { text: t.name, duration: '' }])}>{t.name}</button>; })}</div>}
             <div className="space-y-2">
               {list.map((c, i) => (
                 <div key={i} className="grid grid-cols-[1fr_150px_44px_44px] gap-2 items-center anim-scale-in">
