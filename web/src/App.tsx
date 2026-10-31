@@ -78,7 +78,8 @@ function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavi
         {clinicItems.length > 0 && <div className="px-4 pb-1 pt-4 text-[10.5px] font-bold uppercase tracking-[.1em] text-muted">Clinic</div>}
         {clinicItems.map(link)}
       </nav>
-      <div className="mt-auto flex items-center gap-2.5 border-t border-ink/8 px-2 pt-4">
+      <Link to="/help" onClick={onNavigate} className="mt-auto flex items-center gap-3 rounded-full px-4 py-2.5 text-[14.5px] font-medium text-ink-2 hover:bg-white/60"><Icon name="help" className="h-[18px] w-[18px]" /><span>Help</span></Link>
+      <div className="mt-2 flex items-center gap-2.5 border-t border-ink/8 px-2 pt-4">
         <Avatar name={me.name} size="h-9 w-9 text-xs" />
         <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-semibold">{me.name}</div><div className="truncate text-[11.5px] capitalize text-muted">{roles.join(' · ')}</div></div>
         <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon"><Icon name="logout" /></button>
@@ -158,6 +159,7 @@ export function App() {
             <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
             <span className="truncate text-[17px] font-semibold md:hidden">{clinic}</span>
             <span className="ml-auto" />
+            <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-ghost btn-icon"><Icon name="help" /></Link>
             {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (⌘K)" className="btn btn-ghost btn-icon"><Icon name="search" /></button>}
             {!platform && c('appointment.read') && <div className="relative">
               <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-ghost btn-icon"><Icon name="bell" />{requests + plansNew > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests + plansNew}</span>}</button>

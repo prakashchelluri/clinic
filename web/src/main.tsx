@@ -16,6 +16,7 @@ import { Worklist } from './pages/Worklist';
 import { Reports } from './pages/Reports';
 import { TestReports } from './pages/TestReports';
 import { Followups } from './pages/Followups';
+import { Help } from './pages/Help';
 import { Dashboard } from './pages/Dashboard';
 import { PrintRx } from './pages/PrintRx';
 import { Pharmacy } from './pages/Pharmacy';
@@ -51,6 +52,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/reports" element={<Reports />} />
             <Route path="/tests" element={<TestReports />} />
             <Route path="/followups" element={<Followups />} />
+            <Route path="/help" element={<Help />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/settings" element={<Settings />} />
