@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
-import { type PatientFlags, patient, visit, encounter, prescriptionItem, recommendation, charge, payment } from '../db/schema.js';
+import { type PatientFlags, appointment, callback, patient, practitioner, procedureCatalog, procedureSession, session, visit, encounter, prescriptionItem, recommendation, charge, payment } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
@@ -96,6 +96,15 @@ export function patientRoutes(app: FastifyInstance) {
     const recs = await tx.select().from(recommendation).where(and(eq(recommendation.patientId, id), eq(recommendation.tenantId, t))).orderBy(desc(recommendation.createdAt));
     const charges = await tx.select().from(charge).where(and(eq(charge.patientId, id), eq(charge.tenantId, t))).orderBy(desc(charge.createdAt));
     const payments = await tx.select().from(payment).where(and(eq(payment.patientId, id), eq(payment.tenantId, t))).orderBy(desc(payment.receivedAt));
+    // Sittings, and the visits and sittings the patient did not come to with every call made about them: evidence if progress is ever questioned.
+    const sessions = await tx.select({ ps: procedureSession, proc: procedureCatalog.name, doctor: practitioner.name }).from(procedureSession).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
+      .where(and(eq(procedureSession.patientId, id), eq(procedureSession.tenantId, t))).orderBy(desc(procedureSession.day));
+    const noShows = await tx.select({ a: appointment, day: session.day, start: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.patientId, id), eq(appointment.tenantId, t), eq(appointment.status, 'no_show'))).orderBy(desc(session.day));
+    const calls = await tx.select().from(callback).where(and(eq(callback.patientId, id), eq(callback.tenantId, t))).orderBy(desc(callback.createdAt));
+    const missed = [
+      ...noShows.map((x) => ({ kind: 'visit' as const, refId: x.a.id, day: x.day, time: x.start, what: 'Missed visit', calls: calls.filter((c) => c.refId === x.a.id) })),
+      ...sessions.filter((s) => s.ps.state === 'missed').map((s) => ({ kind: 'sitting' as const, refId: s.ps.id, day: s.ps.day, time: s.ps.startTime, what: `Missed ${s.proc ?? 'procedure'} sitting ${s.ps.sittingNo}`, calls: calls.filter((c) => c.refId === s.ps.id) })),
+    ].sort((a, b) => b.day.localeCompare(a.day));
     // what is still owed: a part-paid invoice counts only its balance
     const paidOn = (cid: string) => payments.filter((x) => x.chargeId === cid).reduce((s, x) => s + x.amountPaise, 0);
     const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - paidOn(c.id)), 0);
@@ -103,6 +112,6 @@ export function patientRoutes(app: FastifyInstance) {
     const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
     // roles without 'See fees and payments' see no prices, payments or amounts due
     const fees = can(req.perms, 'fees.see');
-    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, visits, encounters: encounters.map((e) => ({ ...e, prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
+    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
   });
 }

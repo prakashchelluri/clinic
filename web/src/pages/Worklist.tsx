@@ -5,6 +5,7 @@ import { get, patch, post, qc, today, errText, dialable } from '../api';
 import { can } from '../App';
 import { PhotoCapture } from '../photos';
 import { ProcSchedule } from './ProcSchedule';
+import { ProcedureBoard } from '../procBoard';
 import { openViewer } from '../viewer';
 import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast, ask } from '../ui';
 
@@ -16,8 +17,8 @@ export function Worklist() {
   const { perms } = useOutletContext<any>();
   const [kind, setKind] = useState<Kind>('procedure');
   const [sp, setSp] = useSearchParams();
-  const view: 'schedule' | 'plans' = sp.get('tab') === 'plans' ? 'plans' : 'schedule'; // the schedule by date is the first thing you see
-  const setView = (v: 'schedule' | 'plans') => setSp((p) => { p.set('tab', v); return p; }, { replace: true });
+  const view: 'schedule' | 'plans' | 'board' = sp.get('tab') === 'plans' ? 'plans' : sp.get('tab') === 'board' ? 'board' : 'schedule'; // the schedule by date is the first thing you see
+  const setView = (v: 'schedule' | 'plans' | 'board') => setSp((p) => { p.set('tab', v); return p; }, { replace: true });
   const proc = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), refetchInterval: 15000 });
   const fu = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), refetchInterval: 15000 });
   const inv = useQuery({ queryKey: ['worklist', 'investigation'], queryFn: () => get('/worklist?kind=investigation'), refetchInterval: 15000 });
@@ -39,10 +40,10 @@ export function Worklist() {
   return (
     <div>
       <PageHeader title="Procedures" subtitle={view === 'schedule' ? 'What is planned, any date' : overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Everything the doctor recommended, nothing re-typed'}>
-        <Segmented<'schedule' | 'plans'> value={view} onChange={setView} options={[{ value: 'schedule', label: 'Schedule' }, { value: 'plans', label: newPlans ? `Plans to schedule · ${newPlans} new` : 'Plans to schedule', count: (proc.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length || undefined }]} />
+        <Segmented<'schedule' | 'plans' | 'board'> value={view} onChange={setView} options={[{ value: 'schedule', label: 'Schedule' }, { value: 'board', label: 'Board' }, { value: 'plans', label: newPlans ? `Plans to schedule · ${newPlans} new` : 'Plans to schedule', count: (proc.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length || undefined }]} />
         {view === 'plans' && <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }]} />}
       </PageHeader>
-      {view === 'schedule' ? <ProcSchedule onPlans={() => setView('plans')} /> : (<>
+      {view === 'schedule' ? <ProcSchedule onPlans={() => setView('plans')} /> : view === 'board' ? <ProcedureBoard /> : (<>
       {kind === 'procedure' && (sessions.data ?? []).length > 0 && (
         <div className="card anim-fade-up mb-4 flex items-center gap-3 flex-wrap text-sm"><Icon name="stetho" className="h-4 w-4 text-sky" /><span className="font-medium">Today in the rooms:</span>
           {(sessions.data ?? []).map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><Chip tone="sky">{s.startTime} {s.patient.fullName} · {s.room ?? 'no room'}</Chip>{can(perms, 'document.write') && !['cancelled', 'postponed'].includes(s.state) && <button className="btn btn-ghost btn-icon !h-8 !w-8" aria-label={`Take photos for ${s.patient.fullName}`} data-tip="Photos" onClick={() => setCap(s)}><Icon name="spark" className="h-3.5 w-3.5" /></button>}</span>)}

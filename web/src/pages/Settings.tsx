@@ -8,6 +8,7 @@ import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
 import { PrivacyTab } from './Privacy';
 import { TemplatesTab } from './SettingsTemplates';
+import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
 type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
@@ -69,7 +70,7 @@ export function Settings() {
           <h2 className="text-xl font-medium mb-3">{cur[1]}</h2>
           {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
           {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'rules' && <BookingRulesTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
           {tab === 'online' && <OnlineBookingTab cfg={cfg} onSaved={refresh} />}
           {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
@@ -80,7 +81,7 @@ export function Settings() {
           {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'templates' && <TemplatesTab cfg={cfg} />}
           {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'procedures' && <ProceduresTab cfg={cfg} onSaved={refresh} />}
+          {tab === 'procedures' && <><ProceduresTab cfg={cfg} onSaved={refresh} /><PackagesCard cfg={cfg} onSaved={refresh} /></>}
           {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
           {tab === 'privacy' && owner && <PrivacyTab />}
         </div>

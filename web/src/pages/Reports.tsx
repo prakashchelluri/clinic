@@ -4,12 +4,13 @@ import { Link, useOutletContext, useSearchParams } from 'react-router';
 import { get, today, fmtTime, listOut } from '../api';
 import { can } from '../App';
 import { EmiAwaiting } from '../takePayment';
-import { Chip, Empty, Icon, PageHeader, Section, Skeleton, Stat, money, toast } from '../ui';
+import { EndOfDay } from '../endOfDay';
+import { Chip, Empty, Icon, PageHeader, Section, Segmented, Skeleton, Stat, money, toast } from '../ui';
 
 /** Daily collections + expenses: replaces the two-page printout and the handwritten ledger. */
 export function Reports() {
   const { perms, me } = useOutletContext<any>();
-  const [day, setDay] = useState(today());
+  const [day, setDay] = useState(today()); const [view, setView] = useState<'daily' | 'eod'>('daily');
   const r = useQuery({ queryKey: ['daily', day], queryFn: () => get(`/reports/daily?day=${day}`) });
   const d = r.data;
   const [sp, setSp] = useSearchParams();
@@ -23,9 +24,10 @@ export function Reports() {
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
           <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => d && setDay(d.nextDay)}><Icon name="chevR" /></button>
         </div>
+        {can(perms, 'fees.see') && can(perms, 'report.daily') && <Segmented<'daily' | 'eod'> value={view} onChange={setView} options={[{ value: 'daily', label: 'Daily report' }, { value: 'eod', label: 'End of day' }]} />}
         {me?.privacy?.canExport && <button className="btn no-print" onClick={() => listOut(`Printed the daily report ${day}`, undefined, () => window.print())}><Icon name="print" />Print</button>}
       </PageHeader>
-      {!d ? <Skeleton rows={3} /> : (<>
+      {view === 'eod' ? <EndOfDay day={day} /> : !d ? <Skeleton rows={3} /> : (<>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat label="Visits" value={d.totals.visits} delay={0} />
           <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.byMethod.length ? d.byMethod.map((m: any) => `${m.method.toUpperCase()} ${money(m.total)}`).join(' · ') : 'no payments yet'} delay={40} />

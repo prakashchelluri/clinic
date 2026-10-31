@@ -16,7 +16,7 @@ export type Ctx = { tenantId: string; userId: string; role: string; roles: strin
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {
   owner: ['*'],
-  admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'fees.*', 'document.read'],
+  admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'fees.*', 'day.close', 'document.read'],
   doctor: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
   receptionist: ['fees.see', 'patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
@@ -59,6 +59,7 @@ export const PERMISSIONS: { key: string; group: string; label: string; hint: str
   { key: 'fees.see', group: 'Money', label: 'See fees and payments', hint: 'Off for junior doctors: prices, amounts due and revenue are hidden' },
   { key: 'discount.give', group: 'Money', label: 'Give procedure discounts', hint: 'Up to the clinic cap; owner by default' },
   { key: 'refund.course', group: 'Money', label: 'Approve refunds of unused prepaid sittings', hint: 'Owner by default' },
+  { key: 'day.close', group: 'Money', label: 'Close the day', hint: 'End of day: count the drawer, check against the diary, lock the day' },
   { key: 'report.daily', group: 'Money', label: 'See the daily report', hint: 'Reports page' },
   { key: 'expense.read', group: 'Money', label: 'See expenses', hint: 'Expenses page' },
   { key: 'expense.write', group: 'Money', label: 'Add, edit and remove expenses', hint: '' },

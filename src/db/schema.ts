@@ -274,6 +274,7 @@ export const procedureSession = pgTable('procedure_session', {
   procedureId: uuid('procedure_id').references(() => procedureCatalog.id),
   practitionerId: uuid('practitioner_id').references(() => practitioner.id),
   roomId: uuid('room_id').references(() => room.id),
+  supervisorId: uuid('supervisor_id'),   // a second doctor who supervises the sitting; does not block their OP time
   sittingNo: integer('sitting_no').notNull().default(1),
   day: date('day').notNull(),
   startTime: text('start_time').notNull(),
@@ -322,6 +323,46 @@ export const course = pgTable('course', {
   lockedAt: ts('locked_at'),
   agreedBy: text('agreed_by'),
 }, (t) => [uniqueIndex('course_rec').on(t.tenantId, t.recommendationId), index('course_patient').on(t.tenantId, t.patientId)]);
+
+// A call or message to bring a patient back: one row per attempt, for every kind of follow-up.
+export const callback = pgTable('callback', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  kind: text('kind').notNull(),        // review | missed_visit | missed_sitting | schedule | advised
+  refId: uuid('ref_id'),               // the recommendation, appointment or sitting this call is about
+  outcome: text('outcome').notNull(),  // booked | call_later | no_answer | not_interested
+  note: text('note'),
+  callbackOn: date('callback_on'),
+  byName: text('by_name').notNull(),
+}, (t) => [index('callback_ref').on(t.tenantId, t.kind, t.refId)]);
+
+// What the patient was told for a procedure plan, and until when the price holds.
+export const quote = pgTable('quote', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  recommendationId: uuid('recommendation_id').notNull(),
+  number: text('number').notNull(),
+  totalPaise: integer('total_paise').notNull(),
+  sittings: integer('sittings').notNull(),
+  validUntil: date('valid_until').notNull(),
+  extras: jsonb('extras').$type<{ name: string; pricePaise: number }[]>().notNull().default([]),
+  sentVia: text('sent_via'),           // whatsapp | print
+  sentAt: ts('sent_at'),
+  status: text('status').notNull().default('open'), // open | agreed | declined
+  byName: text('by_name').notNull(),
+}, (t) => [index('quote_rec').on(t.tenantId, t.recommendationId)]);
+
+// The end of a day, once the head receptionist has read it against the paper diary. A closed day does not change.
+export const dayClose = pgTable('day_close', {
+  ...tenantCols,
+  day: date('day').notNull(),
+  closedBy: text('closed_by').notNull(),
+  cashCountedPaise: integer('cash_counted_paise'),
+  counts: jsonb('counts').$type<Record<string, number>>().notNull().default({}),   // General, Review, Procedure, Relatives and friends
+  diary: jsonb('diary').$type<Record<string, number>>().notNull().default({}),     // what the paper diary said
+  notes: jsonb('notes').$type<Record<string, string>>().notNull().default({}),     // a reason for every difference
+  totals: jsonb('totals').$type<Record<string, any>>().notNull().default({}),
+}, (t) => [uniqueIndex('day_close_day').on(t.tenantId, t.day)]);
 
 export const charge = pgTable('charge', {
   ...tenantCols,
@@ -580,7 +621,7 @@ export const domainEvent = pgTable('domain_event', {
 
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
-  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'charge', 'payment',
+  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'callback', 'quote', 'day_close', 'charge', 'payment',
   'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 

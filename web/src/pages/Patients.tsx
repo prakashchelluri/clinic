@@ -60,7 +60,8 @@ function Timeline({ id }: { id: string }) {
   const [forTest, setForTest] = useState('');
   const [edit, setEdit] = useState<any>(null);
   const [viewing, setViewing] = useState<string | null>(null);
-  const [flagging, setFlagging] = useState(false); const [paying, setPaying] = useState(false);
+  const [flagging, setFlagging] = useState(false); const [filter, setFilter] = useState<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'>('all');
+  const show = (...k: string[]) => filter === 'all' || k.includes(filter); const [paying, setPaying] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); } });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
@@ -99,21 +100,22 @@ function Timeline({ id }: { id: string }) {
         )}
       </div>
 
-      <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />
+      <div className="no-print"><Segmented<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'> value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'visits', label: 'Visits' }, { value: 'procedures', label: 'Procedures' }, { value: 'payments', label: 'Payments' }, { value: 'reports', label: 'Reports' }, { value: 'missed', label: 'Missed', count: (t.data.missed ?? []).length || undefined }]} /></div>
+      {show() && <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Section title="Open plans" delay={60}>
+      {show('procedures', 'reports') && <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {show('procedures') && <Section title="Open plans" delay={60}>
           {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
             openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
-        </Section>
-        <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>} delay={90}
+        </Section>}
+        {show('reports') && <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>} delay={90}
           aside={can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}>
           <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos above.</div> : <DocList docs={reports} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
-        </Section>
-        {can(perms, 'appointment.read') && <PatientMessages id={id} />}
-      </div>
+        </Section>}
+        {show() && can(perms, 'appointment.read') && <PatientMessages id={id} />}
+      </div>}
 
-      <div className="relative pl-6">
+      {show('visits') && <div className="relative pl-6">
         <div className="absolute left-[9px] top-2 bottom-2 w-px bg-line" />
         {encounters.length === 0 && <div className="text-sm text-muted py-2">No consultations yet.</div>}
         {encounters.map((e: any, i: number) => (
@@ -127,9 +129,11 @@ function Timeline({ id }: { id: string }) {
             </button>
           </div>
         ))}
-      </div>
-      <CoursesCard patientId={id} patientName={p.fullName} />
-      <Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} canDiscount={can(perms, 'discount.give')} />
+      </div>}
+      {show('procedures') && (t.data.sessions ?? []).length > 0 && <Section title="Sittings" delay={120}>{t.data.sessions.map((s: any) => <div key={s.id} className="row"><div className="min-w-0 flex-1 text-sm"><b>{s.procedure ?? 'Procedure'}</b> · sitting {s.sittingNo}<div className="text-xs text-muted">{fmtDate(s.day)} {s.startTime}{s.doctor ? ` · ${s.doctor}` : ''}</div></div><Chip tone={s.state === 'completed' ? 'sage' : s.state === 'missed' ? 'rose' : ''}>{s.state}</Chip></div>)}</Section>}
+      {show('missed') && <Section title={<>Missed <span className="text-muted font-normal">· {(t.data.missed ?? []).length}</span></>} delay={120}>{(t.data.missed ?? []).length === 0 ? <div className="p-4 text-sm text-muted">Nothing missed.</div> : t.data.missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
+      {show('procedures', 'payments') && <CoursesCard patientId={id} patientName={p.fullName} />}
+      {show('payments') && <Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} canDiscount={can(perms, 'discount.give')} />}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}

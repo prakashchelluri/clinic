@@ -89,7 +89,7 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
                 <div className="text-xs text-muted pl-9">{s.procedure ?? 'Procedure'} · sitting {s.sittingNo}{s.of ? ` of ${s.of}` : ''} · {s.startTime}–{s.endTime}<span className="md:hidden"> · {s.room ?? 'no room'} · {s.doctor ?? 'no doctor'}</span></div>
               </div>
               <span className="hidden md:block w-44 text-sm">{s.room ?? <span className="text-muted">no room</span>}</span>
-              <span className="hidden md:block w-40 text-sm">{s.doctor ?? <span className="text-rose">not assigned</span>}</span>
+              <span className="hidden md:block w-40 text-sm">{s.doctor ?? <span className="text-rose">not assigned</span>}{s.supervisor && <div className="text-xs text-muted">supervised by {s.supervisor}</div>}</span>
               <span className="flex w-44 flex-wrap gap-1">{status(s)}{noDoc(s) && <Chip tone="rose">no doctor</Chip>}</span>
               <span className="w-9 text-right">{canWrite && <MoreMenu items={[
                 { label: 'Reschedule', hidden: !['confirmed', 'postponed', 'missed'].includes(s.state), onClick: () => setMoving(s) },
@@ -115,8 +115,8 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
 /** Put a doctor on a sitting. A clash with the doctor's other work is explained and can be overridden. */
 function AssignDoctor({ s, docs, onClose }: { s: any; docs: any[]; onClose: () => void }) {
   const [doc, setDoc] = useState<string>(s.practitionerId ?? docs[0]?.id ?? '');
-  const [conf, setConf] = useState<any[] | null>(null);
-  const save = useMutation({ mutationFn: (force: boolean) => post(`/procedure-sessions/${s.id}/assign`, { practitionerId: doc || null, force }),
+  const [conf, setConf] = useState<any[] | null>(null); const [sup, setSup] = useState<string>(s.supervisorId ?? '');
+  const save = useMutation({ mutationFn: (force: boolean) => post(`/procedure-sessions/${s.id}/assign`, { practitionerId: doc || null, supervisorId: sup || null, force }),
     onSuccess: () => { toast('Doctor assigned'); onClose(); },
     onError: (e: any) => { if (e instanceof ApiError && e.body?.code === 'CONFLICT') setConf(e.body.conflicts); else toast(errText(e), 'err'); } });
   return (
@@ -125,6 +125,7 @@ function AssignDoctor({ s, docs, onClose }: { s: any; docs: any[]; onClose: () =
         <div><label className="label" htmlFor="as-doc">Doctor</label>
           <select id="as-doc" className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setConf(null); }}>{!s.requiresMainDoctor && <option value="">No doctor needed</option>}{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
           {doc && <div className="mt-1 text-[11px] text-amber">Blocks this doctor's OP capacity for the slot.</div>}</div>
+        <div><label className="label" htmlFor="as-sup">Supervised by (optional)</label><select id="as-sup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Nobody</option>{docs.filter((p: any) => p.id !== doc).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
         {conf && <div className="rounded-xl bg-amber-soft p-3 text-sm text-amber anim-fade-up"><div className="mb-1 font-medium">This doctor is busy then:</div>{conf.map((c, i) => <div key={i}>• {c.kind}: {c.who} ({c.startTime}–{c.endTime})</div>)}</div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           {conf ? <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}>Assign anyway</button> : <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(false)}><Icon name="check" />Assign</button>}</div>

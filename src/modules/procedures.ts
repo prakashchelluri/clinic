@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc, gte, lte } from 'drizzle-orm';
+import { and, eq, sql, asc, gte, lte, inArray } from 'drizzle-orm';
 import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -98,7 +98,7 @@ export function procedureRoutes(app: FastifyInstance) {
   /** Put a doctor on a sitting that has none (or change the doctor). The doctor's OP time is blocked like when scheduling. */
   // The coordinator assigns anyone; a doctor may take a sitting that has no doctor ("Take it" on Today).
   route(app, 'post', '/procedure-sessions/:id/assign', null, async (req, tx) => {
-    const body = z.object({ practitionerId: z.string().uuid().nullable(), force: z.boolean().default(false) }).parse(req.body);
+    const body = z.object({ practitionerId: z.string().uuid().nullable(), supervisorId: z.string().uuid().nullable().optional(), force: z.boolean().default(false) }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
     if (!ps) throw new HttpError(404, 'NOT_FOUND');
@@ -110,7 +110,8 @@ export function procedureRoutes(app: FastifyInstance) {
       const c = (await conflicts(tx, t, ps.day, ps.startTime, ps.endTime, null, body.practitionerId, id));
       if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     }
-    const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId }).where(eq(procedureSession.id, id)).returning();
+    if (body.supervisorId && body.supervisorId === body.practitionerId) throw new HttpError(400, 'SUPERVISOR_IS_THE_DOCTOR');
+    const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId, ...(body.supervisorId !== undefined ? { supervisorId: body.supervisorId } : {}) }).where(eq(procedureSession.id, id)).returning();
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: ps.roomId, day: ps.day, startTime: ps.startTime, endTime: ps.endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
     await emit(tx, req.ctx, 'procedure_session.doctor_assigned', 'procedure_session', id, { practitionerId: body.practitionerId });
@@ -130,7 +131,11 @@ export function procedureRoutes(app: FastifyInstance) {
     return tx.select({ ps: procedureSession, patient: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex }, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, mainDoctor: procedureCatalog.requiresMainDoctor, review: procedureCatalog.requiresReview })
       .from(procedureSession).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
       .where(and(...where)).orderBy(asc(procedureSession.day), asc(procedureSession.startTime))
-      .then((rows) => rows.map((r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor, of: r.of, requiresMainDoctor: r.mainDoctor, requiresReview: r.review })));
+      .then(async (rows) => {
+        const ids = [...new Set(rows.map((r) => r.ps.supervisorId).filter(Boolean))] as string[];
+        const names = new Map((ids.length ? await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(inArray(practitioner.id, ids)) : []).map((x) => [x.id, x.name]));
+        return rows.map((r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor, supervisor: r.ps.supervisorId ? names.get(r.ps.supervisorId) ?? null : null, of: r.of, requiresMainDoctor: r.mainDoctor, requiresReview: r.review }));
+      });
   });
 
   /** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */

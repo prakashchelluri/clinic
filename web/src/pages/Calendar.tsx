@@ -77,8 +77,11 @@ export function Calendar() {
   const title = view === 'week' ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 5), { day: 'numeric', month: 'short' })}` : fullDay(day);
   const canChangeDoc = (pid?: string) => !!pid && (canBook || me.practitionerId === pid);
 
+  const zoom = ({ small: 0.92, normal: 1, large: 1.15 } as Record<string, number>)[cfg?.tenant?.settings?.calendarTextSize ?? 'normal'] ?? 1;
+  const keyed = (cfg?.services ?? []).filter((s: any) => s.color);
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" style={{ zoom }}>
+      {keyed.length > 0 && <div className="flex flex-wrap items-center gap-3 text-xs text-muted" aria-label="Colour key"><span className="font-semibold">Colour key</span>{keyed.map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</span>)}<span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px] bg-sky" />Procedure</span></div>}
       <div className="flex flex-wrap items-center gap-2.5">
         <SearchBox onOpen={setOpenId} onBook={canBook ? (patient) => setPanel({ patient }) : undefined} />
         {canBook && <button className="btn btn-primary" onClick={() => setPanel({})}><Icon name="plus" />Book</button>}

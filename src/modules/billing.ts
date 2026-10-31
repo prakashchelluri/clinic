@@ -5,9 +5,10 @@ import { charge, payment, expense, visit, feeCategory, patient, tenant, appUser 
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
+import { assertDayOpen } from './dayclose.js';
 
 /** [start,end) in UTC for a local day in the tenant timezone. */
-function dayBounds(day: string, tz: string) {
+export function dayBounds(day: string, tz: string) {
   const probe = new Date(day + 'T12:00:00Z');
   const local = new Date(probe.toLocaleString('en-US', { timeZone: tz }));
   const offsetMs = local.getTime() - probe.getTime();
@@ -19,7 +20,7 @@ export function billingRoutes(app: FastifyInstance) {
   route(app, 'post', '/payments', 'payment.record', async (req, tx) => {
     const body = z.object({ patientId: z.string().uuid(), chargeId: z.string().uuid().optional(), amountPaise: z.number().int().positive(),
       method: z.enum(['cash', 'upi', 'card', 'bank', 'emi']), reference: z.string().optional(), lender: z.string().trim().max(60).optional(), idempotencyKey: z.string().optional() }).parse(req.body);
-    const t = req.ctx.tenantId;
+    const t = req.ctx.tenantId; await assertDayOpen(tx, req.ctx);
     if (body.method === 'emi' && (!body.lender || !body.reference)) throw new HttpError(400, 'EMI_NEEDS_LENDER_AND_APPROVAL_CODE');
     if (body.idempotencyKey) {
       const dup = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.idempotencyKey, body.idempotencyKey))).then((r) => r[0]);
@@ -51,7 +52,7 @@ export function billingRoutes(app: FastifyInstance) {
   route(app, 'post', '/payments/take', 'payment.record', async (req, tx) => {
     const body = z.object({ patientId: z.string().uuid(), chargeIds: z.array(z.string().uuid()).min(1).max(20), idempotencyKey: z.string().min(8),
       parts: z.array(z.object({ method: z.enum(['cash', 'upi', 'card', 'bank', 'emi']), amountPaise: z.number().int().positive(), reference: z.string().trim().max(60).optional(), lender: z.string().trim().max(60).optional() })).min(1).max(6) }).parse(req.body);
-    const t = req.ctx.tenantId;
+    const t = req.ctx.tenantId; await assertDayOpen(tx, req.ctx);
     const done = await tx.select().from(payment).where(and(eq(payment.tenantId, t), sql`${payment.idempotencyKey} like ${body.idempotencyKey + '#%'}`));
     if (done.length) return { payments: done, repeated: true };
     for (const p of body.parts) if (p.method === 'emi' && (!p.lender || !p.reference)) throw new HttpError(400, 'EMI_NEEDS_LENDER_AND_APPROVAL_CODE');

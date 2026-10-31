@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc, desc, gte, lte, ilike, or, inArray } from 'drizzle-orm';
+import { and, eq, sql, asc, desc, gt, gte, lte, ilike, or, inArray } from 'drizzle-orm';
 import jsonLogic from 'json-logic-js';
 import { visit, appointment, patient, feeCategory, charge, payment, recommendation, practitioner, encounter, session, procedureCatalog, prescriptionItem } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
@@ -42,6 +42,7 @@ const CheckIn = z.object({
   details: z.record(z.string(), z.any()).default({}),
   payment: z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0).max(100000000), reference: z.string().optional() }).optional(),
   waive: z.object({ reason: z.string().min(1) }).optional(),
+  allowReview: z.object({ reason: z.string().trim().min(3) }).optional(), // one more free review than the limit allows
   idempotencyKey: z.string().optional(),
 });
 
@@ -59,6 +60,17 @@ export function visitRoutes(app: FastifyInstance) {
     if (open.length) throw new HttpError(409, 'ALREADY_CHECKED_IN', { opNumber: open[0].opNumber });
     const cat = await tx.select().from(feeCategory).where(and(eq(feeCategory.tenantId, t), eq(feeCategory.code, body.feeCategoryCode))).then((r) => r[0]);
     if (!cat) throw new HttpError(400, 'BAD_CATEGORY');
+    // Review limit: reviews since the last paid consultation are capped (default 1). A second one is for the head receptionist to allow, with a reason.
+    if (cat.code === 'REN') {
+      const limit = Number((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings?.reviewLimit ?? 1);
+      const lastPaid = await tx.select({ at: payment.receivedAt }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId))
+        .where(and(eq(payment.tenantId, t), eq(payment.patientId, body.patientId), sql`${charge.description} like 'Consultation%'`, sql`${charge.amountPaise} > 0`)).orderBy(desc(payment.receivedAt)).limit(1).then((r) => r[0]);
+      const used = await tx.select({ n: sql<number>`count(*)::int` }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, body.patientId), eq(visit.feeCategoryId, cat.id), lastPaid ? gt(visit.arrivedAt, lastPaid.at) : sql`true`)).then((r) => r[0]?.n ?? 0);
+      if (used >= limit) {
+        if (!body.allowReview) throw new HttpError(409, 'REVIEW_LIMIT', { used, limit });
+        if (!can(req.perms, 'payment.refund')) throw new HttpError(403, 'FORBIDDEN:payment.refund');
+      }
+    }
     const branchId = body.branchId ?? (await tx.query.branch.findFirst({ where: (b, { eq }) => eq(b.tenantId, t) }))!.id;
     const settings = (await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings ?? {};
     const scope = settings.numbering?.opNumberScope === 'day' ? `${branchId}:${day}` : `${branchId}:${day}:${cat.code}`;

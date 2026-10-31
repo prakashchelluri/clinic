@@ -8,6 +8,7 @@ import { openPrint } from '../printPreview';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare } from '../photos';
 import { parseRxLine } from '../rxLine';
+import { FlagChips, CarefulBanner } from '../flags';
 import { useTemplates, suggests, norm, isSlow, uniq, type Tmpl } from '../templates';
 import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, type History } from '../screening';
 
@@ -215,7 +216,7 @@ export function Encounter() {
       <div className="sticky top-0 z-20 card !p-3 anim-fade-up !bg-[#FBFAF7]" style={{ boxShadow: 'var(--shadow-lift)' }}>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Avatar name={p.fullName} size="h-10 w-10 text-sm" />
-          <div className="min-w-0"><div className="text-[17px] font-semibold leading-tight">{p.fullName}</div>
+          <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5 text-[17px] font-semibold leading-tight">{p.fullName}<FlagChips flags={p.flags} /></div><CarefulBanner flags={p.flags} />
             <div className="text-xs text-muted">{[p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null].filter(Boolean).join(' · ')}</div></div>
           {p.allergies && <span className="chip chip-rose !text-xs">Allergy: {p.allergies}</span>}
           <div className="flex flex-wrap gap-1.5">{(() => { const d = e.visit?.details ?? {}; return [['BP', d.bp, ''], ['Wt', d.weight_kg, ' kg'], ['Temp', d.temp_f, '°F'], ['SpO₂', d.spo2, '%']].filter((x) => x[1] !== undefined && x[1] !== null && x[1] !== '').map((x) => <span key={x[0] as string} className="chip !text-xs">{x[0]} {x[1]}{x[2]}</span>); })()}</div>

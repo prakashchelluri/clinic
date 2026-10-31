@@ -17,12 +17,14 @@ export type NavItem = { to: string; label: string; icon: string; group?: 'clinic
 export const NAV: NavItem[] = [
   // ponytail: Dashboard hidden for now (PM review, Oct 2026); bring back by restoring c('finance.read')
   { to: '/overview', label: 'Dashboard', icon: 'home', show: () => false },
+  { to: '/dashboard', label: 'Dashboard', icon: 'chart', group: 'clinic', show: (c) => c('report.read') || c('finance.read') },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
   { to: '/calendar', label: 'Calendar', icon: 'calendar', show: (c) => c('appointment.read') },
   { to: '/bookings', label: 'Bookings', icon: 'inbox', show: (c) => c('appointment.read') },
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', icon: 'clock', show: (c) => c('worklist.read') },
+  { to: '/followups', label: 'Follow-ups', icon: 'phone', show: (c) => c('worklist.read') },
   { to: '/tests', label: 'Test reports', icon: 'inbox', show: (c) => c('worklist.read') || c('encounter.complete') },
   { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', group: 'clinic', show: (c) => c('pharmacy.read') },
   { to: '/reports', label: 'Reports', icon: 'chart', group: 'clinic', show: (c) => c('report.daily') || c('finance.read') },

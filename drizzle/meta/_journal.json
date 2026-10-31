@@ -134,6 +134,20 @@
       "when": 1793545600000,
       "tag": "0018_wave5",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793632000000,
+      "tag": "0019_wave5b",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793718400000,
+      "tag": "0020_supervisor",
+      "breakpoints": true
     }
   ]
 }

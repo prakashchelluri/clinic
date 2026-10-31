@@ -306,6 +306,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const w = Number(vit.weight_kg), h = Number(vit.height_cm);
   const bmi = w > 0 && h > 0 ? Math.round((w / ((h / 100) ** 2)) * 10) / 10 : null;
   const commit = () => { if (draft.text.trim()) { setList([...list, { text: draft.text.trim(), duration: draft.duration.trim() }]); setDraft({ text: '', duration: '' }); } };
+  const allowReview = useRef('');
   const submit = useMutation({
     mutationFn: async () => {
       let pid = patientId;
@@ -316,10 +317,17 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
       for (const f of VITAL_FIELDS) if (enabled.includes(f.key) && vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
       return post('/visits', { patientId: pid, appointmentId: appt?.id ?? init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
         details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: complaints.map((c) => c.text).join(', ') },
-        payment: !waive && fee > 0 ? { method, amountPaise: toPaise(amount || String(fee / 100)) } : undefined, waive: waive ? { reason: waive } : undefined, idempotencyKey: uuid() });
+        payment: !waive && fee > 0 ? { method, amountPaise: toPaise(amount || String(fee / 100)) } : undefined, waive: waive ? { reason: waive } : undefined, allowReview: allowReview.current ? { reason: allowReview.current } : undefined, idempotencyKey: uuid() });
     },
     onSuccess: (v: any) => { toast(`Checked in · token ${v.opNumber}`); onClose(); },
-    onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.existing); else toast(errText(e), 'err'); },
+    onError: async (e: any) => {
+      if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.existing);
+      else if (e instanceof ApiError && e.body.code === 'REVIEW_LIMIT') {
+        if (!can(perms, 'payment.refund')) { toast(`This patient has already had ${e.body.used} free review since the last paid consultation (the limit is ${e.body.limit}). Choose the paid consultation, or ask the owner to allow one more.`, 'err'); return; }
+        const a = await ask({ title: 'Allow one more free review?', body: `${e.body.used} used of ${e.body.limit} since the last paid consultation. The reason is kept in the log.`, confirmLabel: 'Allow and check in', field: { label: 'Why', required: true, maxLength: 200 } });
+        if (a?.value) { allowReview.current = a.value; submit.mutate(); }
+      } else toast(errText(e), 'err');
+    },
   });
   useEffect(() => { if (forceNew) { submit.mutate(); setForceNew(false); } }, [forceNew]);
   const step = !patientId && !newP ? 1 : 2;

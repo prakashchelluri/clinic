@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, inArray } from 'drizzle-orm';
-import { course, charge, payment, procedureCatalog, procedureSession, recommendation, tenant } from '../db/schema.js';
+import { and, desc, eq, sql, inArray } from 'drizzle-orm';
+import { course, charge, payment, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, nextNumber } from '../lib/core.js';
+import { emit, nextNumber, todayIn } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
+import { assertDayOpen } from './dayclose.js';
 
 type Course = typeof course.$inferSelect;
 const sum = (rows: { n: number }[]) => rows[0]?.n ?? 0;
@@ -53,15 +54,20 @@ export function courseRoutes(app: FastifyInstance) {
     const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
     const sittings = rec.sittings ?? 1; const per = proc?.pricePaise;
     if (!per && !b.totalPaise) throw new HttpError(400, 'PRICE_NEEDED');
-    const list = (per ?? 0) * sittings || b.totalPaise!; const total = b.totalPaise ?? list;
+    const list = (per ?? 0) * sittings || b.totalPaise!;
+    // a quote already told the patient a price: that is the default when the patient agrees
+    const told = await tx.select().from(quote).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open'))).orderBy(desc(quote.createdAt)).limit(1).then((r) => r[0]);
+    const total = b.totalPaise ?? (told && told.validUntil >= todayIn(req.ctx.timezone) ? told.totalPaise : list);
     if (total > list) throw new HttpError(400, 'ABOVE_LIST_PRICE', { listPaise: list });
-    if (total < list) {
+    const quoted = b.totalPaise === undefined && !!told && told.validUntil >= todayIn(req.ctx.timezone); // the discount was approved when the quote was made
+    if (total < list && !quoted) {
       if (!can(req.perms, 'discount.give')) throw new HttpError(403, 'FORBIDDEN:discount.give');
       const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
       const cap = Number((ten?.settings as any)?.discountCapPct ?? 10); const pct = Math.round(((list - total) / list) * 1000) / 10;
       if (pct > cap && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'DISCOUNT_ABOVE_CAP_NEEDS_OWNER', { capPct: cap, pct });
     }
     const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: req.ctx.name }).returning();
+    await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
     await emit(tx, req.ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings });
     return standing(tx, t, row);
   });
@@ -77,6 +83,7 @@ export function courseRoutes(app: FastifyInstance) {
   route(app, 'post', '/courses/:id/advance', 'payment.record', async (req, tx) => {
     const b = z.object({ amountPaise: z.number().int().positive(), method: z.enum(['cash', 'upi', 'card', 'bank', 'emi']), reference: z.string().trim().max(60).optional(), lender: z.string().trim().max(60).optional(), idempotencyKey: z.string().min(8) }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
+    await assertDayOpen(tx, req.ctx);
     const dup = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.idempotencyKey, `${b.idempotencyKey}#c`))).then((r) => r[0]);
     if (dup) return { repeated: true, receiptNo: dup.receiptNo };
     const c = await tx.select().from(course).where(and(eq(course.id, id), eq(course.tenantId, t))).then((r) => r[0]);
