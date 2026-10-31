@@ -10,6 +10,7 @@ import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../enc
 import { PhotoTimeline } from '../photos';
 import { TakePayment } from '../takePayment';
 import { Invoices } from '../invoices';
+import { CoursesCard } from '../courses';
 import { FlagChips, CarefulBanner, FlagEditor, GuardianPick } from '../flags';
 
 export function Patients() {
@@ -127,6 +128,7 @@ function Timeline({ id }: { id: string }) {
           </div>
         ))}
       </div>
+      <CoursesCard patientId={id} patientName={p.fullName} />
       <Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} canDiscount={can(perms, 'discount.give')} />
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}

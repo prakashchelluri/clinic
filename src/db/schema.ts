@@ -310,6 +310,19 @@ export const recommendation = pgTable('recommendation', {
   informedBy: text('informed_by'),
 }, (t) => [index('rec_status').on(t.tenantId, t.kind, t.status)]);
 
+// A procedure plan the patient agreed to: price locked once an advance is taken; sittings are paid from the advance, then on the day.
+export const course = pgTable('course', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  recommendationId: uuid('recommendation_id').notNull(),
+  procedureId: uuid('procedure_id').references(() => procedureCatalog.id),
+  sittings: integer('sittings').notNull(),
+  listPaise: integer('list_paise').notNull(),
+  totalPaise: integer('total_paise').notNull(),
+  lockedAt: ts('locked_at'),
+  agreedBy: text('agreed_by'),
+}, (t) => [uniqueIndex('course_rec').on(t.tenantId, t.recommendationId), index('course_patient').on(t.tenantId, t.patientId)]);
+
 export const charge = pgTable('charge', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
@@ -324,6 +337,9 @@ export const charge = pgTable('charge', {
   discountReason: text('discount_reason'),
   excludedAt: ts('excluded_at'),         // left out of the tax reports; the row is never deleted
   excludedReason: text('excluded_reason'),
+  courseId: uuid('course_id'),            // a sitting of a procedure course
+  sessionId: uuid('session_id'),          // the sitting this invoice came from (one invoice per sitting)
+  prepaid: boolean('prepaid').notNull().default(false), // paid from the course's advance
 });
 
 export const payment = pgTable('payment', {
@@ -334,7 +350,8 @@ export const payment = pgTable('payment', {
   method: text('method').notNull(), // cash | upi | card | bank | emi
   reference: text('reference'),
   lender: text('lender'),                // EMI: who finances it; the approval code is the reference
-  receiptNo: text('receipt_no'),         // one number for everything taken in one go
+  receiptNo: text('receipt_no'),
+  courseId: uuid('course_id'),           // an advance for a procedure course (negative = refund of unused sittings)         // one number for everything taken in one go
   settledAt: ts('settled_at'),           // EMI: when the lender's money reached the bank; null = awaiting settlement
   feePaise: integer('fee_paise'),        // EMI: what the lender kept
 
@@ -563,7 +580,7 @@ export const domainEvent = pgTable('domain_event', {
 
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
-  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'charge', 'payment',
+  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'charge', 'payment',
   'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
 ];
 

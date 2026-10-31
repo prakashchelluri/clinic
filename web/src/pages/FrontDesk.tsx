@@ -7,6 +7,7 @@ import { openPrint } from '../printPreview';
 import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { FlagChips } from '../flags';
+import { CourseDialog } from '../courses';
 import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Segmented, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty } from '../ui';
 import { useTemplates, norm } from '../templates';
 
@@ -415,7 +416,7 @@ const plansRefresh = () => ['frontdesk', 'worklist', 'bookings', 'psessions', 'p
 /** After the doctor: every open plan of a finished patient with the one action that settles it. A patient leaves this list when nothing is pending. */
 function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: boolean; canForce: boolean }) {
   const nav = useNavigate();
-  const [sched, setSched] = useState<{ rec: any; patient: any } | null>(null);
+  const [sched, setSched] = useState<{ rec: any; patient: any } | null>(null); const [course, setCourse] = useState<{ rec: any; patient: any } | null>(null);
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: plansRefresh, onError: (e) => toast(errText(e), 'err') });
   const act = (ids: string[], status: string, outcome: string, note?: string) => Promise.all(ids.map((id) => upd.mutateAsync({ id, status, contact: { outcome, note } })));
   const decline = async (ids: string[], what: string) => { const a = await ask({ title: `Patient declined ${what}?`, body: 'It leaves the pending list and stays in the patient record.', confirmLabel: 'Declined', cancelLabel: 'Keep', field: { label: 'Reason', maxLength: 200 } }); if (a) await act(ids, 'cancelled', 'Declined', a.value || undefined); };
@@ -429,19 +430,19 @@ function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: b
         const recs: any[] = (v.recommendations ?? []); const open = recs.filter((r) => r.status === 'open'); const tst = testsOf(v); const got = tst.filter((r) => r.status === 'done').length; const waitingRep = awaitingReports(v);
         const procs = recs.filter((r) => r.kind === 'procedure'); const fus = recs.filter((r) => r.kind === 'followup'); const tests = recs.filter((r) => r.kind === 'investigation');
         const doneLabel = (r: any) => r.status === 'scheduled' ? (r.kind === 'procedure' ? 'Scheduled' : 'Booked') : r.status === 'cancelled' ? 'Declined' : r.status === 'done' ? 'Done' : (r.contactLog?.[r.contactLog.length - 1]?.outcome ?? 'Handled');
-        const Item = ({ tag, tone, title, sub, rs, action, onAction }: { tag: string; tone: 'sky' | 'clay' | 'amber'; title: string; sub?: string; rs: any[]; action: string; onAction: () => void }) => {
+        const Item = ({ tag, tone, title, sub, rs, action, onAction, extra }: { tag: string; tone: 'sky' | 'clay' | 'amber'; title: string; sub?: string; rs: any[]; action: string; onAction: () => void; extra?: React.ReactNode }) => {
           const pending = rs.filter((r) => r.status === 'open'); const ids = pending.map((r) => r.id);
           return pending.length === 0
             ? <div className="flex items-center gap-2 rounded-2xl px-3 py-2 text-sm opacity-60"><Chip>done</Chip><span className="flex-1">{title} · {doneLabel(rs[0])}</span><Icon name="check" className="h-4 w-4" /></div>
             : <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-white/70 px-3 py-2.5 text-sm"><Chip tone={tone}>{tag}</Chip><span className="min-w-0 flex-1"><b>{title}</b>{sub && <span className="text-muted"> · {sub}</span>}</span>
-              {canDesk && <><button className="btn btn-sm btn-primary" disabled={upd.isPending} onClick={onAction}>{action}</button>
+              {canDesk && <>{extra}<button className="btn btn-sm btn-primary" disabled={upd.isPending} onClick={onAction}>{action}</button>
                 <MoreMenu items={[{ label: 'Patient declined', danger: true, onClick: () => decline(ids, tag) }, { label: 'Do later', onClick: () => later(ids) }]} /></>}</div>;
         };
         return (
           <div key={v.id} className="card !p-4">
             <div className="flex flex-wrap items-center gap-2"><b className="text-[16px]">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /><span className="text-xs text-muted">{v.opNumber} · seen {v.completedAt ? hhmm(v.completedAt) : ''}{v.doctor ? ` by ${v.doctor}` : ''}{v.patient.phone ? ` · ${v.patient.phone}` : ''}</span><span className="ml-auto" />{open.length ? <Chip tone="amber">{open.length} open</Chip> : <Chip>ready to close</Chip>}</div>
             <div className="mt-2.5 space-y-1.5">
-              {procs.map((r) => <Item key={r.id} tag="procedure" tone="sky" title={r.procedure ?? 'Procedure'} sub={r.sittings ? `${r.sittings} sittings planned` : undefined} rs={[r]} action="Schedule" onAction={() => setSched({ rec: { ...r, patient: v.patient }, patient: v.patient })} />)}
+              {procs.map((r) => <Item key={r.id} tag="procedure" tone="sky" title={r.procedure ?? 'Procedure'} sub={r.sittings ? `${r.sittings} sittings planned` : undefined} rs={[r]} action="Schedule" onAction={() => setSched({ rec: { ...r, patient: v.patient }, patient: v.patient })} extra={r.procedureId ? <button className="btn btn-sm" onClick={() => setCourse({ rec: r, patient: v.patient })}>Price & advance</button> : undefined} />)}
               {tests.length > 0 && <Item tag="tests" tone="clay" title={tests.map((r) => r.notes).filter(Boolean).join(', ') || 'Tests'} sub="lab slip" rs={tests} action="Slip given" onAction={() => act(tests.filter((r) => r.status === 'open').map((r) => r.id), 'contacted', 'Lab slip given').then(() => toast('Marked: lab slip given', 'info'))} />}
               {fus.map((r) => <Item key={r.id} tag="follow-up" tone="amber" title={r.dueOn ? `Review around ${fmtDate(r.dueOn)}` : 'Review'} rs={[r]} action="Book visit" onAction={() => nav(`?book=1&patient=${v.patient.id}&pname=${encodeURIComponent(v.patient.fullName)}&rec=${r.id}`)} />)}
               {waitingRep && <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-3 py-2.5 text-sm"><Chip tone="amber">reports</Chip><span className="min-w-0 flex-1"><b>{got} of {tst.length} received</b><span className="text-muted"> · carries on in Awaiting reports, it does not hold up closing</span></span></div>}
@@ -452,6 +453,7 @@ function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: b
               <button className="btn btn-sm btn-primary" disabled={close.isPending || open.length > 0} onClick={() => close.mutate({ id: v.id })}><Icon name="check" className="h-3.5 w-3.5" />Close visit</button></div>}
           </div>);
       })}
+      {course && <CourseDialog rec={course.rec} patientId={course.patient.id} patientName={course.patient.fullName} onClose={() => setCourse(null)} />}
       {sched && <ScheduleModal rec={sched.rec} onClose={() => { setSched(null); plansRefresh(); }} />}
     </div>
   );

@@ -7,6 +7,7 @@ import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
+import { drawSitting } from './courses.js';
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -171,6 +172,7 @@ export function procedureRoutes(app: FastifyInstance) {
       const log = ['postponed', 'missed', 'cancelled'].includes(body.state) ? [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: `Session ${body.state}`, note: body.reason }] : rec.contactLog;
       await tx.update(recommendation).set({ status: newStatus, contactLog: log }).where(eq(recommendation.id, rec.id));
     }
+    if (body.state === 'completed') await drawSitting(tx, req.ctx, ps);
     await emit(tx, req.ctx, `procedure_session.${body.state}`, 'procedure_session', id, { reason: body.reason });
     return ps;
   });
