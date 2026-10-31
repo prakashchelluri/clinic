@@ -100,6 +100,7 @@ export const procedureCatalog = pgTable('procedure_catalog', {
   active: boolean('active').notNull().default(true),
 });
 
+export type PatientFlags = { vip?: boolean; family?: boolean; careful?: { note: string; by: string; at: string } };
 export const patient = pgTable('patient', {
   ...tenantCols,
   patientNo: text('patient_no').notNull(),
@@ -112,6 +113,9 @@ export const patient = pgTable('patient', {
   referralCard: boolean('referral_card').notNull().default(false),
   allergies: text('allergies'),
   history: jsonb('history').$type<Record<string, { yes: boolean; note?: string }>>().notNull().default({}), // diabetes, thyroid, bp, other: asked once, confirmed at each visit
+  flags: jsonb('flags').$type<PatientFlags>().notNull().default({}),   // VIP, Family and friends, Handle carefully (with a reason)
+  guardianId: uuid('guardian_id'),           // a minor's parent has their own record
+  contactLabel: text('contact_label'),       // who answers this phone: mother, father…
   notes: text('notes'),
   legacyId: text('legacy_id'),
   consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string }>>().notNull().default({}),

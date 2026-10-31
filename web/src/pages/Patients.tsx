@@ -8,6 +8,7 @@ import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skele
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
+import { FlagChips, CarefulBanner, FlagEditor, GuardianPick } from '../flags';
 
 export function Patients() {
   const { id } = useParams(); const nav = useNavigate(); const { perms } = useOutletContext<any>();
@@ -32,7 +33,8 @@ export function Patients() {
               (list.data ?? []).map((p: any, i: number) => (
                 <button key={p.id} className={`row w-full text-left anim-fade-up ${p.id === id ? '!bg-clay-soft/60' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }} onClick={() => nav(`/patients/${p.id}`, { viewTransition: true })}>
                   <Avatar name={p.fullName} />
-                  <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{p.fullName} <span className="text-xs text-muted font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></div><div className="text-xs text-muted truncate">{p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div></div>
+                  <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{p.fullName} <span className="text-xs text-muted font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span> <FlagChips flags={p.flags} /></div><div className="text-xs text-muted truncate">{p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div>
+                    <div className="text-xs text-muted truncate">{p.lastVisitAt ? `last visit ${fmtDate(p.lastVisitAt)}` : 'no visit yet'}{p.mainProblem ? ` · ${p.mainProblem}` : ''}</div></div>
                   <Icon name="chevR" className={`h-4 w-4 ${p.id === id ? 'text-clay' : 'text-muted/50'}`} />
                 </button>))}
           </Section>
@@ -46,6 +48,7 @@ export function Patients() {
 }
 
 function Timeline({ id }: { id: string }) {
+  const nav = useNavigate();
   const t = useQuery({ queryKey: ['timeline', id], queryFn: () => get(`/patients/${id}/timeline`) });
   const docs = useQuery({ queryKey: ['documents', id], queryFn: () => get(`/patients/${id}/documents`) });
   const { perms } = useOutletContext<any>();
@@ -54,10 +57,11 @@ function Timeline({ id }: { id: string }) {
   const [forTest, setForTest] = useState('');
   const [edit, setEdit] = useState<any>(null);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [flagging, setFlagging] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); } });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
-  const { patient: p, encounters, recommendations, charges, outstandingPaise, visits } = t.data;
+  const { patient: p, encounters, recommendations, charges, outstandingPaise, visits, guardian, sharingPhone } = t.data;
   const openPlans = recommendations.filter((r: any) => !['done', 'cancelled'].includes(r.status));
   const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo');
   return (
@@ -66,14 +70,17 @@ function Timeline({ id }: { id: string }) {
         <div className="flex items-start gap-4">
           <Avatar name={p.fullName} size="h-14 w-14 text-lg" />
           <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-medium leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></h2>
+            <h2 className="text-2xl font-medium leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span> <span className="inline-flex flex-wrap gap-1.5 align-middle"><FlagChips flags={p.flags} /></span></h2>
+            <CarefulBanner flags={p.flags} />
+            {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1.5 text-sm text-ink-2">{guardian && <>Guardian: <button className="underline font-medium" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
             <div className="text-sm text-muted mt-1 flex items-center gap-2 flex-wrap"><span>{p.patientNo}</span><span>·</span><span>{p.phone ?? 'no phone'}</span>{p.locality && <><span>·</span><span>{p.locality}</span></>}{p.referralCard && <Chip tone="sky">Special card</Chip>}</div>
             {p.allergies && <div className="mt-2 inline-flex items-center gap-1.5 text-sm text-rose bg-rose-soft rounded-full px-3 py-1"><Icon name="spark" className="h-3.5 w-3.5" />Allergies: {p.allergies}</div>}
             {p.notes && <div className="text-sm text-ink-2 mt-2">{p.notes}</div>}
             {can(perms, 'user.write') && <div className="mt-2"><SeenBy patientId={id} /></div>}
           </div>
           <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-muted">Visits</div><div className="serif text-2xl">{visits.length}</div>{outstandingPaise > 0 && <div className="text-sm text-rose font-medium mt-1">Due {money(outstandingPaise)}</div>}</div>
-          {can(perms, 'patient.write') && <button className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard })}><Icon name="edit" /></button>}
+          {can(perms, 'encounter.complete') && <button className="btn btn-sm" onClick={() => setFlagging(true)}>Flags</button>}
+          {can(perms, 'patient.write') && <button className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian })}><Icon name="edit" /></button>}
         </div>
         {edit && (
           <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-line anim-fade-up">
@@ -81,8 +88,10 @@ function Timeline({ id }: { id: string }) {
             <div><label className="label">Age</label><NumInput max={120} className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
             <div><label className="label">Sex</label><div className="flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
             <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={edit.referralCard} onChange={(e) => setEdit({ ...edit, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
+            <div><label className="label">Who answers this phone</label><input className="input" placeholder="mother, father…" maxLength={40} value={edit.contactLabel} onChange={(e) => setEdit({ ...edit, contactLabel: e.target.value })} /></div>
+            <div className="col-span-2"><label className="label">Guardian (for a minor)</label><GuardianPick selfId={id} value={edit.guardian} onChange={(g) => setEdit({ ...edit, guardian: g })} /></div>
             <div className="col-span-3 flex gap-2 justify-end"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => save.mutate({ ...edit, phone: edit.phone || null, ageYears: edit.ageYears === '' ? null : Number(edit.ageYears), sex: edit.sex || null, locality: edit.locality || null, allergies: edit.allergies || null, notes: edit.notes || null })}>Save</button></div>
+              <button className="btn btn-primary" onClick={() => save.mutate({ ...edit, guardian: undefined, guardianId: edit.guardian?.id ?? null, contactLabel: edit.contactLabel.trim() || null, phone: edit.phone || null, ageYears: edit.ageYears === '' ? null : Number(edit.ageYears), sex: edit.sex || null, locality: edit.locality || null, allergies: edit.allergies || null, notes: edit.notes || null })}>Save</button></div>
           </div>
         )}
       </div>
@@ -118,6 +127,7 @@ function Timeline({ id }: { id: string }) {
       </div>
       {charges.length > 0 && <Section title="Charges" delay={200}><table className="table"><tbody>{charges.map((c: any) => <tr key={c.id}><td className="pl-4">{c.description}</td><td><Chip tone={c.status === 'paid' ? 'sage' : c.status === 'due' ? 'rose' : ''}>{c.status}</Chip></td><td className="text-right pr-4">{money(c.amountPaise)}</td></tr>)}</tbody></table></Section>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
+      {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
     </div>
   );
 }

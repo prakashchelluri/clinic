@@ -6,6 +6,7 @@ import { get, post, patch, qc, uuid, ApiError, today, errText, listOut, dialable
 import { openPrint } from '../printPreview';
 import { ScheduleModal } from './Worklist';
 import { can } from '../App';
+import { FlagChips } from '../flags';
 import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Segmented, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty } from '../ui';
 import { useTemplates, norm } from '../templates';
 
@@ -93,13 +94,13 @@ export function FrontDesk() {
   const render = (r: Row) => {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; return (
       <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
-        <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">waited {minsSince(v.arrivedAt)} min</div></td>
+        <td><b>{v.patient.fullName}</b> <FlagChips flags={v.patient.flags} /> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">waited {minsSince(v.arrivedAt)} min</div></td>
         <td>{v.status === 'intake' ? <Chip tone="sky">intake</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : <Chip>waiting</Chip>}</td>
         <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
         <td className="text-right pr-4 whitespace-nowrap">{isClinical && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>{me.role === 'assistant' ? 'Intake' : 'Call in'}</button>} {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}</td></tr>); }
     if (r.type === 'doctor') { const v = r.v; return (
       <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
-        <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></td>
+        <td><b>{v.patient.fullName}</b> <FlagChips flags={v.patient.flags} /> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></td>
         <td><Chip tone="clay"><span className="h-1.5 w-1.5 rounded-full bg-clay live-dot inline-block mr-1" />in consult</Chip></td>
         <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
         <td className="text-right pr-4">{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}</td></tr>); }
@@ -116,7 +117,7 @@ export function FrontDesk() {
     const v = r.v; const due = v.due.reduce((s: number, c: any) => s + c.amountPaise, 0); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
     return (
       <tr key={v.id} className={`anim-fade-up ${due ? 'bg-rose-soft/40' : handled || left ? 'opacity-70' : ''}`}><td className="pl-4 serif text-lg">{v.opNumber}</td>
-        <td><b>{v.patient.fullName}</b> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">{left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : ''}</div></td>
+        <td><b>{v.patient.fullName}</b> <FlagChips flags={v.patient.flags} /> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">{left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : ''}</div></td>
         <td>{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : <Chip tone="sage">completed</Chip>}</td><td>{v.doctor ?? '—'}</td>
         <td className="text-xs">{left ? <span className="text-muted">Did not see the doctor</span> : v.recommendations.length ? <div className="flex flex-wrap gap-1">{v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` · ${rc.sittings} sittings` : ''} → coordinator` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</div> : <span className="text-muted">Medicines only · pharmacy has the Rx</span>}</td>
         <td className="text-right pr-4 whitespace-nowrap">
@@ -438,7 +439,7 @@ function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: b
         };
         return (
           <div key={v.id} className="card !p-4">
-            <div className="flex flex-wrap items-center gap-2"><b className="text-[16px]">{v.patient.fullName}</b><span className="text-xs text-muted">{v.opNumber} · seen {v.completedAt ? hhmm(v.completedAt) : ''}{v.doctor ? ` by ${v.doctor}` : ''}{v.patient.phone ? ` · ${v.patient.phone}` : ''}</span><span className="ml-auto" />{open.length ? <Chip tone="amber">{open.length} open</Chip> : <Chip>ready to close</Chip>}</div>
+            <div className="flex flex-wrap items-center gap-2"><b className="text-[16px]">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /><span className="text-xs text-muted">{v.opNumber} · seen {v.completedAt ? hhmm(v.completedAt) : ''}{v.doctor ? ` by ${v.doctor}` : ''}{v.patient.phone ? ` · ${v.patient.phone}` : ''}</span><span className="ml-auto" />{open.length ? <Chip tone="amber">{open.length} open</Chip> : <Chip>ready to close</Chip>}</div>
             <div className="mt-2.5 space-y-1.5">
               {procs.map((r) => <Item key={r.id} tag="procedure" tone="sky" title={r.procedure ?? 'Procedure'} sub={r.sittings ? `${r.sittings} sittings planned` : undefined} rs={[r]} action="Schedule" onAction={() => setSched({ rec: { ...r, patient: v.patient }, patient: v.patient })} />)}
               {tests.length > 0 && <Item tag="tests" tone="clay" title={tests.map((r) => r.notes).filter(Boolean).join(', ') || 'Tests'} sub="lab slip" rs={tests} action="Slip given" onAction={() => act(tests.filter((r) => r.status === 'open').map((r) => r.id), 'contacted', 'Lab slip given').then(() => toast('Marked: lab slip given', 'info'))} />}
@@ -461,6 +462,6 @@ function AwaitingList({ visits }: { visits: any[] }) {
   const nav = useNavigate();
   if (visits.length === 0) return <div className="card"><Empty icon="check" title="No reports are being waited for" hint="After the lab slip is given, the patient stays here until the doctor has reviewed the reports and the patient has been told." /></div>;
   return <div className="space-y-3 anim-fade-up">{visits.map((v) => { const t = testsOf(v); const got = t.filter((r) => r.status === 'done').length;
-    return <div key={v.id} className="card !p-4"><div className="flex flex-wrap items-center gap-2"><b className="text-[16px]">{v.patient.fullName}</b><span className="text-xs text-muted">{v.opNumber}{v.doctor ? ` · seen by ${v.doctor}` : ''}</span><span className="ml-auto" /><Chip tone="amber">{got} of {t.length} received</Chip><button className="btn btn-sm" onClick={() => nav('/tests')}>Open Test reports</button></div>
+    return <div key={v.id} className="card !p-4"><div className="flex flex-wrap items-center gap-2"><b className="text-[16px]">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /><span className="text-xs text-muted">{v.opNumber}{v.doctor ? ` · seen by ${v.doctor}` : ''}</span><span className="ml-auto" /><Chip tone="amber">{got} of {t.length} received</Chip><button className="btn btn-sm" onClick={() => nav('/tests')}>Open Test reports</button></div>
       <div className="mt-2 text-sm text-muted">{t.map((r) => `${r.notes} (${r.informedAt ? 'told' : r.reviewedAt ? 'reviewed' : r.status === 'done' ? 'received' : 'pending'})`).join(' · ')}</div></div>; })}</div>;
 }
