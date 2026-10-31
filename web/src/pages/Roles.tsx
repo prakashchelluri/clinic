@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, errText } from '../api';
 import { NAV, can } from '../App';
-import { Chip, Icon, Modal, Skeleton, toast } from '../ui';
+import { Chip, Icon, Modal, NumInput, Skeleton, toast } from '../ui';
 
 /** Every permission the system knows, in plain words. Mirrors the server list (src/lib/auth.ts). */
 export const useRoles = () => useQuery({ queryKey: ['roles'], queryFn: () => get('/admin/roles'), staleTime: 30_000 });
@@ -89,6 +89,22 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAdding(null)}>Cancel</button><button className="btn btn-primary" disabled={adding.name.trim().length < 1 || create.isPending} onClick={() => create.mutate()}>Create role</button></div>
           </div>
         </Modal>)}
+    </div>
+  );
+}
+
+/** One discount cap for the whole clinic. Anyone with the discount permission can go up to it; above it only the owner may. */
+export function DiscountCap({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const cur = Number(cfg.tenant.settings?.discountCapPct ?? 10);
+  const [v, setV] = useState(String(cur));
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { discountCapPct: Number(v) } }), onSuccess: () => { toast('Discount cap saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const bad = v === '' || Number(v) < 0 || Number(v) > 100;
+  return (
+    <div className="card-flat p-5 mt-4">
+      <h3 className="text-lg font-medium">Procedure discounts</h3>
+      <p className="text-sm text-muted mb-3">One limit for the whole clinic. People with Give procedure discounts can go up to it; anything above needs the owner.</p>
+      <div className="flex items-end gap-3"><div><label className="label" htmlFor="cap">Highest discount without the owner (%)</label><NumInput id="cap" max={100} className="input !w-28" value={v} onChange={(e) => setV(e.target.value)} /></div>
+        <button className="btn btn-primary" disabled={bad || save.isPending || Number(v) === cur} onClick={() => save.mutate()}>Save</button></div>
     </div>
   );
 }

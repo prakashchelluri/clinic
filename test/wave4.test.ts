@@ -88,3 +88,43 @@ test('refund needs its own permission; junior doctors see no fees', async () => 
   assert.equal(tl.outstandingPaise, 0); assert.deepEqual(tl.charges, []); assert.deepEqual(tl.payments, []);
   assert.equal((await owner('GET', `/patients/${p.id}/timeline`)).body.charges.length > 0, true);
 });
+
+test('invoice menu: cancel only unpaid, exclude from tax reports, discount cap (owner above it), receipt', async () => {
+  const owner = await as('owner@demo.clinic');
+  assert.equal((await owner('DELETE', '/admin/roles/receptionist')).status, 200, 'back to the standard desk permissions');
+  const reception = await as('reception@demo.clinic');
+  const p = (await reception('POST', '/patients', { fullName: 'Menu Wave4', phone: '9848044433' })).body;
+  const mk = async (d: string, n: number) => (await reception('POST', '/charges', { patientId: p.id, description: d, amountPaise: n })).body;
+  const a = await mk('Peel 1', 100000); const b = await mk('Peel 2', 100000); const c = await mk('Peel 3', 100000);
+
+  assert.equal((await reception('POST', `/charges/${a.id}/cancel`, { reason: 'entered by mistake' })).status, 403);
+  assert.equal((await owner('POST', `/charges/${a.id}/cancel`, { reason: ' ' })).status, 400, 'a reason is required');
+  assert.equal((await owner('POST', `/charges/${a.id}/cancel`, { reason: 'entered by mistake' })).status, 200);
+  const take = await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [b.id], idempotencyKey: 'wave4-menu-0001', parts: [{ method: 'cash', amountPaise: 100000 }] });
+  assert.match(take.body.receiptNo, /^R-\d{4}$/);
+  assert.equal((await owner('POST', `/charges/${b.id}/cancel`, { reason: 'wrong patient' })).status, 409, 'a paid invoice is refunded, not cancelled');
+
+  // exclude from tax reports: kept, flagged, once
+  assert.equal((await owner('POST', `/charges/${b.id}/exclude`, { reason: 'duplicate cash bill' })).status, 200);
+  assert.equal((await owner('POST', `/charges/${b.id}/exclude`, { reason: 'again please' })).status, 409);
+  const tl = (await owner('GET', `/patients/${p.id}/timeline`)).body;
+  assert.ok(tl.charges.find((x: any) => x.id === b.id).excludedAt);
+  assert.equal(tl.charges.find((x: any) => x.id === a.id).status, 'cancelled');
+
+  // receipt carries everything taken together
+  const rc = (await reception('GET', `/receipts/${take.body.receiptNo}`)).body;
+  assert.equal(rc.totalPaise, 100000); assert.equal(rc.lines[0].description, 'Peel 2'); assert.equal(rc.patient.fullName, 'Menu Wave4');
+
+  // discount: not without the permission; within the cap with it; above the cap only the owner
+  assert.equal((await reception('POST', `/charges/${c.id}/discount`, { amountPaise: 5000, reason: 'known person' })).status, 403);
+  assert.equal((await owner('PATCH', '/admin/roles/receptionist', { perms: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'appointment.write', 'visit.read', 'visit.write', 'visit.queue', 'payment.record', 'payment.waive', 'discount.give', 'worklist.read', 'worklist.write', 'document.read', 'document.write'] })).status, 200);
+  const r2 = await as('reception@demo.clinic');
+  assert.equal((await r2('POST', `/charges/${c.id}/discount`, { amountPaise: 8000, reason: 'known person' })).status, 200, '8% is within the 10% cap');
+  const over = await r2('POST', `/charges/${c.id}/discount`, { amountPaise: 8000, reason: 'asked again' });
+  assert.equal(over.status, 403); assert.equal(over.body.capPct, 10);
+  assert.equal((await owner('POST', `/charges/${c.id}/discount`, { amountPaise: 8000, reason: 'owner agreed' })).status, 200);
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { discountCapPct: 200 } })).status, 400);
+  const cur = (await owner('GET', `/patients/${p.id}/timeline`)).body.charges.find((x: any) => x.id === c.id);
+  assert.equal(cur.amountPaise, 84000); assert.equal(cur.discountPaise, 16000);
+  assert.equal((await r2('POST', `/charges/${c.id}/discount`, { amountPaise: 84000, reason: 'whole thing' })).status, 400, 'a whole-amount discount is a waiver');
+});

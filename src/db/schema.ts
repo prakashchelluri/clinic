@@ -317,9 +317,13 @@ export const charge = pgTable('charge', {
   description: text('description').notNull(),
   amountPaise: integer('amount_paise').notNull(),
   taxRateBp: integer('tax_rate_bp').notNull().default(0),
-  status: text('status').notNull().default('due'), // due | paid | waived | refunded
+  status: text('status').notNull().default('due'), // due | paid | waived | refunded | cancelled
   adjustmentReason: text('adjustment_reason'),
   adjustedBy: uuid('adjusted_by'),
+  discountPaise: integer('discount_paise').notNull().default(0), // already taken off amountPaise
+  discountReason: text('discount_reason'),
+  excludedAt: ts('excluded_at'),         // left out of the tax reports; the row is never deleted
+  excludedReason: text('excluded_reason'),
 });
 
 export const payment = pgTable('payment', {
@@ -330,6 +334,7 @@ export const payment = pgTable('payment', {
   method: text('method').notNull(), // cash | upi | card | bank | emi
   reference: text('reference'),
   lender: text('lender'),                // EMI: who finances it; the approval code is the reference
+  receiptNo: text('receipt_no'),         // one number for everything taken in one go
   settledAt: ts('settled_at'),           // EMI: when the lender's money reached the bank; null = awaiting settlement
   feePaise: integer('fee_paise'),        // EMI: what the lender kept
 

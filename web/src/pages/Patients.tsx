@@ -9,6 +9,7 @@ import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
 import { TakePayment } from '../takePayment';
+import { Invoices } from '../invoices';
 import { FlagChips, CarefulBanner, FlagEditor, GuardianPick } from '../flags';
 
 export function Patients() {
@@ -126,7 +127,7 @@ function Timeline({ id }: { id: string }) {
           </div>
         ))}
       </div>
-      {charges.length > 0 && <Section title="Charges" delay={200}><table className="table"><tbody>{charges.map((c: any) => <tr key={c.id}><td className="pl-4">{c.description}</td><td><Chip tone={c.status === 'paid' ? 'sage' : c.status === 'due' ? 'rose' : ''}>{c.status}</Chip></td><td className="text-right pr-4">{money(c.amountPaise)}</td></tr>)}</tbody></table></Section>}
+      <Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} canDiscount={can(perms, 'discount.give')} />
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}

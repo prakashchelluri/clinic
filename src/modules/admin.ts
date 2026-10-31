@@ -16,6 +16,7 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/clinic', 'config.write', async (req, tx) => {
     const body = z.object({ name: Name.optional(), settings: z.record(z.string(), z.any()).optional() }).parse(req.body);
     if (body.settings?.photos?.areas !== undefined) body.settings.photos.areas = z.array(z.string().trim().min(1).max(40)).min(1).max(40).parse(body.settings.photos.areas);
+    if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
     if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
     req.auditBefore = { name: cur.name, settings: Object.fromEntries(Object.keys(body.settings ?? {}).map((k) => [k, (cur.settings as any)?.[k]])) };

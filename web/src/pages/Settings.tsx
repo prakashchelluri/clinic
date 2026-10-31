@@ -4,7 +4,7 @@ import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
 import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, ask } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
-import { RolesTab, useRoles } from './Roles';
+import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
 import { PrivacyTab } from './Privacy';
 import { TemplatesTab } from './SettingsTemplates';
@@ -75,7 +75,7 @@ export function Settings() {
           {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
           {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
           {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'roles' && <RolesTab onSaved={refresh} />}
+          {tab === 'roles' && <><RolesTab onSaved={refresh} /><DiscountCap cfg={cfg} onSaved={refresh} /></>}
           {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
           {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'templates' && <TemplatesTab cfg={cfg} />}
