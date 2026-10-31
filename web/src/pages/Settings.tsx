@@ -342,24 +342,27 @@ function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   );
 }
 
-/** Owner-only: fill the clinic with realistic test data (patients, three weeks of bookings, requests, messages, procedure courses with photos). */
+/** Owner-only: wipe everything this clinic has done and load realistic test data from scratch (patients, a week of bookings, requests, messages, courses with photos). */
 function TestDataCard() {
   const [result, setResult] = useState<any>(null);
-  const load = useMutation({ mutationFn: () => post('/dev/sample-bookings'), onSuccess: (r: any) => { setResult(r); qc.invalidateQueries(); toast(r.topUp ? 'Test data topped up' : 'Test data loaded'); }, onError: (e: any) => toast(errText(e), 'err') });
+  const load = useMutation({ mutationFn: () => post('/dev/reset-sample', { confirm: 'RESET' }), onSuccess: (r: any) => { setResult(r); qc.clear(); qc.invalidateQueries(); toast('Cleared and loaded fresh test data'); }, onError: (e: any) => toast(errText(e), 'err') });
   const run = async () => {
     const r = await ask({
-      title: result ? 'Top up the test data?' : 'Load test data into this clinic?',
-      body: "It adds sample patients (once) and one week of data around today (six days back, six ahead): every doctor's bookings, visits and prescriptions, pharmacy bills and counter sales, expenses, online requests, repeat visits, messages and procedure courses with photos. It switches online booking on. Running it again adds nothing twice. It cannot be removed in one step, so use it on a test clinic only.",
-      confirmLabel: result ? 'Top up' : 'Load test data',
+      title: 'Clear everything and load fresh test data?',
+      body: 'This deletes every patient, booking, visit, prescription, bill, payment, stock movement, message and photo record in this clinic, and then loads a new set of test data. Your staff, doctors, rooms, prices, forms and templates stay. It cannot be undone. Use it only on a test clinic.',
+      confirmLabel: 'Clear and load',
+      field: { label: 'Type RESET to confirm', required: true, maxLength: 10 },
     });
-    if (r) load.mutate();
+    if (!r) return;
+    if (r.value.trim().toUpperCase() !== 'RESET') return toast('Nothing was changed. Type RESET to confirm.', 'info');
+    load.mutate();
   };
   return (
     <div className="card space-y-3">
       <div className="text-[11px] uppercase tracking-wider text-muted">Test data</div>
-      <div className="text-sm text-ink-2">Fills the clinic with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, online requests, repeat visits, patient messages and two procedure courses with before/after photos. Use it on a test clinic, not one with real patients.</div>
-      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">{result.topUp ? 'Topped up' : 'Loaded'} {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses{result.topUp ? '' : `, ${result.requested} online requests, ${result.series} repeat visits, ${result.sittings} procedure sittings, ${result.photos} photos`}.</div>}
-      <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : result ? 'Top up again' : 'Load test data'}</button>
+      <div className="text-sm text-ink-2">Clears everything this clinic has done and starts fresh with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, online requests, repeat visits, patient messages and two procedure courses with before/after photos. Staff, doctors, rooms, prices, forms and templates are kept. Use it on a test clinic, not one with real patients.</div>
+      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.requested} online requests, {result.series} repeat visits, {result.sittings} procedure sittings, {result.photos} photos.</div>}
+      <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : 'Clear everything and load test data'}</button>
     </div>
   );
 }

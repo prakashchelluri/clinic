@@ -1,15 +1,42 @@
 import type { FastifyInstance } from 'fastify';
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { patient, session, appointment, visit, encounter, prescriptionItem, recommendation, charge, payment, expense, feeCategory, medicine, procedureCatalog, formDefinition, practitioner, branch, room, calendarBlock, procedureSession } from '../db/schema.js';
+import { patient, session, appointment, visit, encounter, prescriptionItem, recommendation, charge, payment, expense, feeCategory, medicine, procedureCatalog, formDefinition, practitioner, branch, room, calendarBlock, procedureSession, TENANT_TABLES } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { nextNumber, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { originOf } from '../lib/booking.js';
 import { loadBookingSample } from './sampleBookings.js';
 
+/** What a clinic is set up with and keeps through a reset: people, rooms, doctors, prices, forms, templates, settings. The audit log is kept too: nobody can edit it. */
+const KEEP = new Set(['branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog', 'rx_template', 'tmpl', 'room', 'service', 'audit_log']);
+
+/** Empties everything the clinic did (patients, bookings, visits, money, stock, messages) for this clinic only, children before parents. */
+export async function clearClinicData(tx: Tx, t: string) {
+  const tables = TENANT_TABLES.filter((x) => !KEEP.has(x));
+  const fks: any = await tx.execute(sql`select c.relname as child, p.relname as parent from pg_constraint k join pg_class c on c.oid = k.conrelid join pg_class p on p.oid = k.confrelid where k.contype = 'f'`);
+  const edges = (fks.rows ?? fks).filter((e: any) => e.child !== e.parent && tables.includes(e.child) && tables.includes(e.parent));
+  const order: string[] = []; const left = new Set(tables);
+  while (left.size) { // a table can go once nothing left still points at it
+    const next = [...left].filter((x) => !edges.some((e: any) => e.parent === x && left.has(e.child)));
+    if (!next.length) throw new HttpError(500, 'FK_CYCLE');
+    for (const x of next) { order.push(x); left.delete(x); }
+  }
+  for (const name of order) await tx.execute(sql`delete from ${sql.identifier(name)} where tenant_id = ${t}`);
+  return order.length;
+}
+
 /** Demo data for a dermatology OP day in Rajahmundry. Owner-only; refuses to run twice. */
 export function sampleRoutes(app: FastifyInstance) {
+  /** Clear everything this clinic has done, then load the test data fresh. Owner only, and only when the caller types the word. */
+  route(app, 'post', '/dev/reset-sample', 'config.*', async (req, tx) => {
+    if (!req.ctx.roles.includes('owner')) throw new HttpError(403, 'FORBIDDEN:owner');
+    if ((req.body as any)?.confirm !== 'RESET') throw new HttpError(400, 'CONFIRM_BY_TYPING_RESET');
+    const t = req.ctx.tenantId;
+    const cleared = await clearClinicData(tx, t);
+    const base = await loadSample(tx, t, req.ctx.userId, req.ctx.timezone);
+    return { cleared, base, ...(await loadBookingSample(tx, t, req.ctx.userId, req.ctx.timezone, originOf(req))) };
+  });
   route(app, 'post', '/dev/sample-data', 'config.*', async (req, tx) => loadSample(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
   route(app, 'post', '/dev/sample-collections', 'config.*', async (req, tx) => backfillCollections(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
   /** Everything at once for testers: the base sample if missing, then bookings, requests, series, messages, courses and photos. */
