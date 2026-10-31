@@ -150,7 +150,7 @@ export function visitRoutes(app: FastifyInstance) {
       day,
       appointments: appts.map((x) => ({ ...x.a, patient: x.p, window: x.w })),
       visits: visits.map((x) => ({ ...x.v, patient: x.p, category: x.cat, doctor: x.doctor, encounterId: x.encounterId, encounterStatus: x.encounterStatus, completedAt: x.completedAt,
-        rxCount: rxRows.find((r) => r.encounterId === x.encounterId)?.n ?? 0, recommendations: recs.filter((r) => r.r.encounterId === x.encounterId).map((r) => ({ ...r.r, procedure: r.procedure })), due: dues.filter((d) => d.visitId === x.v.id) })),
+        rxCount: rxRows.find((r) => r.encounterId === x.encounterId)?.n ?? 0, recommendations: recs.filter((r) => r.r.encounterId === x.encounterId).map((r) => ({ ...r.r, procedure: r.procedure })), due: can(req.perms, 'fees.see') ? dues.filter((d) => d.visitId === x.v.id) : [] })),
       payments: can(req.perms, 'report.daily') || can(req.perms, 'finance.read') ? pays : [],
       doctors: docs.map((d) => ({ id: d.id, name: d.name, from: windows.find((w) => w.practitionerId === d.id)?.startTime ?? null, until: [...windows].reverse().find((w) => w.practitionerId === d.id)?.endTime ?? null })),
     };

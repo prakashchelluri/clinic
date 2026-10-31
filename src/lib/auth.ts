@@ -16,12 +16,12 @@ export type Ctx = { tenantId: string; userId: string; role: string; roles: strin
 // Permission bundles. Tenants can override via tenant.settings.roles[role] = string[].
 export const DEFAULT_ROLES: Record<string, string[]> = {
   owner: ['*'],
-  admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'document.read'],
-  doctor: ['patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
+  admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'fees.*', 'document.read'],
+  doctor: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
-  receptionist: ['patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
-  coordinator: ['patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
-  pharmacist: ['patient.read', 'pharmacy.*', 'stock.read', 'stock.write', 'payment.record', 'document.read'],
+  receptionist: ['fees.see', 'patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
+  coordinator: ['fees.see', 'patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
+  pharmacist: ['fees.see', 'patient.read', 'pharmacy.*', 'stock.read', 'stock.write', 'payment.record', 'document.read'],
   superadmin: ['platform.*'],
 };
 
@@ -55,6 +55,10 @@ export const PERMISSIONS: { key: string; group: string; label: string; hint: str
   { key: 'worklist.write', group: 'Procedures', label: 'Schedule procedures and log calls', hint: '' },
   { key: 'payment.record', group: 'Money', label: 'Collect payments', hint: '' },
   { key: 'payment.waive', group: 'Money', label: 'Waive or adjust charges', hint: '' },
+  { key: 'payment.refund', group: 'Money', label: 'Cancel a paid visit / refund', hint: 'Owner and admin by default' },
+  { key: 'fees.see', group: 'Money', label: 'See fees and payments', hint: 'Off for junior doctors: prices, amounts due and revenue are hidden' },
+  { key: 'discount.give', group: 'Money', label: 'Give procedure discounts', hint: 'Up to the clinic cap; owner by default' },
+  { key: 'refund.course', group: 'Money', label: 'Approve refunds of unused prepaid sittings', hint: 'Owner by default' },
   { key: 'report.daily', group: 'Money', label: 'See the daily report', hint: 'Reports page' },
   { key: 'expense.read', group: 'Money', label: 'See expenses', hint: 'Expenses page' },
   { key: 'expense.write', group: 'Money', label: 'Add, edit and remove expenses', hint: '' },

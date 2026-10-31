@@ -327,8 +327,12 @@ export const payment = pgTable('payment', {
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   chargeId: uuid('charge_id').references(() => charge.id), // ponytail: direct link; payment_allocation table when packages/partials arrive
   amountPaise: integer('amount_paise').notNull(),
-  method: text('method').notNull(), // cash | upi | card | bank
+  method: text('method').notNull(), // cash | upi | card | bank | emi
   reference: text('reference'),
+  lender: text('lender'),                // EMI: who finances it; the approval code is the reference
+  settledAt: ts('settled_at'),           // EMI: when the lender's money reached the bank; null = awaiting settlement
+  feePaise: integer('fee_paise'),        // EMI: what the lender kept
+
   receivedBy: uuid('received_by').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
   idempotencyKey: text('idempotency_key'),

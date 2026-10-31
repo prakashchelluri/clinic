@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useOutletContext, useSearchParams } from 'react-router';
 import { get, today, fmtTime, listOut } from '../api';
 import { can } from '../App';
+import { EmiAwaiting } from '../takePayment';
 import { Chip, Empty, Icon, PageHeader, Section, Skeleton, Stat, money, toast } from '../ui';
 
 /** Daily collections + expenses: replaces the two-page printout and the handwritten ledger. */
@@ -43,6 +44,7 @@ export function Reports() {
             {can(perms, 'expense.read') && <div className="p-4 no-print border-t border-line"><Link to="/expenses" className="btn btn-sm"><Icon name="rupee" className="h-3.5 w-3.5" />Add or manage expenses</Link></div>}
           </Section>
         </div>
+        {can(perms, 'payment.record') && <EmiAwaiting />}
         <Section title={<>Payments <span className="text-muted font-normal">· {d.payments.length}</span></>} delay={240} className="mt-5">
           {d.payments.length === 0 ? <Empty icon="wallet" title="No payments yet today" /> :
             <div className="overflow-x-auto"><table className="table min-w-[460px]"><thead><tr><th className="pl-4">Time</th><th>Patient</th><th>For</th><th>Method</th><th className="text-right pr-4">Amount</th></tr></thead>

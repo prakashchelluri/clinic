@@ -8,6 +8,7 @@ import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skele
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
+import { TakePayment } from '../takePayment';
 import { FlagChips, CarefulBanner, FlagEditor, GuardianPick } from '../flags';
 
 export function Patients() {
@@ -57,7 +58,7 @@ function Timeline({ id }: { id: string }) {
   const [forTest, setForTest] = useState('');
   const [edit, setEdit] = useState<any>(null);
   const [viewing, setViewing] = useState<string | null>(null);
-  const [flagging, setFlagging] = useState(false);
+  const [flagging, setFlagging] = useState(false); const [paying, setPaying] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); } });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
@@ -78,7 +79,7 @@ function Timeline({ id }: { id: string }) {
             {p.notes && <div className="text-sm text-ink-2 mt-2">{p.notes}</div>}
             {can(perms, 'user.write') && <div className="mt-2"><SeenBy patientId={id} /></div>}
           </div>
-          <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-muted">Visits</div><div className="serif text-2xl">{visits.length}</div>{outstandingPaise > 0 && <div className="text-sm text-rose font-medium mt-1">Due {money(outstandingPaise)}</div>}</div>
+          <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-muted">Visits</div><div className="serif text-2xl">{visits.length}</div>{outstandingPaise > 0 && <div className="text-sm text-rose font-medium mt-1">Due {money(outstandingPaise)}</div>}{outstandingPaise > 0 && can(perms, 'payment.record') && <button className="btn btn-sm btn-primary mt-1.5" onClick={() => setPaying(true)}>Take payment</button>}</div>
           {can(perms, 'encounter.complete') && <button className="btn btn-sm" onClick={() => setFlagging(true)}>Flags</button>}
           {can(perms, 'patient.write') && <button className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian })}><Icon name="edit" /></button>}
         </div>
@@ -127,6 +128,7 @@ function Timeline({ id }: { id: string }) {
       </div>
       {charges.length > 0 && <Section title="Charges" delay={200}><table className="table"><tbody>{charges.map((c: any) => <tr key={c.id}><td className="pl-4">{c.description}</td><td><Chip tone={c.status === 'paid' ? 'sage' : c.status === 'due' ? 'rose' : ''}>{c.status}</Chip></td><td className="text-right pr-4">{money(c.amountPaise)}</td></tr>)}</tbody></table></Section>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
+      {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
     </div>
   );

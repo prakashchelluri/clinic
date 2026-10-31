@@ -5,7 +5,7 @@ import { type PatientFlags, patient, visit, encounter, prescriptionItem, recomme
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
-import { HttpError } from '../lib/auth.js';
+import { HttpError, can } from '../lib/auth.js';
 
 const PatientIn = z.object({
   fullName: z.string().trim().min(2).max(100),
@@ -96,9 +96,13 @@ export function patientRoutes(app: FastifyInstance) {
     const recs = await tx.select().from(recommendation).where(and(eq(recommendation.patientId, id), eq(recommendation.tenantId, t))).orderBy(desc(recommendation.createdAt));
     const charges = await tx.select().from(charge).where(and(eq(charge.patientId, id), eq(charge.tenantId, t))).orderBy(desc(charge.createdAt));
     const payments = await tx.select().from(payment).where(and(eq(payment.patientId, id), eq(payment.tenantId, t))).orderBy(desc(payment.receivedAt));
-    const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + c.amountPaise, 0);
+    // what is still owed: a part-paid invoice counts only its balance
+    const paidOn = (cid: string) => payments.filter((x) => x.chargeId === cid).reduce((s, x) => s + x.amountPaise, 0);
+    const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - paidOn(c.id)), 0);
     const guardian = p.guardianId ? await tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }).from(patient).where(and(eq(patient.id, p.guardianId), eq(patient.tenantId, t))).then((r) => r[0] ?? null) : null;
     const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
-    return { patient: p, guardian, sharingPhone: sharing, visits, encounters: encounters.map((e) => ({ ...e, prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges, payments, outstandingPaise: due };
+    // roles without 'See fees and payments' see no prices, payments or amounts due
+    const fees = can(req.perms, 'fees.see');
+    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, visits, encounters: encounters.map((e) => ({ ...e, prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
   });
 }
