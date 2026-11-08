@@ -112,10 +112,10 @@ export function SkinMapPanel({ patientId, patientName, encounterId, readOnly, de
         ) : !pin ? (
           <div>
             {list.length === 0 ? <div className="rounded-xl border border-dashed border-line-2 p-4 text-[13px] leading-relaxed text-muted">No pins yet.{readOnly ? '' : ' Tap where the problem is, confirm the site, and the pin keeps the photos, the finding and the diagnosis for that spot across visits.'}</div>
-              : <div className="space-y-0.5">{list.map((p) => <button key={p.id} type="button" className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13.5px] hover:bg-surface-2" onClick={() => { setSide(p.side); setSel(p.id); }}>
+              : <div className="space-y-0.5">{list.map((p) => <button key={p.id} type="button" className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left text-[13.5px] leading-snug hover:bg-surface-2" onClick={() => { setSide(p.side); setSel(p.id); }}>
                   <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white" style={{ background: p.resolvedAt ? 'var(--color-muted)' : p.encounterId && encounterId && p.encounterId === encounterId ? 'var(--color-clay)' : 'var(--color-sky)' }}>{numberOf(p)}</span>
-                  <span className="min-w-0 flex-1 truncate"><b>{p.area}</b>{p.diagnosis ? ` · ${p.diagnosis}` : ''}{p.finding ? <span className="text-muted"> · {p.finding}</span> : ''}</span>
-                  <span className="shrink-0 text-[11.5px] text-muted">{p.photos ? `${p.photos} photo${p.photos === 1 ? '' : 's'} · ` : ''}{p.resolvedAt ? 'resolved' : p.encounterAt ? fmtDate(p.encounterAt) : fmtDate(p.createdAt)}</span>
+                  <span className="min-w-0 flex-1"><b>{p.area}</b>{p.diagnosis ? ` · ${p.diagnosis}` : ''}{p.finding ? <span className="text-muted"> · {p.finding}</span> : ''}</span>
+                  <span className="shrink-0 pt-px text-[11.5px] text-muted">{p.photos ? `${p.photos} photo${p.photos === 1 ? '' : 's'} · ` : ''}{p.resolvedAt ? 'resolved' : p.encounterAt ? fmtDate(p.encounterAt) : fmtDate(p.createdAt)}</span>
                   <Icon name="chevR" className="h-3.5 w-3.5 shrink-0 text-muted" /></button>)}</div>}
           </div>
         ) : (
