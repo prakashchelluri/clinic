@@ -281,11 +281,37 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">Days</label><NumInput max={365} className="input" value={edit.defaults.durationDays ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, durationDays: e.target.value ? Number(e.target.value) : undefined } })} /></div>
             </div>
             <div><label className="label">Instructions</label><input className="input" value={edit.defaults.instructions ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, instructions: e.target.value } })} /></div>
-            <div className="modal-foot !justify-between">{edit.id ? <button className="btn btn-ghost text-rose" onClick={() => del.mutate(edit.id)}>Delete</button> : <span />}<div className="flex gap-2"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name || !(Number(edit.packSize ?? 1) >= 1)} onClick={() => save.mutate({ id: edit.id, name: edit.name, form: edit.form, scheduleClass: edit.scheduleClass, defaults: edit.defaults, mrp: edit.mrp, mrpPaise: edit.mrpPaise, gstBp: edit.gstBp, hsn: edit.hsn, packSize: Number(edit.packSize ?? 1), reorderLevel: Number(edit.reorderLevel ?? 0) })}>Save</button></div></div>
+            <div className="text-[11px] uppercase tracking-wider text-muted">How to use leaflet</div>
+            <LeafletField med={edit} onChange={(leafletUrl) => setEdit({ ...edit, leafletUrl })} onSaved={onSaved} />
+            <div className="modal-foot !justify-between">{edit.id ? <button className="btn btn-ghost text-rose" onClick={() => del.mutate(edit.id)}>Delete</button> : <span />}<div className="flex gap-2"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name || !(Number(edit.packSize ?? 1) >= 1)} onClick={() => save.mutate({ id: edit.id, name: edit.name, form: edit.form, scheduleClass: edit.scheduleClass, defaults: edit.defaults, mrp: edit.mrp, mrpPaise: edit.mrpPaise, gstBp: edit.gstBp, hsn: edit.hsn, leafletUrl: edit.leafletUrl?.trim() || null, packSize: Number(edit.packSize ?? 1), reorderLevel: Number(edit.reorderLevel ?? 0) })}>Save</button></div></div>
           </div>
         </Modal>
       )}
     </Section>
+  );
+}
+
+/** The sheet sent to the patient on WhatsApp with the prescription: upload a PDF or picture, or paste a link the clinic already hosts. */
+function LeafletField({ med, onChange, onSaved }: { med: any; onChange: (url: string | null) => void; onSaved: () => void }) {
+  const upload = useMutation({
+    mutationFn: async (f: File) => {
+      if (f.size > 5 * 1024 * 1024) throw new Error('TOO_LARGE');
+      const dataBase64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f); });
+      return post(`/admin/medicines/${med.id}/leaflet`, { mime: f.type, dataBase64 });
+    },
+    onSuccess: (row: any) => { onChange(row.leafletUrl); toast('Leaflet uploaded'); onSaved(); },
+    onError: (e: any) => toast(e?.message === 'TOO_LARGE' ? 'Keep the leaflet under 5 MB' : errText(e), 'err'),
+  });
+  const isFile = /\/api\/public\/leaflet\//.test(med.leafletUrl ?? '');
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <input className="input min-w-0 flex-1" placeholder="https://… a PDF or page the patient can open" value={isFile ? '' : med.leafletUrl ?? ''} disabled={isFile} onChange={(e) => onChange(e.target.value)} />
+        {med.id ? <label className={`btn btn-sm cursor-pointer ${upload.isPending ? 'opacity-50' : ''}`}><Icon name="plus" className="h-3.5 w-3.5" />{upload.isPending ? 'Uploading…' : 'Upload PDF'}<input type="file" className="sr-only" accept="application/pdf,image/jpeg,image/png" disabled={upload.isPending} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) upload.mutate(f); }} /></label>
+          : <span className="text-xs text-muted">Save the medicine first to upload a file</span>}
+      </div>
+      {med.leafletUrl && <div className="flex items-center gap-2 text-xs"><a className="text-sky underline" href={med.leafletUrl} target="_blank" rel="noreferrer">{isFile ? 'Open the uploaded leaflet' : 'Open link'}</a><button type="button" className="btn btn-ghost btn-sm !min-h-6 !px-1.5 text-rose" onClick={() => onChange(null)}>Remove</button><span className="text-muted">· sent with every prescription that has this medicine</span></div>}
+    </div>
   );
 }
 

@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { tenant, appUser, practitioner, service, feeCategory, medicine, procedureCatalog, room, formDefinition, branch, type FormSchema } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { db } from '../db/index.js';
+import { putFile, getFile } from '../lib/storage.js';
+import { originOf } from '../lib/booking.js';
 import { emit, sent } from '../lib/core.js';
 import jsonLogic from 'json-logic-js';
 import { DEFAULT_ROLES, PERMISSIONS, hashPassword, HttpError, can, rolesFor, isKnownPerm, expandPerms, BUILTIN_NAMES } from '../lib/auth.js';
@@ -119,7 +122,7 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => { const b = sent(FeeIn.partial().parse(req.body), req.body); checkRule(b.eligibility); return upd(tx, feeCategory, req, b); });
 
   // --- medicines ---
-  const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), packSize: z.number().int().min(1).max(1000).optional(), reorderLevel: z.number().int().min(0).max(100000).optional(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), mrpPaise: z.number().int().min(0).max(100000000).optional(), gstBp: z.number().int().min(0).max(2800).optional(), hsn: z.string().max(10).optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });
+  const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), packSize: z.number().int().min(1).max(1000).optional(), reorderLevel: z.number().int().min(0).max(100000).optional(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), mrpPaise: z.number().int().min(0).max(100000000).optional(), gstBp: z.number().int().min(0).max(2800).optional(), hsn: z.string().max(10).optional().nullable(), leafletUrl: z.string().trim().url().max(500).optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });
   route(app, 'post', '/admin/medicines', 'config.write', async (req, tx) => {
     const b = MedIn.parse(req.body);
     const dup = await tx.select({ id: medicine.id }).from(medicine).where(and(eq(medicine.tenantId, req.ctx.tenantId), sql`lower(${medicine.name}) = ${b.name.toLowerCase()}`, sql`coalesce(${medicine.strength},'') = ${b.strength ?? ''}`)).limit(1);
@@ -127,6 +130,32 @@ export function adminRoutes(app: FastifyInstance) {
     return (await tx.insert(medicine).values({ ...b, tenantId: req.ctx.tenantId }).returning())[0];
   });
   route(app, 'patch', '/admin/medicines/:id', 'config.write', async (req, tx) => upd(tx, medicine, req, sent(MedIn.partial().parse(req.body), req.body)));
+  /** The "how to use" leaflet: a PDF or picture the patient gets on WhatsApp with the prescription. Stored like a document; served to the patient without a login. */
+  const LEAFLET_EXT: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
+  route(app, 'post', '/admin/medicines/:id/leaflet', 'config.write', async (req, tx) => {
+    const b = z.object({ mime: z.enum(['application/pdf', 'image/jpeg', 'image/png']), dataBase64: z.string().min(1) }).parse(req.body);
+    const id = (req.params as any).id; const t = req.ctx.tenantId;
+    const m = await tx.select({ id: medicine.id }).from(medicine).where(and(eq(medicine.id, id), eq(medicine.tenantId, t))).then((r) => r[0]);
+    if (!m) throw new HttpError(404, 'NOT_FOUND');
+    const bytes = Buffer.from(b.dataBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (bytes.length > 5 * 1024 * 1024) throw new HttpError(413, 'TOO_LARGE');
+    const ext = LEAFLET_EXT[b.mime];
+    await putFile(`${t}/leaflets/${id}.${ext}`, bytes, b.mime);
+    const leafletUrl = `${originOf(req)}/api/public/leaflet/${id}.${ext}`;
+    const [row] = await tx.update(medicine).set({ leafletUrl }).where(eq(medicine.id, id)).returning();
+    await emit(tx, req.ctx, 'medicine.leaflet_uploaded', 'medicine', id, { mime: b.mime, sizeBytes: bytes.length });
+    return row;
+  });
+  app.get('/public/leaflet/:file', async (req, reply) => {
+    const m = String((req.params as any).file).match(/^([0-9a-f-]{36})\.(pdf|jpg|png)$/);
+    if (!m) throw new HttpError(404, 'NOT_FOUND');
+    const med = await db.select({ tenantId: medicine.tenantId, name: medicine.name, leafletUrl: medicine.leafletUrl }).from(medicine).where(eq(medicine.id, m[1])).then((r) => r[0]);
+    if (!med?.leafletUrl?.endsWith(`/${m[0]}`)) throw new HttpError(404, 'NOT_FOUND'); // a replaced or removed leaflet stops being served
+    const file = await getFile(`${med.tenantId}/leaflets/${m[0]}`);
+    if (!file) throw new HttpError(404, 'FILE_MISSING');
+    const mime = m[2] === 'pdf' ? 'application/pdf' : m[2] === 'jpg' ? 'image/jpeg' : 'image/png';
+    return reply.type(mime).header('cache-control', 'public, max-age=86400').header('content-disposition', `inline; filename="${med.name.replace(/[^\w. -]/g, '_')}.${m[2]}"`).send(file);
+  });
   route(app, 'delete', '/admin/medicines/:id', 'config.write', async (req, tx) => { await tx.delete(medicine).where(and(eq(medicine.id, (req.params as any).id), eq(medicine.tenantId, req.ctx.tenantId))); return { ok: true }; });
 
   // --- procedures ---

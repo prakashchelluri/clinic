@@ -13,6 +13,13 @@ export const HISTORY_CATEGORIES: { key: HistoryKey; label: string; short: string
   { key: 'otherAllergies', label: 'Food and other allergies', short: 'Other allergy', notePlaceholder: 'What happened', options: ['Hair dye (PPD)', 'Nickel', 'Latex', 'Cosmetics or fragrance', 'Seafood', 'Nuts', 'Eggs', 'Milk', 'Dust', 'Pollen'] },
 ];
 
+/** The six categories with the clinic's own option lists where the owner changed them (Settings → Rx pad). */
+export function historyCategories(settings: any) {
+  const own = settings?.pad?.historyOptions;
+  if (!own || typeof own !== 'object') return HISTORY_CATEGORIES;
+  return HISTORY_CATEGORIES.map((c) => (Array.isArray(own[c.key]) ? { ...c, options: own[c.key] as string[] } : c));
+}
+
 // The earlier shape was yes/no per key: diabetes, thyroid, bp, allergy, other. Each becomes an item in a category.
 const OLD: Record<string, [HistoryKey, string]> = { diabetes: ['conditions', 'Diabetes'], thyroid: ['conditions', 'Thyroid'], bp: ['conditions', 'BP'] };
 export function normHistory(raw: any): History {

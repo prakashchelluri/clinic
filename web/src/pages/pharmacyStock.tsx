@@ -21,8 +21,8 @@ export function schemeFree(scheme: string, qty: number) {
 const taxable = (qty: number, rate: number, discBp: number) => Math.round((qty * rate * (10000 - discBp)) / 10000);
 const withGst = (a: number, bp: number) => a + Math.round((a * bp) / 10000);
 const Tile = ({ label, value, sub, on, onClick }: { label: string; value: React.ReactNode; sub?: React.ReactNode; on?: boolean; onClick?: () => void }) => (
-  <button type="button" onClick={onClick} disabled={!onClick} className={`card !p-4 text-left ${on ? '!bg-ink text-white' : ''} ${onClick ? 'card-hover' : ''}`}>
-    <div className={`text-[11px] uppercase tracking-wider ${on ? 'text-white/70' : 'text-muted'}`}>{label}</div><div className="text-2xl font-semibold mt-1">{value}</div>{sub && <div className={`text-xs mt-0.5 ${on ? 'text-white/70' : 'text-muted'}`}>{sub}</div>}
+  <button type="button" onClick={onClick} disabled={!onClick} className={`card !p-4 text-left ${on ? '!bg-[#E9EBEF] !border-[#CDD1D6]' : ''} ${onClick ? 'card-hover' : ''}`}>
+    <div className="text-[12px] font-medium text-muted">{label}</div><div className="text-[24px] font-semibold tracking-tight mt-1.5">{value}</div>{sub && <div className={`text-xs mt-0.5 text-muted`}>{sub}</div>}
   </button>
 );
 
@@ -72,7 +72,7 @@ export function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
           <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-60" aria-label="Find medicine" placeholder="Medicine" value={find} onChange={(e) => setFind(e.target.value)} /></div>
         </div>
         {rows.length === 0 ? <Empty icon="pill" title="Nothing here" /> : <table className="table min-w-[820px]"><thead><tr><th>Medicine</th><th className="!text-right">On hand</th><th className="!text-right">Free received, 90 days</th><th className="!text-right">Batches</th><th>Nearest expiry</th><th className="!text-right">Reorder at</th><th className="!text-right">Cost value</th><th></th></tr></thead>
-          <tbody>{rows.map((i: any) => <tr key={i.id} className="cursor-pointer hover:bg-white/60" onClick={() => go({ tab: 'stock', item: i.id })}>
+          <tbody>{rows.map((i: any) => <tr key={i.id} className="cursor-pointer hover:bg-surface-2" onClick={() => go({ tab: 'stock', item: i.id })}>
             <td><button className="font-semibold text-left hover:underline" onClick={(e) => { e.stopPropagation(); go({ tab: 'stock', item: i.id }); }}>{i.name}</button><div className="text-xs text-muted">{['tab', 'cap'].includes(i.form) ? `strip of ${i.packSize}` : i.form ?? ''} · MRP {money(i.mrpPaise)}</div></td>
             <td className="text-right font-semibold">{i.onHand}{i.expired > 0 && <div className="text-xs text-rose font-normal">+{i.expired} expired</div>}</td><td className="text-right">{i.free90}</td><td className="text-right">{i.batches}</td>
             <td>{i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">{exp(i.nearestExpiry)}</Chip> : exp(i.nearestExpiry)) : '—'}</td><td className="text-right">{i.reorderLevel}</td><td className="text-right">{money(i.costValuePaise)}</td>
@@ -105,7 +105,7 @@ export function DecisionDialog({ id, onClose }: { id: string; onClose: () => voi
           {([['owe', 'Pay the bill, vendor owes the free units', `${short} unit${short === 1 ? '' : 's'} go on this vendor's owed list and are checked on the next delivery.`],
             ['debit', 'Pay the promised rate, vendor owes the free units', `A debit note of ${money(extra)} for the vendor; the free units go on the owed list.`],
             ['accept', 'Accept everything as billed', 'No owed list, no debit note. Needs a reason.']] as const).map(([k, l, h]) => (
-            <label key={k} className={`flex cursor-pointer gap-3 rounded-2xl px-4 py-3 ${choice === k ? 'bg-ink text-white' : 'bg-white/70'}`}><input type="radio" name="decision" className="mt-1 accent-clay" checked={choice === k} onChange={() => setChoice(k)} /><span><b>{l}</b><div className={`text-xs ${choice === k ? 'text-white/70' : 'text-muted'}`}>{h}</div></span></label>))}
+            <label key={k} className={`flex cursor-pointer gap-3 rounded-[10px] border px-4 py-3 ${choice === k ? 'border-ink-2 bg-[#E9EBEF]' : 'border-line bg-surface'}`}><input type="radio" name="decision" className="mt-1 accent-clay" checked={choice === k} onChange={() => setChoice(k)} /><span><b>{l}</b><div className={`text-xs text-muted`}>{h}</div></span></label>))}
           <label className="block"><span className="label">Reason {choice === 'accept' ? '' : '(optional)'}</span><input className="input" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} /></label>
         </div> : <div className="text-sm text-muted">Waiting for the owner to decide.</div>)
           : d.decision && <div className="text-sm">Decided by {d.decision.by}: <b>{d.decision.choice === 'owe' ? 'vendor owes the free units' : d.decision.choice === 'debit' ? `debit note ${money(d.decision.debitPaise ?? 0)}` : 'accepted as billed'}</b>{d.decision.reason ? ` · ${d.decision.reason}` : ''}</div>}
@@ -137,7 +137,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Stock</button><h2 className="text-2xl font-semibold">{m.name}</h2>
+        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Stock</button><h2 className="text-[18px] font-semibold">{m.name}</h2>
           <div className="text-sm text-muted">{[['tab', 'cap'].includes(m.form) ? `strip of ${m.packSize}` : m.form, m.scheduleClass && m.scheduleClass !== 'OTC' ? `Schedule ${m.scheduleClass}` : 'OTC', m.hsn ? `HSN ${m.hsn}` : null, `GST ${m.gstBp / 100}%`, `MRP ${money(m.mrpPaise)}`].filter(Boolean).join(' · ')}</div></div>
         {can(perms, 'stock.write') && <><button className="btn" onClick={() => setReturning(true)}>Return to vendor</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}>Order more</button></>}
       </div>
@@ -205,7 +205,7 @@ function CountView({ id, go }: { id: string; go: Go }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Stock</button><h2 className="text-2xl font-semibold">Stock count {d.docNo} · {fmtDate(d.createdAt)}</h2>
+        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Stock</button><h2 className="text-[18px] font-semibold">Stock count {d.docNo} · {fmtDate(d.createdAt)}</h2>
           <div className="text-sm text-muted">Started by {d.createdByName} · {d.lines.length} batches · {d.lines.filter((l: any) => l.state === 'match').length} matched{gaps.length ? ` · ${gaps.length} with a gap` : ''}</div></div>
         <Chip tone={d.status === 'closed' ? 'sage' : d.status === 'review' ? 'amber' : 'sky'}>{d.status === 'open' ? 'counting' : d.status === 'review' ? 'waiting for owner' : 'closed'}</Chip>
       </div>
@@ -277,7 +277,7 @@ export function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
       <div className="card !p-0 overflow-x-auto">
         {docs.isLoading ? <div className="p-5"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="inbox" title={kind === 'order' ? 'No purchase orders yet' : kind === 'receipt' ? 'No deliveries yet' : 'No returns yet'} /> : (
           <table className="table min-w-[760px]"><thead><tr><th>{kind === 'order' ? 'Order' : kind === 'receipt' ? 'Delivery' : 'Return'}</th><th>Date</th><th>Vendor</th><th>{kind === 'receipt' ? 'Bill' : kind === 'order' ? 'Deliver by' : 'Reason'}</th><th>Items</th><th className="!text-right">{kind === 'return' ? 'Credit' : 'Amount'}</th><th>Status</th><th></th></tr></thead>
-            <tbody>{rows.map((r) => <tr key={r.id} className="cursor-pointer hover:bg-white/60" onClick={() => setOpen(r.id)}>
+            <tbody>{rows.map((r) => <tr key={r.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpen(r.id)}>
               <td className="font-semibold">{r.docNo}</td><td className="whitespace-nowrap">{fmtDate(r.createdAt)}</td><td>{r.vendor ?? 'Opening stock'}</td><td>{kind === 'receipt' ? r.billNo ?? '—' : kind === 'order' ? (r.dueDate ? fmtDate(r.dueDate) : '—') : r.note}</td>
               <td className="text-sm">{r.lines.map((l: any) => l.name).slice(0, 2).join(', ')}{r.lines.length > 2 ? ` +${r.lines.length - 2}` : ''}</td>
               <td className="text-right">{money(r.lines.reduce((n: number, l: any) => n + (l.amountPaise ?? l.creditPaise ?? 0), 0))}</td>
@@ -322,7 +322,7 @@ function OrderEditor({ go, vendorId: initial }: { go: Go; vendorId: string }) {
   const addable = (draft.data?.all ?? []).filter((x: any) => !lines.some((l) => l.medicineId === x.medicineId));
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3"><div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'orders' })}>← Orders</button><h2 className="text-2xl font-semibold">New purchase order</h2></div>
+      <div className="flex flex-wrap items-end gap-3"><div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'orders' })}>← Orders</button><h2 className="text-[18px] font-semibold">New purchase order</h2></div>
         <button className="btn" disabled={save.isPending} onClick={() => { setTried(true); if (!problem) save.mutate(false); }}>Save without sending</button>
         <button className="btn btn-primary" disabled={save.isPending} onClick={() => { setTried(true); if (!problem) save.mutate(true); }}><Icon name="message" />Save and send on WhatsApp</button></div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
@@ -360,7 +360,7 @@ function OrderEditor({ go, vendorId: initial }: { go: Go; vendorId: string }) {
             <div className="flex justify-between border-t border-ink/10 pt-2 text-base"><span>Payable</span><b>{rupees2(tot.pay)}</b></div>
             <div className="flex justify-between pt-2"><span>Free units promised</span><b>{tot.free}</b></div><div className="text-xs text-muted">Worth {rupees2(tot.freeVal)} at rate. The delivery is checked against this.</div></div>
           {lines.length > 0 && <div className="card text-sm"><div className="label">What the vendor receives</div>
-            <div className="mt-2 rounded-2xl bg-sage-soft/70 p-3 whitespace-pre-line text-[13px] leading-relaxed">{[`New order${due ? ` · deliver by ${fmtDate(due)}` : ''}`, ...lines.map((l, i) => `${l.name} · ${calc[i].qty}${calc[i].free ? ` + ${calc[i].free} free` : ''} · ${rupees2(calc[i].rate)}${calc[i].disc ? ` less ${calc[i].disc / 100}%` : ''}`), 'Please reply OK to confirm.'].join('\n')}</div>
+            <div className="mt-2 rounded-[10px] bg-sage-soft/70 p-3 whitespace-pre-line text-[13px] leading-relaxed">{[`New order${due ? ` · deliver by ${fmtDate(due)}` : ''}`, ...lines.map((l, i) => `${l.name} · ${calc[i].qty}${calc[i].free ? ` + ${calc[i].free} free` : ''} · ${rupees2(calc[i].rate)}${calc[i].disc ? ` less ${calc[i].disc / 100}%` : ''}`), 'Please reply OK to confirm.'].join('\n')}</div>
             <div className="mt-2 text-xs text-muted">{v?.phone ? `Sent to ${v.phone} on WhatsApp. ` : 'This vendor has no phone number, so nothing is sent. '}The order number is added when it is saved.</div></div>}
         </div>
       </div>
@@ -409,7 +409,7 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3"><div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'orders' })}>← Orders</button>
-        <h2 className="text-2xl font-semibold">Receive stock{order.data ? ` · ${order.data.vendor?.name}` : ''}</h2>{order.data && <div className="text-sm text-muted">Against {order.data.docNo} · ordered {fmtDate(order.data.createdAt)}</div>}</div></div>
+        <h2 className="text-[18px] font-semibold">Receive stock{order.data ? ` · ${order.data.vendor?.name}` : ''}</h2>{order.data && <div className="text-sm text-muted">Against {order.data.docNo} · ordered {fmtDate(order.data.createdAt)}</div>}</div></div>
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
         <div className="card">
           <div className="label">From the vendor's bill and the box</div>
@@ -455,7 +455,7 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
             {(totalExtra > 0 || totalShort > 0) && <div className="pt-1 text-xs text-muted">Stock goes on the shelf when you save. The owner decides on the money and the free units.</div>}
           </div>
           {vendor && lines.length > 0 && <div className="card text-sm"><div className="label">Sent to the vendor when saved</div>
-            <div className="mt-2 rounded-2xl bg-sage-soft/70 p-3 whitespace-pre-line text-[13px] leading-relaxed">{[`Received against ${order.data?.docNo ?? 'no order'} (bill ${billNo || '…'}):`, ...lines.map((l, i) => `${l.name} · ${calc[i].qty}${calc[i].free ? ` + ${calc[i].free} free` : ''} · ${rupees2(calc[i].rate)}`), 'Reply if this does not match what you sent.'].join('\n')}</div>
+            <div className="mt-2 rounded-[10px] bg-sage-soft/70 p-3 whitespace-pre-line text-[13px] leading-relaxed">{[`Received against ${order.data?.docNo ?? 'no order'} (bill ${billNo || '…'}):`, ...lines.map((l, i) => `${l.name} · ${calc[i].qty}${calc[i].free ? ` + ${calc[i].free} free` : ''} · ${rupees2(calc[i].rate)}`), 'Reply if this does not match what you sent.'].join('\n')}</div>
             <div className="mt-2 text-xs text-muted">If the vendor actually sent more free units, they will reply. That catches free units kept back at the counter.</div></div>}
         </div>
       </div>
@@ -475,8 +475,8 @@ export function VendorsTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
       <div className="card !p-3 space-y-1">
         {can(perms, 'stock.write') && <button className="btn w-full justify-center mb-2" onClick={() => setEdit({})}><Icon name="plus" />Add vendor</button>}
         {list.isLoading ? <Skeleton rows={3} /> : (list.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No vendors yet.</div> : list.data.map((v: any) => (
-          <button key={v.id} onClick={() => go({ tab: 'vendors', vendor: v.id })} className={`flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-left ${sel === v.id ? 'bg-ink text-white' : 'hover:bg-white/70'}`}>
-            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{v.name}</span><span className={`block text-xs ${sel === v.id ? 'text-white/70' : 'text-muted'}`}>{v.address ?? ''}{v.orders30 ? ` · ${v.orders30} order${v.orders30 === 1 ? '' : 's'} this month` : ''}{!v.active ? ' · inactive' : ''}</span></span>
+          <button key={v.id} onClick={() => go({ tab: 'vendors', vendor: v.id })} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left ${sel === v.id ? 'bg-[#E9EBEF]' : 'hover:bg-surface-2'}`}>
+            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{v.name}</span><span className={`block text-xs text-muted`}>{v.address ?? ''}{v.orders30 ? ` · ${v.orders30} order${v.orders30 === 1 ? '' : 's'} this month` : ''}{!v.active ? ' · inactive' : ''}</span></span>
             {v.owed > 0 ? <Chip tone="amber">owes {v.owed}</Chip> : <Chip tone="sage">clear</Chip>}
           </button>))}
       </div>
@@ -518,7 +518,7 @@ function VendorAccount({ id, go, onEdit }: { id: string; go: Go; onEdit: (v: any
   const tone = (s: string) => (s === 'review' ? 'amber' : 'sage') as any;
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><h2 className="text-2xl font-semibold">{v.name}</h2><div className="text-sm text-muted">{[v.gstin ? `GSTIN ${v.gstin}` : null, v.phone, v.address, v.note].filter(Boolean).join(' · ') || 'No details yet'}</div></div>
+      <div className="flex flex-wrap items-center gap-3"><div className="mr-auto"><h2 className="text-[18px] font-semibold">{v.name}</h2><div className="text-sm text-muted">{[v.gstin ? `GSTIN ${v.gstin}` : null, v.phone, v.address, v.note].filter(Boolean).join(' · ') || 'No details yet'}</div></div>
         {can(perms, 'stock.write') && <><button className="btn btn-sm" onClick={() => onEdit(v)}><Icon name="edit" />Edit</button><button className="btn" onClick={() => setReturning(true)}>Return stock</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new', vendor: v.id })}>New order</button></>}</div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile label="Free units still owed" value={t.owedUnits} sub={t.owedUnits ? 'Settled when they arrive in a later delivery' : 'Nothing owed'} />
@@ -537,7 +537,7 @@ function VendorAccount({ id, go, onEdit }: { id: string; go: Go; onEdit: (v: any
         <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2"><b className="mr-2">Deliveries and returns</b><Segmented value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'diff', label: 'With differences' }, { value: 'return', label: 'Returns' }]} /></div>
         {shown.length === 0 ? <div className="px-5 pb-4 text-sm text-muted">Nothing yet.</div> : <table className="table min-w-[700px]"><thead><tr><th>Date</th><th>Document</th><th>By</th><th className="!text-right">Bill</th><th>Against the promise</th><th>Decision</th></tr></thead>
           <tbody>{shown.map((d: any) => { const extra = d.lines.reduce((n: number, l: any) => n + (l.extraPaise ?? 0), 0); const short = d.lines.reduce((n: number, l: any) => n + (l.freeShort ?? 0), 0); return (
-            <tr key={d.id} className="cursor-pointer hover:bg-white/60" onClick={() => setOpen(d)}><td className="whitespace-nowrap">{fmtDate(d.createdAt)}</td><td className="font-semibold">{d.kind === 'return' ? `Return ${d.docNo}` : `${d.billNo ?? d.docNo}`}</td><td>{d.createdByName}</td>
+            <tr key={d.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpen(d)}><td className="whitespace-nowrap">{fmtDate(d.createdAt)}</td><td className="font-semibold">{d.kind === 'return' ? `Return ${d.docNo}` : `${d.billNo ?? d.docNo}`}</td><td>{d.createdByName}</td>
               <td className="text-right">{d.kind === 'return' ? `− ${money(d.lines.reduce((n: number, l: any) => n + l.creditPaise, 0))}` : d.billTotalPaise != null ? money(d.billTotalPaise) : '—'}</td>
               <td>{d.kind === 'return' ? d.lines.map((l: any) => `${l.qty} × ${l.name}, ${l.batchNo}`).join('; ') : <>{extra > 0 && <Chip tone="rose">+{money(extra)} rate</Chip>} {short > 0 && <Chip tone="amber">{short} free short</Chip>} {!extra && !short && <Chip tone="sage">matches</Chip>}</>}</td>
               <td>{d.kind === 'receipt' ? (d.status === 'review' ? <Chip tone={tone(d.status)}>waiting for owner</Chip> : d.decision ? `${d.decision.by}: ${d.decision.choice === 'owe' ? 'vendor owes' : d.decision.choice === 'debit' ? 'debit note' : 'accepted'}` : '—') : d.note}</td></tr>); })}</tbody></table>}

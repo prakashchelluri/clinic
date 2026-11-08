@@ -155,7 +155,7 @@ export function clinicalRoutes(app: FastifyInstance) {
     const recIds = e.recommendations.map((r: any) => r.id);
     const labs = await tx.select().from(labResult).where(and(eq(labResult.tenantId, t), eq(labResult.patientId, e.patientId), recIds.length ? sql`(${labResult.encounterId} = ${e.id} or ${labResult.recommendationId} in ${recIds})` : eq(labResult.encounterId, e.id))).orderBy(labResult.test);
     const phrases = [...e.prescription.flatMap((i: any) => [i.frequency, i.timing, i.instructions, i.durationDays ? `${i.durationDays} days` : null]), ...String(e.data?.plan?.advice ?? '').split('\n')].filter(Boolean) as string[];
-    const telugu = Object.fromEntries(phrases.map((p) => [p, te(p)]).filter(([, v]) => v));
+    const telugu = Object.fromEntries(phrases.map((p) => [p, te(p, ten.settings)]).filter(([, v]) => v));
     return { ...e, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, visit: v, labs, printRx: printSettings(ten.settings), pad: padConfig(ten.settings), telugu };
   });
 

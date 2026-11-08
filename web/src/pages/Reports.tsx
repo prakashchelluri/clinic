@@ -19,7 +19,7 @@ export function Reports() {
   return (
     <div>
       <PageHeader title="Daily report" subtitle={dayLabel}>
-        <div className="flex items-center gap-1 card !p-1 !rounded-full no-print">
+        <div className="flex items-center gap-1 card !p-1 no-print">
           <button className="btn btn-ghost btn-icon" aria-label="Previous day" onClick={() => d && setDay(d.prevDay)}><Icon name="chevL" /></button>
           <input type="date" className="input !w-auto !border-0 !shadow-none !py-1.5 text-center" value={day} onChange={(e) => setDay(e.target.value)} />
           <button className="btn btn-ghost btn-icon" aria-label="Next day" onClick={() => d && setDay(d.nextDay)}><Icon name="chevR" /></button>

@@ -7,8 +7,8 @@ import { HttpError } from '../lib/auth.js';
 import { emit } from '../lib/core.js';
 import { bookingSettings } from '../lib/booking.js';
 import { LAB_PARAMS, findParam, flagOf, numOf } from '../lib/labs.js';
-import { normHistory, cleanHistory, allergyText } from '../lib/history.js';
-import { padConfig, printSettings, PAD_SECTIONS } from '../lib/pad.js';
+import { normHistory, cleanHistory, allergyText, historyCategories, HISTORY_CATEGORIES, HISTORY_KEYS } from '../lib/history.js';
+import { padConfig, printSettings, PAD_SECTIONS, TE, teluguTable } from '../lib/pad.js';
 
 /** What the pad reads and writes besides the note itself: history chips, vitals, lab values, often-prescribed medicines, and the clinic's pad configuration. */
 export const VITAL_KEYS = ['weight_kg', 'height_cm', 'bp', 'pulse', 'temp_f', 'spo2'] as const;
@@ -92,19 +92,29 @@ export function rxpadRoutes(app: FastifyInstance) {
   // --- the clinic's pad: which sections show, are required, print; and how the prescription prints ---
   route(app, 'get', '/admin/pad', 'config.write', async (req, tx) => {
     const ten = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
-    return { sections: padConfig(ten.settings), print: printSettings(ten.settings), known: PAD_SECTIONS };
+    return padView(ten.settings);
   });
+  const padView = (s: any) => ({ sections: padConfig(s), print: printSettings(s), known: PAD_SECTIONS, telugu: teluguTable(s), teluguDefaults: TE, history: historyCategories(s), historyDefaults: HISTORY_CATEGORIES });
   route(app, 'put', '/admin/pad', 'config.write', async (req, tx) => {
     const b = z.object({ sections: z.array(z.object({ key: z.string(), show: z.boolean(), required: z.boolean(), print: z.boolean() })).max(40).optional(),
-      print: z.object({ lang: z.enum(['te+en', 'en', 'te']).optional(), outOfRangeOnly: z.boolean().optional(), vitals: z.array(z.string()).max(8).optional() }).optional() }).parse(req.body);
+      print: z.object({ lang: z.enum(['te+en', 'en', 'te']).optional(), outOfRangeOnly: z.boolean().optional(), vitals: z.array(z.string()).max(8).optional() }).optional(),
+      telugu: z.record(z.string().trim().min(1).max(80), z.string().trim().max(160)).refine((o) => Object.keys(o).length <= 400, 'TOO_MANY').optional(),
+      historyOptions: z.record(z.enum(HISTORY_KEYS), z.array(z.string().trim().min(1).max(60)).max(40)).optional() }).parse(req.body);
     const t = req.ctx.tenantId;
     const ten = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
     const s = { ...(ten.settings ?? {}) } as any;
     if (b.sections) s.pad = { ...(s.pad ?? {}), sections: padConfig({ pad: { sections: b.sections } }) };
     if (b.print) s.print = { ...(s.print ?? {}), rx: { ...printSettings(s).valueOf(), ...b.print } };
+    // the whole table comes in; only what differs from the built-in one is kept, so a later app update to the defaults still reaches the clinic
+    if (b.telugu) s.pad = { ...(s.pad ?? {}), telugu: Object.fromEntries(Object.entries(b.telugu).map(([k, v]) => [k.toLowerCase(), v]).filter(([k, v]) => (TE[k] ?? '') !== v)) };
+    if (b.historyOptions) {
+      const own: Record<string, string[]> = {};
+      for (const c of HISTORY_CATEGORIES) { const xs = b.historyOptions[c.key]; if (xs && JSON.stringify(xs) !== JSON.stringify(c.options)) own[c.key] = [...new Set(xs)]; }
+      s.pad = { ...(s.pad ?? {}), historyOptions: own };
+    }
     await tx.update(tenant).set({ settings: s }).where(eq(tenant.id, t));
-    await emit(tx, req.ctx, 'pad.configured', 'tenant', t, { sections: !!b.sections, print: !!b.print });
-    return { sections: padConfig(s), print: printSettings(s) };
+    await emit(tx, req.ctx, 'pad.configured', 'tenant', t, { sections: !!b.sections, print: !!b.print, telugu: !!b.telugu, history: !!b.historyOptions });
+    return padView(s);
   });
 
   route(app, 'get', '/lab-params', 'encounter.intake', async () => LAB_PARAMS);

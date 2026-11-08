@@ -43,7 +43,7 @@ export function RegisterTab({ clinic, licence }: { clinic: string; licence?: str
         <span className="ml-auto flex gap-2"><button className="btn btn-sm" disabled={!rows.length || bad} onClick={print}><Icon name="print" className="h-3.5 w-3.5" />Print</button><button className="btn btn-sm" disabled={!rows.length || bad} onClick={csv}><Icon name="download" className="h-3.5 w-3.5" />Download</button></span>
       </div>
       {bad && <div className="text-sm text-rose">“From” is after “to”.</div>}
-      {noRx > 0 && <div className="rounded-2xl bg-amber-soft px-3.5 py-2 text-sm text-[#6E4D10]">{noRx} entr{noRx === 1 ? 'y was' : 'ies were'} sold with no prescription on file. These drugs need one: check those bills.</div>}
+      {noRx > 0 && <div className="rounded-[10px] bg-amber-soft px-3.5 py-2 text-sm text-[#6E4D10]">{noRx} entr{noRx === 1 ? 'y was' : 'ies were'} sold with no prescription on file. These drugs need one: check those bills.</div>}
       <section className="card-flat overflow-hidden">
         {q.isLoading ? <div className="p-4"><Skeleton rows={5} /></div> : rows.length === 0 ? <Empty icon="pill" title="Nothing sold in this period" hint="Medicines marked Schedule H, H1 or X appear here by themselves when they are billed. Set a medicine's schedule under Settings → Medicines." /> : (
           <div className="overflow-x-auto"><table className="table min-w-[980px]">

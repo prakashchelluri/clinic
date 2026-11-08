@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { findParam, flagOf } from '../src/lib/labs.js';
-import { normHistory, cleanHistory, allergyText } from '../src/lib/history.js';
-import { padConfig, printSettings, te } from '../src/lib/pad.js';
+import { normHistory, cleanHistory, allergyText, historyCategories } from '../src/lib/history.js';
+import { padConfig, printSettings, te, teluguTable } from '../src/lib/pad.js';
 
 test('a typed value is flagged against the clinic list', () => {
   const hb = findParam('hb')!; assert.equal(hb.name, 'Haemoglobin', 'aliases resolve');
@@ -39,4 +39,15 @@ test('pad defaults fill what the clinic has not configured', () => {
 test('standard phrases get a Telugu line, free text does not', () => {
   assert.equal(te('1-0-1'), 'ఉదయం 1, రాత్రి 1'); assert.equal(te('After food'), 'భోజనం తర్వాత'); assert.equal(te('14 days'), '14 రోజులు');
   assert.equal(te('neck down, repeat day 8'), null); assert.equal(te(''), null);
+});
+
+test("the clinic's own phrases and history options sit on top of the built-in lists", () => {
+  const s = { pad: { telugu: { 'after food': 'భోజనం అయ్యాక', 'after bath': 'స్నానం తర్వాత', 'at night': '' }, historyOptions: { conditions: ['BP', 'Anaemia'] } } };
+  assert.equal(te('After food', s), 'భోజనం అయ్యాక', 'an edited phrase wins');
+  assert.equal(te('after bath', s), 'స్నానం తర్వాత', 'an added phrase translates');
+  assert.equal(te('at night', s), null, 'an emptied phrase prints in English only');
+  assert.equal(te('after food'), 'భోజనం తర్వాత', 'without settings the built-in line stands');
+  assert.ok(Object.keys(teluguTable(s)).length > 40, 'the merged table keeps every built-in phrase');
+  assert.deepEqual(historyCategories(s).find((c) => c.key === 'conditions')!.options, ['BP', 'Anaemia']);
+  assert.equal(historyCategories(s).find((c) => c.key === 'family')!.options.length, historyCategories({}).find((c) => c.key === 'family')!.options.length, 'untouched categories keep the defaults');
 });

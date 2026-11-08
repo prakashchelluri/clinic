@@ -41,10 +41,16 @@ export const TE: Record<string, string> = {
   'avoid oily food': 'నూనె పదార్థాలు తగ్గించండి', 'mild soap only': 'మైల్డ్ సబ్బు మాత్రమే వాడండి', 'treat everyone at home, same night': 'ఇంట్లో అందరికీ అదే రాత్రి చికిత్స చేయండి', 'hot-wash clothes and bedding': 'బట్టలు, పరుపులు వేడి నీటిలో ఉతకండి',
   'stop the steroid cream': 'స్టెరాయిడ్ క్రీమ్ ఆపండి', "don't scratch": 'గోకవద్దు', 'cut nails short': 'గోళ్లు చిన్నగా కత్తిరించండి', 'review': 'మళ్లీ రావాల్సిన తేదీ',
 };
+/** The clinic's phrase table: the built-in one with the owner's edits and additions on top (Settings → Rx pad). An empty edit removes the Telugu line. */
+export function teluguTable(settings: any): Record<string, string> {
+  const own = settings?.pad?.telugu;
+  return own && typeof own === 'object' ? { ...TE, ...own } : TE;
+}
 /** The Telugu for a phrase, or null when it is free text. Numbers in "x days" are kept. */
-export function te(phrase: string | null | undefined): string | null {
+export function te(phrase: string | null | undefined, settings?: any): string | null {
   if (!phrase) return null; const k = phrase.trim().toLowerCase();
-  if (TE[k]) return TE[k];
+  const table = teluguTable(settings);
+  if (k in table) return table[k] || null;
   const d = k.match(/^(\d+)\s*days?$/); if (d) return `${d[1]} రోజులు`;
   return null;
 }

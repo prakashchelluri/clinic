@@ -146,7 +146,7 @@ export function Encounter() {
       const arrival: Sym[] = (enc.data.visit?.details?.complaints ?? []).map((c: any) => ({ name: c.text, ...(c.duration ? { since: c.duration } : {}) }));
       let d = { ...(enc.data.data ?? {}) };
       if (!asSym(d.complaint?.chief_complaint).length && arrival.length) d = { ...d, complaint: { ...(d.complaint ?? {}), chief_complaint: arrival } };
-      if (enc.data.status !== 'completed' && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
+      if (isDoctor && enc.data.status !== 'completed' && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
       loaded.current = true; setData(d); setRx(enc.data.prescription.map(strip));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
       setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
@@ -157,11 +157,12 @@ export function Encounter() {
   const callNext = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => { loaded.current = false; nav(`/encounter/${e.id}`, { viewTransition: true }); }, onError: (e) => toast(errText(e), 'err') });
   const cleanRx = () => rx.filter((i) => i.name).map(strip);
   const save = useMutation({
-    mutationFn: ({ complete }: { complete: boolean; next?: boolean }) => patch(`/encounters/${id}`, { data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
-    onSuccess: (_e, { complete, next }) => {
+    mutationFn: ({ complete }: { complete: boolean; next?: boolean; back?: boolean }) => patch(`/encounters/${id}`, { data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
+    onSuccess: (_e, { complete, next, back }) => {
       setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       ['queue', 'frontdesk', 'timeline'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       if (complete) { toast('Consultation completed'); openPrint({ title: 'Prescription', rx: id }); if (next && nextVisit) callNext.mutate(nextVisit.id); else nav(isDoctor ? '/today' : '/queue', { viewTransition: true }); }
+      else if (back) { toast('Intake saved · ready for the doctor'); nav('/queue', { viewTransition: true }); }
     },
     onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else toast(errText(e), 'err'); },
   });
@@ -323,7 +324,7 @@ export function Encounter() {
   const cards: Record<string, ReactNode> = {
     vitals: <Card key="vitals" id="vitals" title="Vitals" meta="from check-in · tap to change"><VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} /></Card>,
     history: null, // the chips sit under the type-anything bar
-    symptoms: <Card key="symptoms" id="symptoms" title="Symptoms" required={padOf('symptoms').required} actions={!readOnly && isDoctor && <><LoadSet kind="symptom" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('symptom')}>Save</Act><Act onClick={() => clearSection('symptoms', () => setSyms([]))} disabled={!syms.length}>Clear</Act></>}>
+    symptoms: <Card key="symptoms" id="symptoms" title="Symptoms" required={isDoctor && padOf('symptoms').required} actions={!readOnly && isDoctor && <><LoadSet kind="symptom" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('symptom')}>Save</Act><Act onClick={() => clearSection('symptoms', () => setSyms([]))} disabled={!syms.length}>Clear</Act></>}>
       <div data-invalid={!!err('complaint', 'chief_complaint')}>
         {syms.map((s, i) => <div key={s.name + i} className="flex flex-wrap items-center gap-1.5 border-t border-line py-1.5 first:border-t-0 first:pt-0">
           <span className="toggle-opt on">{s.name}{!readOnly && <button type="button" aria-label={`Remove ${s.name}`} className="ml-1.5" onClick={() => setSyms(syms.filter((_, j) => j !== i))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>
@@ -335,7 +336,7 @@ export function Encounter() {
         {err('complaint', 'chief_complaint') && <div className="mt-1 text-xs text-rose">At least one symptom is required</div>}
         {otherFields('complaint', ['chief_complaint', 'duration']).map((f: Field) => <div key={f.key} className="mt-2" data-invalid={!!err('complaint', f.key)}><CompactField f={f} value={data.complaint?.[f.key]} onChange={(v) => set('complaint', f.key, v)} disabled={readOnly} invalid={!!err('complaint', f.key)} /></div>)}
       </div></Card>,
-    diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required actions={!readOnly && isDoctor && <><LoadPrevious previous={previous} onLoad={loadPrevious} /><LoadSet kind="diagnosis" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('diagnosis')}>Save</Act><Act onClick={() => clearSection('the diagnosis', () => setDxs([]))} disabled={!dxs.length}>Clear</Act></>}>
+    diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required={isDoctor} meta={isDoctor ? undefined : 'the doctor decides; leave it if unsure'} actions={!readOnly && isDoctor && <><LoadPrevious previous={previous} onLoad={loadPrevious} /><LoadSet kind="diagnosis" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('diagnosis')}>Save</Act><Act onClick={() => clearSection('the diagnosis', () => setDxs([]))} disabled={!dxs.length}>Clear</Act></>}>
       <div data-invalid={!!err('assessment', 'diagnosis')}>
         {dxs.map((d, i) => <div key={d.name} className="flex flex-wrap items-center gap-1.5 border-t border-line py-1.5 first:border-t-0 first:pt-0">
           <span className="chip chip-clay !py-1 !text-[12.5px]">{d.name}{!readOnly && <button type="button" aria-label={`Remove ${d.name}`} className="ml-1" onClick={() => setDxs(dxs.filter((_, j) => j !== i))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>
@@ -348,7 +349,7 @@ export function Encounter() {
         {otherFields('assessment', []).map((f: Field) => <div key={f.key} className="mt-2"><CompactField f={f} value={data.assessment?.[f.key]} onChange={(v) => set('assessment', f.key, v)} disabled={readOnly} /></div>)}
         {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{p.allergies ? (allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ` ${p.allergies} allergy checked: no clash found.`) : ''} <button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
       </div></Card>,
-    exam: <Card key="exam" id="exam" title="Examination" required={padOf('exam').required} actions={!readOnly && isDoctor && <><LoadSet kind="finding" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('finding')}>Save</Act><Act onClick={() => clearSection('the examination', () => setData((d) => ({ ...d, exam: {} })))} disabled={!Object.keys(data.exam ?? {}).length}>Clear</Act></>}>
+    exam: <Card key="exam" id="exam" title="Examination" required={isDoctor && padOf('exam').required} actions={!readOnly && isDoctor && <><LoadSet kind="finding" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('finding')}>Save</Act><Act onClick={() => clearSection('the examination', () => setData((d) => ({ ...d, exam: {} })))} disabled={!Object.keys(data.exam ?? {}).length}>Clear</Act></>}>
       <div className="space-y-2">{(formSections.find((s) => s.key === 'exam')?.fields ?? []).map((f: Field) => <div key={f.key} data-invalid={!!err('exam', f.key)}><CompactField f={f} value={data.exam?.[f.key]} onChange={(v) => set('exam', f.key, v)} disabled={readOnly} invalid={!!err('exam', f.key)} />{err('exam', f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div></Card>,
     medicines: isDoctor ? <Card key="medicines" id="medicines" title="Medicines" required={padOf('medicines').required} meta={rx.filter((i) => i.name).length ? String(rx.filter((i) => i.name).length) : undefined} actions={!readOnly && <><LoadPrevious previous={previous} onLoad={loadPrevious} /><LoadSet kind="medicine" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('medicine')}>Save</Act><Act onClick={() => clearSection('the medicines', () => setRx([]))} disabled={!rx.length}>Clear</Act></>}>
       <datalist id="meds">{meds.map((m: any) => <option key={m.id} value={m.name} />)}</datalist>
@@ -421,7 +422,9 @@ export function Encounter() {
         : ph.length ? <div className="flex gap-1.5">{ph.slice(0, 6).map((x) => <img key={x.id} src={`/api/documents/${x.id}/file`} alt={x.area ?? 'photo'} className="h-16 w-16 rounded-lg object-cover" />)}</div> : <div className="text-xs text-muted">No photos yet.</div>}
     </Card>,
   };
-  const order = pad.length ? pad.filter((s) => s.show).map((s) => s.key) : Object.keys(cards);
+  const shown = pad.length ? pad.filter((s) => s.show).map((s) => s.key) : Object.keys(cards);
+  // intake: the junior's cards plus Photos, since "before" pictures are taken at intake
+  const order = isDoctor ? shown : [...shown.filter((k) => k !== 'photos'), ...(can(perms, 'document.write') ? ['photos'] : [])];
 
   return (
     <div className="space-y-3 pb-24">
@@ -509,7 +512,7 @@ export function Encounter() {
             {errors.length > 0 ? <button type="button" className="text-xs text-rose underline" onClick={() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' })}>{errors.length} required field{errors.length > 1 ? 's' : ''} missing · show</button>
               : <span className="text-xs text-muted">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves'}{isDoctor && !readOnly ? ` · ${[padOf('symptoms').required ? 'Symptoms' : null, 'Diagnosis', padOf('exam').required ? 'Examination' : null, padOf('medicines').required ? 'Medicines' : null].filter(Boolean).join(', ')} required` : ''}</span>}
             <span className="ml-auto" />
-            {!readOnly && !isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save intake &amp; return to queue</button>}
+            {!readOnly && !isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
             {!readOnly && isDoctor && <>
               <MoreMenu label="Save as template" items={[{ label: 'Save the whole pad as a template', onClick: askTpl }, { label: 'Save only the medicines', onClick: () => saveSection('medicine') }, { label: 'Save only the advice', onClick: () => saveSection('advice') }, { label: 'Save only the tests', onClick: () => saveSection('tests') }, { label: 'Configure pad…', onClick: () => nav('/settings?tab=pad'), hidden: !can(perms, 'config.write') }]} />
               <button className="btn" onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}><Icon name="print" />Preview</button>

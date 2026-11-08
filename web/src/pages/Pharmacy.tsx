@@ -51,9 +51,9 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
   const list = useQuery({ queryKey: ['pharmacy', 'counter', term], queryFn: () => get(`/pharmacy/counter${term ? `?q=${encodeURIComponent(term)}` : ''}`), refetchInterval: 15000 });
   const d = list.data;
   const Row = ({ r, sub }: { r: any; sub?: string }) => (
-    <button onClick={() => pick(r.encounterId)} aria-pressed={sel === r.encounterId} className={`flex w-full items-center gap-2 rounded-2xl px-3 py-2.5 text-left transition-colors ${sel === r.encounterId ? 'bg-ink text-white' : 'hover:bg-white/70'}`}>
+    <button onClick={() => pick(r.encounterId)} aria-pressed={sel === r.encounterId} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors ${sel === r.encounterId ? "bg-[#E9EBEF]" : "hover:bg-surface-2"}`}>
       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{r.patient.fullName}</span>
-        <span className={`block truncate text-xs ${sel === r.encounterId ? 'text-white/70' : 'text-muted'}`}>{sub ?? [r.opNumber, r.doctor, fmtTime(r.completedAt), `${r.items} medicine${r.items === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</span></span>
+        <span className={`block truncate text-xs text-muted`}>{sub ?? [r.opNumber, r.doctor, fmtTime(r.completedAt), `${r.items} medicine${r.items === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</span></span>
       {r.status === 'issued' && <Chip tone="sage">issued</Chip>}{r.status === 'part' && <Chip tone="amber">part issued</Chip>}{r.status === 'nothing' && <Chip>not bought</Chip>}
     </button>
   );
@@ -70,7 +70,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
             <div className="px-1 pb-2 text-xs text-muted">Click a patient to open the doctor's prescription. Nothing here is a task.</div>
             {(d?.today ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No prescriptions yet today.</div> : d.today.map((r: any) => <Row key={r.encounterId} r={r} />)}
             {(d?.balances ?? []).length > 0 && <>
-              <div className="px-1 pb-1 pt-4 text-[11px] font-bold uppercase tracking-wider text-muted">Balance to collect · last 30 days</div>
+              <div className="px-1 pb-1 pt-4 text-[11.5px] font-semibold text-muted">Balance to collect · last 30 days</div>
               {d.balances.map((r: any) => <Row key={r.encounterId} r={r} sub={`Rx ${fmtDate(r.day)} · ${r.balance.map((b: any) => `${b.name} ${b.left} left`).join(', ')}`} />)}
             </>}
           </>
@@ -203,7 +203,7 @@ function AddItem({ meds, onAdd }: { meds: any[]; onAdd: (m: any) => void }) {
       <Icon name="plus" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
       <input className="input !pl-10" aria-label="Add item to this bill" placeholder="Add item to this bill" value={q} onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); pick(shown[0]); } if (e.key === 'Escape') setOpen(false); }} />
-      {open && <div className="absolute z-20 mt-1 w-full card-flat !rounded-2xl bg-white p-1 shadow-lg max-h-72 overflow-y-auto">
+      {open && <div className="absolute z-20 mt-1 w-full card-flat p-1 shadow-lg max-h-72 overflow-y-auto">
         {shown.length === 0 ? <div className="p-3 text-sm text-muted">Not in the medicine list. Add it under Settings → Medicines.</div> : shown.map((m) => (
           <button key={m.id} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-ink/5" onClick={() => pick(m)}>
             <span className="flex-1 truncate">{m.name}</span><span className={`text-xs ${m.onHand ? 'text-muted' : 'text-rose'}`}>{m.onHand ? `${m.onHand} in stock` : 'out of stock'}</span><span className="w-14 text-right text-xs font-semibold">{money(m.mrpPaise)}</span>
@@ -304,14 +304,14 @@ function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string |
       </div>
       {t && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[['Bills', money(t.total - t.refunds), `${t.count} bills${t.returns ? ` · ${t.returns} return${t.returns === 1 ? '' : 's'}` : ''}`], ['Cash in drawer should be', money(t.cash ?? 0), t.refunds ? `after ${money(t.refunds)} refunds` : 'cash payments'], ['UPI', money(t.upi ?? 0), ''], ['Card', money(t.card ?? 0), ''],
-          ['Prescriptions with nothing issued', `${list.data.rx.notBought} of ${list.data.rx.total}`, "for the doctor's information"]].map(([l, v, s]) => <div key={l} className="card !p-4"><div className="text-[11px] uppercase tracking-wider text-muted">{l}</div><div className="text-2xl font-semibold mt-1">{v}</div>{s && <div className="text-xs text-muted mt-0.5">{s}</div>}</div>)}
+          ['Prescriptions with nothing issued', `${list.data.rx.notBought} of ${list.data.rx.total}`, "for the doctor's information"]].map(([l, v, s]) => <div key={l} className="card !p-4"><div className="text-[12px] font-medium text-muted">{l}</div><div className="text-[24px] font-semibold tracking-tight mt-1.5">{v}</div>{s && <div className="text-xs text-muted mt-0.5">{s}</div>}</div>)}
       </div>}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-start">
         <div className={`card !p-0 overflow-x-auto ${sel ? 'hidden lg:block' : ''}`}>
           {list.isLoading ? <div className="p-5"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="pill" title="No bills in this range" /> : (
             <table className="table min-w-[640px]"><thead><tr><th>Bill</th><th>Time</th><th>Patient</th><th>Items</th><th className="!text-right">Amount</th><th>Paid by</th></tr></thead>
               <tbody>{rows.map((r) => (
-                <tr key={r.id} onClick={() => pick(r.id)} className={`cursor-pointer ${sel === r.id ? 'bg-ink/5' : 'hover:bg-white/60'}`}>
+                <tr key={r.id} onClick={() => pick(r.id)} className={`cursor-pointer ${sel === r.id ? 'bg-paper-2' : 'hover:bg-surface-2'}`}>
                   <td><button className="font-semibold hover:underline" onClick={(e) => { e.stopPropagation(); pick(r.id); }}>{r.invoiceNo}</button></td><td className="text-muted whitespace-nowrap">{range === 'today' ? fmtTime(r.at) : `${fmtDate(r.at)} ${fmtTime(r.at)}`}</td>
                   <td><div className="font-medium">{r.patient.fullName}</div><div className="text-xs text-muted">{r.encounterId ? `Rx ${r.doctor ?? ''}` : 'Walk-in · no prescription'}</div></td>
                   <td className="text-sm">{r.items}{r.balance.length > 0 && <Chip tone="amber" className="ml-1.5">balance {r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)}</Chip>}{r.notIssued > 0 && <Chip className="ml-1.5">{r.notIssued} not issued</Chip>}</td>

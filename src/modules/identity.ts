@@ -7,7 +7,7 @@ import { tenant, appUser, practitioner, feeCategory, formDefinition, medicine, p
 import { whatsappReady } from '../lib/messaging.js';
 import { padConfig, printSettings } from '../lib/pad.js';
 import { LAB_PARAMS } from '../lib/labs.js';
-import { HISTORY_CATEGORIES } from '../lib/history.js';
+import { historyCategories } from '../lib/history.js';
 import { verifyPassword, HttpError } from '../lib/auth.js';
 import { route } from '../lib/route.js';
 
@@ -70,7 +70,7 @@ export function identityRoutes(app: FastifyInstance) {
     const settings = req.ctx.roles.includes('owner') ? ten.settings : { ...ten.settings, security: undefined };
     return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings },
       branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms, services, whatsappReady: whatsappReady(),
-      pad: padConfig(ten.settings), printRx: printSettings(ten.settings), labParams: LAB_PARAMS, historyCategories: HISTORY_CATEGORIES };
+      pad: padConfig(ten.settings), printRx: printSettings(ten.settings), labParams: LAB_PARAMS, historyCategories: historyCategories(ten.settings) };
   });
 
   route(app, 'get', '/users', 'user.read', async (req, tx) =>
