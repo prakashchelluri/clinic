@@ -14,6 +14,7 @@ import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, t
 import { HistoryChips } from '../historyChips';
 import { VitalsCard } from '../vitals';
 import { LabResultsCard } from '../labs';
+import { SkinMapPanel } from '../skinmap';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
@@ -356,6 +357,7 @@ export function Encounter() {
         {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{p.allergies ? (allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ` ${p.allergies} allergy checked: no clash found.`) : ''} <button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
       </div></Card>,
     exam: <Card key="exam" id="exam" title="Examination" required={isDoctor && padOf('exam').required} actions={!readOnly && isDoctor && <><LoadSet kind="finding" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('finding')}>Save</Act><Act onClick={() => clearSection('the examination', () => setData((d) => ({ ...d, exam: {} })))} disabled={!Object.keys(data.exam ?? {}).length}>Clear</Act></>}>
+      <div className="mb-3 border-b border-line pb-3"><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), a]))} compact /></div>
       <div className="space-y-2">{(formSections.find((s) => s.key === 'exam')?.fields ?? []).map((f: Field) => <div key={f.key} data-invalid={!!err('exam', f.key)}><CompactField f={f} value={data.exam?.[f.key]} onChange={(v) => set('exam', f.key, v)} disabled={readOnly} invalid={!!err('exam', f.key)} />{err('exam', f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div></Card>,
     medicines: isDoctor ? <Card key="medicines" id="medicines" title="Medicines" required={padOf('medicines').required} meta={rx.filter((i) => i.name).length ? String(rx.filter((i) => i.name).length) : undefined} actions={!readOnly && <><LoadPrevious previous={previous} onLoad={loadPrevious} /><LoadSet kind="medicine" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('medicine')}>Save</Act><Act onClick={() => clearSection('the medicines', () => setRx([]))} disabled={!rx.length}>Clear</Act></>}>
       <datalist id="meds">{meds.map((m: any) => <option key={m.id} value={m.name} />)}</datalist>
@@ -440,7 +442,7 @@ export function Encounter() {
     vitals: txt([vd.weight_kg && `${vd.weight_kg} kg`, vd.height_cm && `${vd.height_cm} cm`, vd.bp && `BP ${vd.bp}`, vd.pulse && `pulse ${vd.pulse}`, vd.temp_f && `${vd.temp_f} °F`, vd.spo2 && `SpO₂ ${vd.spo2}`]) || null,
     symptoms: syms.length ? txt([syms.map((x) => txt([x.name, x.since && `since ${x.since}`, x.severity?.toLowerCase()])).join('; '), (data.complaint?.site ?? []).join(', ')]) : null,
     diagnosis: dxs.length ? dxs.map((d) => txt([d.name, d.severity?.toLowerCase(), d.status?.toLowerCase()])).join('; ') : null,
-    exam: txt(examFields.map((f) => { const v = data.exam?.[f.key]; return Array.isArray(v) ? v.join(', ') : v ? String(v) : null; })) || null,
+    exam: txt([...examFields.map((f) => { const v = data.exam?.[f.key]; return Array.isArray(v) ? v.join(', ') : v ? String(v) : null; }), (data.complaint?.site ?? []).length ? `sites: ${(data.complaint.site as string[]).join(', ')}` : null]) || null,
     medicines: rx.filter((i) => i.name).length ? <>{rx.filter((i) => i.name).map((i, n) => <div key={n}>{n + 1}. <b>{i.name}</b> <span className="text-muted">{txt([i.dose, i.frequency, i.timing, i.durationDays ? `${i.durationDays} d` : null, i._issued && 'issued'])}</span></div>)}</> : null,
     advice: adviceLines.length ? adviceLines.join(' · ') : null,
     tests: tests.length ? tests.map((r) => `${r.notes}${r.status === 'done' ? ' (in)' : ''}`).join(', ') : null,

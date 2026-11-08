@@ -8,6 +8,7 @@ import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skele
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
+import { SkinMapPanel } from '../skinmap';
 import { TakePayment } from '../takePayment';
 import { Invoices } from '../invoices';
 import { CoursesCard } from '../courses';
@@ -105,6 +106,7 @@ function Timeline({ id }: { id: string }) {
       {/* the story on the left, what is open on the right */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] xl:items-start">
       <div className="min-w-0 space-y-4">
+      {show() && <Section title="Skin map" delay={30}><div className="p-4"><SkinMapPanel patientId={id} patientName={p.fullName} readOnly={!can(perms, 'encounter.intake')} /></div></Section>}
       {show() && <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />}
       {show('visits') && <div className="relative pl-6">
         <div className="absolute left-[9px] top-2 bottom-2 w-px bg-line" />

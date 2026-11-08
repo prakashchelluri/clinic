@@ -598,8 +598,22 @@ export const document = pgTable('document', {
   area: text('area'),
   view: text('view'),                         // front | left | right | back | closeup
   procedureSessionId: uuid('procedure_session_id'),
+  pinId: uuid('pin_id'),                      // the skin-map pin this photo belongs to
   takenAt: ts('taken_at').notNull().defaultNow(),
 }, (t) => [index('doc_patient').on(t.tenantId, t.patientId), index('doc_photo_area').on(t.tenantId, t.patientId, t.area)]);
+
+/** Skin map: a pin on the body silhouette, kept across visits; photos, the finding and the diagnosis hang off it. x and y are 0..1 of the silhouette box. */
+export const bodyPin = pgTable('body_pin', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  encounterId: uuid('encounter_id').references(() => encounter.id),
+  side: text('side').notNull().default('front'), // front | back
+  x: real('x').notNull(), y: real('y').notNull(),
+  area: text('area').notNull(),
+  finding: text('finding'), diagnosis: text('diagnosis'),
+  resolvedAt: ts('resolved_at'),
+  createdBy: text('created_by'),
+}, (t) => [index('pin_patient').on(t.tenantId, t.patientId)]);
 
 export const numberingSequence = pgTable('numbering_sequence', {
   tenantId: uuid('tenant_id').notNull(),
@@ -643,7 +657,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'callback', 'quote', 'day_close', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message', 'lab_result',
+  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message', 'body_pin', 'lab_result',
 ];
 
 export type FormField = {
