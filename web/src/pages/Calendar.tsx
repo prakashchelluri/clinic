@@ -24,10 +24,10 @@ type View = 'day' | 'week';
 type Pick = { k: 'doc' | 'room' | 'all'; id?: string };
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } } };
 const PILL: Record<string, string> = {
-  booked: 'bg-white border-line', confirmed: 'bg-white border-line', requested: 'bg-white border-dashed border-clay text-[#9A3412]',
-  arrived: 'bg-amber-soft text-[#6E4D10] border-transparent', no_show: 'border-dashed border-rose/50 text-rose line-through',
+  booked: 'bg-white border-line', confirmed: 'bg-white border-line', requested: 'bg-white border-dashed border-clay text-[var(--color-ink)]',
+  arrived: 'bg-amber-soft text-[var(--color-amber)] border-transparent', no_show: 'border-dashed border-rose/50 text-rose line-through',
 };
-const stripe = { background: 'repeating-linear-gradient(45deg,rgba(23,25,26,.05) 0 6px,transparent 6px 12px)' };
+const stripe = { background: 'repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 6px,transparent 6px 12px)' };
 
 /** Calendar for the front desk: one doctor or room at a time (or all as cards), day or week, book on a phone call, what needs handling. */
 export function Calendar() {
@@ -169,7 +169,7 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
                   </button>))}
                 {r.procs.map((p) => <span key={p.id} title={p.room ?? ''} className="rounded-[10px] bg-sky-soft px-2.5 py-1 text-[12.5px] font-semibold text-sky">{p.startTime} {p.patient} · {p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.state === 'completed' ? ' ✓' : ''}</span>)}
                 {w && !closed && w.free > 0 && !past && (!isToday || w.endTime > now) && (grid.canBook
-                  ? <button className="rounded-[10px] border-[1.5px] border-dashed border-[#A9CDB8] px-2.5 py-1 text-[12.5px] font-semibold text-sage hover:bg-sage-soft" onClick={() => grid.onBook({ ...w, day })}>{w.free} free</button>
+                  ? <button className="rounded-[10px] border-[1.5px] border-dashed border-sage/40 px-2.5 py-1 text-[12.5px] font-semibold text-sage hover:bg-sage-soft" onClick={() => grid.onBook({ ...w, day })}>{w.free} free</button>
                   : <span className="text-xs text-muted">{w.free} free</span>)}
               </div>
               <span className={`pt-2.5 text-right text-xs font-bold ${w && w.allocated >= w.effectiveCapacity ? 'text-rose' : 'text-muted'}`}>{w ? `${w.allocated} / ${w.effectiveCapacity}` : ''}</span>
@@ -229,7 +229,7 @@ function WeekGrid({ from, docs, onOpenDay }: { from: string; docs: any[]; onOpen
     if (!ws.length) return { text: '—', sub: part ? '' : 'not working', cls: 'text-muted', style: {} };
     const a = ws.reduce((n: number, w: any) => n + w.allocated, 0); const c = ws.reduce((n: number, w: any) => n + w.effectiveCapacity, 0);
     const r = c ? a / c : 1; const notes = d.blocks.filter((b: any) => b.practitionerId === pid && ['other', 'stop'].includes(b.kind) && ws.some((w: any) => w.startTime < b.endTime && w.endTime > b.startTime)).map((b: any) => b.note);
-    return { text: `${a} / ${c}`, sub: notes[0] ?? (c - a > 0 ? `${c - a} free` : 'full'), cls: r >= 0.95 ? 'bg-[#F6DCCF] text-[#8A3A1C]' : r >= 0.6 ? 'bg-[#F4EBD3] text-[#6E4D10]' : 'bg-sage-soft text-sage', style: {}, r };
+    return { text: `${a} / ${c}`, sub: notes[0] ?? (c - a > 0 ? `${c - a} free` : 'full'), cls: r >= 0.95 ? 'bg-[#F6DCCF] text-[#8A3A1C]' : r >= 0.6 ? 'bg-[#F4EBD3] text-[var(--color-amber)]' : 'bg-sage-soft text-sage', style: {}, r };
   };
   const rows: { key: string; head: ReactNode; cell: (d: any) => ReactNode }[] = [];
   for (const doc of docs) {

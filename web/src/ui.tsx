@@ -64,15 +64,14 @@ export const Chip = ({ tone = '', children, className = '' }: { tone?: '' | 'cla
 
 export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?: string }) {
   const initials = name.split(/\s+/).filter((s) => /^\p{L}/u.test(s)).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('');
-  const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-  // flat: a pale tint per person with dark text, so avatars read as labels, not decorations
-  return <div className={`${size} shrink-0 rounded-full grid place-items-center font-semibold`} style={{ background: `hsl(${hue} 30% 92%)`, color: `hsl(${hue} 30% 28%)` }}>{initials}</div>;
+  // monochrome (Mendo): a grey disc with the initials; status, not colour, tells people apart
+  return <div className={`${size} shrink-0 rounded-full grid place-items-center bg-paper-2 font-bold text-ink`} style={{ boxShadow: 'var(--ring)' }}>{initials}</div>;
 }
 
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
     <div className="anim-fade-up flex flex-wrap items-end gap-3 mb-6">
-      <div className="mr-auto"><h1 className="text-[26px] leading-tight font-semibold text-ink">{title}</h1>{subtitle && <div className="text-[14px] text-muted mt-1">{subtitle}</div>}</div>
+      <div className="mr-auto"><h1 className="text-[34px] font-semibold text-ink">{title}</h1>{subtitle && <div className="text-[14px] text-muted mt-1.5">{subtitle}</div>}</div>
       {children}
     </div>
   );

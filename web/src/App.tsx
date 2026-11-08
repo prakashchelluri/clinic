@@ -63,26 +63,32 @@ export function useTheme() {
 
 /** The desktop rail: icon above a short label, the way Eka does it, so the work area gets the width. */
 function Rail({ items, active, clinic, me, requests, onSignOut }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; requests: number; onSignOut: () => void }) {
-  const [theme, toggleTheme] = useTheme();
   return (
-    <div className="flex h-full flex-col items-center px-2 py-3">
-      <Link to="/" title={clinic} className="mb-3 grid h-9 w-9 place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</Link>
-      <nav className="flex w-full flex-col gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
+    <div className="flex h-full flex-col items-center px-3 pb-3.5 pt-4">
+      <Link to="/" title={clinic} className="mb-4 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
+      <nav className="flex w-full flex-col items-center gap-1 overflow-y-auto no-scrollbar" aria-label="Sections">
         {items.map((n, i) => <span key={n.to} className="contents">
-          {i > 0 && n.group === 'clinic' && items[i - 1].group !== 'clinic' && <span className="mx-3 my-1.5 border-t border-line" />}
-          <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} className={`rail-item ${active?.to === n.to ? 'active' : ''}`}>
-            <Icon name={n.icon} className="h-[18px] w-[18px]" /><span className="max-w-full truncate">{n.label}</span>
-            {n.to === '/bookings' && requests > 0 && <span className="absolute right-1.5 top-1 rounded-full bg-clay px-1.5 text-[10px] font-bold text-white" aria-label={`${requests} online requests`}>{requests}</span>}
+          {i > 0 && n.group === 'clinic' && items[i - 1].group !== 'clinic' && <span className="my-1.5 w-6 border-t border-line-2" />}
+          <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} aria-label={n.label} data-tip={n.label} className={`tip rail-item ${active?.to === n.to ? 'active' : ''}`}>
+            <Icon name={n.icon} className="h-[18px] w-[18px]" />
+            {n.to === '/bookings' && requests > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-ink" aria-label={`${requests} online requests`} />}
           </Link></span>)}
       </nav>
-      <Link to="/help" className="rail-item mt-auto"><Icon name="help" className="h-[18px] w-[18px]" /><span>Help</span></Link>
-      <button type="button" onClick={toggleTheme} className="rail-item" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-[18px] w-[18px]" /><span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button>
-      <div className="mt-1 flex w-full flex-col items-center gap-1 border-t border-line pt-2.5">
-        <Avatar name={me.name} size="h-8 w-8 text-[11px]" />
-        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon !h-8 !w-8"><Icon name="logout" /></button>
+      <Link to="/help" aria-label="Help" data-tip="Help" className="tip rail-item mt-auto"><Icon name="help" className="h-[18px] w-[18px]" /></Link>
+      <div className="relative mt-2 flex flex-col items-center gap-2 pt-1">
+        <span className="relative"><Avatar name={me.name} size="h-9 w-9 text-[12px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }} /></span>
+        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip rail-item !h-9"><Icon name="logout" className="h-4 w-4" /></button>
       </div>
     </div>
   );
+}
+
+/** The clock in the top bar: the clinic's time with a breathing dot, so the room knows the app is live. */
+function Clock() {
+  const fmt = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+  const [t, setT] = useState(fmt);
+  useEffect(() => { const i = setInterval(() => setT(fmt()), 10_000); return () => clearInterval(i); }, []);
+  return <span className="toppill hidden !px-2.5 sm:inline-flex" aria-label={`Clinic time ${t}`}><span className="breathe h-2 w-2 rounded-full bg-sage" />{t}</span>;
 }
 
 function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void }) {
@@ -134,6 +140,7 @@ export function App() {
   const requests = counts.data?.requests ?? 0;
   const plansNew = c('worklist.read') ? counts.data?.plans ?? 0 : 0; // plans the doctor made today that nobody has acted on yet
   const [bell, setBell] = useState(false);
+  const [theme, toggleTheme] = useTheme();
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
@@ -167,7 +174,7 @@ export function App() {
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[84px] border-r border-line/70 bg-sidebar/85 backdrop-blur-xl md:block" aria-label="Main">
+      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[76px] bg-sidebar md:block" style={{ boxShadow: '1px 0 0 rgba(0,0,0,.15)' }} aria-label="Main">
         <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} />
       </aside>
       {drawer && (
@@ -176,16 +183,18 @@ export function App() {
         </div>
       )}
 
-      <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-        <header className="no-print sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-line/60 bg-surface/75 px-3 backdrop-blur-xl md:px-6">
+      <div className={`md:pl-[76px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+        <header className="no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-          <span className="truncate text-[15px] font-semibold">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : clinic)}</span><span className="hidden truncate text-[13px] text-muted lg:inline">· {clinic}</span>
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[13.5px] font-semibold text-muted"><span className="hidden truncate sm:inline">{clinic}</span><Icon name="chevR" className="hidden h-3.5 w-3.5 sm:block" /><span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span></nav>
           <span className="ml-auto" />
-          {!platform && <button onClick={() => setPalette(true)} className="mr-1.5 hidden h-8 w-[260px] items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-[12.5px] text-muted hover:border-muted lg:flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-3.5 w-3.5" /><span className="flex-1 text-left">Patient, phone or ID</span><span className="kbd">Ctrl K</span></button>}
-          {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
-          <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-ghost btn-icon"><Icon name="help" /></Link>
+          {!platform && <button onClick={() => setPalette(true)} className="toppill mr-1 hidden w-[280px] !font-medium !text-muted lg:inline-flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-4 w-4" /><span className="flex-1 truncate text-left">Patients, phone or ID…</span><span className="kbd">Ctrl K</span></button>}
+          {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-icon lg:hidden"><Icon name="search" /></button>}
+          <Clock />
+          <button type="button" onClick={toggleTheme} className="btn btn-icon" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
+          <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-icon"><Icon name="help" className="h-4 w-4" /></Link>
             {!platform && c('appointment.read') && <div className="relative">
-              <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-ghost btn-icon"><Icon name="bell" />{requests + plansNew > 0 && <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-clay px-1 text-[10px] font-bold text-white anim-scale-in">{requests + plansNew}</span>}</button>
+              <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-icon"><Icon name="bell" className="h-4 w-4" />{requests + plansNew > 0 && <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-ink px-1 text-[10.5px] font-bold text-paper anim-scale-in" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }}>{requests + plansNew}</span>}</button>
               {bell && <><div className="fixed inset-0 z-30" onClick={() => setBell(false)} /><div className="menu anim-menu z-40 !w-[270px]" role="menu">
                 {requests + plansNew === 0 && <div className="px-3 py-2.5 text-sm text-muted">Nothing new.</div>}
                 {requests > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/bookings?tab=requests'); }}><Icon name="inbox" className="h-4 w-4" />{requests} online booking request{requests === 1 ? '' : 's'}</button>}
@@ -193,7 +202,7 @@ export function App() {
               </div></>}</div>}
             {!platform && (() => { const acts = createActions(c, loc.pathname); return acts.length > 0 && (
               <div className="relative shrink-0">
-                <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-primary !min-h-8 !px-2.5 sm:!px-3"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
+                <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-primary !min-h-10 !rounded-[11px] !px-3 sm:!px-4"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
                 {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
                   <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
               </div>); })()}
@@ -203,7 +212,7 @@ export function App() {
             </div>
         </header>
 
-        <div className={`mx-auto w-full px-4 py-5 md:px-6 md:py-6 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1440px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
+        <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>

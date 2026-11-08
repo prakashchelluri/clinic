@@ -18,8 +18,8 @@ const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const
 
 type Pill = { key: string; label: string; cls: string; sort: number; patientId?: string; title?: string };
 const PILL: Record<string, string> = {
-  done: 'bg-sage-soft text-sage border-transparent', with: 'bg-ink text-white border-transparent', wait: 'bg-amber-soft text-[#6E4D10] border-transparent',
-  booked: 'bg-white border-line', req: 'bg-white border-dashed border-clay text-[#9A3412]', gone: 'border-dashed border-rose/50 text-rose line-through', proc: 'bg-sky-soft text-sky border-transparent',
+  done: 'bg-sage-soft text-sage border-transparent', with: 'bg-ink text-white border-transparent', wait: 'bg-amber-soft text-amber border-transparent',
+  booked: 'bg-surface border-line-2', req: 'bg-surface border-dashed border-ink text-ink', gone: 'border-dashed border-rose/50 text-rose line-through', proc: 'bg-sky-soft text-sky border-transparent',
 };
 
 /** The doctor's day: who is with me and who is next, the day as a calendar, what is left before I go, tomorrow in one line. No money. */
@@ -135,7 +135,7 @@ export function Today() {
 
   const nextCard = (
     <section className="card-flat order-1 p-4 anim-fade-up">
-      {sentIn && <div className="mb-3 rounded-[10px] border border-[#E8A68F] bg-clay-soft px-3 py-2.5 anim-fade-up" role="alert">
+      {sentIn && <div className="mb-3 rounded-[12px] border border-line-2 bg-paper-2 px-3 py-2.5 anim-fade-up" role="alert">
         <div className="text-[11px] font-bold uppercase tracking-wider text-clay">Coming in now</div>
         <div className="mt-1 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{sentIn.patient.fullName}</div><div className="text-xs text-muted">{[sentIn.patient.ageYears ? `${sentIn.patient.ageYears} ${sentIn.patient.sex ?? ''}` : null, sentIn.details?.reportsEncounterId ? 'back with reports' : sentIn.details?.complaints?.[0]?.text ?? sentIn.details?.complaint, `sent in ${minsSince(sentIn.details.calledAt)} min ago`].filter(Boolean).join(' · ')}</div></div>
           {can(perms, 'encounter.intake') && <button className="btn btn-primary" disabled={open.isPending} onClick={() => open.mutate(sentIn.id)}>Open</button>}</div>
@@ -161,7 +161,7 @@ export function Today() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3 anim-fade-up">
-        <div className="min-w-0"><h1 className="text-[26px] font-semibold leading-tight" aria-label={greet}><Letters text={greet} /></h1>
+        <div className="min-w-0"><h1 className="text-[34px] font-semibold" aria-label={greet}><Letters text={greet} /></h1>
           <p className="mt-1.5 text-sm text-muted">{dateLabel}. <b className="text-ink">{apptCount} patient{apptCount === 1 ? '' : 's'}{c.procedures?.length ? ` and ${c.procedures.length} procedure${c.procedures.length === 1 ? '' : 's'}` : ''}</b>, {seen} seen, {waiting.length} waiting, {toCome} still to come.{lastEnd ? ` You finish at ${lastEnd}.` : doc ? ' Not working today.' : ''}</p>
           {(late || breakNow || away) && <div className="mt-1.5 flex flex-wrap gap-1.5">{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}</div>}</div>
         {canChange && <div className="ml-auto hidden flex-wrap gap-2 sm:flex">
@@ -212,12 +212,12 @@ export function Today() {
             <div>{rows.map((r, i) => (
               <div key={r.time + i}>
                 {i === nowIdx && (!gap(i) || now < gap(i)!.at) && <NowLine at={now} />}
-                {gap(i) && <div className="grid grid-cols-[52px_1fr] border-t border-line/60"><span /><div className="my-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-muted" style={{ background: 'repeating-linear-gradient(45deg,rgba(23,25,26,.05) 0 6px,transparent 6px 12px)' }}>{gap(i)!.label}</div></div>}
+                {gap(i) && <div className="grid grid-cols-[52px_1fr] border-t border-line/60"><span /><div className="my-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-muted" style={{ background: 'repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 6px,transparent 6px 12px)' }}>{gap(i)!.label}</div></div>}
                 {i === nowIdx && gap(i) && now >= gap(i)!.at && <NowLine at={now} />}
                 <div className="grid min-h-[52px] grid-cols-[52px_1fr] items-start border-t border-line/60">
                   <b className="pt-2.5 text-xs text-muted">{r.time}</b>
                   <div className="flex flex-wrap items-center gap-1.5 py-2">
-                    {r.off ? <span className="flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold text-muted" style={{ background: 'repeating-linear-gradient(45deg,rgba(23,25,26,.05) 0 6px,transparent 6px 12px)' }}>{r.off}</span> : null}
+                    {r.off ? <span className="flex-1 rounded-xl px-3 py-1.5 text-xs font-semibold text-muted" style={{ background: 'repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 6px,transparent 6px 12px)' }}>{r.off}</span> : null}
                     {r.pills.map((p) => <button key={p.key} title={p.title} onClick={() => p.patientId && nav(`/patients/${p.patientId}`)} className={`rounded-[10px] border px-2.5 py-1 text-[12.5px] font-semibold ${p.cls}`}>{p.label}</button>)}
                     {!r.off && r.free > 0 && r.end > now && <span className="text-xs text-muted">· {r.free} free</span>}
                   </div>
