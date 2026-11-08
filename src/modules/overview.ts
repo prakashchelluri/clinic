@@ -13,7 +13,7 @@ export function overviewRoutes(app: FastifyInstance) {
     const yesterdaySame = await tx.select({ n: sql<number>`count(*)::int` }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.day, addDays(today, -7))));
     const waitingRows = await tx.select({ v: visit, p: { fullName: patient.fullName }, doctor: practitioner.name }).from(visit)
       .innerJoin(patient, eq(patient.id, visit.patientId)).leftJoin(practitioner, eq(practitioner.id, visit.practitionerId))
-      .where(and(eq(visit.tenantId, t), eq(visit.day, today), inArray(visit.status, ['waiting', 'intake']))).orderBy(desc(visit.priority), visit.queuePosition);
+      .where(and(eq(visit.tenantId, t), eq(visit.day, today), inArray(visit.status, ['waiting', 'intake', 'screened']))).orderBy(desc(visit.priority), visit.queuePosition);
 
     const daily: any = await tx.execute(sql`
       select (p.received_at at time zone ${tz})::date::text as day, sum(p.amount_paise)::int as total, p.method as method

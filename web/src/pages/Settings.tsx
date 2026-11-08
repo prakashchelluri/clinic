@@ -97,8 +97,8 @@ export function Settings() {
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
   const [vitals, setVitals] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
-  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { vitals, print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category', screening: s.screening ?? 'off', freeDays: String(s.reports?.freeDays ?? 30) });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { vitals, print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope }, screening: f.screening, reports: { freeDays: Math.max(0, Math.min(365, Number(f.freeDays) || 0)) } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="space-y-4">
@@ -117,9 +117,32 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div className="text-[11px] uppercase tracking-wider text-muted">OP numbers</div>
         <div><label className="label">Daily OP number resets</label><div className="flex gap-1">{[['day+category', 'Per category (GEN-1, REN-1…)'], ['day', 'One sequence per day']].map(([v, l]) => <button key={v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div></div>
       </div>
+      <div className="card space-y-3">
+        <div className="text-[11px] uppercase tracking-wider text-muted">The day's flow</div>
+        <div><label className="label">Junior doctor screening before the doctor</label>
+          <div className="flex flex-wrap gap-1">{([['off', 'Off', 'Reception sends patients straight to the doctor'], ['first', 'When a junior is on', 'The junior screens whoever is waiting; the doctor takes screened patients first, others when nobody is screened'], ['required', 'Every patient', 'The doctor sees only patients the junior has screened']] as const).map(([v, l, h]) => <button key={v} type="button" title={h} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF({ ...f, screening: v })}>{l}</button>)}</div>
+          <div className="mt-1 text-xs text-muted">{f.screening === 'off' ? 'Users with the Junior doctor role see no Intake button.' : f.screening === 'first' ? 'The junior sees the waiting list and takes patients for screening; the doctor is never shown someone mid-screening.' : 'Reception cannot send an unscreened patient to the doctor.'}</div></div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div><label className="label">Free return with reports (days)</label><NumInput max={365} className="input" value={f.freeDays} onChange={(e: any) => setF({ ...f, freeDays: e.target.value })} /><div className="mt-1 text-xs text-muted">Within this many days of the tests, coming back with reports has no fee; the desk sees it pre-filled.</div></div>
+        </div>
+        <DisplayLinkCard />
+      </div>
       <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
       <TestDataCard />
     </div>
+  );
+}
+
+/** The waiting-room screen link: open it on a TV or tablet in the waiting area. Tokens only, no names. */
+function DisplayLinkCard() {
+  const q = useQuery({ queryKey: ['display-link'], queryFn: () => get('/admin/display') });
+  const regen = useMutation({ mutationFn: () => get('/admin/display?regen=1'), onSuccess: () => { qc.invalidateQueries({ queryKey: ['display-link'] }); toast('New link made. The old screen stops showing.', 'info'); } });
+  const url: string = q.data?.url ?? '';
+  const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { toast('Copy the link from the box', 'info'); } };
+  return (
+    <div><label className="label">Waiting-room display</label>
+      <div className="flex flex-wrap items-center gap-2"><input className="input min-w-0 flex-1 text-xs" readOnly value={url} onFocus={(e) => e.target.select()} /><button className="btn btn-sm" disabled={!url} onClick={copy}>Copy</button><a className="btn btn-sm" href={url || '#'} target="_blank" rel="noreferrer">Open</a><button className="btn btn-sm btn-ghost" disabled={regen.isPending} onClick={() => regen.mutate()}>New link</button></div>
+      <div className="mt-1 text-xs text-muted">Shows Now and Next by token for each doctor, with a chime when a token is called. Anyone with the link can see tokens, so make a new link if a screen is lost.</div></div>
   );
 }
 

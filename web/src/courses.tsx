@@ -5,6 +5,7 @@ import { get, post, qc, errText } from './api';
 import { can } from './App';
 import { Chip, Icon, Modal, MoneyInput, Section, ask, money, toPaise, toast } from './ui';
 import { printReceipt } from './invoices';
+import { ScheduleModal } from './pages/Worklist';
 import type { Pkg } from './packages';
 
 type Mode = 'upi' | 'cash' | 'card' | 'emi' | 'bank';
@@ -39,7 +40,8 @@ export async function printQuote(id: string) {
 }
 
 /** Agree the price, then pay for some sittings now if the patient wishes. Everything is one place for the desk. */
-export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { id: string; procedureId: string; procedure?: string; sittings?: number }; patientId: string; patientName: string; onClose: () => void }) {
+export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { id: string; procedureId: string; procedure?: string; sittings?: number; patient?: any }; patientId: string; patientName: string; onClose: () => void }) {
+  const [booking, setBooking] = useState(false);
   const { cfg, perms } = useOutletContext<any>();
   const cs = useCourses(patientId); const c = (cs.data ?? []).find((x: any) => x.recommendationId === rec.id);
   const proc = cfg?.procedures?.find((p: any) => p.id === rec.procedureId);
@@ -64,6 +66,8 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
     try { await post(`/courses/${c.id}/refund`, { amountPaise: paise, method: 'cash', reason: why.value }); refresh(); toast('Refund recorded'); } catch (e) { toast(errText(e), 'err'); }
   };
   const emiBad = mode === 'emi' && (!ref.trim() || !lender.trim());
+  const ledger: any[] = c?.ledger ?? []; const booked = ledger.find((l: any) => l.state && !['done', 'planned'].includes(l.state));
+  if (booking) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} onClose={() => { setBooking(false); refresh(); }} />;
   return (
     <Modal title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${sittings} sittings planned`} onClose={onClose} width="max-w-lg">
       {!cs.data ? <div className="text-sm text-muted">Loading…</div> : !c ? (
@@ -79,11 +83,12 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
             <div className="flex flex-wrap gap-2"><button className="btn btn-sm" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate('whatsapp')}>Send on WhatsApp</button><button className="btn btn-sm" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate('print')}>Print</button></div>
             <div className="text-xs text-muted">The quote never shows consultation or pharmacy prices. When the patient agrees, the quoted price is used.</div>
           </div>
-          <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-primary" disabled={agree.isPending || (price !== '' && toPaise(price) > list)} onClick={() => agree.mutate()}><Icon name="check" />Patient agrees</button></div>
+          <div className="modal-foot"><button className="btn btn-sm mr-auto" onClick={() => setBooking(true)}>Book first sitting</button><button className="btn btn-ghost" onClick={onClose}>Close</button><button className="btn btn-primary" disabled={agree.isPending || (price !== '' && toPaise(price) > list)} onClick={() => agree.mutate()}><Icon name="check" />Patient agrees</button></div>
         </div>
       ) : (
         <div className="space-y-4">
           <Standing c={c} />
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line p-3 text-sm"><b>Sittings</b><span className="text-muted">{c.doneSittings} of {c.sittings} done{booked?.day ? ` · next booked ${booked.day}` : ' · next not booked yet'}</span><span className="ml-auto" />{c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book sitting {c.doneSittings + 1}</button>}</div>
           {max > 0 && can(perms, 'payment.record') && <div className="rounded-xl border border-line p-3 space-y-3">
             <div className="label !mb-0">Pay for sittings now</div>
             <div className="flex items-center gap-2 text-sm"><button type="button" className="btn btn-sm" aria-label="One sitting fewer" disabled={n <= 1} onClick={() => setN(n - 1)}>−</button><b>{n}</b><button type="button" className="btn btn-sm" aria-label="One sitting more" disabled={n >= max} onClick={() => setN(n + 1)}>+</button><span>sitting{n === 1 ? '' : 's'} = <b>{money(amount)}</b></span>{n < max && <button type="button" className="ml-auto underline text-muted" onClick={() => setN(max)}>all {max}</button>}</div>

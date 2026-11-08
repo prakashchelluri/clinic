@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
-import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, type FormSchema } from '../db/schema.js';
+import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, feeCategory, type FormSchema } from '../db/schema.js';
 import { queueRxMessage } from './rxpad.js';
 import { padConfig, printSettings, te } from '../lib/pad.js';
 import { normHistory } from '../lib/history.js';
@@ -11,9 +11,9 @@ import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { expectedDays } from '../lib/tests.js';
 
-const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
+const RxItem = z.object({ id: z.string().uuid().optional(), medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
   frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
-const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
+const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
   intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
 
@@ -39,7 +39,25 @@ export function clinicalRoutes(app: FastifyInstance) {
     const t = req.ctx.tenantId; const visitId = (req.params as any).visitId;
     const v = await tx.select().from(visit).where(and(eq(visit.id, visitId), eq(visit.tenantId, t))).then((r) => r[0]);
     if (!v) throw new HttpError(404, 'VISIT_NOT_FOUND');
+    const intakeOnly = isIntakeOnly(req);
+    // Someone is with the junior doctor right now: the doctor's screen waits for the screening to finish.
+    if (!intakeOnly && v.status === 'intake') throw new HttpError(409, 'WITH_JUNIOR');
+    // Brings the patient in. Reception may already have sent them (details.calledBy = desk); otherwise the doctor is pulling them in and the desk is told.
+    const bringIn = async (status: 'intake' | 'in_consult') => {
+      if (v.status === status) return;
+      const details = status === 'in_consult' ? { ...(v.details ?? {}), calledBy: (v.details as any)?.calledBy === 'desk' && v.status === 'in_consult' ? 'desk' : 'doctor', calledAt: new Date().toISOString() } : v.details;
+      await tx.update(visit).set({ status, details }).where(eq(visit.id, visitId));
+    };
+    // Back with reports: the same consultation opens again, nothing new is created.
+    // The doctor has the pad open: the 'coming in now' note on the doctor's screen can go.
+    const markOpened = async () => { if (intakeOnly) return; const cur = await tx.select({ details: visit.details, practitionerId: visit.practitionerId }).from(visit).where(eq(visit.id, visitId)).then((r) => r[0]); const set: any = {}; if (!(cur?.details as any)?.doctorOpenedAt) set.details = { ...(cur?.details ?? {}), doctorOpenedAt: new Date().toISOString() }; if (!cur?.practitionerId && req.ctx.practitionerId) set.practitionerId = req.ctx.practitionerId; /* the doctor who opened the pad is the patient's doctor for the day */ if (Object.keys(set).length) await tx.update(visit).set(set).where(eq(visit.id, visitId)); };
+    const heldId = (v.details as any)?.reportsEncounterId as string | undefined;
+    if (heldId && !intakeOnly) {
+      const held = await tx.select({ id: encounter.id, status: encounter.status }).from(encounter).where(and(eq(encounter.id, heldId), eq(encounter.tenantId, t))).then((r) => r[0]);
+      if (held) { await bringIn('in_consult'); await markOpened(); return getEncounter(tx, t, held.id); }
+    }
     let enc = await tx.select().from(encounter).where(and(eq(encounter.visitId, visitId), eq(encounter.tenantId, t))).then((r) => r[0]);
+    if (enc && !intakeOnly && v.status !== 'in_consult' && enc.status === 'draft') await bringIn('in_consult');
     if (enc && enc.status === 'draft') {
       // Drafts follow the latest form version; completed encounters stay pinned to the version they were written with.
       const latest = await tx.select({ id: formDefinition.id }).from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, 'encounter'), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
@@ -49,17 +67,19 @@ export function clinicalRoutes(app: FastifyInstance) {
       const form = await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, 'encounter'), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
       if (!form) throw new HttpError(500, 'NO_ENCOUNTER_FORM');
       [enc] = await tx.insert(encounter).values({ tenantId: t, visitId, patientId: v.patientId, practitionerId: v.practitionerId ?? req.ctx.practitionerId, formDefinitionId: form.id,
-        provenance: { source: isIntakeOnly(req) ? 'intake' : 'typed', openedBy: req.ctx.userId } }).returning();
-      const newStatus = isIntakeOnly(req) ? 'intake' : 'in_consult';
-      await tx.update(visit).set({ status: newStatus }).where(eq(visit.id, visitId));
+        provenance: { source: intakeOnly ? 'intake' : 'typed', openedBy: req.ctx.userId } }).returning();
+      await bringIn(intakeOnly ? 'intake' : 'in_consult');
       await emit(tx, req.ctx, 'encounter.opened', 'encounter', enc.id, { visitId, by: req.ctx.role });
+    } else if (intakeOnly && v.status !== 'intake' && enc.status === 'draft') {
+      await bringIn('intake');
     }
+    await markOpened();
     return getEncounter(tx, t, enc.id);
   });
 
   route(app, 'get', '/encounters/:id', 'encounter.intake', async (req, tx) => {
     const e = await getEncounter(tx, req.ctx.tenantId, (req.params as any).id);
-    await auditView(tx, req, e.patientId, e.status === 'completed' ? 'Read a past consultation' : 'Opened the consultation');
+    await auditView(tx, req, e.patientId, e.status === 'completed' ? 'Read a past consultation' : e.status === 'awaiting_reports' ? 'Opened a consultation held for reports' : 'Opened the consultation');
     return e;
   });
 
@@ -69,7 +89,11 @@ export function clinicalRoutes(app: FastifyInstance) {
     const enc = await tx.select().from(encounter).where(and(eq(encounter.id, id), eq(encounter.tenantId, t))).then((r) => r[0]);
     if (!enc) throw new HttpError(404, 'NOT_FOUND');
     if (enc.status === 'completed') throw new HttpError(409, 'ALREADY_COMPLETED');
-    if (body.complete && !req.perms.some((p) => p === '*' || p === 'encounter.*' || p === 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:encounter.complete');
+    const isDoctor = req.perms.some((p) => p === '*' || p === 'encounter.*' || p === 'encounter.complete');
+    if (body.complete && !isDoctor) throw new HttpError(403, 'FORBIDDEN:encounter.complete');
+    // Held open for reports: the prescription has gone out, the pad is still the doctor's to finish.
+    const held = enc.status === 'awaiting_reports';
+    if (held && !isDoctor) throw new HttpError(409, 'AWAITING_REPORTS');
 
     const form = await tx.select().from(formDefinition).where(eq(formDefinition.id, enc.formDefinitionId)).then((r) => r[0]);
     const data = { ...enc.data, ...body.data };
@@ -77,29 +101,65 @@ export function clinicalRoutes(app: FastifyInstance) {
       const errors = validate(form.schema, data);
       if (errors.length) throw new HttpError(422, 'FORM_INVALID', { errors });
     }
-    // Rx and recommendations are replaced wholesale on every save: simplest correct behaviour for a draft.
-    await tx.delete(prescriptionItem).where(and(eq(prescriptionItem.encounterId, id), eq(prescriptionItem.tenantId, t)));
-    if (body.prescription.length) await tx.insert(prescriptionItem).values(body.prescription.map((i, k) => ({ ...i, tenantId: t, encounterId: id, sortOrder: k })));
-    await tx.delete(recommendation).where(and(eq(recommendation.encounterId, id), eq(recommendation.tenantId, t), eq(recommendation.status, 'open')));
     const today = todayIn(req.ctx.timezone);
-    if (body.recommendations.length) {
-      const rows = await tx.insert(recommendation).values(body.recommendations.map((r) => ({
-        tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
-        dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : null), sittings: r.sittings, notes: r.notes,
-        ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
-      }))).returning();
-      if (body.complete) for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
+    let newRx = 0;
+    if (held) {
+      // Items already issued at the counter stay; the doctor can add medicines after the reports, correct unissued ones, or drop unissued ones.
+      const cur = await tx.select().from(prescriptionItem).where(and(eq(prescriptionItem.encounterId, id), eq(prescriptionItem.tenantId, t)));
+      const keep = new Set(body.prescription.map((i) => i.id).filter(Boolean));
+      for (const c of cur) if (!keep.has(c.id) && !c.dispensed && c.issuedQty === 0) await tx.delete(prescriptionItem).where(eq(prescriptionItem.id, c.id));
+      for (const [k, i] of body.prescription.entries()) {
+        const { id: iid, ...fields } = i;
+        if (iid && cur.some((c) => c.id === iid)) { const c = cur.find((x) => x.id === iid)!; await tx.update(prescriptionItem).set(c.dispensed || c.issuedQty > 0 ? { sortOrder: k } : { ...fields, sortOrder: k }).where(eq(prescriptionItem.id, iid)); }
+        else { await tx.insert(prescriptionItem).values({ ...fields, tenantId: t, encounterId: id, sortOrder: k }); newRx++; }
+      }
+      const fresh = body.recommendations.filter((r) => !r.id);
+      if (fresh.length) {
+        const rows = await tx.insert(recommendation).values(fresh.map((r) => ({
+          tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
+          dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : null), sittings: r.sittings, notes: r.notes,
+          ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
+        }))).returning();
+        for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
+      }
+    } else {
+      // Rx and recommendations are replaced wholesale on every save: simplest correct behaviour for a draft.
+      await tx.delete(prescriptionItem).where(and(eq(prescriptionItem.encounterId, id), eq(prescriptionItem.tenantId, t)));
+      if (body.prescription.length) await tx.insert(prescriptionItem).values(body.prescription.map(({ id: _i, ...i }, k) => ({ ...i, tenantId: t, encounterId: id, sortOrder: k })));
+      await tx.delete(recommendation).where(and(eq(recommendation.encounterId, id), eq(recommendation.tenantId, t), eq(recommendation.status, 'open')));
+      if (body.recommendations.length) {
+        const rows = await tx.insert(recommendation).values(body.recommendations.map((r) => ({
+          tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
+          dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : null), sittings: r.sittings, notes: r.notes,
+          ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
+        }))).returning();
+        if (body.complete) for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
+      }
     }
     // Medical history lives on the patient as six categories (PUT /patients/:id/history); nothing here writes it any more.
     const set: any = { data, provenance: { ...enc.provenance, lastEditedBy: req.ctx.userId, lastEditedRole: req.ctx.role } };
-    if (body.complete) { set.status = 'completed'; set.completedAt = new Date().toISOString(); if (req.ctx.practitionerId) set.practitionerId = req.ctx.practitionerId; }
-    await tx.update(encounter).set(set).where(eq(encounter.id, id));
+    // Tests ordered keep the consultation open: the patient leaves with the prescription, the doctor finishes when the reports are in.
+    const testsPending = !held && body.complete && (await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.status} not in ('done','cancelled')`)))[0].n > 0;
     if (body.complete) {
+      set.status = testsPending ? 'awaiting_reports' : 'completed';
+      if (!held) set.completedAt = new Date().toISOString(); else set.provenance.reportsClosedAt = new Date().toISOString();
+      if (req.ctx.practitionerId) set.practitionerId = req.ctx.practitionerId;
+    }
+    await tx.update(encounter).set(set).where(eq(encounter.id, id));
+    if (held) {
+      // The return visit for the reports is over for today whether the pad was closed or kept open for the rest.
+      const back = await tx.select({ id: visit.id, details: visit.details }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.status, 'in_consult'), sql`${visit.details}->>'reportsEncounterId' = ${id}`));
+      for (const b of back) await tx.update(visit).set({ status: 'done', details: { ...(b.details ?? {}), returnDoneAt: new Date().toISOString() } }).where(eq(visit.id, b.id));
+      if (body.complete) await emit(tx, req.ctx, 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, afterReports: true, newRx });
+      else await emit(tx, req.ctx, 'encounter.kept_open', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, newRx });
+      if (newRx > 0) await queueRxMessage(tx, req.ctx, id); // medicines added after the reports go out the same way
+    } else if (body.complete) {
       await tx.update(visit).set({ status: 'done' }).where(eq(visit.id, enc.visitId));
-      await emit(tx, req.ctx, 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length });
+      await emit(tx, req.ctx, testsPending ? 'encounter.awaiting_reports' : 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length });
       await queueRxMessage(tx, req.ctx, id); // the prescription and any "how to apply" leaflets go out on WhatsApp
     } else if (isIntakeOnly(req)) {
-      await tx.update(visit).set({ status: 'waiting' }).where(eq(visit.id, enc.visitId)); // intake done, back to doctor's queue
+      const cur = await tx.select({ details: visit.details }).from(visit).where(eq(visit.id, enc.visitId)).then((r) => r[0]);
+      await tx.update(visit).set({ status: 'screened', details: { ...(cur?.details ?? {}), screenedAt: new Date().toISOString(), screenedBy: req.ctx.name } }).where(eq(visit.id, enc.visitId)); // screening done, the doctor's line
     }
     return getEncounter(tx, t, id);
   });
@@ -202,6 +262,6 @@ async function getEncounter(tx: any, t: string, id: string) {
   if (!row) throw new HttpError(404, 'NOT_FOUND');
   const rx = await tx.select().from(prescriptionItem).where(eq(prescriptionItem.encounterId, id)).orderBy(asc(prescriptionItem.sortOrder));
   const recs = await tx.select().from(recommendation).where(eq(recommendation.encounterId, id));
-  const v = await tx.select({ details: visit.details, opNumber: visit.opNumber }).from(visit).where(eq(visit.id, row.e.visitId)).then((r: any[]) => r[0]);
+  const v = await tx.select({ details: visit.details, opNumber: visit.opNumber, status: visit.status, day: visit.day, category: feeCategory.code }).from(visit).leftJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId)).where(eq(visit.id, row.e.visitId)).then((r: any[]) => r[0]);
   return { ...row.e, form: row.form, patient: { ...row.p, history: normHistory(row.p.history) }, doctor: row.doctor, prescription: rx, recommendations: recs, visit: v };
 }

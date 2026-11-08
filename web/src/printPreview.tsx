@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Icon, Modal } from './ui';
 import { PrintRx } from './pages/PrintRx';
 
-type Doc = { title: string; rx?: string; html?: string };
+type Doc = { title: string; rx?: string; html?: string; mode?: 'results' };
 let current: Doc | null = null; const subs = new Set<() => void>();
 const set = (d: Doc | null) => { current = d; subs.forEach((s) => s()); };
 
@@ -26,8 +26,8 @@ export function PrintHost() {
     <Modal title={d.title} onClose={() => set(null)} width="max-w-2xl">
       {d.html
         ? <iframe ref={frame} title={d.title} srcDoc={d.html} className="block w-full rounded-xl border border-line bg-white" style={{ height: 'min(68vh, 760px)' }} />
-        : <div className="overflow-auto rounded-xl border border-line bg-paper p-3" style={{ maxHeight: 'min(68vh, 760px)' }}><div className="mx-auto w-fit shadow-md"><PrintRx id={d.rx} embed /></div></div>}
-      {d.rx && createPortal(<div id="print-area" className="hidden"><PrintRx id={d.rx} embed /></div>, document.body)}
+        : <div className="overflow-auto rounded-xl border border-line bg-paper p-3" style={{ maxHeight: 'min(68vh, 760px)' }}><div className="mx-auto w-fit shadow-md"><PrintRx id={d.rx} embed mode={d.mode} /></div></div>}
+      {d.rx && createPortal(<div id="print-area" className="hidden"><PrintRx id={d.rx} embed mode={d.mode} /></div>, document.body)}
       <div className="modal-foot"><button className="btn btn-ghost" onClick={() => set(null)}>Close</button><button className="btn btn-primary" onClick={print}><Icon name="print" />Print</button></div>
     </Modal>
   );

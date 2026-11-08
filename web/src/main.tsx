@@ -28,6 +28,7 @@ import { Expenses } from './pages/Expenses';
 import { Bookings } from './pages/Bookings';
 import { PublicBook } from './pages/PublicBook';
 import { PatientLink } from './pages/PatientLink';
+import { Display } from './pages/Display';
 import { NotFound } from './ui';
 
 createRoot(document.getElementById('root')!).render(
@@ -39,6 +40,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/print/:id" element={<PrintRx />} />
           <Route path="/book/:slug" element={<PublicBook />} />
           <Route path="/a/:slug/:token" element={<PatientLink />} />
+          <Route path="/display/:slug/:token" element={<Display />} />
           <Route element={<App />}>
             <Route index element={<Home />} />
             <Route path="/overview" element={<Overview />} />

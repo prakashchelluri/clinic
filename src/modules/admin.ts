@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { tenant, appUser, practitioner, service, feeCategory, medicine, procedureCatalog, room, formDefinition, branch, type FormSchema } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { randomBytes } from 'node:crypto';
 import { db } from '../db/index.js';
 import { putFile, getFile } from '../lib/storage.js';
 import { originOf } from '../lib/booking.js';
@@ -21,6 +22,10 @@ export function adminRoutes(app: FastifyInstance) {
     if (body.settings?.photos?.areas !== undefined) body.settings.photos.areas = z.array(z.string().trim().min(1).max(40)).min(1).max(40).parse(body.settings.photos.areas);
     if (body.settings?.packages !== undefined) body.settings.packages = z.array(z.object({ id: z.string().min(1).max(40), name: z.string().trim().min(1).max(60), procedureId: z.string().uuid(), sittings: z.number().int().min(1).max(60), intervalDays: z.number().int().min(0).max(365), pricePaise: z.number().int().min(0) })).max(50).parse(body.settings.packages);
     if (body.settings?.calendarTextSize !== undefined) body.settings.calendarTextSize = z.enum(['small', 'normal', 'large']).parse(body.settings.calendarTextSize);
+    // off: no junior step. first: the junior screens whoever is waiting, the doctor takes screened patients first. required: the doctor sees only screened patients.
+    if (body.settings?.screening !== undefined) body.settings.screening = z.enum(['off', 'first', 'required']).parse(body.settings.screening);
+    if (body.settings?.reports !== undefined) body.settings.reports = z.object({ freeDays: z.number().int().min(0).max(365) }).parse(body.settings.reports);
+    if (body.settings && 'display' in body.settings) throw new HttpError(400, 'DISPLAY_TOKEN_IS_GENERATED');
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
     if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
@@ -28,6 +33,19 @@ export function adminRoutes(app: FastifyInstance) {
     const [row] = await tx.update(tenant).set({ ...(body.name ? { name: body.name } : {}), ...(body.settings ? { settings: deepMerge(cur.settings, body.settings) } : {}) }).where(eq(tenant.id, req.ctx.tenantId)).returning();
     await emit(tx, req.ctx, 'clinic.updated', 'tenant', row.id, body);
     return { id: row.id, name: row.name, settings: row.settings };
+  });
+
+  /** The waiting-room display: a link with its own token, made once, shown in Settings. Regenerating it signs the old screen out. */
+  route(app, 'get', '/admin/display', 'config.write', async (req, tx) => {
+    const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
+    const regen = (req.query as any).regen === '1';
+    let token = (cur.settings as any)?.display?.token as string | undefined;
+    if (!token || regen) {
+      token = randomBytes(12).toString('base64url');
+      await tx.update(tenant).set({ settings: { ...cur.settings, display: { token } } }).where(eq(tenant.id, cur.id));
+      await emit(tx, req.ctx, 'display.link_made', 'tenant', cur.id, { regen });
+    }
+    return { url: `${originOf(req)}/display/${cur.slug}/${token}` };
   });
 
   // --- users: one person, several roles (owner + doctor is the common case) ---

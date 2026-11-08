@@ -304,7 +304,7 @@ function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string |
       </div>
       {t && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[['Bills', money(t.total - t.refunds), `${t.count} bills${t.returns ? ` · ${t.returns} return${t.returns === 1 ? '' : 's'}` : ''}`], ['Cash in drawer should be', money(t.cash ?? 0), t.refunds ? `after ${money(t.refunds)} refunds` : 'cash payments'], ['UPI', money(t.upi ?? 0), ''], ['Card', money(t.card ?? 0), ''],
-          ['Prescriptions with nothing issued', `${list.data.rx.notBought} of ${list.data.rx.total}`, "for the doctor's information"]].map(([l, v, s]) => <div key={l} className="card !p-4"><div className="text-[12px] font-medium text-muted">{l}</div><div className="text-[24px] font-semibold tracking-tight mt-1.5">{v}</div>{s && <div className="text-xs text-muted mt-0.5">{s}</div>}</div>)}
+          ['Bought elsewhere or not at all', `${list.data.rx.notBought} of ${list.data.rx.total}`, 'prescriptions today · not a task, for the doctor to know']].map(([l, v, s]) => <div key={l} className="card !p-4"><div className="text-[12px] font-medium text-muted">{l}</div><div className="text-[24px] font-semibold tracking-tight mt-1.5">{v}</div>{s && <div className="text-xs text-muted mt-0.5">{s}</div>}</div>)}
       </div>}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-start">
         <div className={`card !p-0 overflow-x-auto ${sel ? 'hidden lg:block' : ''}`}>

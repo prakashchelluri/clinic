@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
-import { get, post, qc, today, errText } from '../api';
+import { get, post, qc, today, fmtTime, errText } from '../api';
+import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
 import { Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
 import { ChangeMyDay, type ChangeKind } from '../dayChange';
@@ -43,8 +44,16 @@ export function Today() {
   const d = fd.data; const c = cal.data;
   const visits: any[] = (d?.visits ?? []).filter((v: any) => !doc || !v.practitionerId || v.practitionerId === doc);
   const withYou = visits.find((v) => v.status === 'in_consult');
-  const waiting = visits.filter((v) => v.status === 'waiting' || v.status === 'intake');
+  // The line: screened patients first, then the rest; never someone who is with the junior right now. With screening required, only screened patients.
+  const screening: 'off' | 'first' | 'required' = cfg?.tenant?.settings?.screening ?? 'off';
+  const withJunior = visits.filter((v) => v.status === 'intake');
+  const unscreened = visits.filter((v) => v.status === 'waiting');
+  const waiting = screening === 'off' ? unscreened : [...visits.filter((v) => v.status === 'screened'), ...(screening === 'required' ? [] : unscreened)];
   const next = waiting[0];
+  // Reception sent someone in: the pad is not open yet, so say so once, with a chime.
+  const sentIn = withYou && withYou.details?.calledBy === 'desk' && !withYou.details?.doctorOpenedAt ? withYou : null;
+  const heard = useRef(makeOnceWatcher<string>());
+  useEffect(() => { heard.current(sentIn ? [sentIn.id] : [], () => chime('call')); }, [sentIn?.id]);
   const nextTl = useQuery({ queryKey: ['timeline', next?.patient?.id], queryFn: () => get(`/patients/${next.patient.id}/timeline`), enabled: !!next });
   if (!d || !c) return <div className="space-y-4"><Skeleton rows={2} /><Skeleton rows={8} /></div>;
 
@@ -54,7 +63,7 @@ export function Today() {
   const visitPill = (v: any, key: string): Pill => {
     const st = v.status; const name = v.patient.fullName;
     if (st === 'in_consult') return { key, label: `${name} · with you`, cls: PILL.with, sort: 0, patientId: v.patient.id };
-    if (st === 'waiting' || st === 'intake') return { key, label: `${name} · ${minsSince(v.arrivedAt)} min`, cls: PILL.wait, sort: 1, patientId: v.patient.id };
+    if (st === 'waiting' || st === 'intake' || st === 'screened') return { key, label: `${name} · ${st === 'intake' ? 'with junior' : st === 'screened' ? 'screened · ' + minsSince(v.arrivedAt) + ' min' : minsSince(v.arrivedAt) + ' min'}${v.details?.reportsEncounterId ? ' · back with reports' : ''}`, cls: PILL.wait, sort: 1, patientId: v.patient.id };
     if (st === 'left') return { key, label: `${name} · left`, cls: PILL.gone, sort: 4, patientId: v.patient.id };
     return { key, label: v.encounterStatus === 'draft' ? `${name} · note unfinished` : name, cls: PILL.done, sort: 3, patientId: v.patient.id };
   };
@@ -120,7 +129,12 @@ export function Today() {
 
   const nextCard = (
     <section className="card-flat order-1 p-4 anim-fade-up">
-      {withYou ? <>
+      {sentIn && <div className="mb-3 rounded-[10px] border border-[#E8A68F] bg-clay-soft px-3 py-2.5 anim-fade-up" role="alert">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-clay">Coming in now</div>
+        <div className="mt-1 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{sentIn.patient.fullName}</div><div className="text-xs text-muted">{[sentIn.patient.ageYears ? `${sentIn.patient.ageYears} ${sentIn.patient.sex ?? ''}` : null, sentIn.details?.reportsEncounterId ? 'back with reports' : sentIn.details?.complaints?.[0]?.text ?? sentIn.details?.complaint, `sent in ${minsSince(sentIn.details.calledAt)} min ago`].filter(Boolean).join(' · ')}</div></div>
+          {can(perms, 'encounter.intake') && <button className="btn btn-primary" disabled={open.isPending} onClick={() => open.mutate(sentIn.id)}>Open</button>}</div>
+      </div>}
+      {withYou && !sentIn ? <>
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted">With you now</div>
         <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{withYou.patient.fullName}</div>
           <div className="text-xs text-muted">{[withYou.patient.ageYears ? `${withYou.patient.ageYears} ${withYou.patient.sex ?? ''}` : null, withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint, withYou.details?.bp && `BP ${withYou.details.bp}`].filter(Boolean).join(' · ')}</div></div>
@@ -132,9 +146,9 @@ export function Today() {
         <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{next.patient.fullName}</div>
           <div className="text-xs text-muted">{[next.patient.ageYears ? `${next.patient.ageYears} ${next.patient.sex ?? ''}` : null, next.details?.complaints?.[0]?.text ?? next.details?.complaint, `waiting ${minsSince(next.arrivedAt)} min`].filter(Boolean).join(' · ')}</div>
           {lastEnc && <div className="mt-1 text-xs text-muted">Last visit {fmtDate(lastEnc.createdAt)}: {joinList(lastEnc.data?.assessment?.diagnosis) || joinList(lastEnc.data?.complaint?.chief_complaint) || 'consultation'}{lastEnc.prescription?.length ? ` · ${lastEnc.prescription.map((i: any) => i.name).slice(0, 2).join(', ')}` : ''}</div>}</div>
-          {can(perms, 'encounter.intake') && <button className={`btn ${withYou ? '' : 'btn-primary'}`} disabled={open.isPending} onClick={() => open.mutate(next.id)}>Call in</button>}</div>
-        <div className="mt-2.5 text-xs text-muted">{waiting[1] ? `Then ${waiting[1].patient.fullName} (${minsSince(waiting[1].arrivedAt)} min). ` : ''}{toCome ? `${toCome} more booked after them.` : 'No more bookings to come.'}</div>
-      </> : !withYou && <div className="py-2 text-sm text-muted">{toCome ? `Nobody waiting. ${toCome} booked still to come.` : 'Nobody waiting, nobody else booked today.'}</div>}
+          {can(perms, 'encounter.intake') && <button className={`btn ${withYou ? '' : 'btn-primary'}`} disabled={open.isPending} title="Reception usually sends the patient in; this opens the consultation yourself and tells the desk" onClick={() => open.mutate(next.id)}>Open</button>}</div>
+        <div className="mt-2.5 text-xs text-muted">{waiting[1] ? `Then ${waiting[1].patient.fullName} (${minsSince(waiting[1].arrivedAt)} min). ` : ''}{withJunior.length ? `${withJunior.length} with the junior doctor. ` : ''}{screening === 'required' && unscreened.length ? `${unscreened.length} waiting for screening. ` : ''}{toCome ? `${toCome} more booked after them.` : 'No more bookings to come.'}</div>
+      </> : !withYou && <div className="py-2 text-sm text-muted">{withJunior.length ? `${withJunior.length} with the junior doctor. ` : ''}{screening === 'required' && unscreened.length ? `${unscreened.length} waiting for screening. ` : ''}{toCome ? `Nobody waiting for you. ${toCome} booked still to come.` : withJunior.length || unscreened.length ? '' : 'Nobody waiting, nobody else booked today.'}</div>}
     </section>
   );
 

@@ -182,7 +182,7 @@ export function visitRoutes(app: FastifyInstance) {
 
   /** Reorder/skip/call/done. Position is fractional: moving between 3 and 4 gives 3.5, nothing else is rewritten. */
   route(app, 'patch', '/visits/:id', 'visit.queue', async (req, tx) => {
-    const body = z.object({ status: z.enum(['waiting', 'intake', 'in_consult', 'done', 'left']).optional(), afterVisitId: z.string().uuid().nullable().optional(),
+    const body = z.object({ status: z.enum(['waiting', 'intake', 'screened', 'in_consult', 'done', 'left']).optional(), afterVisitId: z.string().uuid().nullable().optional(),
       practitionerId: z.string().uuid().nullable().optional(), details: z.record(z.string(), z.any()).optional(), priority: z.number().int().optional(), reason: z.string().optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const cur = await tx.select().from(visit).where(and(eq(visit.id, id), eq(visit.tenantId, t))).then((r) => r[0]);
@@ -192,6 +192,11 @@ export function visitRoutes(app: FastifyInstance) {
     if (body.practitionerId !== undefined) set.practitionerId = body.practitionerId;
     if (body.priority !== undefined) set.priority = body.priority;
     if (body.details) set.details = { ...cur.details, ...body.details };
+    // Sending a patient in: who did it decides who gets the chime (the desk sends, the doctor is told; the doctor pulls, the desk is told).
+    if (body.status === 'in_consult' && cur.status !== 'in_consult') {
+      if (cur.status === 'intake') throw new HttpError(409, 'WITH_JUNIOR');
+      set.details = { ...(set.details ?? cur.details), calledBy: can(req.perms, 'encounter.complete') ? 'doctor' : 'desk', calledAt: new Date().toISOString() };
+    }
     if (body.afterVisitId !== undefined) {
       const others = await tx.select({ id: visit.id, pos: visit.queuePosition }).from(visit)
         .where(and(eq(visit.tenantId, t), eq(visit.day, cur.day), sql`${visit.id} <> ${id}`)).orderBy(asc(visit.queuePosition));

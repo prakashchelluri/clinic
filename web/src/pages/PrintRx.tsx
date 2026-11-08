@@ -6,24 +6,29 @@ import { joinList } from '../encounterDetail';
 
 /** A5 prescription. Fields follow the Telemedicine Practice Guidelines minimum: doctor, reg no, patient, date, items.
  *  What prints is the clinic's Print settings (sections on or off, language, out-of-range results only), not what shows on the pad. */
-export function PrintRx({ id: idProp, embed = false }: { id?: string; embed?: boolean } = {}) {
+export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: string; embed?: boolean; mode?: 'results' } = {}) {
   const params = useParams(); const id = idProp ?? params.id;
+  // results: the short sheet after the reports are in (results, diagnosis, anything added), not the whole prescription again
+  const results = (modeProp ?? (new URLSearchParams(location.search).get('mode') as any)) === 'results';
   const q = useQuery({ queryKey: ['print', id], queryFn: () => get(`/encounters/${id}/print`) });
   useEffect(() => { if (!embed && q.data && new URLSearchParams(location.search).get('auto') !== '0') setTimeout(() => window.print(), 400); }, [q.data]);
   if (!q.data) return <div className="p-8">Loading…</div>;
   const e = q.data; const p = e.patient; const d = e.data ?? {};
   const pr = e.printRx ?? { lang: 'te+en', outOfRangeOnly: true, vitals: ['weight_kg', 'bp'] };
-  const on = (k: string) => (e.pad ?? []).find((s: any) => s.key === k)?.print ?? true;
+  const padOn = (k: string) => (e.pad ?? []).find((s: any) => s.key === k)?.print ?? true;
+  const on = (k: string) => (results ? !['symptoms', 'exam', 'history', 'vitals', 'tests'].includes(k) : true) && padOn(k);
+  const issuedAt = e.completedAt ? new Date(e.completedAt).getTime() : 0;
+  const rxLines: any[] = results ? e.prescription.filter((i: any) => i.createdAt && new Date(i.createdAt).getTime() > issuedAt + 60_000) : e.prescription;
   const tel = (s: string | null | undefined) => (s && pr.lang !== 'en' ? e.telugu?.[s] ?? null : null);
   const line = (xs: (string | null | undefined)[]) => xs.filter(Boolean).join(' · ');
-  const date = new Date(e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const date = new Date(results ? e.provenance?.reportsClosedAt ?? Date.now() : e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   const investigations = e.recommendations.filter((r: any) => r.kind === 'investigation');
   const plans = e.recommendations.filter((r: any) => r.kind !== 'investigation');
   const syms: any[] = Array.isArray(d.complaint?.chief_complaint) ? d.complaint.chief_complaint.map((x: any) => (typeof x === 'string' ? { name: x } : x)) : d.complaint?.chief_complaint ? [{ name: String(d.complaint.chief_complaint) }] : [];
   const dxs: any[] = Array.isArray(d.assessment?.diagnosis) ? d.assessment.diagnosis.map((x: any) => (typeof x === 'string' ? { name: x } : x)) : d.assessment?.diagnosis ? [{ name: String(d.assessment.diagnosis) }] : [];
   const vit = e.visit?.details ?? {}; const vitals: [string, any][] = (pr.vitals ?? []).map((k: string) => [k, vit[k]] as [string, any]).filter(([, v]: [string, any]) => v !== undefined && v !== null && v !== '');
   const vLabel: Record<string, [string, string]> = { weight_kg: ['Wt', ' kg'], height_cm: ['Ht', ' cm'], bp: ['BP', ''], pulse: ['Pulse', ''], temp_f: ['Temp', '°F'], spo2: ['SpO₂', '%'] };
-  const outOnly = d.labs?.printOutOfRangeOnly ?? pr.outOfRangeOnly;
+  const outOnly = results ? false : d.labs?.printOutOfRangeOnly ?? pr.outOfRangeOnly;
   const labs: any[] = (e.labs ?? []).filter((r: any) => !outOnly || ['low', 'high', 'abnormal'].includes(r.flag));
   const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
   const hist = p.history ?? {}; const histLine = ['conditions', 'drugAllergies', 'otherAllergies'].flatMap((k) => (hist[k] ?? []).map((x: any) => x.name)).join(', ');
@@ -37,7 +42,7 @@ export function PrintRx({ id: idProp, embed = false }: { id?: string; embed?: bo
       </div>
       <div className="flex justify-between py-2 border-b border-black">
         <div><b>{p.fullName}</b> {p.ageYears ? `· ${p.ageYears} y` : ''} {p.sex ? `· ${p.sex}` : ''}<div>ID {p.patientNo} · {p.phone ?? ''} · {p.locality ?? ''}</div></div>
-        <div className="text-right"><div>{date}</div><div>OP {e.visit?.opNumber}</div>{on('vitals') && vitals.length > 0 && <div>{vitals.map(([k, v]: [string, any]) => `${vLabel[k]?.[0] ?? k} ${v}${vLabel[k]?.[1] ?? ''}`).join(' · ')}</div>}</div>
+        <div className="text-right"><div>{date}</div><div>{results ? `Results review · Rx of ${new Date(e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : `OP ${e.visit?.opNumber}`}</div>{on('vitals') && vitals.length > 0 && <div>{vitals.map(([k, v]: [string, any]) => `${vLabel[k]?.[0] ?? k} ${v}${vLabel[k]?.[1] ?? ''}`).join(' · ')}</div>}</div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 py-2">
         {on('symptoms') && syms.length > 0 && <div><b>C/o:</b> {syms.map((s) => line([s.name, s.since ? `since ${s.since}` : null, s.severity?.toLowerCase()])).join('; ')}{d.complaint?.site?.length ? ` · ${d.complaint.site.join(', ')}` : ''}</div>}
@@ -45,10 +50,10 @@ export function PrintRx({ id: idProp, embed = false }: { id?: string; embed?: bo
         {on('exam') && (d.exam?.findings || d.exam?.morphology?.length) && <div className="col-span-2"><b>O/e:</b> {line([(d.exam.morphology ?? []).join(', '), d.exam.distribution, d.exam.findings])}</div>}
         {(p.allergies || (on('history') && histLine)) && <div className="col-span-2">{p.allergies && <><b>Allergies:</b> {p.allergies}</>}{on('history') && histLine && <> · <b>History:</b> {histLine}</>}</div>}
       </div>
-      {on('medicines') && <>
-        <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞</div>
+      {on('medicines') && (!results || rxLines.length > 0) && <>
+        <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞{results && <span className="ml-2 align-middle text-[11px] font-sans text-gray-600">added after the reports</span>}</div>
         <table className="w-full mt-1"><tbody>
-          {e.prescription.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : null; const parts = [i.frequency, i.timing, days]; const teLine = line(parts.map(tel)); return (
+          {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : null; const parts = [i.frequency, i.timing, days]; const teLine = line(parts.map(tel)); return (
             <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>
               <td className="py-1"><b>{i.name}</b>{i.dose ? ` ${i.dose}` : ''}{i.qty ? <span className="float-right text-[11px] text-gray-600">× {i.qty}</span> : null}
                 {en && <div className="text-[11px]">{line([...parts, i.route && i.route !== 'oral' ? i.route : null])}{i.instructions ? ` — ${i.instructions}` : ''}</div>}

@@ -40,7 +40,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const from = addDays(day, -30);
     const encs = await tx.select({ e: encounter, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }, opNumber: visit.opNumber, day: visit.day, doctor: practitioner.name })
       .from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).innerJoin(patient, eq(patient.id, encounter.patientId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
-      .where(and(eq(encounter.tenantId, t), eq(encounter.status, 'completed'), gte(visit.day, from), lte(visit.day, day),
+      .where(and(eq(encounter.tenantId, t), inArray(encounter.status, ['completed', 'awaiting_reports']), gte(visit.day, from), lte(visit.day, day),
         q ? or(ilike(patient.fullName, `%${q}%`), ilike(patient.phone, `%${q}%`), ilike(visit.opNumber, `%${q}%`), ilike(patient.patientNo, `%${q}%`)) : undefined))
       .orderBy(desc(encounter.completedAt)).limit(300);
     if (!encs.length) return { today: [], balances: [], found: [] };
@@ -160,7 +160,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const encIds = rows.map((r) => r.s.encounterId).filter(Boolean) as string[];
     const left = encIds.length ? await tx.select({ e: prescriptionItem.encounterId, i: prescriptionItem, form: medicine.form, packSize: medicine.packSize }).from(prescriptionItem).leftJoin(medicine, eq(medicine.id, prescriptionItem.medicineId)).where(and(eq(prescriptionItem.tenantId, t), inArray(prescriptionItem.encounterId, encIds))) : [];
     const rx = await tx.select({ id: encounter.id, issued: sql<number>`coalesce((select sum(pi.issued_qty) from prescription_item pi where pi.encounter_id = ${encounter.id}), 0)::int`, lines: sql<number>`(select count(*) from prescription_item pi where pi.encounter_id = ${encounter.id})::int` })
-      .from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).where(and(eq(encounter.tenantId, t), eq(encounter.status, 'completed'), gte(visit.day, q.from), lte(visit.day, q.to)));
+      .from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).where(and(eq(encounter.tenantId, t), inArray(encounter.status, ['completed', 'awaiting_reports']), gte(visit.day, q.from), lte(visit.day, q.to)));
     const withRx = rx.filter((r) => r.lines > 0);
     return {
       rows: rows.map(({ s, p, doctor }) => {

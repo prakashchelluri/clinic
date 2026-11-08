@@ -16,7 +16,7 @@ import { VitalsCard } from '../vitals';
 import { LabResultsCard } from '../labs';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
-type RxItem = { medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
+type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
 type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; notes?: string; orderNo?: number; status?: string; id?: string };
 type Sym = { name: string; since?: string; severity?: string; note?: string };
 type Dx = { name: string; severity?: string; status?: string };
@@ -42,9 +42,12 @@ const allergyHit = (allergies: string | null | undefined, med: string) => {
   return null;
 };
 const sameLine = (a: RxItem, b: RxItem) => a.name === b.name && (a.dose ?? '') === (b.dose ?? '') && (a.frequency ?? '') === (b.frequency ?? '') && (a.durationDays ?? null) === (b.durationDays ?? null) && (a.instructions ?? '') === (b.instructions ?? '');
-const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, ...i }: any): RxItem => i;
+const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, _issued, ...i }: any): RxItem => i;
+/** The pad's own lines keep their id so a held-open consultation updates them instead of re-issuing; issued lines are locked. */
+const own = (i: any): RxItem => ({ ...strip(i), id: i.id, _issued: !!(i.dispensed || i.issuedQty > 0) });
 const asSym = (v: any): Sym[] => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? { name: x } : x)) : v ? [{ name: String(v) }] : []);
 const asDx = (v: any): Dx[] => (Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? { name: x } : x)) : v ? [{ name: String(v) }] : []);
+const isReviewVisit = (v: any, cfg: any) => { const code = v?.category; if (!code) return false; if (['REN', 'FREE'].includes(code)) return true; const cat = (cfg?.feeCategories ?? []).find((c: any) => c.code === code); return !!cat && (cat.amountPaise === 0 || /review|renew|follow/i.test(cat.name ?? '')); };
 const withQty = (i: RxItem): RxItem => (i._qtyTouched || i.qty ? i : { ...i, qty: qtyFor(i) ?? undefined });
 const ICON: Record<string, [string, string]> = { vitals: ['♡', '#5B8DB8'], symptoms: ['S', '#C53B14'], diagnosis: ['Dx', '#8A2E10'], exam: ['Ex', '#6F8F78'], medicines: ['℞', '#15181B'], advice: ['A', '#B98B6E'], tests: ['T', '#5B8DB8'], results: ['R', '#B8860B'], next: ['→', '#6F8F78'], notes: ['N', '#8B929C'], referral: ['Rf', '#5B8DB8'], history: ['H', '#8A2E10'], photos: ['P', '#6F8F78'] };
 
@@ -121,7 +124,6 @@ export function Encounter() {
   const tpls = useQuery({ queryKey: ['rx-templates'], queryFn: () => get('/rx-templates'), enabled: isDoctor });
   const stock = useQuery({ queryKey: ['encounters-stock'], queryFn: () => get('/encounters-stock'), enabled: isDoctor, staleTime: 60_000 });
   const frequent = useQuery({ queryKey: ['encounters-frequent'], queryFn: () => get('/encounters-frequent'), enabled: isDoctor, staleTime: 300_000 });
-  const fd = useQuery({ queryKey: ['frontdesk', 'today-doc'], queryFn: () => get('/frontdesk'), refetchInterval: 15000, enabled: isDoctor });
   const sets = useTemplates();
   const photos = usePhotos(enc.data?.patientId);
   const [data, setData] = useState<Record<string, any>>({});
@@ -146,22 +148,22 @@ export function Encounter() {
       const arrival: Sym[] = (enc.data.visit?.details?.complaints ?? []).map((c: any) => ({ name: c.text, ...(c.duration ? { since: c.duration } : {}) }));
       let d = { ...(enc.data.data ?? {}) };
       if (!asSym(d.complaint?.chief_complaint).length && arrival.length) d = { ...d, complaint: { ...(d.complaint ?? {}), chief_complaint: arrival } };
-      if (isDoctor && enc.data.status !== 'completed' && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
-      loaded.current = true; setData(d); setRx(enc.data.prescription.map(strip));
+      if (isDoctor && enc.data.status === 'draft' && isReviewVisit(enc.data.visit, cfg) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
+      loaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
       setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
     }
   }, [enc.data, timeline.data]);
-  const nextVisit = (fd.data?.visits ?? []).find((v: any) => (v.status === 'waiting' || v.status === 'intake') && v.id !== enc.data?.visitId && (!me.practitionerId || !v.practitionerId || v.practitionerId === me.practitionerId));
-  const callNext = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => { loaded.current = false; nav(`/encounter/${e.id}`, { viewTransition: true }); }, onError: (e) => toast(errText(e), 'err') });
-  const cleanRx = () => rx.filter((i) => i.name).map(strip);
+  const cleanRx = () => rx.filter((i) => i.name).map(({ _qtyTouched, _issued, ...i }) => i);
   const save = useMutation({
-    mutationFn: ({ complete }: { complete: boolean; next?: boolean; back?: boolean }) => patch(`/encounters/${id}`, { data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
-    onSuccess: (_e, { complete, next, back }) => {
+    mutationFn: ({ complete }: { complete: boolean; back?: boolean }) => patch(`/encounters/${id}`, { data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
+    onSuccess: (_e, { complete, back }) => {
       setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       ['queue', 'frontdesk', 'timeline'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
-      if (complete) { toast('Consultation completed'); openPrint({ title: 'Prescription', rx: id }); if (next && nextVisit) callNext.mutate(nextVisit.id); else nav(isDoctor ? '/today' : '/queue', { viewTransition: true }); }
+      if (complete && held) { toast('Consultation completed'); openPrint({ title: 'Results sheet', rx: id, mode: 'results' }); nav('/today', { viewTransition: true }); }
+      else if (complete) { toast(willHold ? 'Prescription issued · held open for the reports' : 'Consultation completed'); openPrint({ title: 'Prescription', rx: id }); nav(isDoctor ? '/today' : '/queue', { viewTransition: true }); }
+      else if (back && held) { toast('Kept open for the rest of the reports'); nav('/today', { viewTransition: true }); }
       else if (back) { toast('Intake saved · ready for the doctor'); nav('/queue', { viewTransition: true }); }
     },
     onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else toast(errText(e), 'err'); },
@@ -230,7 +232,9 @@ export function Encounter() {
   const saveTpl = useMutation({ mutationFn: (name: string) => post('/rx-templates', { name, data, prescription: cleanRx(), recommendations: recs }), onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['rx-templates'] }); toast(`Saved as template “${r.name}”`); }, onError: (e) => toast(errText(e), 'err') });
 
   if (!enc.data || !timeline.data) return <div className="card"><Skeleton rows={5} /></div>;
-  const e = enc.data; const p = e.patient; const readOnly = e.status === 'completed';
+  const e = enc.data; const p = e.patient; const held = e.status === 'awaiting_reports'; const readOnly = e.status === 'completed' || (held && !isDoctor);
+  const testRecs: any[] = e.recommendations.filter((r: any) => r.kind === 'investigation' && r.status !== 'cancelled'); const testsIn = testRecs.filter((r: any) => r.status === 'done').length; const testsOpen = testRecs.length > testsIn;
+  const willHold = !held && recs.some((r) => r.kind === 'investigation' && r.notes && r.status !== 'done'); // what Finish will do with the tests on the pad right now
   const set = (s: string, k: string, v: any) => { setErrors((er) => er.filter((x) => x.path !== `${s}.${k}`)); setData((d) => ({ ...d, [s]: { ...(d[s] ?? {}), [k]: v } })); };
   const err = (s: string, k: string) => errors.find((x) => x.path === `${s}.${k}`)?.message;
   const meds: any[] = cfg?.medicines ?? [];
@@ -313,10 +317,10 @@ export function Encounter() {
   const leaflets = rx.filter((i) => i.medicineId).map((i) => meds.find((m: any) => m.id === i.medicineId)).filter((m: any) => m?.leafletUrl);
   const upd = (k: number, patchI: Partial<RxItem>) => setRx(rx.map((r, j) => { if (j !== k) return r; const n = { ...r, ...patchI }; return 'qty' in patchI ? { ...n, _qtyTouched: true } : n._qtyTouched ? n : { ...n, qty: qtyFor(n) ?? undefined }; }));
   /** Finish: the clinic's required sections are checked here in words; the form's own required fields are checked by the server. */
-  const finish = (next: boolean) => {
+  const finish = () => {
     const missing = [padOf('symptoms').required && !syms.length ? 'Symptoms' : null, padOf('exam').required && !Object.values(data.exam ?? {}).some((v: any) => (Array.isArray(v) ? v.length : v)) ? 'Examination' : null, padOf('medicines').required && !rx.some((i) => i.name) ? 'Medicines' : null].filter(Boolean);
     if (missing.length) return toast(`Please fill in: ${missing.join(', ')}`, 'err');
-    save.mutate({ complete: true, next });
+    save.mutate({ complete: true });
   };
   const clearSection = async (what: string, fn: () => void) => { const r = await ask({ title: `Clear ${what}?`, body: 'Everything in this section goes; the rest of the pad stays.', confirmLabel: 'Clear', tone: 'danger' }); if (r) fn(); };
 
@@ -359,15 +363,15 @@ export function Encounter() {
         <div className="grid grid-cols-[1.5fr_64px_92px_104px_52px_56px_1fr_80px_28px] gap-1.5 px-0.5 text-[11.5px] font-semibold text-muted"><span>Medicine</span><span>Dose</span><span>When</span><span>Timing</span><span>Days</span><span>Qty</span><span>How</span><span /><span /></div>
         {rx.map((i, k) => { const n = onHand(i); const hit = allergyHit(p.allergies, i.name); return (
           <div key={k} className="mt-1.5 grid grid-cols-[1.5fr_64px_92px_104px_52px_56px_1fr_80px_28px] items-center gap-1.5">
-            <input id={`rx-${i.name}`} list="meds" aria-label="Medicine" className={`input !py-1.5 font-semibold ${hit ? '!border-rose' : ''}`} value={i.name} disabled={readOnly} onChange={(ev) => { const m = meds.find((x: any) => x.name === ev.target.value); upd(k, { name: ev.target.value, medicineId: m?.id ?? null, ...(m ? { dose: m.defaults?.dose, route: m.defaults?.route, frequency: m.defaults?.frequency, durationDays: m.defaults?.durationDays, instructions: m.defaults?.instructions } : {}) }); }} />
-            <input aria-label="Dose" className="input !py-1.5" value={i.dose ?? ''} disabled={readOnly} onChange={(ev) => upd(k, { dose: ev.target.value })} />
-            <input aria-label="When" list="freq" className="input !py-1.5" value={i.frequency ?? ''} disabled={readOnly} onChange={(ev) => upd(k, { frequency: ev.target.value })} />
-            <input aria-label="Timing" list="timing" className="input !py-1.5" placeholder="after food" value={i.timing ?? ''} disabled={readOnly} onChange={(ev) => upd(k, { timing: ev.target.value || null })} />
-            <NumInput aria-label="Days" max={365} className="input !py-1.5" value={i.durationDays ?? ''} disabled={readOnly} onChange={(ev) => upd(k, { durationDays: ev.target.value ? Number(ev.target.value) : undefined })} />
-            <NumInput aria-label="Quantity" max={9999} className="input !py-1.5" value={i.qty ?? ''} disabled={readOnly} onChange={(ev) => upd(k, { qty: ev.target.value ? Number(ev.target.value) : null })} />
-            <input aria-label="How" className="input !py-1.5" value={i.instructions ?? ''} disabled={readOnly} onChange={(ev) => upd(k, { instructions: ev.target.value })} />
+            <input id={`rx-${i.name}`} list="meds" aria-label="Medicine" className={`input !py-1.5 font-semibold ${hit ? '!border-rose' : ''}`} value={i.name} disabled={readOnly || i._issued} onChange={(ev) => { const m = meds.find((x: any) => x.name === ev.target.value); upd(k, { name: ev.target.value, medicineId: m?.id ?? null, ...(m ? { dose: m.defaults?.dose, route: m.defaults?.route, frequency: m.defaults?.frequency, durationDays: m.defaults?.durationDays, instructions: m.defaults?.instructions } : {}) }); }} />
+            <input aria-label="Dose" className="input !py-1.5" value={i.dose ?? ''} disabled={readOnly || i._issued} onChange={(ev) => upd(k, { dose: ev.target.value })} />
+            <input aria-label="When" list="freq" className="input !py-1.5" value={i.frequency ?? ''} disabled={readOnly || i._issued} onChange={(ev) => upd(k, { frequency: ev.target.value })} />
+            <input aria-label="Timing" list="timing" className="input !py-1.5" placeholder="after food" value={i.timing ?? ''} disabled={readOnly || i._issued} onChange={(ev) => upd(k, { timing: ev.target.value || null })} />
+            <NumInput aria-label="Days" max={365} className="input !py-1.5" value={i.durationDays ?? ''} disabled={readOnly || i._issued} onChange={(ev) => upd(k, { durationDays: ev.target.value ? Number(ev.target.value) : undefined })} />
+            <NumInput aria-label="Quantity" max={9999} className="input !py-1.5" value={i.qty ?? ''} disabled={readOnly || i._issued} onChange={(ev) => upd(k, { qty: ev.target.value ? Number(ev.target.value) : null })} />
+            <input aria-label="How" className="input !py-1.5" value={i.instructions ?? ''} disabled={readOnly || i._issued} onChange={(ev) => upd(k, { instructions: ev.target.value })} />
             <span className={`truncate text-[11.5px] font-semibold ${hit ? 'text-rose' : n === 0 ? 'text-amber' : 'text-muted'}`}>{hit ? `allergy: ${hit}` : n === null ? (i.name && !i.medicineId ? 'not in list' : '') : n === 0 ? 'out of stock' : `${n} in stock`}</span>
-            {!readOnly ? <button className="btn btn-ghost btn-icon !h-8 !w-8" aria-label={`Remove ${i.name || 'line'}`} onClick={() => setRx(rx.filter((_, j) => j !== k))}><Icon name="x" className="h-3.5 w-3.5" /></button> : <span />}
+            {!readOnly && !i._issued ? <button className="btn btn-ghost btn-icon !h-8 !w-8" aria-label={`Remove ${i.name || 'line'}`} onClick={() => setRx(rx.filter((_, j) => j !== k))}><Icon name="x" className="h-3.5 w-3.5" /></button> : i._issued ? <span className="text-[11px] text-muted" title="Issued at the counter; it stays as written">issued</span> : <span />}
           </div>); })}
       </div></div>}
       {!readOnly && <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -436,7 +440,7 @@ export function Encounter() {
             <div className="text-xs text-muted">{[p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ')}</div></div>
           {p.allergies && <span className="chip chip-rose !py-1">Allergy: {p.allergies}</span>}
           {isReview && notBought.length > 0 && <span className="text-xs text-muted">Last time did not buy: {notBought.map((i) => i.name).join(', ')}</span>}
-          <span className="ml-auto flex items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{!readOnly && isDoctor && <span title="Minutes since the consultation opened"><Icon name="clock" className="mr-1 inline h-3.5 w-3.5" />{mins} min</span>}{readOnly && <Chip tone="sage">completed</Chip>}
+          <span className="ml-auto flex items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{!readOnly && isDoctor && <span title="Minutes since the consultation opened"><Icon name="clock" className="mr-1 inline h-3.5 w-3.5" />{mins} min</span>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}{held && <Chip tone="amber">Rx issued {fmtDate(e.completedAt)} · {testsIn} of {testRecs.length} reports in</Chip>}
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><Icon name="list" className="h-3.5 w-3.5" />Templates</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={520}>
                 <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-2 p-1.5">
@@ -465,6 +469,7 @@ export function Encounter() {
             {padOf('history').show && <div className="mt-2.5"><HistoryChips patientId={p.id} history={p.history ?? {}} categories={cfg?.historyCategories ?? []} readOnly={readOnly} /></div>}
           </div>}
 
+          {held && <div className="mx-4 mb-2 mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in" role="status"><b>Held for reports.</b><span>Prescription issued {fmtDate(e.completedAt)}. {testsIn} of {testRecs.length} reports in{testsOpen ? `; pending: ${testRecs.filter((r: any) => r.status !== 'done').map((r: any) => `${r.notes}${r.expectedOn ? ` (expected ${fmtDate(r.expectedOn)})` : ''}`).join(', ')}` : ''}.</span>{isDoctor && <span className="text-muted">Add or change what the results call for, then Complete. Issued medicines stay as written.</span>}</div>}
           {setNote && !readOnly && <div className="mx-4 mb-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in" role="status">{setNote}</div>}
           {isDoctor && !readOnly && (sugg.length > 0 || protoSugg.length > 0) && <div className="flex flex-col gap-2 border-t border-line px-4 py-2.5 sm:flex-row sm:gap-3" id="sec-suggest">
             <div className="w-20 shrink-0 pt-1 text-[11.5px] font-semibold text-muted">Suggested</div>
@@ -516,8 +521,8 @@ export function Encounter() {
             {!readOnly && isDoctor && <>
               <MoreMenu label="Save as template" items={[{ label: 'Save the whole pad as a template', onClick: askTpl }, { label: 'Save only the medicines', onClick: () => saveSection('medicine') }, { label: 'Save only the advice', onClick: () => saveSection('advice') }, { label: 'Save only the tests', onClick: () => saveSection('tests') }, { label: 'Configure pad…', onClick: () => nav('/settings?tab=pad'), hidden: !can(perms, 'config.write') }]} />
               <button className="btn" onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}><Icon name="print" />Preview</button>
-              <button className="btn" disabled={save.isPending} onClick={() => finish(false)}>Finish</button>
-              {nextVisit && <button className="btn btn-primary" disabled={save.isPending || callNext.isPending} onClick={() => finish(true)}>Finish &amp; call {nextVisit.patient.fullName.split(' ')[0]} →</button>}
+              {held && testsOpen && <button className="btn" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+              <button className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish'}</button>
             </>}
             {readOnly && <button className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" />Print Rx</button>}
           </div>

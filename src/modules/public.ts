@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db, withTenant, type Tx } from '../db/index.js';
-import { tenant, appointment, patient, practitioner, service, session, OPEN_STATUSES, HOLDS_PLACE } from '../db/schema.js';
+import { tenant, appointment, patient, practitioner, service, session, visit, OPEN_STATUSES, HOLDS_PLACE } from '../db/schema.js';
 import { HttpError, type Ctx } from '../lib/auth.js';
 import { emit, nextNumber, todayIn, addDays } from '../lib/core.js';
 import { bookingSettings, hoursUntil, newToken, queueMessage, planReminders, dropReminders, originOf, appointmentView } from '../lib/booking.js';
@@ -201,6 +201,30 @@ export function publicRoutes(app: FastifyInstance) {
       await emit(tx, ctxFor(t), 'appointment.moved', 'appointment', v.a.id, { from: v.a.sessionId, to: s.id, by: 'patient' });
       await planReminders(tx, t.id, v.a.id, originOf(req));
       return patientView((await find(tx)));
+    });
+  });
+
+  /** The waiting-room screen: tokens only, no names. Who is in with each doctor and who is next. */
+  app.get('/public/display/:slug/:token', async (req) => {
+    const { slug, token } = req.params as any;
+    limit(`display:${req.ip}`, 120, 60_000);
+    const t = await clinicBySlug(slug);
+    if (!token || t.settings?.display?.token !== token) throw new HttpError(404, 'NOT_FOUND');
+    return inTenant(t, async (tx) => {
+      const day = todayIn(t.timezone);
+      const rows = await tx.select({ v: visit, doctor: practitioner.name, practitionerId: visit.practitionerId }).from(visit).leftJoin(practitioner, eq(practitioner.id, visit.practitionerId))
+        .where(and(eq(visit.tenantId, t.id), eq(visit.day, day), inArray(visit.status, ['waiting', 'intake', 'screened', 'in_consult']))).orderBy(sql`${visit.priority} desc`, visit.queuePosition);
+      const docs = await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(and(eq(practitioner.tenantId, t.id), eq(practitioner.active, true)));
+      const lanes = docs.map((d) => {
+        const mine = rows.filter((r) => r.practitionerId === d.id || (!r.practitionerId && docs.length === 1));
+        return { doctor: d.name, now: mine.find((r) => r.v.status === 'in_consult')?.v.opNumber ?? null,
+          next: mine.filter((r) => r.v.status === 'waiting' || r.v.status === 'screened').slice(0, 3).map((r) => r.v.opNumber), withJunior: mine.filter((r) => r.v.status === 'intake').map((r) => r.v.opNumber) };
+      }).filter((l) => l.now || l.next.length || l.withJunior.length || docs.length === 1);
+      const unassigned = docs.length > 1 ? rows.filter((r) => !r.practitionerId && r.v.status !== 'in_consult').slice(0, 5).map((r) => r.v.opNumber) : [];
+      // someone is in with a doctor who was not named on the visit: still show them as Now
+      const nowUnnamed = docs.length > 1 ? rows.filter((r) => !r.practitionerId && r.v.status === 'in_consult').map((r) => r.v.opNumber) : [];
+      if (nowUnnamed.length) lanes.push({ doctor: 'Consultation', now: nowUnnamed[0], next: [], withJunior: [] });
+      return { clinic: t.name, at: new Date().toISOString(), lanes, unassigned };
     });
   });
 }

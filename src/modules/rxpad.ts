@@ -85,7 +85,7 @@ export function rxpadRoutes(app: FastifyInstance) {
     const t = req.ctx.tenantId; const pid = req.ctx.practitionerId;
     return tx.select({ name: prescriptionItem.name, medicineId: prescriptionItem.medicineId, n: sql<number>`count(*)::int` }).from(prescriptionItem)
       .innerJoin(encounter, eq(encounter.id, prescriptionItem.encounterId))
-      .where(and(eq(prescriptionItem.tenantId, t), eq(encounter.status, 'completed'), pid ? eq(encounter.practitionerId, pid) : sql`true`, sql`${encounter.createdAt} > now() - interval '180 days'`))
+      .where(and(eq(prescriptionItem.tenantId, t), sql`${encounter.status} in ('completed','awaiting_reports')`, pid ? eq(encounter.practitionerId, pid) : sql`true`, sql`${encounter.createdAt} > now() - interval '180 days'`))
       .groupBy(prescriptionItem.name, prescriptionItem.medicineId).orderBy(desc(sql`count(*)`), prescriptionItem.name).limit(12);
   });
 
