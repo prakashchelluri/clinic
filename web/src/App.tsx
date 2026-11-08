@@ -93,7 +93,7 @@ export function App() {
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
   const items = NAV.filter((n) => (n.to === '/platform' ? platform : !platform) && n.show(c));
-  const fit = loc.pathname === '/queue'; // table pages: the page stays put, only the table scrolls
+  const fit = false; // every page scrolls; the desk's check-in panel sticks on its own
   // A page you cannot use is not shown, and typing its address gets a clear "no access" instead of an empty screen.
   const sub = loc.pathname.split('/')[1] ?? '';
   const pageRule = NAV.find((n) => n.to === '/' + sub) ?? (sub === 'encounter' ? { to: '', label: 'The consultation page', icon: '', show: (x: (p: string) => boolean) => x('encounter.intake') } : null);

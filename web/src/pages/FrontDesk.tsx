@@ -37,7 +37,9 @@ export function FrontDesk() {
   const day = today(); const isToday = true;
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
   const [tab, setTab] = useState<Tab>('waiting');
-  const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null);
+  const [docFilter, setDocFilter] = useState<string | null>(null); // one doctor's queue, or everyone
+  const [arriveKey, setArriveKey] = useState(0);
+  const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }>(null);
   const find = '';
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [sp, setSp] = useSearchParams();
@@ -53,7 +55,8 @@ export function FrontDesk() {
   const f = find.trim().toLowerCase();
   const match = (p: any, extra = '') => !f || p.fullName.toLowerCase().includes(f) || (p.phone ?? '').includes(f) || p.patientNo.toLowerCase().includes(f) || extra.toLowerCase().includes(f);
 
-  const visits: any[] = d?.visits ?? [];
+  const visitsAll: any[] = d?.visits ?? [];
+  const visits: any[] = docFilter ? visitsAll.filter((v) => v.practitionerId === docFilter) : visitsAll;
   const scheduled: any[] = (d?.appointments ?? []).filter((a: any) => ['booked', 'confirmed', 'requested'].includes(a.status) && match(a.patient));
   const noShows: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'no_show' && match(a.patient));
   const waiting = visits.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && match(v.patient, v.opNumber));
@@ -102,45 +105,58 @@ export function FrontDesk() {
     downloadCsv(`front-desk-${tab}-${day}.csv`, out);
   };
 
+  const who = (p: any) => <><b className="text-[14px]">{p.fullName}</b><FlagChips flags={p.flags} /><span className="text-muted">{[p.ageYears, p.sex].filter(Boolean).join(' ')}</span></>;
+  const meta = (xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ');
+  const Row = ({ token, tokenCls = '', top, sub, actions, cls = '' }: { token: React.ReactNode; tokenCls?: string; top: React.ReactNode; sub: React.ReactNode; actions: React.ReactNode; cls?: string }) => (
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line px-4 py-2.5 first:border-t-0 hover:bg-surface-2 anim-fade-up ${cls}`}>
+      <span className={`w-[72px] shrink-0 text-[15px] font-bold tracking-tight ${tokenCls}`}>{token}</span>
+      <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-2 gap-y-1">{top}</div><div className="mt-0.5 text-[12px] text-muted">{sub}</div></div>
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">{actions}</div>
+    </div>);
   const render = (r: Row) => {
-    if (r.type === 'waiting') { const v = r.v; const i = r.i!; return (
-      <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
-        <td><b>{v.patient.fullName}</b> <FlagChips flags={v.patient.flags} /> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">waited {minsSince(v.arrivedAt)} min</div></td>
-        <td>{v.status === 'intake' ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : <Chip>waiting</Chip>}</td>
-        <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
-        <td className="text-right pr-4 whitespace-nowrap">{isJunior && screening !== 'off' && v.status === 'waiting' && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>Intake</button>}{isDoctorUser && <button className="btn btn-sm" disabled={v.status === 'intake'} title={v.status === 'intake' ? 'With the junior doctor right now' : 'Open the consultation yourself; the desk is told'} onClick={() => openEncounter.mutate(v.id)}>Open</button>} {canDesk && (() => { const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting'; return <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>Send in</button>; })()} {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}</td></tr>); }
+    if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting'; return (
+      <Row key={v.id} token={v.opNumber} tokenCls={i === 0 && !withJr ? 'text-clay' : ''}
+        top={<>{who(v.patient)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
+        sub={meta([v.patient.patientNo, v.patient.phone, `arrived ${hhmm(v.arrivedAt)} · waited ${minsSince(v.arrivedAt)} min`, v.category, v.details?.complaint, v.details?.weight_kg && `${v.details.weight_kg} kg`, v.details?.bp && `BP ${v.details.bp}`])}
+        actions={<>
+          {isJunior && screening !== 'off' && v.status === 'waiting' && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>Intake</button>}
+          {isDoctorUser && <button className="btn btn-sm" disabled={withJr} title={withJr ? 'With the junior doctor right now' : 'Open the consultation yourself; the desk is told'} onClick={() => openEncounter.mutate(v.id)}>Open</button>}
+          {canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}
+          {canDesk && <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>Send in</button>}
+          {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Change doctor', hidden: !(d?.doctors ?? []).length, onClick: () => { const next = (d?.doctors ?? []).find((x: any) => x.id !== v.practitionerId); if (next) upVisit.mutate({ id: v.id, practitionerId: next.id }); } }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}
+        </>} />); }
     if (r.type === 'doctor') { const v = r.v; return (
-      <tr key={v.id} className="anim-fade-up"><td className="pl-4 serif text-lg">{v.opNumber}</td>
-        <td><b>{v.patient.fullName}</b> <FlagChips flags={v.patient.flags} /> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span></td>
-        <td><Chip tone="clay"><span className="h-1.5 w-1.5 rounded-full bg-clay live-dot inline-block mr-1" />in consult</Chip>{v.details?.calledAt && <div className="mt-0.5 text-[11px] text-muted">{v.details.calledBy === 'desk' ? 'sent in' : 'called by doctor'} {hhmm(v.details.calledAt)}</div>}</td>
-        <td>{v.doctor ?? '—'}</td><td className="text-muted text-xs">{v.details?.complaint ?? ''}</td>
-        <td className="text-right pr-4">{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}</td></tr>); }
+      <Row key={v.id} token={v.opNumber}
+        top={<>{who(v.patient)}<Chip tone="clay"><span className="h-1.5 w-1.5 rounded-full bg-clay live-dot inline-block mr-1" />in consult</Chip>{v.doctor && <Chip>{v.doctor}</Chip>}</>}
+        sub={meta([v.patient.patientNo, v.details?.calledAt && `${v.details.calledBy === 'desk' ? 'sent in' : 'called by doctor'} ${hhmm(v.details.calledAt)}`, v.details?.complaint])}
+        actions={<>{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}{canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}</>} />); }
     if (r.type === 'appt') { const a = r.a; const isLate = isToday && toMin(a.window.endTime) < nowMin(); return (
-      <tr key={a.id} className={`anim-fade-up ${isLate ? 'bg-rose-soft/40' : ''}`}><td className={`pl-4 font-semibold ${isLate ? 'text-rose' : ''}`}>{a.window.startTime}{isLate && <div className="text-[11px] font-normal">late</div>}</td>
-        <td><b>{a.patient.fullName}</b> <span className="text-muted">{a.patient.ageYears ?? ''} {a.patient.sex ?? ''}</span><div className="text-xs text-muted">{[a.patient.phone, a.patient.locality].filter(Boolean).join(' · ')}</div></td>
-        <td>{isLate ? <Chip tone="rose">not arrived</Chip> : a.status === 'confirmed' ? <Chip tone="sage">confirmed</Chip> : a.status === 'requested' ? <Chip tone="clay">requested</Chip> : <Chip>booked</Chip>}</td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">{a.note ?? ''}</td>
-        <td className="text-right pr-4 whitespace-nowrap">{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>} {canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}` }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</td></tr>); }
+      <Row key={a.id} token={a.window.startTime} tokenCls={isLate ? 'text-rose' : ''} cls={isLate ? 'bg-rose-soft/30' : ''}
+        top={<>{who(a.patient)}{isLate ? <Chip tone="rose">not arrived</Chip> : a.status === 'confirmed' ? <Chip tone="sage">confirmed</Chip> : a.status === 'requested' ? <Chip tone="clay">online request</Chip> : <Chip>booked</Chip>}<Chip>{docName(a.window.practitionerId)}</Chip></>}
+        sub={meta([a.patient.patientNo, a.patient.phone, a.patient.locality, a.service, a.note])}
+        actions={<>{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>}{canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}`, hidden: !dialable(a.patient.phone) }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</>} />); }
     if (r.type === 'noshow') { const a = r.a; return (
-      <tr key={a.id} className="anim-fade-up opacity-70"><td className="pl-4 font-semibold">{a.window.startTime}</td>
-        <td><b>{a.patient.fullName}</b><div className="text-xs text-muted">{a.patient.phone ?? ''}</div></td>
-        <td><Chip tone="rose">no-show</Chip></td><td>{docName(a.window.practitionerId)}</td><td className="text-muted text-xs">Did not arrive</td>
-        <td className="text-right pr-4">{canDesk && <button className="btn btn-sm" onClick={() => nav(`/calendar?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>}</td></tr>); }
-    const v = r.v; const due = v.due.reduce((s: number, c: any) => s + c.amountPaise, 0); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
+      <Row key={a.id} token={a.window.startTime} cls="opacity-70"
+        top={<>{who(a.patient)}<Chip tone="rose">no-show</Chip><Chip>{docName(a.window.practitionerId)}</Chip></>}
+        sub={meta([a.patient.phone, 'did not arrive'])}
+        actions={canDesk && <button className="btn btn-sm" onClick={() => nav(`/calendar?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>} />); }
+    const v = r.v; const due = v.due.reduce((x: number, c: any) => x + c.amountPaise, 0); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
     return (
-      <tr key={v.id} className={`anim-fade-up ${due ? 'bg-rose-soft/40' : handled || left ? 'opacity-70' : ''}`}><td className="pl-4 serif text-lg">{v.opNumber}</td>
-        <td><b>{v.patient.fullName}</b> <FlagChips flags={v.patient.flags} /> <span className="text-muted">{v.patient.ageYears ?? ''} {v.patient.sex ?? ''}</span><div className="text-xs text-muted">{left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : ''}</div></td>
-        <td>{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : <Chip tone="sage">completed</Chip>}</td><td>{v.doctor ?? '—'}</td>
-        <td className="text-xs">{left ? <span className="text-muted">Did not see the doctor</span> : v.recommendations.length ? <div className="flex flex-wrap gap-1">{v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` · ${rc.sittings} sittings` : ''} → coordinator` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</div> : <span className="text-muted">Medicines only · pharmacy has the Rx</span>}</td>
-        <td className="text-right pr-4 whitespace-nowrap">
+      <Row key={v.id} token={v.opNumber} cls={due ? 'bg-rose-soft/30' : handled || left ? 'opacity-70' : ''}
+        top={<>{who(v.patient)}{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : v.encounterStatus === 'awaiting_reports' ? <Chip tone="amber">held for reports</Chip> : <Chip tone="sage">completed</Chip>}{v.doctor && <Chip>{v.doctor}</Chip>}
+          {!left && v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` × ${rc.sittings}` : ''}` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</>}
+        sub={meta([v.patient.patientNo, v.patient.phone, left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : null, left ? 'did not see the doctor' : v.rxCount ? `${v.rxCount} medicine${v.rxCount === 1 ? '' : 's'} · pharmacy has the Rx` : v.recommendations.length ? null : 'nothing to arrange'])}
+        actions={<>
           {canDesk && v.due[0] && <button className="btn btn-sm btn-primary" onClick={() => collect.mutate({ c: v.due[0], method: 'cash' })}>Collect {money(v.due[0].amountPaise)}</button>}
           {canDesk && !left && !handled && !v.due.length && v.recommendations.length > 0 && <button className="btn btn-sm btn-primary" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button>}
-          {' '}<MoreMenu items={[
+          {v.encounterId && !left && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
+          <MoreMenu items={[
             { label: 'Collect by UPI', hidden: !(canDesk && v.due[0]), onClick: () => collect.mutate({ c: v.due[0], method: 'upi' }) },
-            { label: 'Print prescription', hidden: !(v.encounterId && !left), onClick: () => openPrint({ title: 'Prescription', rx: v.encounterId }) },
+            { label: 'Open record', onClick: () => nav(`/patients/${v.patient.id}`) },
             { label: 'Mark as explained', hidden: !(canDesk && !left && !handled && v.recommendations.length > 0 && v.due.length > 0), onClick: () => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } }) },
             { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) },
           ]} />
-        </td></tr>);
+        </>} />);
   };
 
   return (
@@ -154,23 +170,26 @@ export function FrontDesk() {
       </div>
 
       {calling.length > 0 && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-[10px] border border-[#E8A68F] bg-clay-soft px-4 py-3 text-[14px] anim-fade-up"><Icon name="bell" className="h-5 w-5 text-clay" />{calling.map((v) => <span key={v.id}><b>{v.doctor ?? 'The doctor'}</b> is calling <b>{v.patient.fullName}</b> · token {v.opNumber}</span>)}<button className="btn btn-sm ml-auto" onClick={() => setCalling([])}>Sent</button></div>}
-      {!d ? <Skeleton rows={3} /> : (<>
-        <div className="mb-3 flex gap-0.5 overflow-x-auto no-scrollbar border-b border-line" role="tablist">
-          {([['waiting', 'Waiting', waiting.length, waiting.length > 0], ...(canDesk ? [['scheduled', 'Not yet arrived', scheduled.length, late.length > 0]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Checkout', checkout.length, checkout.length > 0], ['reports', 'Reports pending', reportsOpen.length, reportsOpen.some((o) => o.state === 'ready' || o.state === 'partial')], ['completed', 'Completed', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false], ...(canDesk ? [['needs', 'Needs you', needsCount, needsCount > 0]] : [])] as [Tab, string, number, boolean][]).map(([k, l, n, hot]) => (
-            <button key={k} role="tab" aria-selected={tab === k} className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] whitespace-nowrap ${tab === k ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-muted hover:text-ink'}`} onClick={() => setTab(k)}>{l}<span className={`tabular-nums ${hot && tab !== k ? 'text-clay font-semibold' : tab === k ? 'text-ink' : 'text-muted'}`}>{n}</span></button>))}
-        </div>
-
-        {tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
-          <div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm md:min-w-[760px] stack-on-phone">
-            <thead><tr><th className="pl-4 w-24">{tab === 'scheduled' ? 'Time' : 'Token'}</th><th>Patient</th><th className="w-36">{tab === 'completed' ? 'Outcome' : 'Stage'}</th><th className="w-36">Doctor</th><th>{tab === 'completed' || tab === 'needs' ? 'What to tell them' : 'Note'}</th><th className="text-right pr-4 w-72">Action</th></tr></thead>
-            <tbody>
-              {groups.length === 0 && <tr><td colSpan={6} className="!py-10 text-center text-muted">{emptyText[tab]}</td></tr>}
-              {groups.map((g) => (<GroupRows key={g.group} showGroup={false} group={g.group}>{g.rows.map(render)}</GroupRows>))}
-            </tbody>
-          </table></div>
-        </div>}
-      </>)}
-      {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visits.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); refresh(); }} />}
+      {!d ? <Skeleton rows={3} /> : (
+        <div className={`grid items-start gap-4 ${canDesk && tab !== 'history' ? 'xl:grid-cols-[380px_minmax(0,1fr)]' : ''}`}>
+          {canDesk && tab !== 'history' && <div className="xl:sticky xl:top-16 xl:self-start"><ArrivalSheet key={`${arriveKey}:${arrive?.patientId ?? ''}:${arrive?.appointmentId ?? ''}:${arrive?.reports?.encounterId ?? ''}`} inline init={arrive ?? {}} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} /></div>}
+          <div className="min-w-0">
+            {(d?.doctors ?? []).length > 1 && tab !== 'history' && <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <button type="button" className={`toggle-opt ${!docFilter ? 'on' : ''}`} onClick={() => setDocFilter(null)}>All doctors<span className="ml-1.5 text-muted">{visitsAll.filter((v) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length}</span></button>
+              {(d?.doctors ?? []).map((x: any) => <button key={x.id} type="button" className={`toggle-opt ${docFilter === x.id ? 'on' : ''}`} onClick={() => setDocFilter(docFilter === x.id ? null : x.id)}>{x.name}<span className="ml-1.5 text-muted">{visitsAll.filter((v) => v.practitionerId === x.id && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length}</span></button>)}
+              {visitsAll.some((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)) && <span className="text-xs text-rose">{visitsAll.filter((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)).length} with no doctor picked</span>}
+            </div>}
+            <div className="mb-3 flex gap-0.5 overflow-x-auto no-scrollbar border-b border-line" role="tablist">
+              {([['waiting', 'Waiting', waiting.length, waiting.length > 0], ...(canDesk ? [['scheduled', 'Not yet arrived', scheduled.length, late.length > 0]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Checkout', checkout.length, checkout.length > 0], ['reports', 'Reports pending', reportsOpen.length, reportsOpen.some((o) => o.state === 'ready' || o.state === 'partial')], ['completed', 'Completed', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false], ...(canDesk ? [['needs', 'Needs you', needsCount, needsCount > 0]] : [])] as [Tab, string, number, boolean][]).map(([k, l, n, hot]) => (
+                <button key={k} role="tab" aria-selected={tab === k} className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] whitespace-nowrap ${tab === k ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-muted hover:text-ink'}`} onClick={() => setTab(k)}>{l}<span className={`tabular-nums ${hot && tab !== k ? 'text-clay font-semibold' : tab === k ? 'text-ink' : 'text-muted'}`}>{n}</span></button>))}
+            </div>
+            {tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
+              <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+                {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
+                {groups.map((g) => g.rows.map(render))}
+              </div>)}
+          </div>
+        </div>)}
     </div>
   );
 }
@@ -180,9 +199,6 @@ export function FrontDesk() {
 const Sep = () => <span className="w-px h-9 bg-ink/10 hidden sm:block" />;
 function Stat({ label, value, sub, tone = '' }: { label: string; value: any; sub?: string; tone?: '' | 'clay' | 'sage' }) {
   return <div><div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div><div className={`serif text-2xl leading-tight ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : ''}`}>{typeof value === 'number' ? <Num value={value} /> : value} {sub && <span className="font-sans text-[13px] font-normal text-muted">{sub}</span>}</div></div>;
-}
-function GroupRows({ showGroup, group, children }: { showGroup: boolean; group: string; children: React.ReactNode }) {
-  return <>{showGroup && <tr><td colSpan={6} className="!py-2 !bg-paper text-[11px] font-semibold uppercase tracking-wider text-muted">{group}</td></tr>}{children}</>;
 }
 
 const dayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
@@ -268,7 +284,7 @@ export const DEFAULT_VITALS = ['weight_kg', 'height_cm', 'temp_f', 'bp', 'spo2']
 type Complaint = { text: string; duration: string };
 
 /** Arrival: who they are, why this fee, vitals, complaints, which doctor. One screen, one button. */
-function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
+function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, inline = false }: { inline?: boolean; init: { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [patientId, setPatientId] = useState(init.patientId);
   const [newP, setNewP] = useState<null | { fullName: string; phone: string; ageYears: string; sex: string }>(null);
@@ -325,8 +341,11 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const step = !patientId && !newP ? 1 : 2;
   const blocker = !chosen ? 'Pick a visit type' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : fee > 0 && !waive && toPaise(amount === '' ? String(fee / 100) : amount) <= 0 ? 'Enter the amount collected' : '';
   const facts = sug.data?.facts;
+  const Frame = ({ children }: { children: React.ReactNode }) => inline
+    ? <section className="card-flat p-4 anim-fade-up" aria-label="Check in"><div className="mb-3 flex items-center gap-2"><b className="text-[14px]">{step === 1 ? 'Check in' : 'Arrival'}</b><span className="text-xs text-muted">{step === 1 ? 'phone, name or patient ID' : p?.fullName ?? newP?.fullName ?? ''}</span>{step === 2 && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={onClose}>Clear</button>}</div>{children}</section>
+    : <Modal title={step === 1 ? 'Who has arrived?' : 'Arrival'} subtitle={step === 1 ? 'Phone, name or patient ID' : undefined} onClose={onClose} width="max-w-2xl">{children}</Modal>;
   return (
-    <Modal title={step === 1 ? 'Who has arrived?' : 'Arrival'} subtitle={step === 1 ? 'Phone, name or patient ID' : undefined} onClose={onClose} width="max-w-2xl">
+    <Frame>
       {step === 1 && (
         <div className="anim-fade-up">
           <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10 !py-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder="98765…" /></div>
@@ -340,8 +359,8 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
       {step === 2 && (
         <div className="space-y-4 anim-fade-up">
           {newP ? (
-            <div className="grid grid-cols-6 gap-2">
-              <div className="col-span-3"><label className="label">Full name</label><input autoFocus className="input" maxLength={100} value={newP.fullName} onChange={(e) => { setDup(null); setNewP({ ...newP, fullName: e.target.value }); }} /></div>
+            <div className={inline ? 'grid grid-cols-2 gap-2' : 'grid grid-cols-6 gap-2'}>
+              <div className={inline ? 'col-span-2' : 'col-span-3'}><label className="label">Full name</label><input autoFocus className="input" maxLength={100} value={newP.fullName} onChange={(e) => { setDup(null); setNewP({ ...newP, fullName: e.target.value }); }} /></div>
               <div className="col-span-2"><label className="label">Phone</label><input className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
               <div><label className="label">Age</label><input className="input" inputMode="numeric" placeholder="years" value={newP.ageYears} onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setNewP({ ...newP, ageYears: v && Number(v) > 120 ? '120' : v }); }} /></div>
               <div className="col-span-6 flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${newP.sex === s ? 'on' : ''}`} onClick={() => setNewP({ ...newP, sex: s })}>{s === 'M' ? 'Male' : s === 'F' ? 'Female' : 'Other'}</button>)}<button className="btn btn-ghost btn-sm ml-auto" onClick={() => setNewP(null)}>Back to search</button></div>
@@ -399,11 +418,11 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
               {fee > 0 && can(perms, 'payment.waive') && <input className="input mt-2 !py-1.5 text-xs" placeholder="Waive? type the reason (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
             </div>
           </div>
-          <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <div className={inline ? 'flex flex-wrap items-center gap-2 pt-1' : 'modal-foot'}><span className="mr-auto text-xs text-muted" role="status">{blocker}</span>{!inline && <button className="btn btn-ghost" onClick={onClose}>Cancel</button>}
             <button className="btn btn-primary" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{fee > 0 && !waive && !blocker ? ` · collect ${money(toPaise(amount === '' ? String(fee / 100) : amount))}` : ''}</button></div>
         </div>
       )}
-    </Modal>
+    </Frame>
   );
 }
 
