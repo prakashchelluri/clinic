@@ -97,7 +97,7 @@ function RequestRow({ r, canWrite, onOpen, onApprove, busy }: { r: any; canWrite
         <div><b>{r.patient.fullName}</b> <span className="text-sm text-muted">· {r.patient.phone}</span>{r.noShows > 0 && <Chip tone="rose" className="ml-2">{r.noShows} no-show{r.noShows === 1 ? '' : 's'}</Chip>}</div>
         <div className="truncate text-sm text-muted">{r.service?.name ?? 'Visit'} · {r.window.doctor ?? 'Any doctor'} · {dayLabel(r.window.day)}, {r.window.startTime}–{r.window.endTime}{r.note ? ` · “${r.note}”` : ''}</div>
       </button>
-      {canWrite && <div className="flex gap-2"><button className="btn btn-sm" onClick={onOpen}>Decline…</button><button className="btn btn-sm btn-primary" disabled={busy} onClick={onApprove}><Icon name="check" />Approve</button></div>}
+      {canWrite && <div className="flex gap-2"><button className="btn btn-sm" onClick={onOpen}>Decline</button><button className="btn btn-sm btn-primary" disabled={busy} onClick={onApprove}><Icon name="check" />Approve</button></div>}
     </div>
   );
 }

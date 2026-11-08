@@ -359,11 +359,11 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
       {step === 2 && (
         <div className="space-y-4 anim-fade-up">
           {newP ? (
-            <div className={inline ? 'grid grid-cols-2 gap-2' : 'grid grid-cols-6 gap-2'}>
+            <div className={inline ? 'grid grid-cols-[minmax(0,1fr)_88px] gap-2' : 'grid grid-cols-6 gap-2'}>
               <div className={inline ? 'col-span-2' : 'col-span-3'}><label className="label">Full name</label><input autoFocus className="input" maxLength={100} value={newP.fullName} onChange={(e) => { setDup(null); setNewP({ ...newP, fullName: e.target.value }); }} /></div>
-              <div className="col-span-2"><label className="label">Phone</label><input className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
+              <div className={inline ? '' : 'col-span-2'}><label className="label">Phone</label><input className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
               <div><label className="label">Age</label><input className="input" inputMode="numeric" placeholder="years" value={newP.ageYears} onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setNewP({ ...newP, ageYears: v && Number(v) > 120 ? '120' : v }); }} /></div>
-              <div className="col-span-6 flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${newP.sex === s ? 'on' : ''}`} onClick={() => setNewP({ ...newP, sex: s })}>{s === 'M' ? 'Male' : s === 'F' ? 'Female' : 'Other'}</button>)}<button className="btn btn-ghost btn-sm ml-auto" onClick={() => setNewP(null)}>Back to search</button></div>
+              <div className={`${inline ? 'col-span-2' : 'col-span-6'} flex flex-wrap items-center gap-1.5`}>{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${newP.sex === s ? 'on' : ''}`} onClick={() => setNewP({ ...newP, sex: s })}>{s === 'M' ? 'Male' : s === 'F' ? 'Female' : 'Other'}</button>)}<button className="btn btn-ghost btn-sm ml-auto" onClick={() => setNewP(null)}>Back to search</button></div>
             </div>
           ) : (
             <div className="flex items-start gap-3">
@@ -378,10 +378,10 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
 
           <div>
             <div className="flex items-baseline gap-2 mb-1.5"><span className="label !mb-0">Vitals</span><span className="text-xs text-muted">all optional{bmi ? ` · BMI ${bmi}` : ' · BMI is calculated from weight and height'}</span></div>
-            <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${Math.min(enabled.length, 5)}, minmax(0, 1fr))` }}>
+            <div className="grid gap-2.5" style={{ gridTemplateColumns: inline ? 'repeat(auto-fill, minmax(100px, 1fr))' : `repeat(${Math.min(enabled.length, 5)}, minmax(0, 1fr))` }}>
               {VITAL_FIELDS.filter((f) => enabled.includes(f.key)).map((f) => (
                 <div key={f.key}><label htmlFor={`v-${f.key}`} className="text-[10px] font-semibold uppercase tracking-wider text-muted block mb-1">{f.label}</label>
-                  <div className="relative"><input id={`v-${f.key}`} className="input !pr-12" inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph} value={vit[f.key] ?? ''} maxLength={7} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : e.target.value.replace(/[^\d/]/g, '') })} /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
+                  <div className="relative"><input id={`v-${f.key}`} className="input !px-3 !pr-11" inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph} value={vit[f.key] ?? ''} maxLength={7} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : e.target.value.replace(/[^\d/]/g, '') })} /><span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
               ))}
             </div>
           </div>
@@ -391,30 +391,30 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
             {(comp.data ?? []).length > 0 && <div className="mb-2.5 flex flex-wrap gap-1.5" role="group" aria-label="Common complaints">{(comp.data ?? []).map((t) => { const on = list.some((c) => norm(c.text) === norm(t.name)); return <button key={t.id} type="button" aria-pressed={on} className={`toggle-opt !py-2 ${on ? 'on' : ''}`} onClick={() => setList(on ? list.filter((c) => norm(c.text) !== norm(t.name)) : [...list, { text: t.name, duration: '' }])}>{t.name}</button>; })}</div>}
             <div className="space-y-2">
               {list.map((c, i) => (
-                <div key={i} className="grid grid-cols-[1fr_150px_44px_44px] gap-2 items-center anim-scale-in">
+                <div key={i} className={`grid items-center gap-2 anim-scale-in ${inline ? 'grid-cols-[minmax(0,1fr)_92px_40px_40px]' : 'grid-cols-[1fr_150px_44px_44px]'}`}>
                   <div className="input flex items-center !bg-paper">{c.text}</div><div className="input flex items-center !bg-paper text-muted">{c.duration || '—'}</div>
                   <span className="grid place-items-center h-11 rounded-full bg-sage-soft text-sage border border-sage/40" title="Done"><Icon name="check" /></span>
                   <button type="button" className="btn btn-icon !h-11 !w-11" aria-label="Remove complaint" onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
                 </div>))}
-              <div className="grid grid-cols-[1fr_150px_92px] gap-2 items-center">
+              <div className={`grid items-center gap-2 ${inline ? 'grid-cols-[minmax(0,1fr)_92px_auto]' : 'grid-cols-[1fr_150px_92px]'}`}>
                 <input className="input" aria-label="Complaint" placeholder={list.length ? 'Another complaint…' : 'Main complaint…'} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
-                <input className="input" aria-label="Since when" placeholder="Since when" value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
-                <button type="button" className="btn !bg-ink !text-paper !border-ink !h-11" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
+                <input className="input" aria-label="Since when" placeholder={inline ? 'Since' : 'Since when'} value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                <button type="button" className="btn btn-primary !h-10" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
               </div>
             </div>
           </div>
 
           {init.reports && <div className="rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber"><b>Back with reports:</b> {init.reports.tests}. No new complaint is needed; the doctor opens the same consultation.{init.reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
-          <div className="grid grid-cols-2 gap-3">
+          <div className={`grid gap-3 ${inline ? 'grid-cols-[1.5fr_1fr]' : 'grid-cols-2'}`}>
             <div><label htmlFor="visit-type" className="label">Visit type · fee</label>
               <select id="visit-type" className="input" value={chosen} onChange={(e) => setCat(e.target.value)}>{cfg?.feeCategories.map((c: any) => <option key={c.code} value={c.code}>{c.name} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code ? ' (suggested)' : ''}</option>)}</select></div>
             <div><label htmlFor="locality" className="label">Location</label><input id="locality" className="input" placeholder={p?.locality ?? ''} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="label">Doctor <span className="font-normal text-muted">· tap to change</span></label><div className="flex flex-wrap gap-1.5">{cfg?.practitioners.map((x: any) => <button key={x.id} type="button" className={`toggle-opt !py-2.5 ${practitionerId === x.id ? 'on' : ''}`} onClick={() => setPractitionerId(x.id)}>{x.name} · {waitingByDoctor[x.id] ?? 0} waiting</button>)}</div></div>
+          <div className={`grid gap-3 ${inline ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            <div><label className="label">Doctor <span className="font-normal text-muted">· tap to change</span></label><div className="flex flex-wrap gap-1.5">{cfg?.practitioners.map((x: any) => <button key={x.id} type="button" className={`toggle-opt !py-2 ${practitionerId === x.id ? 'on' : ''}`} onClick={() => setPractitionerId(x.id)}>{x.name}<span className={`ml-1.5 font-medium ${practitionerId === x.id ? 'text-paper/70' : 'text-muted'}`}>{waitingByDoctor[x.id] ?? 0} waiting</span></button>)}</div></div>
             <div><label className="label">Payment</label>
               {fee === 0 ? <div className="text-sm text-muted pt-2.5">Nothing to collect for {catRow?.name?.split(' (')[0] ?? 'this visit'}.</div> : waive ? <div className="text-sm text-amber pt-2.5">Waived · {waive}</div> : (
-                <div className="flex gap-1.5 items-center flex-wrap">{['cash', 'upi', 'card'].map((m) => <button key={m} type="button" className={`toggle-opt !py-2.5 uppercase ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{m}</button>)}<MoneyInput className="!w-28" value={amount === '' ? String(fee / 100) : amount} onChange={setAmount} /></div>)}
+                <div className="flex gap-1.5 items-center flex-wrap">{['cash', 'upi', 'card'].map((m) => <button key={m} type="button" className={`toggle-opt !py-2 ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{m === 'upi' ? 'UPI' : m[0].toUpperCase() + m.slice(1)}</button>)}<MoneyInput className="!w-28" value={amount === '' ? String(fee / 100) : amount} onChange={setAmount} /></div>)}
               {fee > 0 && can(perms, 'payment.waive') && <input className="input mt-2 !py-1.5 text-xs" placeholder="Waive? type the reason (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
             </div>
           </div>
