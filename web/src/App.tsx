@@ -54,6 +54,37 @@ export function Home() {
 }
 
 /** Left navigation: a quiet rail with counts; the active item is one filled row. */
+/** Light or dark for this person, kept on this device. The print sheet and the waiting-room TV ignore it. */
+export function useTheme() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => { try { return (localStorage.getItem('theme') as 'light' | 'dark') || 'light'; } catch { return 'light'; } });
+  useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('theme', theme); } catch { /* private mode */ } }, [theme]);
+  return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))] as const;
+}
+
+/** The desktop rail: icon above a short label, the way Eka does it, so the work area gets the width. */
+function Rail({ items, active, clinic, me, requests, onSignOut }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; requests: number; onSignOut: () => void }) {
+  const [theme, toggleTheme] = useTheme();
+  return (
+    <div className="flex h-full flex-col items-center px-2 py-3">
+      <Link to="/" title={clinic} className="mb-3 grid h-9 w-9 place-items-center rounded-[10px] bg-brand text-[15px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</Link>
+      <nav className="flex w-full flex-col gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
+        {items.map((n, i) => <span key={n.to} className="contents">
+          {i > 0 && n.group === 'clinic' && items[i - 1].group !== 'clinic' && <span className="mx-3 my-1.5 border-t border-line" />}
+          <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} className={`rail-item ${active?.to === n.to ? 'active' : ''}`}>
+            <Icon name={n.icon} className="h-[18px] w-[18px]" /><span className="max-w-full truncate">{n.label}</span>
+            {n.to === '/bookings' && requests > 0 && <span className="absolute right-1.5 top-1 rounded-full bg-clay px-1.5 text-[10px] font-bold text-white" aria-label={`${requests} online requests`}>{requests}</span>}
+          </Link></span>)}
+      </nav>
+      <Link to="/help" className="rail-item mt-auto"><Icon name="help" className="h-[18px] w-[18px]" /><span>Help</span></Link>
+      <button type="button" onClick={toggleTheme} className="rail-item" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-[18px] w-[18px]" /><span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button>
+      <div className="mt-1 flex w-full flex-col items-center gap-1 border-t border-line pt-2.5">
+        <Avatar name={me.name} size="h-8 w-8 text-[11px]" />
+        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon !h-8 !w-8"><Icon name="logout" /></button>
+      </div>
+    </div>
+  );
+}
+
 function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
@@ -136,19 +167,19 @@ export function App() {
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[224px] border-r border-line bg-[#FAFAFB] md:block" aria-label="Main">
-        <Sidebar {...side} />
+      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[84px] border-r border-line/70 bg-sidebar/85 backdrop-blur-xl md:block" aria-label="Main">
+        <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} />
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
-          <aside className="h-full w-[264px] max-w-[85vw] bg-[#FAFAFB] anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
+          <aside className="h-full w-[264px] max-w-[85vw] bg-sidebar anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
         </div>
       )}
 
-      <div className={`md:pl-[224px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-        <header className="no-print sticky top-0 z-30 flex h-12 shrink-0 items-center gap-1.5 border-b border-line bg-surface px-3 md:px-5">
+      <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+        <header className="no-print sticky top-0 z-30 flex h-12 shrink-0 items-center gap-1.5 border-b border-line/70 bg-surface/80 px-3 backdrop-blur-xl md:px-5">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-          <span className="truncate text-[14px] font-semibold">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : clinic)}</span>
+          <span className="truncate text-[14px] font-semibold">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : clinic)}</span><span className="hidden truncate text-[12.5px] text-muted lg:inline">· {clinic}</span>
           <span className="ml-auto" />
           {!platform && <button onClick={() => setPalette(true)} className="mr-1.5 hidden h-8 w-[260px] items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-[12.5px] text-muted hover:border-muted lg:flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-3.5 w-3.5" /><span className="flex-1 text-left">Patient, phone or ID</span><span className="kbd">Ctrl K</span></button>}
           {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
