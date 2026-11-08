@@ -142,6 +142,15 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
   .toggle-opt.on { @apply bg-ink text-paper font-semibold; }
   .toggle-opt.on:hover { @apply bg-ink-2; }
   .toggle-opt:disabled { @apply opacity-60; }
+  /* Options not yet chosen read as quiet text; they lift on hover. Chosen ones are the solid .toggle-opt.on pill. */
+  .opt { @apply rounded-full border border-transparent bg-transparent px-3 py-1.5 text-[13px] font-medium text-ink-2; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
+  .opt:hover { @apply bg-paper-2 text-ink; }
+  .opt:active { transform: scale(0.97); }
+  .opt:disabled { @apply opacity-50; }
+  /* The type bar: the strongest element on the pad */
+  .typebar { @apply w-full rounded-[14px] border border-line/60 bg-surface pl-12 pr-20 text-[15px] text-ink placeholder:text-muted/70; min-height: 48px; box-shadow: var(--shadow-soft); transition: box-shadow 0.2s var(--ease), border-color 0.2s var(--ease); }
+  .typebar:hover { box-shadow: 0 2px 6px rgba(0,0,0,.06), 0 12px 32px -20px rgba(0,0,0,.25); }
+  .typebar:focus { @apply outline-none border-clay; box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-clay) 14%, transparent), 0 12px 32px -20px rgba(0,0,0,.25); }
 
   /* Segmented control: a grey track, a white pill that slides */
   .seg { @apply relative inline-flex rounded-[11px] bg-paper-2 p-[3px] gap-0.5 flex-wrap; }
@@ -204,10 +213,10 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
 }
 
 /* ---------- Dialogs: one standard (see Modal in ui.tsx) ---------- */
-.modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(21, 24, 27, 0.4); animation: fade-in 0.15s var(--ease) both; overscroll-behavior: contain; }
-.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 12px; border: 1px solid var(--color-line); background: var(--color-surface); box-shadow: var(--shadow-lift); animation: scale-in 0.18s var(--ease) both; outline: none; }
-.modal-head { flex: none; display: flex; align-items: flex-start; gap: 0.75rem; padding: 1rem 1.25rem 0.5rem; }
-.modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem 1.25rem 1.25rem; }
+.modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(21, 24, 27, 0.35); backdrop-filter: blur(6px); animation: fade-in 0.15s var(--ease) both; overscroll-behavior: contain; }
+.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 18px; border: 1px solid color-mix(in srgb, var(--color-line) 60%, transparent); background: var(--color-surface); box-shadow: var(--shadow-lift); animation: scale-in 0.18s var(--ease) both; outline: none; }
+.modal-head { flex: none; display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.375rem 1.5rem 0.75rem; }
+.modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem 1.5rem 1.5rem; }
 /* Buttons row of a dialog: pinned to the bottom of the scrolling area, so Save never hides below the fold. */
 .modal-foot { position: sticky; bottom: -1.25rem; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; margin: 1rem -1.25rem -1.25rem; padding: 0.75rem 1.25rem; background: var(--color-surface); border-top: 1px solid var(--color-line); }
 .modal-grab { display: none; flex: none; width: 40px; height: 5px; margin: 8px auto 0; border-radius: 5px; background: var(--color-line-2); }

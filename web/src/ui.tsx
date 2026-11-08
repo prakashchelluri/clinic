@@ -1,5 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { LayoutList, Calendar, Users, List, BarChart3, LogOut, Plus, Printer, Phone, Check, CircleHelp, X, Undo2, ChevronUp, Search, Pill, Sparkles, User, Clock, DoorOpen, IndianRupee, Pencil, ChevronLeft, ChevronRight, MoreHorizontal, Filter, FileDown, Moon, Home, Lock, Wallet, Bell, Settings, Menu, Repeat, Link as LinkIcon, Download, Copy, MessageCircle, Inbox, Globe, Stethoscope, type LucideIcon } from 'lucide-react';
+
+/** The icon set: Lucide, one stroke weight everywhere. The names stay the app's own so pages did not change. */
+const LUCIDE: Record<string, LucideIcon> = { queue: LayoutList, calendar: Calendar, users: Users, list: List, chart: BarChart3, logout: LogOut, plus: Plus, print: Printer, phone: Phone, check: Check, help: CircleHelp, x: X, undo: Undo2, up: ChevronUp, search: Search, pill: Pill, spark: Sparkles, user: User, clock: Clock, door: DoorOpen, rupee: IndianRupee, edit: Pencil, chevL: ChevronLeft, chevR: ChevronRight, dots: MoreHorizontal, filter: Filter, export: FileDown, moon: Moon, home: Home, lock: Lock, wallet: Wallet, bell: Bell, gear: Settings, menu: Menu, repeat: Repeat, link: LinkIcon, download: Download, copy: Copy, message: MessageCircle, inbox: Inbox, globe: Globe, stetho: Stethoscope };
 
 /* ---------- Icons (inline, stroke) ---------- */
 const PATHS: Record<string, string> = {
@@ -46,6 +50,9 @@ const PATHS: Record<string, string> = {
   stetho: 'M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6 6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3M8 15v1a6 6 0 0 0 6 6 6 6 0 0 0 6-6v-4M20 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
 };
 export function Icon({ name, className = '' }: { name: keyof typeof PATHS | string; className?: string }) {
+  const cls = /(^|\s)(h|w|size)-/.test(className) ? className : `h-4 w-4 ${className}`;
+  const L = LUCIDE[name as string];
+  if (L) return <L className={cls} strokeWidth={1.75} absoluteStrokeWidth={false} aria-hidden />;
   // keep the default size whenever the caller only passes colour or spacing classes
   return (<svg className={/(^|\s)(h|w|size)-/.test(className) ? className : `h-4 w-4 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d={PATHS[name] ?? ''} /></svg>);
 }
@@ -235,7 +242,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
     <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby={id} onClick={onClose}>
       <div ref={panel} tabIndex={-1} className={`modal-panel ${SIZE[width] ?? 'sm:max-w-[720px]'}`} onClick={(e) => e.stopPropagation()}>
         <span className="modal-grab" aria-hidden />
-        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[16px] font-semibold">{title}</h2>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
+        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
         <div className="modal-body">{children}</div>
       </div>
     </div>,
