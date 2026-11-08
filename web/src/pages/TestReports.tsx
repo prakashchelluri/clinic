@@ -5,6 +5,7 @@ import { get, post, qc, errText, fmtTime } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, fmtDate, toast } from '../ui';
 import { openViewer } from '../viewer';
+import { LabValuesEditor, saveLabValues, type LabDraft } from '../labs';
 
 type Test = { id: string; name: string; expectedOn: string | null; receivedAt: string | null; reviewedAt: string | null; late: boolean; called: string | null; docs: any[] };
 type Order = { key: string; encounterId: string; orderNo: number; patient: { id: string; fullName: string; patientNo: string; phone: string | null }; doctor: string | null; tests: Test[]; state: 'pending' | 'partial' | 'ready' | 'reviewed' | 'doctor_call' | 'closed'; got: number;
@@ -32,10 +33,16 @@ async function prepare(file: File): Promise<{ title: string; mime: string; dataB
 function ReportDialog({ order, testId, onClose }: { order: Order; testId: string; onClose: () => void }) {
   const open = order.tests.filter((t) => !t.receivedAt);
   const [ids, setIds] = useState<string[]>([testId]); const [files, setFiles] = useState<File[]>([]); const [note, setNote] = useState('');
+  const [values, setValues] = useState<LabDraft[]>([]); const { cfg } = useOutletContext<any>();
   const input = useRef<HTMLInputElement>(null);
   const save = useMutation({
-    mutationFn: async () => { for (const f of files) { const x = await prepare(f); await post('/documents', { patientId: order.patient.id, encounterId: order.encounterId, recommendationIds: ids, kind: 'report', note: note.trim() || undefined, ...x }); } },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['documents'] }); toast(`Saved for ${ids.map((i) => order.tests.find((t) => t.id === i)?.name).join(', ')}`); onClose(); },
+    mutationFn: async () => {
+      let firstDoc: string | null = null;
+      for (const f of files) { const x = await prepare(f); const d: any = await post('/documents', { patientId: order.patient.id, encounterId: order.encounterId, recommendationIds: ids, kind: 'report', note: note.trim() || undefined, ...x }); firstDoc ??= d?.id ?? null; }
+      // the numbers the doctor will compare, typed from the page in hand; the pages are saved either way
+      return saveLabValues({ patientId: order.patient.id, encounterId: order.encounterId, recommendationId: ids[0], documentId: firstDoc, rows: values });
+    },
+    onSuccess: (vals) => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['documents'] }); toast(`Saved for ${ids.map((i) => order.tests.find((t) => t.id === i)?.name).join(', ')}${vals.length ? ` · ${vals.length} value${vals.length === 1 ? '' : 's'}` : ''}`); onClose(); },
     onError: (e: any) => toast(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF files can be added.' : e?.body?.code === 'TOO_LARGE' ? 'That file is too large (10 MB at most).' : errText(e), 'err'),
   });
   const blocker = !ids.length ? 'Pick which tests this is for' : !files.length ? 'Add at least one page' : '';
@@ -52,6 +59,7 @@ function ReportDialog({ order, testId, onClose }: { order: Order; testId: string
           <div className="mt-1.5 text-xs text-muted">On a phone this opens the camera. Keep the whole page in view, flat. JPG, PNG, WebP or PDF.</div>
         </div>
         <div><span className="label">Which tests is this for</span><div className="flex flex-wrap gap-1.5">{open.map((t) => <button key={t.id} type="button" aria-pressed={ids.includes(t.id)} className={`toggle-opt !py-2 ${ids.includes(t.id) ? 'on' : ''}`} onClick={() => setIds(ids.includes(t.id) ? ids.filter((x) => x !== t.id) : [...ids, t.id])}>{t.name}</button>)}</div></div>
+        <div><span className="label">Values <span className="font-normal text-muted">· optional, so the doctor can compare with earlier results</span></span><LabValuesEditor rows={values} onChange={setValues} params={cfg?.labParams ?? []} /></div>
         <div><label className="label" htmlFor="rep-note">Note (optional)</label><input id="rep-note" className="input" maxLength={200} placeholder="Anything the doctor should know" value={note} onChange={(e) => setNote(e.target.value)} /></div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !!blocker} onClick={() => save.mutate()}><Icon name="check" />{save.isPending ? 'Saving…' : 'Save · tell the doctor'}</button></div>
       </div>

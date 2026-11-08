@@ -39,7 +39,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
 
   return createPortal(
     <div className="fixed inset-0 z-40 anim-fade-in" style={{ background: 'rgba(28,27,25,.28)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <aside role="dialog" aria-label="Booking details" className="absolute inset-y-0 right-0 flex w-full max-w-[420px] flex-col gap-4 overflow-y-auto bg-[#FBFAF7] p-5 anim-slide-in sm:p-6" style={{ boxShadow: '-30px 0 60px -30px rgba(40,30,20,.45)' }} onClick={(e) => e.stopPropagation()}>
+      <aside role="dialog" aria-label="Booking details" className="absolute inset-y-0 right-0 flex w-full max-w-[420px] flex-col gap-4 overflow-y-auto bg-surface p-5 anim-slide-in sm:p-6" style={{ boxShadow: '-30px 0 60px -30px rgba(40,30,20,.45)' }} onClick={(e) => e.stopPropagation()}>
         {!a ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
             <StatusChip s={a.status} />
@@ -54,7 +54,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
               {a.history.noShows > 0 && <Chip tone={a.history.noShows >= warnAt ? 'rose' : 'amber'}>{a.history.noShows} no-show{a.history.noShows === 1 ? '' : 's'}</Chip>}
             </div>
           </div>
-          <div className="glass !rounded-[20px] p-4">
+          <div className="glass !rounded-[10px] p-4">
             <div className="flex items-baseline justify-between gap-2"><b>{dayLabel(a.window.day)} · {a.window.startTime}–{a.window.endTime}</b><span className="text-xs text-muted">arrive by {minus(a.window.startTime, arriveEarly)}</span></div>
             <div className="mt-1 flex items-center gap-2 text-sm text-muted">{a.service && <i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: a.service.color }} />}{a.service?.name ?? 'No visit type'} · {a.window.doctor ?? 'Any doctor'}</div>
             {a.series && <div className="mt-1 flex items-center gap-1.5 text-sm text-muted"><Icon name="repeat" className="h-3.5 w-3.5" />Repeat visit {a.series.index} of {a.series.total}</div>}

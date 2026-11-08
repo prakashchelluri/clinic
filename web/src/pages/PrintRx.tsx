@@ -4,16 +4,30 @@ import { useParams } from 'react-router';
 import { get } from '../api';
 import { joinList } from '../encounterDetail';
 
-/** A5 prescription. Fields follow the Telemedicine Practice Guidelines minimum: doctor, reg no, patient, date, items. */
+/** A5 prescription. Fields follow the Telemedicine Practice Guidelines minimum: doctor, reg no, patient, date, items.
+ *  What prints is the clinic's Print settings (sections on or off, language, out-of-range results only), not what shows on the pad. */
 export function PrintRx({ id: idProp, embed = false }: { id?: string; embed?: boolean } = {}) {
   const params = useParams(); const id = idProp ?? params.id;
   const q = useQuery({ queryKey: ['print', id], queryFn: () => get(`/encounters/${id}/print`) });
   useEffect(() => { if (!embed && q.data && new URLSearchParams(location.search).get('auto') !== '0') setTimeout(() => window.print(), 400); }, [q.data]);
   if (!q.data) return <div className="p-8">Loading…</div>;
   const e = q.data; const p = e.patient; const d = e.data ?? {};
+  const pr = e.printRx ?? { lang: 'te+en', outOfRangeOnly: true, vitals: ['weight_kg', 'bp'] };
+  const on = (k: string) => (e.pad ?? []).find((s: any) => s.key === k)?.print ?? true;
+  const tel = (s: string | null | undefined) => (s && pr.lang !== 'en' ? e.telugu?.[s] ?? null : null);
+  const line = (xs: (string | null | undefined)[]) => xs.filter(Boolean).join(' · ');
   const date = new Date(e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   const investigations = e.recommendations.filter((r: any) => r.kind === 'investigation');
   const plans = e.recommendations.filter((r: any) => r.kind !== 'investigation');
+  const syms: any[] = Array.isArray(d.complaint?.chief_complaint) ? d.complaint.chief_complaint.map((x: any) => (typeof x === 'string' ? { name: x } : x)) : d.complaint?.chief_complaint ? [{ name: String(d.complaint.chief_complaint) }] : [];
+  const dxs: any[] = Array.isArray(d.assessment?.diagnosis) ? d.assessment.diagnosis.map((x: any) => (typeof x === 'string' ? { name: x } : x)) : d.assessment?.diagnosis ? [{ name: String(d.assessment.diagnosis) }] : [];
+  const vit = e.visit?.details ?? {}; const vitals: [string, any][] = (pr.vitals ?? []).map((k: string) => [k, vit[k]] as [string, any]).filter(([, v]: [string, any]) => v !== undefined && v !== null && v !== '');
+  const vLabel: Record<string, [string, string]> = { weight_kg: ['Wt', ' kg'], height_cm: ['Ht', ' cm'], bp: ['BP', ''], pulse: ['Pulse', ''], temp_f: ['Temp', '°F'], spo2: ['SpO₂', '%'] };
+  const outOnly = d.labs?.printOutOfRangeOnly ?? pr.outOfRangeOnly;
+  const labs: any[] = (e.labs ?? []).filter((r: any) => !outOnly || ['low', 'high', 'abnormal'].includes(r.flag));
+  const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
+  const hist = p.history ?? {}; const histLine = ['conditions', 'drugAllergies', 'otherAllergies'].flatMap((k) => (hist[k] ?? []).map((x: any) => x.name)).join(', ');
+  const en = pr.lang !== 'te';
   return (
     <div className="mx-auto bg-white text-black p-8 print:p-6" style={{ width: '148mm', minHeight: '210mm', fontSize: '12px', fontFamily: 'Inter, sans-serif' }}>
       {!embed && <style>{`@page { size: A5; margin: 8mm } html, body { background: white !important; }`}</style>}
@@ -23,24 +37,29 @@ export function PrintRx({ id: idProp, embed = false }: { id?: string; embed?: bo
       </div>
       <div className="flex justify-between py-2 border-b border-black">
         <div><b>{p.fullName}</b> {p.ageYears ? `· ${p.ageYears} y` : ''} {p.sex ? `· ${p.sex}` : ''}<div>ID {p.patientNo} · {p.phone ?? ''} · {p.locality ?? ''}</div></div>
-        <div className="text-right"><div>{date}</div><div>OP {e.visit?.opNumber}</div>{e.visit?.details?.weight_kg && <div>Wt {e.visit.details.weight_kg} kg</div>}</div>
+        <div className="text-right"><div>{date}</div><div>OP {e.visit?.opNumber}</div>{on('vitals') && vitals.length > 0 && <div>{vitals.map(([k, v]: [string, any]) => `${vLabel[k]?.[0] ?? k} ${v}${vLabel[k]?.[1] ?? ''}`).join(' · ')}</div>}</div>
       </div>
       <div className="grid grid-cols-2 gap-x-4 py-2">
-        {joinList(d.complaint?.chief_complaint) && <div><b>C/o:</b> {joinList(d.complaint?.chief_complaint)} {d.complaint?.duration ? `· ${d.complaint.duration}` : ''} {d.complaint?.site?.length ? `· ${d.complaint.site.join(', ')}` : ''}</div>}
-        {joinList(d.assessment?.diagnosis) && <div><b>Dx:</b> {joinList(d.assessment?.diagnosis)} {d.assessment?.severity ? `(${d.assessment.severity})` : ''}</div>}
-        {d.exam?.findings && <div className="col-span-2"><b>O/e:</b> {d.exam.findings}</div>}
-        {p.allergies && <div className="col-span-2"><b>Allergies:</b> {p.allergies}</div>}
+        {on('symptoms') && syms.length > 0 && <div><b>C/o:</b> {syms.map((s) => line([s.name, s.since ? `since ${s.since}` : null, s.severity?.toLowerCase()])).join('; ')}{d.complaint?.site?.length ? ` · ${d.complaint.site.join(', ')}` : ''}</div>}
+        {on('diagnosis') && dxs.length > 0 && <div><b>Dx:</b> {dxs.map((x) => line([x.name, x.severity?.toLowerCase(), x.status?.toLowerCase()])).join('; ')}</div>}
+        {on('exam') && (d.exam?.findings || d.exam?.morphology?.length) && <div className="col-span-2"><b>O/e:</b> {line([(d.exam.morphology ?? []).join(', '), d.exam.distribution, d.exam.findings])}</div>}
+        {(p.allergies || (on('history') && histLine)) && <div className="col-span-2">{p.allergies && <><b>Allergies:</b> {p.allergies}</>}{on('history') && histLine && <> · <b>History:</b> {histLine}</>}</div>}
       </div>
-      <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞</div>
-      <table className="w-full mt-1"><tbody>
-        {e.prescription.map((i: any, k: number) => (
-          <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>
-            <td className="py-1"><b>{i.name}</b>{i.dose ? ` ${i.dose}` : ''}<div className="text-[11px]">{[i.frequency, i.route, i.durationDays ? `${i.durationDays} days` : null].filter(Boolean).join(' · ')}{i.instructions ? ` — ${i.instructions}` : ''}</div></td></tr>
-        ))}
-      </tbody></table>
-      {investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => r.notes).join(', ')}</div>}
-      {d.plan?.advice && <div className="mt-2"><b>Advice:</b> {d.plan.advice}</div>}
-      {plans.length > 0 && <div className="mt-2">{plans.map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}` : `Procedure advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
+      {on('medicines') && <>
+        <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞</div>
+        <table className="w-full mt-1"><tbody>
+          {e.prescription.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : null; const parts = [i.frequency, i.timing, days]; const teLine = line(parts.map(tel)); return (
+            <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>
+              <td className="py-1"><b>{i.name}</b>{i.dose ? ` ${i.dose}` : ''}{i.qty ? <span className="float-right text-[11px] text-gray-600">× {i.qty}</span> : null}
+                {en && <div className="text-[11px]">{line([...parts, i.route && i.route !== 'oral' ? i.route : null])}{i.instructions ? ` — ${i.instructions}` : ''}</div>}
+                {(teLine || tel(i.instructions)) && <div className="text-[11px] text-gray-800">{line([teLine, tel(i.instructions)])}</div>}</td></tr>); })}
+        </tbody></table>
+      </>}
+      {on('tests') && investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => r.notes).join(', ')}</div>}
+      {on('results') && labs.length > 0 && <div className="mt-2"><b>Results{outOnly ? ' (out of range)' : ''}:</b> {labs.map((r: any) => `${r.test} ${r.value}${r.unit ? ` ${r.unit}` : ''}${r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''}`).join(' · ')}</div>}
+      {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {en && advice.join(' · ')}{pr.lang !== 'en' && advice.some((a) => tel(a)) && <div className="text-gray-800">{advice.map((a) => tel(a) ?? (en ? null : a)).filter(Boolean).join(' · ')}</div>}</div>}
+      {on('next') && plans.length > 0 && <div className="mt-2">{plans.map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `Procedure advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
+      {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
       <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div><div className="border-t border-black pt-1 w-48 text-center">Signature</div></div>
       {!embed && <button className="no-print btn mt-6" onClick={() => window.print()}>Print</button>}
     </div>

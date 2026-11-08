@@ -17,8 +17,11 @@ const Payload = {
   advice: z.object({ lines: z.array(Str).min(1).max(20) }),
   tests: z.object({ tests: z.array(z.object({ name: Str, days: z.number().int().min(0).max(60).optional() })).min(1).max(20) }),
   procedure: z.object({ procedureId: z.string().uuid(), sittings: z.number().int().min(1).max(60).optional(), intervalDays: z.number().int().min(1).max(365).optional(), pricePaise: z.number().int().min(0).optional() }),
+  // per-section templates on the pad (the spec's Tsx / TDx), saved from the card header
+  symptom: z.object({ items: z.array(z.object({ name: Str, since: z.string().trim().max(40).optional(), severity: z.string().trim().max(20).optional(), note: z.string().trim().max(120).optional() })).min(1).max(20) }),
+  diagnosis: z.object({ items: z.array(z.object({ name: Str, severity: z.string().trim().max(20).optional(), status: z.string().trim().max(20).optional() })).min(1).max(10) }),
 } as const;
-const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure']);
+const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure', 'symptom', 'diagnosis']);
 const Linked = z.object({ complaints: z.array(Str).max(20).optional(), diagnoses: z.array(Str).max(20).optional() }).default({});
 const Body = z.object({ kind: Kind, name: z.string().trim().min(2).max(80), linked: Linked, mode: z.enum(['chip', 'auto']).default('chip'), payload: z.record(z.string(), z.any()) });
 const checkPayload = (kind: keyof typeof Payload, payload: unknown) => { const r = Payload[kind].safeParse(payload); if (!r.success) throw new HttpError(400, 'BAD_TEMPLATE', { errors: r.error.issues }); return r.data as Record<string, any>; };

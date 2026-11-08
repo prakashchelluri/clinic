@@ -8,10 +8,11 @@ import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
 import { PrivacyTab } from './Privacy';
 import { TemplatesTab } from './SettingsTemplates';
+import { PadTab } from './SettingsPad';
 import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
+type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
 type TabDef = [Tab, string, string, string];
 const GROUPS: [string, TabDef[]][] = [
   ['Practice', [
@@ -29,6 +30,7 @@ const GROUPS: [string, TabDef[]][] = [
     ['messages', 'Reminders and messages', 'message', 'WhatsApp confirmations and reminders'],
   ]],
   ['Clinical', [
+    ['pad', 'Rx pad', 'stetho', 'Sections, required fields, what prints'],
     ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses'],
     ['templates', 'Templates', 'list', 'Sets for medicines, complaints, advice, tests'],
     ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
@@ -77,6 +79,7 @@ export function Settings() {
           {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
           {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
           {tab === 'roles' && <><RolesTab onSaved={refresh} /><DiscountCap cfg={cfg} onSaved={refresh} /></>}
+          {tab === 'pad' && <PadTab onSaved={refresh} />}
           {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
           {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
           {tab === 'templates' && <TemplatesTab cfg={cfg} />}

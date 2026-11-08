@@ -60,7 +60,7 @@ export function Login() {
           <div className="label">Demo accounts · password demo1234</div>
           <div className="grid grid-cols-2 gap-2 stagger">
             {DEMO.map(([e, role, hint], i) => (
-              <button type="button" key={e} style={{ ['--i' as any]: i }} className="glass card-hover !rounded-[18px] px-3.5 py-3 text-left" onClick={() => submit(undefined, e)}>
+              <button type="button" key={e} style={{ ['--i' as any]: i }} className="glass card-hover !rounded-[10px] px-3.5 py-3 text-left" onClick={() => submit(undefined, e)}>
                 <div className="text-sm font-semibold">{role}</div><div className="text-[11.5px] text-muted mt-0.5">{hint}</div>
               </button>))}
           </div>

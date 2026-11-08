@@ -119,7 +119,7 @@ export function Today() {
   const gap = (i: number) => (i > 0 ? gaps.find((g) => g.at === rows[i - 1].end) : undefined);
 
   const nextCard = (
-    <section className="card-flat order-1 p-4 sm:p-5 anim-fade-up" style={{ background: 'rgba(255,255,255,.75)' }}>
+    <section className="card-flat order-1 p-4 anim-fade-up">
       {withYou ? <>
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted">With you now</div>
         <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{withYou.patient.fullName}</div>
@@ -141,7 +141,7 @@ export function Today() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3 anim-fade-up">
-        <div className="min-w-0"><h1 className="text-[26px] font-semibold leading-tight">{dateLabel}</h1>
+        <div className="min-w-0"><h1 className="text-[18px] font-semibold leading-tight">{dateLabel}</h1>
           <div className="text-sm text-muted"><b className="text-ink">{apptCount} patient{apptCount === 1 ? '' : 's'}{c.procedures?.length ? ` · ${c.procedures.length} procedure${c.procedures.length === 1 ? '' : 's'}` : ''}</b> · {seen} seen · {waiting.length} waiting · {toCome} still to come{lastEnd ? ` · you finish at ${lastEnd}` : doc ? ' · not working today' : ''}</div>
           {(late || breakNow || away) && <div className="mt-1 flex flex-wrap gap-1.5">{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}</div>}</div>
         {canChange && <div className="ml-auto hidden flex-wrap gap-2 sm:flex">

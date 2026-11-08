@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
-import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, type FormSchema } from '../db/schema.js';
+import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, type FormSchema } from '../db/schema.js';
+import { queueRxMessage } from './rxpad.js';
+import { padConfig, printSettings, te } from '../lib/pad.js';
+import { normHistory } from '../lib/history.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
@@ -9,7 +12,7 @@ import { HttpError } from '../lib/auth.js';
 import { expectedDays } from '../lib/tests.js';
 
 const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
-  frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish() }); // blank fields come back from the database as null
+  frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
   intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
@@ -87,18 +90,14 @@ export function clinicalRoutes(app: FastifyInstance) {
       }))).returning();
       if (body.complete) for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
     }
-    // Medical history is asked once and belongs to the patient, not to this visit: keep it on the patient record so every later visit starts from it.
-    const hist = body.data?.screen?.history;
-    if (hist && typeof hist === 'object') {
-      const clean = Object.fromEntries(Object.entries(hist as Record<string, any>).slice(0, 12).map(([k, v]) => [k.slice(0, 30), { yes: !!v?.yes, ...(typeof v?.note === 'string' && v.note.trim() ? { note: v.note.trim().slice(0, 120) } : {}) }]));
-      await tx.update(patient).set({ history: clean, ...(clean.allergy?.yes && clean.allergy.note ? { allergies: clean.allergy.note } : {}) }).where(and(eq(patient.id, enc.patientId), eq(patient.tenantId, t)));
-    }
+    // Medical history lives on the patient as six categories (PUT /patients/:id/history); nothing here writes it any more.
     const set: any = { data, provenance: { ...enc.provenance, lastEditedBy: req.ctx.userId, lastEditedRole: req.ctx.role } };
     if (body.complete) { set.status = 'completed'; set.completedAt = new Date().toISOString(); if (req.ctx.practitionerId) set.practitionerId = req.ctx.practitionerId; }
     await tx.update(encounter).set(set).where(eq(encounter.id, id));
     if (body.complete) {
       await tx.update(visit).set({ status: 'done' }).where(eq(visit.id, enc.visitId));
       await emit(tx, req.ctx, 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length });
+      await queueRxMessage(tx, req.ctx, id); // the prescription and any "how to apply" leaflets go out on WhatsApp
     } else if (isIntakeOnly(req)) {
       await tx.update(visit).set({ status: 'waiting' }).where(eq(visit.id, enc.visitId)); // intake done, back to doctor's queue
     }
@@ -152,7 +151,12 @@ export function clinicalRoutes(app: FastifyInstance) {
     const e = await getEncounter(tx, t, (req.params as any).id);
     const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
     const v = await tx.select().from(visit).where(eq(visit.id, e.visitId)).then((r) => r[0]);
-    return { ...e, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, visit: v };
+    // results typed for this consultation's tests (or linked to it), the clinic's print choices, and the Telugu for every standard phrase on the page
+    const recIds = e.recommendations.map((r: any) => r.id);
+    const labs = await tx.select().from(labResult).where(and(eq(labResult.tenantId, t), eq(labResult.patientId, e.patientId), recIds.length ? sql`(${labResult.encounterId} = ${e.id} or ${labResult.recommendationId} in ${recIds})` : eq(labResult.encounterId, e.id))).orderBy(labResult.test);
+    const phrases = [...e.prescription.flatMap((i: any) => [i.frequency, i.timing, i.instructions, i.durationDays ? `${i.durationDays} days` : null]), ...String(e.data?.plan?.advice ?? '').split('\n')].filter(Boolean) as string[];
+    const telugu = Object.fromEntries(phrases.map((p) => [p, te(p)]).filter(([, v]) => v));
+    return { ...e, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, visit: v, labs, printRx: printSettings(ten.settings), pad: padConfig(ten.settings), telugu };
   });
 
   /** Worklists: open follow-ups and procedure recommendations with contact log. */
@@ -199,5 +203,5 @@ async function getEncounter(tx: any, t: string, id: string) {
   const rx = await tx.select().from(prescriptionItem).where(eq(prescriptionItem.encounterId, id)).orderBy(asc(prescriptionItem.sortOrder));
   const recs = await tx.select().from(recommendation).where(eq(recommendation.encounterId, id));
   const v = await tx.select({ details: visit.details, opNumber: visit.opNumber }).from(visit).where(eq(visit.id, row.e.visitId)).then((r: any[]) => r[0]);
-  return { ...row.e, form: row.form, patient: row.p, doctor: row.doctor, prescription: rx, recommendations: recs, visit: v };
+  return { ...row.e, form: row.form, patient: { ...row.p, history: normHistory(row.p.history) }, doctor: row.doctor, prescription: rx, recommendations: recs, visit: v };
 }

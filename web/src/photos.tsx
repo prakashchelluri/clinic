@@ -35,7 +35,7 @@ export const usePhotos = (patientId: string) => useQuery({ queryKey: ['photos', 
 function ConsentStep({ patientId, name, onDone, dark = false }: { patientId: string; name: string; onDone: () => void; dark?: boolean }) {
   const m = useMutation({ mutationFn: () => post(`/patients/${patientId}/consents`, { key: 'photos', granted: true }), onSuccess: () => { refresh(patientId); toast('Photo consent recorded'); onDone(); }, onError: (e) => toast(errText(e), 'err') });
   return (
-    <div className={`mx-auto max-w-md space-y-4 rounded-[24px] p-6 ${dark ? 'bg-white/10 text-white' : 'card'}`}>
+    <div className={`mx-auto max-w-md space-y-4 rounded-[10px] p-6 ${dark ? 'bg-white/10 text-white' : 'card'}`}>
       <div className="text-lg font-semibold">Photo consent for {name}</div>
       <p className={`text-sm ${dark ? 'text-white/80' : 'text-ink-2'}`}>Ask the patient: “We take photos of the treated area to track how the treatment is working. They stay in your record at this clinic and are not shared. Is that all right?”</p>
       <p className={`text-xs ${dark ? 'text-white/60' : 'text-muted'}`}>Recording consent once covers all later photos. It can be withdrawn from the patient's record at any time.</p>
@@ -119,7 +119,7 @@ export function PhotoCapture({ patient, sitting, onClose }: { patient: { id: str
         </div>
         <div className="flex gap-1.5 px-4 pb-2" role="radiogroup" aria-label="View">{VIEWS.map(([k, l]) => <button key={k} role="radio" aria-checked={view === k} onClick={() => setView(k)} className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${view === k ? 'bg-white text-ink' : 'bg-white/15'}`}>{l}</button>)}</div>
 
-        <div className="relative mx-3 min-h-0 flex-1 overflow-hidden rounded-[24px] bg-black">
+        <div className="relative mx-3 min-h-0 flex-1 overflow-hidden rounded-[10px] bg-black">
           {!camErr && <video ref={video} playsInline muted className="absolute inset-0 h-full w-full object-cover" />}
           {last && <img src={fileUrl(last.id)} alt="" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-cover" style={{ opacity: camErr ? 0.9 : ghost / 100 }} />}
           {flash && <div className="absolute inset-0 bg-white/70" />}
@@ -235,10 +235,10 @@ export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b:
       </div>
       {mode === 'side' ? (
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
-          {[[a, 'Before'], [b, 'After']].map(([p, w]: any) => <div key={p.id} className="relative min-h-[40vh] overflow-hidden rounded-[22px] bg-black"><img src={fileUrl(p.id)} alt={`${w}: ${p.area ?? ''}`} className="absolute inset-0 h-full w-full object-contain" />{tag(p, w)}</div>)}
+          {[[a, 'Before'], [b, 'After']].map(([p, w]: any) => <div key={p.id} className="relative min-h-[40vh] overflow-hidden rounded-[10px] bg-black"><img src={fileUrl(p.id)} alt={`${w}: ${p.area ?? ''}`} className="absolute inset-0 h-full w-full object-contain" />{tag(p, w)}</div>)}
         </div>
       ) : (
-        <div className="relative min-h-0 flex-1 select-none overflow-hidden rounded-[22px] bg-black">
+        <div className="relative min-h-0 flex-1 select-none overflow-hidden rounded-[10px] bg-black">
           <img src={fileUrl(b.id)} alt="After" className="absolute inset-0 h-full w-full object-contain" />
           <img src={fileUrl(a.id)} alt="Before" className="absolute inset-0 h-full w-full object-contain" style={{ clipPath: `inset(0 ${100 - x}% 0 0)` }} />
           <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-white" style={{ left: `${x}%` }} />

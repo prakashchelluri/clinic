@@ -1,5 +1,5 @@
 import {
-  pgTable, uuid, text, integer, boolean, timestamp, date, jsonb, numeric, bigint, index, uniqueIndex,
+  pgTable, uuid, text, integer, boolean, timestamp, date, jsonb, numeric, bigint, real, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
@@ -83,7 +83,26 @@ export const medicine = pgTable('medicine', {
   defaults: jsonb('defaults').$type<{ dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string }>(),
   packSize: integer('pack_size').notNull().default(1),         // tablets in the strip the MRP is for; 1 for a tube or bottle
   reorderLevel: integer('reorder_level').notNull().default(0), // low stock below this many packs
+  leafletUrl: text('leaflet_url'),   // "how to apply" sheet sent on WhatsApp with the prescription
 });
+
+/** One measured value from a lab report, typed in when the report arrives. Text results (Negative) keep flag 'normal' or 'abnormal'. */
+export const labResult = pgTable('lab_result', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  encounterId: uuid('encounter_id'),
+  recommendationId: uuid('recommendation_id'),
+  documentId: uuid('document_id'),
+  test: text('test').notNull(),
+  value: text('value').notNull(),
+  num: real('num'),
+  unit: text('unit'),
+  low: real('low'), high: real('high'),
+  flag: text('flag'),                // low | normal | high | abnormal | null
+  takenOn: date('taken_on').notNull(),
+  note: text('note'),
+  createdBy: text('created_by'),
+}, (t) => [index('lab_patient').on(t.tenantId, t.patientId, t.test)]);
 
 export const procedureCatalog = pgTable('procedure_catalog', {
   ...tenantCols,
@@ -239,6 +258,8 @@ export const prescriptionItem = pgTable('prescription_item', {
   name: text('name').notNull(),
   dose: text('dose'), route: text('route'), frequency: text('frequency'),
   durationDays: integer('duration_days'), instructions: text('instructions'),
+  timing: text('timing'),            // before food | after food | empty stomach | at bedtime
+  qty: integer('qty'),               // units to dispense, worked out from dose × frequency × days, editable
   sortOrder: integer('sort_order').notNull().default(0),
   dispensed: boolean('dispensed').notNull().default(false), // something was issued at the counter
   issuedQty: integer('issued_qty').notNull().default(0),   // packs issued so far, across bills
@@ -622,7 +643,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'callback', 'quote', 'day_close', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message',
+  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message', 'lab_result',
 ];
 
 export type FormField = {

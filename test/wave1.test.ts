@@ -16,7 +16,7 @@ const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
-type Call = (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) => Promise<{ status: number; body: any }>;
+type Call = (method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', url: string, payload?: unknown) => Promise<{ status: number; body: any }>;
 async function as(email: string): Promise<Call> {
   const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'demo1234', tenant: 'sahitya' } });
   assert.equal(r.statusCode, 200, r.body);
@@ -78,12 +78,14 @@ test('medical history asked once is kept on the patient and shows at the next vi
   const p = (await owner('POST', '/patients', { fullName: 'History Patient', phone: '9000011111' })).body;
   const v = (await owner('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
   const e = (await assistant('POST', `/visits/${v.id}/encounter`)).body;
-  const screen = { answers: { 'Itching worse at night?': { a: 'yes' } }, history: { bp: { yes: true, note: 'Telmisartan 40 mg' }, diabetes: { yes: false }, allergy: { yes: true, note: 'Sulfa drugs' } } };
-  assert.equal((await assistant('PATCH', `/encounters/${e.id}`, { data: { screen } })).status, 200);
+  // history is six categories on the patient (the pad's chips), written by the junior doctor and read back normalised with the encounter
+  const h = { conditions: [{ name: 'BP', note: 'Telmisartan 40 mg' }], drugAllergies: [{ name: 'Sulfa drugs' }], none: ['family'] };
+  assert.equal((await assistant('PUT', `/patients/${p.id}/history`, h)).status, 200);
+  assert.equal((await assistant('PATCH', `/encounters/${e.id}`, { data: { screen: { answers: { 'Itching worse at night?': { a: 'yes' } } } } })).status, 200);
   const again = (await owner('GET', `/encounters/${e.id}`)).body;
-  assert.deepEqual(again.patient.history.bp, { yes: true, note: 'Telmisartan 40 mg' });
-  assert.equal(again.patient.history.diabetes.yes, false);
-  assert.equal(again.patient.allergies, 'Sulfa drugs', 'a stated allergy goes to the allergy field the prescription warns from');
+  assert.deepEqual(again.patient.history.conditions, [{ name: 'BP', note: 'Telmisartan 40 mg' }]);
+  assert.deepEqual(again.patient.history.none, ['family']);
+  assert.equal(again.patient.allergies, 'Sulfa drugs', 'a stated drug allergy goes to the allergy field the prescription warns from');
   assert.deepEqual(again.data.screen.answers['Itching worse at night?'], { a: 'yes' });
 });
 

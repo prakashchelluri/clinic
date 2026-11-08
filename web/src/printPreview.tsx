@@ -26,7 +26,7 @@ export function PrintHost() {
     <Modal title={d.title} onClose={() => set(null)} width="max-w-2xl">
       {d.html
         ? <iframe ref={frame} title={d.title} srcDoc={d.html} className="block w-full rounded-xl border border-line bg-white" style={{ height: 'min(68vh, 760px)' }} />
-        : <div className="overflow-auto rounded-xl border border-line bg-[#EFEDE8] p-3" style={{ maxHeight: 'min(68vh, 760px)' }}><div className="mx-auto w-fit shadow-md"><PrintRx id={d.rx} embed /></div></div>}
+        : <div className="overflow-auto rounded-xl border border-line bg-paper p-3" style={{ maxHeight: 'min(68vh, 760px)' }}><div className="mx-auto w-fit shadow-md"><PrintRx id={d.rx} embed /></div></div>}
       {d.rx && createPortal(<div id="print-area" className="hidden"><PrintRx id={d.rx} embed /></div>, document.body)}
       <div className="modal-foot"><button className="btn btn-ghost" onClick={() => set(null)}>Close</button><button className="btn btn-primary" onClick={print}><Icon name="print" />Print</button></div>
     </Modal>

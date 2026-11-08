@@ -24,25 +24,25 @@ export function Patients() {
   useEffect(() => { if (sp.get('new')) { setShowNew(true); setSp({}, { replace: true }); } }, [sp]);
   return (
     <div>
-      <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
-        {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
-        {canMsg && <button className="btn" onClick={() => setBulk(true)}><Icon name="message" className="h-4 w-4" />Message patients</button>}
-      </PageHeader>
-      {canMsg && view === 'sent' ? <SentMessages /> : <div className="grid grid-cols-1 lg:grid-cols-[360px_minmax(0,1fr)] gap-5">
-        <div className="space-y-3">
-          <div className="relative anim-fade-up"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10 !py-3" placeholder="Phone, name or patient ID" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <Section delay={60}>
-            {list.isLoading ? <Skeleton rows={5} /> : (list.data ?? []).length === 0 ? <Empty icon="user" title="No patients found" /> :
-              (list.data ?? []).map((p: any, i: number) => (
-                <button key={p.id} className={`row w-full text-left anim-fade-up ${p.id === id ? '!bg-clay-soft/60' : ''}`} style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }} onClick={() => nav(`/patients/${p.id}`, { viewTransition: true })}>
-                  <Avatar name={p.fullName} />
-                  <div className="min-w-0 flex-1"><div className="text-sm font-medium truncate">{p.fullName} <span className="text-xs text-muted font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span> <FlagChips flags={p.flags} /></div><div className="text-xs text-muted truncate">{p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div>
-                    <div className="text-xs text-muted truncate">{p.lastVisitAt ? `last visit ${fmtDate(p.lastVisitAt)}` : 'no visit yet'}{p.mainProblem ? ` · ${p.mainProblem}` : ''}</div></div>
-                  <Icon name="chevR" className={`h-4 w-4 ${p.id === id ? 'text-clay' : 'text-muted/50'}`} />
-                </button>))}
-          </Section>
-        </div>
-        <div>{id ? <Timeline key={id} id={id} /> : <div className="card border-dashed anim-fade-in"><Empty icon="users" title="Select a patient" hint="Their visits, prescriptions, plans, reports and payments appear here as one timeline." /></div>}</div>
+      {/* One record is a full page; the list is a full-width search. Nobody flips between patients the way they flip between mails. */}
+      {id ? <div className="mb-3 anim-fade-up"><button className="btn btn-ghost btn-sm -ml-2" onClick={() => nav('/patients', { viewTransition: true })}><Icon name="chevL" className="h-4 w-4" />All patients</button></div>
+        : <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
+          {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
+          {canMsg && <button className="btn" onClick={() => setBulk(true)}><Icon name="message" className="h-4 w-4" />Message patients</button>}
+        </PageHeader>}
+      {id ? <Timeline key={id} id={id} /> : canMsg && view === 'sent' ? <SentMessages /> : <div className="space-y-3">
+        <div className="relative anim-fade-up max-w-xl"><Icon name="search" className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-9" placeholder="Phone, name or patient ID" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <Section delay={60}>
+          {list.isLoading ? <Skeleton rows={5} /> : (list.data ?? []).length === 0 ? <Empty icon="user" title="No patients found" /> :
+            (list.data ?? []).map((p: any, i: number) => (
+              <button key={p.id} className="row w-full text-left anim-fade-up md:grid md:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" style={{ animationDelay: `${Math.min(i, 10) * 15}ms` }} onClick={() => nav(`/patients/${p.id}`, { viewTransition: true })}>
+                <Avatar name={p.fullName} size="h-8 w-8 text-[11px]" />
+                <div className="min-w-0 flex-1"><div className="text-[13px] font-semibold truncate">{p.fullName} <span className="text-xs text-muted font-normal">{p.ageYears ? `${p.ageYears} ` : ''}{p.sex ?? ''}</span> <FlagChips flags={p.flags} /></div></div>
+                <div className="text-xs text-muted truncate">{p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div>
+                <div className="text-xs text-muted truncate">{p.lastVisitAt ? `last visit ${fmtDate(p.lastVisitAt)}` : 'no visit yet'}{p.mainProblem ? ` · ${p.mainProblem}` : ''}</div>
+                <Icon name="chevR" className="h-4 w-4 text-muted/50" />
+              </button>))}
+        </Section>
       </div>}
       {bulk && <BroadcastDialog onClose={() => setBulk(false)} onSent={() => setView('sent')} />}
       {showNew && <NewPatient onClose={(p) => { setShowNew(false); if (p) { qc.invalidateQueries({ queryKey: ['patients'] }); nav(`/patients/${p.id}`); } }} />}
@@ -72,9 +72,9 @@ function Timeline({ id }: { id: string }) {
     <div className="space-y-4">
       <div className="card anim-fade-up">
         <div className="flex items-start gap-4">
-          <Avatar name={p.fullName} size="h-14 w-14 text-lg" />
+          <Avatar name={p.fullName} size="h-12 w-12 text-[15px]" />
           <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-medium leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span> <span className="inline-flex flex-wrap gap-1.5 align-middle"><FlagChips flags={p.flags} /></span></h2>
+            <h2 className="text-[18px] font-semibold leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span> <span className="inline-flex flex-wrap gap-1.5 align-middle"><FlagChips flags={p.flags} /></span></h2>
             <CarefulBanner flags={p.flags} />
             {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1.5 text-sm text-ink-2">{guardian && <>Guardian: <button className="underline font-medium" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
             <div className="text-sm text-muted mt-1 flex items-center gap-2 flex-wrap"><span>{p.patientNo}</span><span>·</span><span>{p.phone ?? 'no phone'}</span>{p.locality && <><span>·</span><span>{p.locality}</span></>}{p.referralCard && <Chip tone="sky">Special card</Chip>}</div>
@@ -101,20 +101,11 @@ function Timeline({ id }: { id: string }) {
       </div>
 
       <div className="no-print"><Segmented<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'> value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'visits', label: 'Visits' }, { value: 'procedures', label: 'Procedures' }, { value: 'payments', label: 'Payments' }, { value: 'reports', label: 'Reports' }, { value: 'missed', label: 'Missed', count: (t.data.missed ?? []).length || undefined }]} /></div>
+
+      {/* the story on the left, what is open on the right */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] xl:items-start">
+      <div className="min-w-0 space-y-4">
       {show() && <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />}
-
-      {show('procedures', 'reports') && <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {show('procedures') && <Section title="Open plans" delay={60}>
-          {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
-            openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
-        </Section>}
-        {show('reports') && <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>} delay={90}
-          aside={can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}>
-          <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos above.</div> : <DocList docs={reports} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
-        </Section>}
-        {show() && can(perms, 'appointment.read') && <PatientMessages id={id} />}
-      </div>}
-
       {show('visits') && <div className="relative pl-6">
         <div className="absolute left-[9px] top-2 bottom-2 w-px bg-line" />
         {encounters.length === 0 && <div className="text-sm text-muted py-2">No consultations yet.</div>}
@@ -130,6 +121,21 @@ function Timeline({ id }: { id: string }) {
           </div>
         ))}
       </div>}
+      </div>
+
+      {show('procedures', 'reports') && <div className="min-w-0 space-y-4">
+        {show('procedures') && <Section title="Open plans" delay={60}>
+          {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
+            openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{r.kind === 'followup' ? 'Follow-up review' : r.kind === 'investigation' ? `Test: ${r.notes}` : 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.notes && r.kind === 'procedure' ? ` · ${r.notes}` : ''}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
+        </Section>}
+        {show('reports') && <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>} delay={90}
+          aside={can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}>
+          <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos above.</div> : <DocList docs={reports} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
+        </Section>}
+        {show() && can(perms, 'appointment.read') && <PatientMessages id={id} />}
+      </div>}
+
+      </div>
       {show('procedures') && (t.data.sessions ?? []).length > 0 && <Section title="Sittings" delay={120}>{t.data.sessions.map((s: any) => <div key={s.id} className="row"><div className="min-w-0 flex-1 text-sm"><b>{s.procedure ?? 'Procedure'}</b> · sitting {s.sittingNo}<div className="text-xs text-muted">{fmtDate(s.day)} {s.startTime}{s.doctor ? ` · ${s.doctor}` : ''}</div></div><Chip tone={s.state === 'completed' ? 'sage' : s.state === 'missed' ? 'rose' : ''}>{s.state}</Chip></div>)}</Section>}
       {show('missed') && <Section title={<>Missed <span className="text-muted font-normal">· {(t.data.missed ?? []).length}</span></>} delay={120}>{(t.data.missed ?? []).length === 0 ? <div className="p-4 text-sm text-muted">Nothing missed.</div> : t.data.missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
       {show('procedures', 'payments') && <CoursesCard patientId={id} patientName={p.fullName} />}

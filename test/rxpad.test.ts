@@ -1,0 +1,42 @@
+// The Rx pad's pure parts: lab flags, the history migration, the pad defaults and the Telugu line.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { findParam, flagOf } from '../src/lib/labs.js';
+import { normHistory, cleanHistory, allergyText } from '../src/lib/history.js';
+import { padConfig, printSettings, te } from '../src/lib/pad.js';
+
+test('a typed value is flagged against the clinic list', () => {
+  const hb = findParam('hb')!; assert.equal(hb.name, 'Haemoglobin', 'aliases resolve');
+  assert.equal(flagOf('11.2', hb), 'low'); assert.equal(flagOf('14', hb), 'normal'); assert.equal(flagOf('18.5', hb), 'high');
+  assert.equal(flagOf('7,800', findParam('Total WBC')), 'normal', 'thousands separators are fine');
+  assert.equal(flagOf('Negative', findParam('KOH mount')), 'normal'); assert.equal(flagOf('Positive', findParam('KOH mount')), 'abnormal');
+  assert.equal(flagOf('Non reactive', findParam('VDRL')), 'normal');
+  assert.equal(flagOf('see report', findParam('Skin biopsy')), null, 'free text has no flag');
+  assert.equal(flagOf('12', undefined), null, 'an unlisted test has no range');
+});
+
+test('old yes/no history becomes the six categories, once', () => {
+  const h = normHistory({ diabetes: { yes: true, note: 'Metformin' }, bp: { yes: false }, allergy: { yes: true, note: 'sulfa' }, other: { yes: true, note: 'Asthma' } });
+  assert.deepEqual(h.conditions, [{ name: 'Diabetes', note: 'Metformin' }, { name: 'Asthma' }]);
+  assert.deepEqual(h.drugAllergies, [{ name: 'sulfa' }]);
+  assert.equal(normHistory(h), h, 'already migrated: returned as is');
+  assert.equal(allergyText(h), 'sulfa');
+  const c = cleanHistory({ conditions: [{ name: ' BP ', note: 'Telmisartan' }, { name: '' }], none: ['family', 'conditions', 'bogus'], heightCm: 168 });
+  assert.deepEqual(c, { conditions: [{ name: 'BP', note: 'Telmisartan' }], none: ['family'], heightCm: 168 }, 'blank names, a none that has items, and unknown keys are dropped');
+});
+
+test('pad defaults fill what the clinic has not configured', () => {
+  const d = padConfig({});
+  assert.equal(d.find((s) => s.key === 'diagnosis')!.required, true);
+  assert.equal(d.find((s) => s.key === 'photos')!.show, false);
+  assert.equal(d.find((s) => s.key === 'notes')!.print, false);
+  const saved = padConfig({ pad: { sections: [{ key: 'medicines', show: true, required: false, print: true }, { key: 'diagnosis', show: false, required: false, print: true }, { key: 'junk', show: true, required: false, print: true }] } });
+  assert.equal(saved[0].key, 'medicines', 'saved order first'); assert.equal(saved[1].key, 'diagnosis'); assert.equal(saved[1].show, true, 'diagnosis cannot be hidden');
+  assert.ok(!saved.some((s) => s.key === 'junk')); assert.equal(saved.length, padConfig({}).length);
+  assert.equal(printSettings({}).lang, 'te+en'); assert.equal(printSettings({ print: { rx: { lang: 'en' } } }).lang, 'en');
+});
+
+test('standard phrases get a Telugu line, free text does not', () => {
+  assert.equal(te('1-0-1'), 'ఉదయం 1, రాత్రి 1'); assert.equal(te('After food'), 'భోజనం తర్వాత'); assert.equal(te('14 days'), '14 రోజులు');
+  assert.equal(te('neck down, repeat day 8'), null); assert.equal(te(''), null);
+});

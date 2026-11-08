@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, patch, qc, ApiError } from './api';
@@ -53,36 +53,28 @@ export function Home() {
   return <Navigate to={homeFor(c, me.data?.tenantKind === 'platform')} replace />;
 }
 
-/** Left navigation. The dark pill slides to the active item, as the old top bar did. */
+/** Left navigation: a quiet rail with counts; the active item is one filled row. */
 function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [pill, setPill] = useState<{ top: number; height: number } | null>(null);
-  useLayoutEffect(() => {
-    const measure = () => { const el = box.current?.querySelector<HTMLElement>('a.on'); setPill(el ? { top: el.offsetTop, height: el.offsetHeight } : null); };
-    measure(); document.fonts?.ready.then(measure); window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [active?.to, items.length]);
   const link = (n: NavItem) => (
-    <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} className={`relative z-[1] flex items-center gap-3 rounded-full px-4 py-2.5 text-[14.5px] font-medium transition-colors duration-300 ${active?.to === n.to ? 'on text-white' : 'text-ink-2 hover:text-ink hover:bg-white/50'}`}>
-      <Icon name={n.icon} className="h-[18px] w-[18px]" /><span className="flex-1">{n.label}</span>
-      {n.to === '/bookings' && requests > 0 && <span className="rounded-full bg-clay px-2 text-[11px] font-bold leading-5 text-white" aria-label={`${requests} online requests`}>{requests}</span>}
+    <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
+      <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
+      {n.to === '/bookings' && requests > 0 && <span className="chip chip-clay" aria-label={`${requests} online requests`}>{requests}</span>}
     </Link>
   );
   const main = items.filter((n) => !n.group); const clinicItems = items.filter((n) => n.group === 'clinic');
   return (
-    <div className="flex h-full flex-col px-3.5 py-5">
-      <Link to="/" onClick={onNavigate} className="flex items-center gap-3 px-2 pb-5"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-ink text-lg font-bold text-white">{clinic.slice(0, 1)}</span><span className="text-[15px] font-semibold leading-tight line-clamp-2">{clinic}</span></Link>
-      <nav ref={box} className="relative flex flex-col gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
-        {pill && <span className="absolute left-0 right-0 rounded-full bg-ink" style={{ top: pill.top, height: pill.height, transition: 'top .45s var(--ease), height .45s var(--ease)' }} />}
+    <div className="flex h-full flex-col px-2.5 py-3">
+      <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 px-2 pb-3 pt-1"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
+      <nav className="flex flex-col gap-px overflow-y-auto no-scrollbar" aria-label="Sections">
         {main.map(link)}
-        {clinicItems.length > 0 && <div className="px-4 pb-1 pt-4 text-[10.5px] font-bold uppercase tracking-[.1em] text-muted">Clinic</div>}
+        {clinicItems.length > 0 && <div className="px-2.5 pb-1 pt-3.5 text-[11px] font-semibold uppercase tracking-[.06em] text-muted">Clinic</div>}
         {clinicItems.map(link)}
       </nav>
-      <Link to="/help" onClick={onNavigate} className="mt-auto flex items-center gap-3 rounded-full px-4 py-2.5 text-[14.5px] font-medium text-ink-2 hover:bg-white/60"><Icon name="help" className="h-[18px] w-[18px]" /><span>Help</span></Link>
-      <div className="mt-2 flex items-center gap-2.5 border-t border-ink/8 px-2 pt-4">
-        <Avatar name={me.name} size="h-9 w-9 text-xs" />
-        <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-semibold">{me.name}</div><div className="truncate text-[11.5px] capitalize text-muted">{roles.join(' · ')}</div></div>
-        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon"><Icon name="logout" /></button>
+      <Link to="/help" onClick={onNavigate} className="nav-item mt-auto"><Icon name="help" className="h-4 w-4" /><span>Help</span></Link>
+      <div className="mt-1.5 flex items-center gap-2.5 border-t border-line px-2 pt-3">
+        <Avatar name={me.name} size="h-7 w-7 text-[11px]" />
+        <div className="min-w-0 flex-1"><div className="truncate text-[12.5px] font-semibold">{me.name}</div><div className="truncate text-[11px] capitalize text-muted">{roles.join(' · ')}</div></div>
+        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon !h-8 !w-8"><Icon name="logout" /></button>
       </div>
     </div>
   );
@@ -144,25 +136,25 @@ export function App() {
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[244px] border-r border-white/80 bg-white/40 backdrop-blur-md md:block" aria-label="Main">
+      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[224px] border-r border-line bg-[#FAFAFB] md:block" aria-label="Main">
         <Sidebar {...side} />
       </aside>
       {drawer && (
-        <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(23,25,26,.34)', backdropFilter: 'blur(4px)' }} onClick={() => setDrawer(false)}>
-          <aside className="h-full w-[272px] max-w-[85vw] bg-[#F4F1EA] anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
+        <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
+          <aside className="h-full w-[264px] max-w-[85vw] bg-[#FAFAFB] anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
         </div>
       )}
 
-      <div className={`md:pl-[244px] ${fit ? 'md:h-full' : ''}`}>
-        <div className={`relative mx-auto max-w-[1440px] px-4 pt-4 md:px-8 md:pt-6 ${fit ? 'pb-16 md:h-full md:flex md:flex-col md:pb-5' : 'pb-16'}`}>
-          <header className="no-print mb-5 flex items-center gap-2.5 md:absolute md:right-8 md:top-6 md:z-30 md:mb-0 md:gap-2">
-            <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-            <span className="truncate text-[17px] font-semibold md:hidden">{clinic}</span>
-            <span className="ml-auto" />
-            <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-ghost btn-icon"><Icon name="help" /></Link>
-            {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (⌘K)" className="btn btn-ghost btn-icon"><Icon name="search" /></button>}
+      <div className={`md:pl-[224px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+        <header className="no-print sticky top-0 z-30 flex h-12 shrink-0 items-center gap-1.5 border-b border-line bg-surface px-3 md:px-5">
+          <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
+          <span className="truncate text-[14px] font-semibold">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : clinic)}</span>
+          <span className="ml-auto" />
+          {!platform && <button onClick={() => setPalette(true)} className="mr-1.5 hidden h-8 w-[260px] items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-[12.5px] text-muted hover:border-muted lg:flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-3.5 w-3.5" /><span className="flex-1 text-left">Patient, phone or ID</span><span className="kbd">Ctrl K</span></button>}
+          {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
+          <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-ghost btn-icon"><Icon name="help" /></Link>
             {!platform && c('appointment.read') && <div className="relative">
-              <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-ghost btn-icon"><Icon name="bell" />{requests + plansNew > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-clay px-1 text-[10.5px] font-bold text-white anim-scale-in">{requests + plansNew}</span>}</button>
+              <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-ghost btn-icon"><Icon name="bell" />{requests + plansNew > 0 && <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-clay px-1 text-[10px] font-bold text-white anim-scale-in">{requests + plansNew}</span>}</button>
               {bell && <><div className="fixed inset-0 z-30" onClick={() => setBell(false)} /><div className="menu anim-menu z-40 !w-[270px]" role="menu">
                 {requests + plansNew === 0 && <div className="px-3 py-2.5 text-sm text-muted">Nothing new.</div>}
                 {requests > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/bookings?tab=requests'); }}><Icon name="inbox" className="h-4 w-4" />{requests} online booking request{requests === 1 ? '' : 's'}</button>}
@@ -170,16 +162,17 @@ export function App() {
               </div></>}</div>}
             {!platform && (() => { const acts = createActions(c, loc.pathname); return acts.length > 0 && (
               <div className="relative shrink-0">
-                <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-accent btn-icon !h-11 !w-11 !rounded-full"><Icon name="plus" className={`h-5 w-5 transition-transform duration-200 ${plus ? 'rotate-45' : ''}`} /></button>
+                <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-primary !min-h-8 !px-2.5 sm:!px-3"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
                 {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
                   <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
               </div>); })()}
             <div className="relative md:hidden">
-              <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-10 w-10 text-sm" /></button>
+              <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-8 w-8 text-xs" /></button>
               {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
             </div>
-          </header>
+        </header>
 
+        <div className={`mx-auto w-full max-w-[1440px] px-4 py-4 md:px-5 ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>

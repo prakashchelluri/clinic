@@ -5,6 +5,9 @@ import { db, withTenant } from '../db/index.js';
 import { cleanIp, securityOf, ipExempt, ipAllowed, writeAudit, throttleOnce } from '../lib/audit.js';
 import { tenant, appUser, practitioner, feeCategory, formDefinition, medicine, procedureCatalog, branch, specialty, room, service } from '../db/schema.js';
 import { whatsappReady } from '../lib/messaging.js';
+import { padConfig, printSettings } from '../lib/pad.js';
+import { LAB_PARAMS } from '../lib/labs.js';
+import { HISTORY_CATEGORIES } from '../lib/history.js';
 import { verifyPassword, HttpError } from '../lib/auth.js';
 import { route } from '../lib/route.js';
 
@@ -66,7 +69,8 @@ export function identityRoutes(app: FastifyInstance) {
     // The clinic's allowed addresses and privacy rules are for the owner only.
     const settings = req.ctx.roles.includes('owner') ? ten.settings : { ...ten.settings, security: undefined };
     return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings },
-      branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms, services, whatsappReady: whatsappReady() };
+      branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms, services, whatsappReady: whatsappReady(),
+      pad: padConfig(ten.settings), printRx: printSettings(ten.settings), labParams: LAB_PARAMS, historyCategories: HISTORY_CATEGORIES };
   });
 
   route(app, 'get', '/users', 'user.read', async (req, tx) =>

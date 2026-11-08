@@ -57,13 +57,14 @@ export const Chip = ({ tone = '', children, className = '' }: { tone?: '' | 'cla
 export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?: string }) {
   const initials = name.split(/\s+/).filter((s) => /^\p{L}/u.test(s)).slice(0, 2).map((s) => s[0]?.toUpperCase()).join('');
   const hue = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-  return <div className={`${size} shrink-0 rounded-full grid place-items-center font-semibold text-white`} style={{ background: `linear-gradient(135deg, hsl(${hue} 32% 48%), hsl(${(hue + 30) % 360} 36% 38%))` }}>{initials}</div>;
+  // flat: a pale tint per person with dark text, so avatars read as labels, not decorations
+  return <div className={`${size} shrink-0 rounded-full grid place-items-center font-semibold`} style={{ background: `hsl(${hue} 30% 92%)`, color: `hsl(${hue} 30% 28%)` }}>{initials}</div>;
 }
 
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="anim-fade-up flex flex-wrap items-end gap-3 mb-5">
-      <div className="mr-auto"><h1 className="text-[30px] leading-[1.05] font-semibold text-ink">{title}</h1>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div>
+    <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
+      <div className="mr-auto"><h1 className="text-[18px] leading-tight font-semibold text-ink">{title}</h1>{subtitle && <div className="text-[13px] text-muted mt-0.5">{subtitle}</div>}</div>
       {children}
     </div>
   );
@@ -72,7 +73,7 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 export function Section({ title, aside, children, className = '', delay = 0 }: { title?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string; delay?: number }) {
   return (
     <section className={`card-flat anim-fade-up overflow-hidden ${className}`} style={{ animationDelay: `${delay}ms` }}>
-      {title && <div className="flex items-center gap-2 px-5 py-4 border-b border-ink/8"><div className="text-[15px] font-semibold text-ink">{title}</div><div className="ml-auto flex items-center gap-2">{aside}</div></div>}
+      {title && <div className="flex items-center gap-2 px-4 py-2.5 border-b border-line"><div className="text-[13.5px] font-semibold text-ink">{title}</div><div className="ml-auto flex items-center gap-2">{aside}</div></div>}
       {children}
     </section>
   );
@@ -81,7 +82,7 @@ export function Section({ title, aside, children, className = '', delay = 0 }: {
 export function Empty({ icon = 'spark', title, hint }: { icon?: string; title: string; hint?: string }) {
   return (
     <div className="anim-fade-in flex flex-col items-center justify-center text-center py-10 px-4">
-      <div className="h-10 w-10 rounded-full bg-paper-2 grid place-items-center text-muted mb-3"><Icon name={icon} className="h-5 w-5" /></div>
+      <div className="h-9 w-9 rounded-[10px] bg-paper-2 grid place-items-center text-muted mb-3"><Icon name={icon} className="h-4.5 w-4.5" /></div>
       <div className="text-sm font-medium text-ink-2">{title}</div>{hint && <div className="text-xs text-muted mt-1 max-w-xs">{hint}</div>}
     </div>
   );
@@ -94,8 +95,8 @@ export const Skeleton = ({ rows = 3 }: { rows?: number }) => (
 export function Stat({ label, value, sub, tone = '', delay = 0 }: { label: string; value: ReactNode; sub?: ReactNode; tone?: '' | 'clay' | 'sage'; delay?: number }) {
   return (
     <div className="card anim-fade-up" style={{ animationDelay: `${delay}ms` }}>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">{label}</div>
-      <div className={`serif text-[30px] leading-none mt-2 ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : 'text-ink'}`}>{value}</div>
+      <div className="text-[12px] font-medium text-muted">{label}</div>
+      <div className={`serif text-[24px] leading-none mt-1.5 ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : 'text-ink'}`}>{value}</div>
       {sub && <div className="text-xs text-muted mt-2">{sub}</div>}
     </div>
   );
@@ -233,7 +234,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
     <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby={id} onClick={onClose}>
       <div ref={panel} tabIndex={-1} className={`modal-panel ${SIZE[width] ?? 'sm:max-w-[720px]'}`} onClick={(e) => e.stopPropagation()}>
         <span className="modal-grab" aria-hidden />
-        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-xl font-medium">{title}</h2>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
+        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[16px] font-semibold">{title}</h2>{subtitle && <div className="text-sm text-muted mt-0.5">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
         <div className="modal-body">{children}</div>
       </div>
     </div>,
@@ -272,14 +273,14 @@ export function DialogHost() {
       <div ref={panel} tabIndex={-1} className="modal-panel sm:max-w-[420px]" onClick={(e) => e.stopPropagation()}>
         <span className="modal-grab" aria-hidden />
         <div className="modal-body !pt-6">
-          {!p.field && <span className={`mb-3 grid h-11 w-11 place-items-center rounded-full text-lg font-bold ${danger ? 'bg-rose-soft text-rose' : 'bg-amber-soft text-amber'}`} aria-hidden>!</span>}
-          <h2 id={id} className="text-xl font-semibold leading-snug">{p.title}</h2>
-          {p.body && <div className="mt-2 text-[14.5px] leading-snug text-ink-2">{p.body}</div>}
+          {!p.field && <span className={`mb-3 grid h-9 w-9 place-items-center rounded-[10px] text-base font-bold ${danger ? 'bg-rose-soft text-rose' : 'bg-amber-soft text-amber'}`} aria-hidden>!</span>}
+          <h2 id={id} className="text-[16px] font-semibold leading-snug">{p.title}</h2>
+          {p.body && <div className="mt-2 text-[13.5px] leading-snug text-ink-2">{p.body}</div>}
           {p.field && <div className="mt-4"><label className="label" htmlFor={id + 'f'}>{p.field.label}{p.field.required ? '' : ' (optional)'}</label>
             <input id={id + 'f'} data-autofocus className="input" maxLength={p.field.maxLength ?? 200} placeholder={p.field.placeholder} value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !bad) done({ value: val.trim() }); }} /></div>}
           <div className="modal-foot">
             <button className="btn" onClick={() => done(null)}>{p.cancelLabel ?? 'Cancel'}</button>
-            <button data-autofocus={p.field ? undefined : ''} className={danger ? 'btn !border-rose !bg-rose !text-white' : 'btn btn-primary'} disabled={bad} onClick={() => done({ value: val.trim() })}>{p.confirmLabel ?? 'OK'}</button>
+            <button data-autofocus={p.field ? undefined : ''} className={danger ? 'btn !border-[#F0B8B3] !text-rose' : 'btn btn-primary'} disabled={bad} onClick={() => done({ value: val.trim() })}>{p.confirmLabel ?? 'OK'}</button>
           </div>
         </div>
       </div>
@@ -303,11 +304,11 @@ export function ToastHost() {
   return (
     <>
     <DialogHost />
-    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
+    <div className="fixed bottom-5 left-5 z-50 flex flex-col items-start gap-2 pointer-events-none">
       {list.map((t) => (
-        <div key={t.id} className={`anim-scale-in pointer-events-auto rounded-full px-4 py-2 text-sm font-medium shadow-lg flex items-center gap-2 ${t.tone === 'err' ? 'bg-rose text-white' : t.tone === 'info' ? 'bg-ink text-paper' : 'bg-sage text-white'}`}>
-          <Icon name={t.tone === 'err' ? 'x' : 'check'} className="h-3.5 w-3.5" />{t.msg}
-          {t.action && <button className="-my-1 ml-1 rounded-full bg-white/20 px-3 py-1 text-xs font-bold underline-offset-2 hover:bg-white/30" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action.label}</button>}
+        <div key={t.id} className="anim-scale-in pointer-events-auto rounded-[10px] bg-ink px-3.5 py-2.5 text-[13px] font-medium text-white shadow-lg flex items-center gap-2.5">
+          <Icon name={t.tone === 'err' ? 'x' : 'check'} className={`h-3.5 w-3.5 ${t.tone === 'err' ? 'text-[#FCA5A5]' : 'text-[#86EFAC]'}`} />{t.msg}
+          {t.action && <button className="-my-1 ml-1 rounded-md border border-white/30 px-2.5 py-1 text-xs font-semibold hover:bg-white/10" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action.label}</button>}
         </div>
       ))}
     </div>

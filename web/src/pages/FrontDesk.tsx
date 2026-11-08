@@ -136,7 +136,7 @@ export function FrontDesk() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
-        <div className="mr-auto"><h1 className="text-[30px] leading-tight font-semibold">Front desk</h1>
+        <div className="mr-auto"><h1 className="text-[18px] leading-tight font-semibold">Front desk</h1>
           <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
         {tab === 'history'
           ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab('waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
@@ -153,7 +153,7 @@ export function FrontDesk() {
           <FilterCard i={3} label="Completed" value={completed.length + noShows.length} sub={`${completed.filter((v) => v.status === 'done').length} seen`} on={tab === 'completed'} onClick={() => setTab('completed')} />
           <FilterCard i={4} label="All" value={visits.length + scheduled.length + noShows.length} sub="everyone today" on={tab === 'all'} onClick={() => setTab('all')} />
           {canDesk && <FilterCard i={5} label="Needs you" value={needsCount} sub={dueTotal ? `${money(dueTotal)} due` : needsCount ? 'late arrivals' : 'all clear'} tone="rose" on={tab === 'needs'} onClick={() => setTab('needs')} />}
-          {(can(perms, 'report.daily') || can(perms, 'finance.read')) && <div style={{ ['--i' as any]: 6 }} className="rounded-[22px] border border-white/80 bg-white/35 px-4 py-3.5"><div className="text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Collected</div><div className="mt-1 text-[28px] font-semibold leading-none tracking-tight text-sage"><Num value={collected} format={money} /></div><div className="mt-1.5 text-xs text-muted truncate">{(d.payments ?? []).length ? d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : 'nothing yet'}</div></div>}
+          {(can(perms, 'report.daily') || can(perms, 'finance.read')) && <div style={{ ['--i' as any]: 6 }} className="rounded-[10px] border border-white/80 bg-white/35 px-4 py-3.5"><div className="text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Collected</div><div className="mt-1 text-[24px] font-semibold leading-none tracking-tight text-sage"><Num value={collected} format={money} /></div><div className="mt-1.5 text-xs text-muted truncate">{(d.payments ?? []).length ? d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : 'nothing yet'}</div></div>}
         </div>
 
         {tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'awaiting' ? <AwaitingList visits={awaiting} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
@@ -176,11 +176,11 @@ function FilterCard({ i, label, value, sub, tone, on, onClick }: { i: number; la
   const alert = tone === 'rose' && value > 0;
   return (
     <button type="button" onClick={onClick} aria-pressed={on}
-      className={`rounded-[22px] border px-4 py-3.5 text-left transition-[background-color,box-shadow,transform,border-color,color] duration-300 ease-[var(--ease)] hover:-translate-y-0.5 ${on ? 'border-ink bg-ink text-white' : alert ? 'border-rose/25 bg-rose-soft text-rose' : 'border-white/80 bg-white/55 hover:bg-white'}`}
+      className={`rounded-[10px] border px-4 py-3.5 text-left transition-[background-color,box-shadow,transform,border-color,color] duration-300 ease-[var(--ease)] ${on ? 'border-ink bg-surface shadow-[inset_0_0_0_1px_var(--color-ink)]' : alert ? 'border-rose/25 bg-rose-soft text-rose' : 'border-white/80 bg-white/55 hover:bg-white'}`}
       style={on ? { boxShadow: '0 22px 40px -22px rgba(23,25,26,.7)', ['--i' as any]: i } : { boxShadow: 'var(--shadow-soft)', ['--i' as any]: i }}>
-      <div className={`text-[11px] font-bold uppercase tracking-[0.09em] ${on ? 'text-white/70' : alert ? 'text-rose' : 'text-muted'}`}>{label}</div>
-      <div className={`mt-1 text-[28px] font-semibold leading-none tracking-tight ${!on && tone === 'clay' && value > 0 ? 'text-clay' : ''}`}><Num value={value} /></div>
-      {sub && <div className={`mt-1.5 truncate text-xs ${on ? 'text-white/70' : alert ? 'text-rose/80' : 'text-muted'}`}>{sub}</div>}
+      <div className={`text-[11px] font-bold uppercase tracking-[0.09em] ${on ? 'text-ink-2' : alert ? 'text-rose' : 'text-muted'}`}>{label}</div>
+      <div className={`mt-1 text-[24px] font-semibold leading-none tracking-tight ${!on && tone === 'clay' && value > 0 ? 'text-clay' : ''}`}><Num value={value} /></div>
+      {sub && <div className={`mt-1.5 truncate text-xs ${on ? 'text-ink-2' : alert ? 'text-rose/80' : 'text-muted'}`}>{sub}</div>}
     </button>
   );
 }

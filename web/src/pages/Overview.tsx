@@ -30,7 +30,7 @@ export function Overview() {
   return (
     <div>
       <div className="anim-fade-up flex flex-wrap items-center gap-x-9 gap-y-4 mb-5">
-        <h1 className="text-[30px] leading-[1.05] font-semibold">Clinic<br />Overview</h1>
+        <h1 className="text-[18px] leading-tight font-semibold">Clinic<br />Overview</h1>
         <Kpi icon="users" value={<Num value={d.today.visits} />} label="Patients today" badge={diff ? `${diff > 0 ? '+' : ''}${diff} vs last week` : undefined} />
         <Kpi icon="rupee" value={<Num value={d.today.collectedPaise} format={money} />} label={d.today.byMethod.length ? d.today.byMethod.map((m: any) => `${m.method} ${money(m.totalPaise)}`).join(' · ') : 'Collected today'} />
         <Kpi icon="clock" value={<><Num value={d.today.waiting} /> <span className="text-[15px] font-medium text-muted">waiting</span></>} label={d.today.waiting ? `Longest ${d.today.longestWaitMin} min` : 'Nobody waiting'} />
@@ -38,8 +38,8 @@ export function Overview() {
 
       {(counts.data?.requests > 0 || counts.data?.unconfirmed > 0) && (
         <div className="mb-5 flex flex-wrap gap-3 anim-fade-up" style={{ animationDelay: '30ms' }}>
-          {counts.data.requests > 0 && <button className="glass flex items-center gap-3 !rounded-[20px] px-4 py-3 text-left transition-shadow hover:shadow-md" onClick={() => nav('/bookings?tab=requests')}><Icon name="inbox" className="h-5 w-5 text-clay" /><span><b>{counts.data.requests} online request{counts.data.requests === 1 ? '' : 's'}</b><span className="block text-xs text-muted">waiting for approval</span></span><Icon name="chevR" className="ml-2 h-4 w-4 text-muted" /></button>}
-          {counts.data.unconfirmed > 0 && <button className="glass flex items-center gap-3 !rounded-[20px] px-4 py-3 text-left transition-shadow hover:shadow-md" onClick={() => nav('/bookings?tab=unconfirmed')}><Icon name="message" className="h-5 w-5 text-muted" /><span><b>{counts.data.unconfirmed} not yet confirmed</b><span className="block text-xs text-muted">upcoming bookings</span></span><Icon name="chevR" className="ml-2 h-4 w-4 text-muted" /></button>}
+          {counts.data.requests > 0 && <button className="glass flex items-center gap-3 !rounded-[10px] px-4 py-3 text-left transition-shadow hover:shadow-md" onClick={() => nav('/bookings?tab=requests')}><Icon name="inbox" className="h-5 w-5 text-clay" /><span><b>{counts.data.requests} online request{counts.data.requests === 1 ? '' : 's'}</b><span className="block text-xs text-muted">waiting for approval</span></span><Icon name="chevR" className="ml-2 h-4 w-4 text-muted" /></button>}
+          {counts.data.unconfirmed > 0 && <button className="glass flex items-center gap-3 !rounded-[10px] px-4 py-3 text-left transition-shadow hover:shadow-md" onClick={() => nav('/bookings?tab=unconfirmed')}><Icon name="message" className="h-5 w-5 text-muted" /><span><b>{counts.data.unconfirmed} not yet confirmed</b><span className="block text-xs text-muted">upcoming bookings</span></span><Icon name="chevR" className="ml-2 h-4 w-4 text-muted" /></button>}
         </div>
       )}
 

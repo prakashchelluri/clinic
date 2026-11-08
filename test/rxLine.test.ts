@@ -23,3 +23,13 @@ test('a typed line becomes a prescription row', () => {
   assert.equal(x.medicineId, null, 'unknown medicine stays as typed'); assert.equal(x.name, 'calamine lotion');
   assert.equal(parseRxLine('   ', meds), null);
 });
+
+test('quantity is worked out from dose, frequency and days', async () => {
+  const { qtyFor, dosesPerDay } = await import('../web/src/rxLine.js');
+  assert.equal(dosesPerDay('1-0-1'), 2); assert.equal(dosesPerDay('twice daily'), 2); assert.equal(dosesPerDay('at night'), 1); assert.equal(dosesPerDay('SOS'), null);
+  assert.equal(qtyFor({ dose: '1 tab', frequency: '1-0-1', durationDays: 7 }), 14);
+  assert.equal(qtyFor({ dose: '2 tab', frequency: 'once daily', durationDays: 5 }), 10);
+  assert.equal(qtyFor({ dose: '1 tab', frequency: 'alternate days', durationDays: 10 }), 5);
+  assert.equal(qtyFor({ frequency: 'at night', durationDays: 56, route: 'topical' }), 1, 'a tube is one');
+  assert.equal(qtyFor({ frequency: 'SOS', durationDays: 7 }), null);
+});
