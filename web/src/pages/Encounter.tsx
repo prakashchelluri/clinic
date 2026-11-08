@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, useLayoutEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
@@ -14,7 +14,7 @@ import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, t
 import { HistoryChips } from '../historyChips';
 import { VitalsCard } from '../vitals';
 import { LabResultsCard } from '../labs';
-import { SkinMapPanel } from '../skinmap';
+import { SkinMapPanel, usePins } from '../skinmap';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
@@ -133,7 +133,14 @@ export function Encounter() {
   const [errors, setErrors] = useState<{ path: string; message: string }[]>([]);
   const [savedAt, setSavedAt] = useState<string>('');
   const [viewing, setViewing] = useState<string | null>(null);
-  const [side, setSide] = useState<'visits' | 'docs' | 'photos'>('visits');
+  const [side, setSide] = useState<'edit' | 'visits' | 'skin' | 'docs' | 'photos'>('edit'); // what the drawer shows: the open section, or one of the patient's collections
+  const pinsQ = usePins(enc.data?.patientId ?? '');
+  const [bridgeY, setBridgeY] = useState<number | null>(null);
+  useLayoutEffect(() => { // the clay mark on the drawer sits level with the open row
+    const row = document.querySelector('[id^="row-"][aria-current="true"]'), wrap = document.getElementById('drawer');
+    const y = row && wrap && window.innerWidth >= 1280 ? Math.round(row.getBoundingClientRect().top - wrap.getBoundingClientRect().top) : null;
+    if (y !== bridgeY) setBridgeY(y);
+  });
   const [testDraft, setTestDraft] = useState(''); const [line, setLine] = useState(''); const [pendingLine, setPendingLine] = useState<string | null>(null);
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
   const [seOpen, setSeOpen] = useState(false); const [allSugg, setAllSugg] = useState(false); // side effects and the suggestion strip are folded by default
@@ -332,7 +339,7 @@ export function Encounter() {
   const cards: Record<string, ReactNode> = {
     vitals: <Card key="vitals" id="vitals" title="Vitals" meta="from check-in · tap to change"><VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} /></Card>,
     history: null, // the chips sit under the type-anything bar
-    symptoms: <Card key="symptoms" id="symptoms" title="Symptoms" required={isDoctor && padOf('symptoms').required} actions={!readOnly && isDoctor && <><LoadSet kind="symptom" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('symptom')}>Save</Act><Act onClick={() => clearSection('symptoms', () => setSyms([]))} disabled={!syms.length}>Clear</Act></>}>
+    symptoms: <Card key="symptoms" id="symptoms" title="Complaints" required={isDoctor && padOf('symptoms').required} actions={!readOnly && isDoctor && <><LoadSet kind="symptom" sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} /><Act onClick={() => saveSection('symptom')}>Save</Act><Act onClick={() => clearSection('symptoms', () => setSyms([]))} disabled={!syms.length}>Clear</Act></>}>
       <div data-invalid={!!err('complaint', 'chief_complaint')}>
         {syms.map((s, i) => <div key={s.name + i} className="flex flex-wrap items-center gap-1.5 border-t border-line py-1.5 first:border-t-0 first:pt-0">
           <span className="toggle-opt on">{s.name}{!readOnly && <button type="button" aria-label={`Remove ${s.name}`} className="ml-1.5" onClick={() => setSyms(syms.filter((_, j) => j !== i))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>
@@ -461,6 +468,7 @@ export function Encounter() {
   const firstEmpty = ['review', 'symptoms', 'diagnosis', 'medicines'].find((k) => rowKeys.includes(k) && !summary[k]);
   const act = active && rowKeys.includes(active) ? active : (firstEmpty ?? (rowKeys.includes('medicines') ? 'medicines' : rowKeys[0]));
   const isRequired = (k: string) => k === 'diagnosis' || (['symptoms', 'exam', 'medicines'].includes(k) && padOf(k).required);
+  const pinCount = (pinsQ.data ?? []).filter((x) => !x.resolvedAt).length;
   const secOf = (path: string) => ({ complaint: 'symptoms', assessment: 'diagnosis', exam: 'exam', plan: 'advice' } as Record<string, string>)[path.split('.')[0]] ?? path.split('.')[0];
 
   return (
@@ -473,6 +481,7 @@ export function Encounter() {
             <div className="text-xs text-muted">{[p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ')}</div></div>
           {p.allergies && <span className="chip chip-rose !py-1">Allergy: {p.allergies}</span>}
           {isReview && notBought.length > 0 && <span className="text-xs text-muted">Last time did not buy: {notBought.map((i) => i.name).join(', ')}</span>}
+          {isDoctor && <span className="flex items-center gap-1.5">{([['visits', 'History', previous.length], ['skin', 'Skin map', pinCount], ['photos', 'Photos', ph.length], ['docs', 'Reports', myDocs.length]] as const).map(([k, l, n]) => <button key={k} type="button" className={`cnt ${side === k ? 'on' : ''}`} aria-pressed={side === k} onClick={() => setSide(side === k ? 'edit' : k)}>{l}{n > 0 && <b>{n}</b>}</button>)}</span>}
           <span className="ml-auto flex items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{!readOnly && isDoctor && <span title="Minutes since the consultation opened"><Icon name="clock" className="mr-1 inline h-3.5 w-3.5" />{mins} min</span>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}{held && <Chip tone="amber">Rx issued {fmtDate(e.completedAt)} · {testsIn} of {testRecs.length} reports in</Chip>}
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><Icon name="list" className="h-3.5 w-3.5" />Templates</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={520}>
@@ -491,8 +500,8 @@ export function Encounter() {
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-4 ${isDoctor ? (act === 'medicines' || act === 'review' ? 'xl:grid-cols-[minmax(0,1fr)_minmax(560px,46%)]' : 'xl:grid-cols-[minmax(0,1fr)_minmax(440px,38%)]') : ''}`}>
-        {/* the pad */}
+      <div>
+        {/* the pad: one sheet, with a drawer beside it for whatever is open */}
         <section className="card-flat min-w-0 overflow-hidden !p-0">
           {isDoctor && !readOnly && <div className="px-4 pb-2 pt-3">
             <div className="relative"><Icon name="search" className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-clay" />
@@ -517,36 +526,25 @@ export function Encounter() {
               </section>))}
           </>}
 
-          {/* the note as it reads: one row per section, the open one marked; tap a row to edit it on the right */}
-          {isDoctor && <div className="border-t border-line">
+          <div className="flex flex-col xl:flex-row xl:items-stretch">
+          {/* the note as it reads: one row per section, the open one marked; tap a row and the drawer opens on it */}
+          {isDoctor && <div className="min-w-0 flex-1 border-t border-line">
             {rowKeys.map((k) => { const v = summary[k]; const on = act === k; const bad = errors.some((x) => secOf(x.path) === k); return (
-              <button key={k} type="button" aria-current={on || undefined} className={`group grid w-full grid-cols-[128px_minmax(0,1fr)_auto] items-start gap-4 border-t border-line/70 px-5 py-3.5 text-left first:border-t-0 transition-colors ${on ? 'bg-clay-soft/40 shadow-[inset_3px_0_0_var(--color-clay)]' : 'hover:bg-surface-2'}`} onClick={() => { setActive(k); if (window.innerWidth < 1280) setTimeout(() => document.getElementById('palette')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); }}>
+              <button key={k} type="button" aria-current={on || undefined} id={`row-${k}`} className={`group grid w-full grid-cols-[128px_minmax(0,1fr)_auto] items-start gap-4 border-t border-line/70 px-5 py-3.5 text-left first:border-t-0 transition-colors ${on ? 'bg-clay-soft/40 shadow-[inset_3px_0_0_var(--color-clay)]' : 'hover:bg-surface-2'}`} onClick={() => { setActive(k); setSide('edit'); if (window.innerWidth < 1280) setTimeout(() => document.getElementById('palette')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); }}>
                 <span className="pt-[3px] text-[12.5px] font-semibold text-muted">{LABEL[k] ?? k}{isRequired(k) && <span className="text-clay"> *</span>}</span>
                 <span className={`min-w-0 text-[15px] leading-snug ${v ? 'text-ink' : bad ? 'text-rose' : 'text-muted/70'}`}>{v ?? (bad ? `${LABEL[k]} is required` : HINT[k] ?? 'Tap to add')}</span>
                 <span className={`flex items-center gap-1 pt-[3px] text-xs ${on ? 'font-semibold text-clay' : 'text-muted opacity-0 group-hover:opacity-100'}`}>{on ? 'editing' : 'edit'}<Icon name="chevR" className="h-3.5 w-3.5" /></span>
               </button>); })}
           </div>}
-
-          {/* action bar */}
-          <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-line bg-surface/95 px-4 py-2.5 backdrop-blur">
-            <button className="btn btn-ghost !px-2.5" aria-label="Back" onClick={() => nav(isDoctor ? '/today' : '/queue', { viewTransition: true })}><Icon name="chevL" /></button>
-            {errors.length > 0 ? <button type="button" className="text-xs text-rose underline" onClick={() => { if (isDoctor) setActive(secOf(errors[0].path)); else document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }}>{errors.length} required field{errors.length > 1 ? 's' : ''} missing · show</button>
-              : <span className="text-xs text-muted">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves'}{isDoctor && !readOnly ? ` · ${[padOf('symptoms').required ? 'Symptoms' : null, 'Diagnosis', padOf('exam').required ? 'Examination' : null, padOf('medicines').required ? 'Medicines' : null].filter(Boolean).join(', ')} required` : ''}</span>}
-            <span className="ml-auto" />
-            {!readOnly && !isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
-            {!readOnly && isDoctor && <>
-              <MoreMenu label="Save as template" items={[{ label: 'Save the whole pad as a template', onClick: askTpl }, { label: 'Save only the medicines', onClick: () => saveSection('medicine') }, { label: 'Save only the advice', onClick: () => saveSection('advice') }, { label: 'Save only the tests', onClick: () => saveSection('tests') }, { label: 'Configure pad…', onClick: () => nav('/settings?tab=pad'), hidden: !can(perms, 'config.write') }]} />
-              <button className="btn" onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}><Icon name="print" />Preview</button>
-              {held && testsOpen && <button className="btn" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
-              <button className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish'}</button>
-            </>}
-            {readOnly && <button className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" />Print Rx</button>}
+          {/* the drawer: the open section's editor, or History, Skin map, Photos, Reports; a clay mark sits level with the open row */}
+          {isDoctor && <div id="drawer" className={`relative border-t border-line bg-surface xl:shrink-0 xl:border-l xl:border-t-0 ${side === 'edit' && (act === 'medicines' || act === 'review') ? 'xl:w-[620px]' : 'xl:w-[500px]'}`}>
+          {side === 'edit' && bridgeY !== null && <span aria-hidden className="absolute -left-px hidden w-[3px] rounded-r bg-clay xl:block" style={{ top: bridgeY + 10, height: 32, transition: 'top 0.2s var(--ease)' }} />}
+          <aside className="flex flex-col xl:sticky xl:top-28">
+          <div className="flex flex-wrap items-center gap-0.5 border-b border-line/70 px-3 py-2" role="tablist">
+            <button type="button" role="tab" aria-selected={side === 'edit'} className={`dtab ${side === 'edit' ? 'on' : ''}`} onClick={() => setSide('edit')}>{LABEL[act] ?? act}</button>
+            {([['visits', 'History'], ['skin', 'Skin map'], ['photos', 'Photos'], ['docs', 'Reports']] as const).map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={side === k} className={`dtab ${side === k ? 'on' : ''}`} onClick={() => setSide(k)}>{l}</button>)}
           </div>
-        </section>
-
-        {/* right side: the open section's editor, then the story so far */}
-        {isDoctor && <aside className="flex flex-col gap-3 self-start xl:sticky xl:top-28">
-          <div id="palette" className="card-flat overflow-hidden anim-fade-in" key={act}>
+          {side === 'edit' && <div id="palette" className="overflow-hidden anim-fade-in" key={act}>
           {!readOnly && (sugg.length > 0 || protoSugg.length > 0) && (() => {
             const all = [...protoSugg.map((t: any) => ({ id: t.id, name: t.name, meta: 'protocol', go: () => setSetNote(stackProtocol(t)) })), ...sugg.map((t) => ({ id: t.id, name: t.name, meta: size(t), go: () => setSetNote(applySet(t)) }))];
             const shown = allSugg ? all : all.slice(0, 3); const hidden = all.length - shown.length;
@@ -584,17 +582,22 @@ export function Encounter() {
                 <div className="space-y-2">{x.fields.map((f: Field) => <div key={f.key} data-invalid={!!err(x.key, f.key)}><CompactField f={f} value={data[x.key]?.[f.key]} onChange={(v) => set(x.key, f.key, v)} disabled={readOnly} invalid={!!err(x.key, f.key)} />{err(x.key, f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div>
               </section>); })()
             : (cards[act] ?? cards.medicines)}
-          </div>
-          <div className="card-flat p-3.5">
-          <div className="seg mb-2" role="tablist">{([['visits', `Story so far${previous.length ? ` · ${previous.length}` : ''}`], ['docs', `Reports${myDocs.length ? ` · ${myDocs.length}` : ''}`], ['photos', `Photos${ph.length ? ` · ${ph.length}` : ''}`]] as const).map(([k, l]) => <button key={k} role="tab" aria-selected={side === k} className={side === k ? 'on relative z-[1] !bg-surface' : ''} onClick={() => setSide(k)}>{l}</button>)}</div>
-          {side === 'visits' ? (<div>
+            {(() => { const i = rowKeys.indexOf(act); const prev = rowKeys[i - 1], next = rowKeys[i + 1]; return <div className="flex items-center gap-2 border-t border-line/70 px-4 py-2.5">
+              {prev && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActive(prev)}><Icon name="chevL" className="h-3.5 w-3.5" />{LABEL[prev] ?? prev}</button>}<span className="ml-auto" />
+              {next && <button type="button" className="btn btn-sm" onClick={() => setActive(next)}>Next · {LABEL[next] ?? next}<Icon name="chevR" className="h-3.5 w-3.5" /></button>}
+            </div>; })()}
+          </div>}
+          {side !== 'edit' && <div className="p-4 anim-fade-in" key={side}>
+          {side === 'skin' ? <SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), a]))} />
+          : side === 'visits' ? (<div>
             {previous.length === 0 && <div className="text-[13px] text-muted">First visit</div>}
-            {previous.slice(0, 8).map((x: any) => (
-              <div key={x.id} className="-mx-1 border-t border-line px-1 py-2 text-[13px] first:border-t-0">
-                <div className="flex items-center gap-2"><button type="button" className="text-xs font-semibold hover:underline" onClick={() => setViewing(x.id)}>{fmtDate(x.createdAt)}</button><span className="text-xs text-muted">{x.doctor?.name ?? ''}</span>{!readOnly && x.status === 'completed' && <button type="button" className="ml-auto text-[11.5px] font-semibold text-muted hover:text-ink" onClick={() => loadPrevious(x, { dx: true, rx: true })}>Load</button>}</div>
-                <div className="truncate">{x.data?.review?.response ? `${x.data.review.response} · ` : ''}{joinList(x.data?.assessment?.diagnosis) || joinList(x.data?.complaint?.chief_complaint) || 'Consultation'}</div>
-                {x.prescription?.length > 0 && <div className="truncate text-xs text-muted">{x.prescription.map((i: any) => i.name).join(', ')}</div>}
+            {previous.slice(0, 12).map((x: any) => (
+              <div key={x.id} className="flex items-center gap-2 border-t border-line/70 py-2 text-[13px] first:border-t-0">
+                <button type="button" className="w-14 shrink-0 text-left text-xs font-semibold text-muted hover:text-ink hover:underline" title={x.doctor?.name ?? ''} onClick={() => setViewing(x.id)}>{fmtDate(x.createdAt)}</button>
+                <span className="min-w-0 flex-1 truncate">{x.data?.review?.response ? `${x.data.review.response} · ` : ''}{joinList(x.data?.assessment?.diagnosis) || joinList(x.data?.complaint?.chief_complaint) || 'Consultation'}{x.prescription?.length > 0 && <span className="text-muted"> · {x.prescription.map((i: any) => i.name).join(', ')}</span>}</span>
+                {!readOnly && x.status === 'completed' && <button type="button" className="shrink-0 text-[11.5px] font-semibold text-muted hover:text-ink" onClick={() => loadPrevious(x, { dx: true, rx: true })}>Load</button>}
               </div>))}
+            {previous.length > 12 && <div className="pt-2 text-xs text-muted">Earlier · {previous.length - 12} more in the patient's file</div>}
           </div>) : side === 'docs' ? (<div>
             <div className="mb-2 flex items-center gap-2"><span className="text-xs text-muted">Lab reports and letters</span><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => qc.invalidateQueries({ queryKey: ['documents', p.id] })} />}</div>
             {myDocs.length === 0 ? <div className="text-xs text-muted">No reports yet.</div> : <DocList docs={myDocs.slice(0, 8)} />}
@@ -604,9 +607,28 @@ export function Encounter() {
             {ph.length === 0 && <div className="text-xs text-muted">No photos yet.</div>}
             {can(perms, 'document.write') && !readOnly && <button className="btn btn-sm" onClick={() => setCapture(true)}><Icon name="spark" className="h-3.5 w-3.5" />Take photo</button>}
           </div>)}
-          <div className="mt-3 border-t border-line pt-3"><ScreeningCard complaintText={arrivalText} lists={lists} answers={answers} history={hist} /></div>
+          {side === 'visits' && <div className="mt-3 border-t border-line pt-3"><ScreeningCard complaintText={arrivalText} lists={lists} answers={answers} history={hist} /></div>}
+          </div>}
+          </aside>
+          </div>}
           </div>
-        </aside>}
+
+          {/* action bar */}
+          <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-line bg-surface/95 px-4 py-2.5 backdrop-blur">
+            <button className="btn btn-ghost !px-2.5" aria-label="Back" onClick={() => nav(isDoctor ? '/today' : '/queue', { viewTransition: true })}><Icon name="chevL" /></button>
+            {errors.length > 0 ? <button type="button" className="text-xs text-rose underline" onClick={() => { if (isDoctor) setActive(secOf(errors[0].path)); else document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }}>{errors.length} required field{errors.length > 1 ? 's' : ''} missing · show</button>
+              : <span className="text-xs text-muted">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves'}{isDoctor && !readOnly ? ` · ${[padOf('symptoms').required ? 'Symptoms' : null, 'Diagnosis', padOf('exam').required ? 'Examination' : null, padOf('medicines').required ? 'Medicines' : null].filter(Boolean).join(', ')} required` : ''}</span>}
+            <span className="ml-auto" />
+            {!readOnly && !isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
+            {!readOnly && isDoctor && <>
+              <MoreMenu label="Save as template" items={[{ label: 'Save the whole pad as a template', onClick: askTpl }, { label: 'Save only the medicines', onClick: () => saveSection('medicine') }, { label: 'Save only the advice', onClick: () => saveSection('advice') }, { label: 'Save only the tests', onClick: () => saveSection('tests') }, { label: 'Configure pad…', onClick: () => nav('/settings?tab=pad'), hidden: !can(perms, 'config.write') }]} />
+              <button className="btn" onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}><Icon name="print" />Preview</button>
+              {held && testsOpen && <button className="btn" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+              <button className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish'}</button>
+            </>}
+            {readOnly && <button className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" />Print Rx</button>}
+          </div>
+        </section>
       </div>
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {capture && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} onClose={() => setCapture(false)} />}

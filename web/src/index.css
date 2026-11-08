@@ -141,6 +141,15 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
   .toggle-opt:active { transform: scale(0.97); }
   .toggle-opt.on { @apply bg-ink text-paper font-semibold; }
   .toggle-opt.on:hover { @apply bg-ink-2; }
+  /* Counters in the patient strip: what exists for this patient; the lit one is open in the drawer */
+  .cnt { @apply inline-flex items-center gap-1.5 rounded-full bg-paper-2 px-3 text-[12.5px] font-semibold text-ink; height: 30px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .cnt b { @apply font-medium text-muted; }
+  .cnt:hover { @apply bg-line/60; }
+  .cnt.on { @apply bg-ink text-paper; } .cnt.on b { @apply text-paper/70; }
+  /* Drawer tabs: the open section first, then History, Skin map, Photos, Reports */
+  .dtab { @apply rounded-[9px] px-3 py-1.5 text-[13px] font-medium text-ink-2; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .dtab:hover { @apply text-ink; }
+  .dtab.on { @apply bg-paper-2 font-semibold text-ink; }
   .toggle-opt:disabled { @apply opacity-60; }
   /* Options not yet chosen read as quiet text; they lift on hover. Chosen ones are the solid .toggle-opt.on pill. */
   .opt { @apply rounded-full border border-transparent bg-transparent px-3 py-1.5 text-[13px] font-medium text-ink-2; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
