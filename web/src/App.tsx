@@ -203,7 +203,7 @@ export function App() {
             </div>
         </header>
 
-        <div className={`mx-auto w-full max-w-[1440px] px-4 py-4 md:px-5 ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
+        <div className={`mx-auto w-full px-4 py-4 md:px-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1440px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>

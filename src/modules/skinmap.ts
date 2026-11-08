@@ -29,7 +29,7 @@ export function skinmapRoutes(app: FastifyInstance) {
   });
 
   route(app, 'patch', '/pins/:id', 'encounter.intake', async (req, tx) => {
-    const b = z.object({ area: z.string().trim().min(1).max(40).optional(), finding: z.string().trim().max(200).nullable().optional(), diagnosis: z.string().trim().max(120).nullable().optional(), resolved: z.boolean().optional(), encounterId: z.string().uuid().nullable().optional() }).parse(req.body);
+    const b = z.object({ x: z.number().min(0).max(1).optional(), y: z.number().min(0).max(1).optional(), area: z.string().trim().min(1).max(40).optional(), finding: z.string().trim().max(200).nullable().optional(), diagnosis: z.string().trim().max(120).nullable().optional(), resolved: z.boolean().optional(), encounterId: z.string().uuid().nullable().optional() }).parse(req.body);
     const cur = await tx.select().from(bodyPin).where(and(eq(bodyPin.id, (req.params as any).id), eq(bodyPin.tenantId, req.ctx.tenantId))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
     const { resolved, ...rest } = b;

@@ -1,49 +1,69 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, get, post, qc, errText } from './api';
 import { Chip, Icon, toast, fmtDate } from './ui';
 import { PhotoCapture, PhotoCompare, usePhotos } from './photos';
 
-/** The skin map: a body silhouette with pins. A pin is a place on the patient that the clinic is watching: what was seen there, what it is, and the photos of it across visits. */
+/** The skin map: a body silhouette with pins. A pin is a place on the patient that the clinic is watching: what was seen there, what it is, and the photos of it across visits.
+ *  A tap never commits by itself: it proposes a pin, the doctor confirms (and can change the site), and an added pin can be undone, dragged, resolved or removed. */
 export type Pin = { id: string; side: 'front' | 'back'; x: number; y: number; area: string; finding: string | null; diagnosis: string | null; encounterId: string | null; encounterAt: string | null; resolvedAt: string | null; createdAt: string; photos: number; lastPhotoAt: string | null };
 
 // Where a tap lands, in the 200 × 620 silhouette box. Left and right are the patient's own.
 const ZONES: { area: string; x: number; y: number; w: number; h: number; back?: string }[] = [
-  { area: 'Scalp', x: 70, y: 8, w: 60, h: 24, back: 'Scalp' }, { area: 'Face', x: 70, y: 32, w: 60, h: 56, back: 'Back of head' }, { area: 'Neck', x: 80, y: 88, w: 40, h: 16, back: 'Nape' },
-  { area: 'Chest', x: 60, y: 104, w: 80, h: 70, back: 'Upper back' }, { area: 'Abdomen', x: 60, y: 174, w: 80, h: 68, back: 'Lower back' }, { area: 'Groin', x: 62, y: 242, w: 76, h: 56, back: 'Buttocks' },
-  { area: 'Right upper arm', x: 22, y: 100, w: 34, h: 72, back: 'Left upper arm' }, { area: 'Left upper arm', x: 144, y: 100, w: 34, h: 72, back: 'Right upper arm' },
-  { area: 'Right forearm', x: 20, y: 172, w: 36, h: 76, back: 'Left forearm' }, { area: 'Left forearm', x: 144, y: 172, w: 36, h: 76, back: 'Right forearm' },
-  { area: 'Right hand', x: 16, y: 246, w: 30, h: 42, back: 'Left hand' }, { area: 'Left hand', x: 154, y: 246, w: 30, h: 42, back: 'Right hand' },
-  { area: 'Right thigh', x: 60, y: 298, w: 38, h: 110, back: 'Left thigh' }, { area: 'Left thigh', x: 102, y: 298, w: 38, h: 110, back: 'Right thigh' },
-  { area: 'Right leg', x: 60, y: 408, w: 38, h: 88, back: 'Left leg' }, { area: 'Left leg', x: 102, y: 408, w: 38, h: 88, back: 'Right leg' },
-  { area: 'Right foot', x: 56, y: 494, w: 42, h: 36, back: 'Left foot' }, { area: 'Left foot', x: 102, y: 494, w: 42, h: 36, back: 'Right foot' },
+  { area: 'Scalp', x: 68, y: 6, w: 64, h: 26, back: 'Scalp' }, { area: 'Face', x: 68, y: 32, w: 64, h: 58, back: 'Back of head' }, { area: 'Neck', x: 82, y: 90, w: 36, h: 18, back: 'Nape' },
+  { area: 'Chest', x: 56, y: 108, w: 88, h: 66, back: 'Upper back' }, { area: 'Abdomen', x: 60, y: 174, w: 80, h: 66, back: 'Lower back' }, { area: 'Groin', x: 62, y: 240, w: 76, h: 56, back: 'Buttocks' },
+  { area: 'Right upper arm', x: 18, y: 108, w: 36, h: 70, back: 'Left upper arm' }, { area: 'Left upper arm', x: 146, y: 108, w: 36, h: 70, back: 'Right upper arm' },
+  { area: 'Right forearm', x: 10, y: 178, w: 38, h: 74, back: 'Left forearm' }, { area: 'Left forearm', x: 152, y: 178, w: 38, h: 74, back: 'Right forearm' },
+  { area: 'Right hand', x: 4, y: 252, w: 36, h: 44, back: 'Left hand' }, { area: 'Left hand', x: 160, y: 252, w: 36, h: 44, back: 'Right hand' },
+  { area: 'Right thigh', x: 58, y: 296, w: 40, h: 112, back: 'Left thigh' }, { area: 'Left thigh', x: 102, y: 296, w: 40, h: 112, back: 'Right thigh' },
+  { area: 'Right leg', x: 60, y: 408, w: 38, h: 90, back: 'Left leg' }, { area: 'Left leg', x: 102, y: 408, w: 38, h: 90, back: 'Right leg' },
+  { area: 'Right foot', x: 52, y: 498, w: 46, h: 36, back: 'Left foot' }, { area: 'Left foot', x: 102, y: 498, w: 46, h: 36, back: 'Right foot' },
 ];
+export const AREAS = (side: 'front' | 'back') => [...new Set(ZONES.map((z) => (side === 'back' ? z.back ?? z.area : z.area)))];
 export function areaAt(side: 'front' | 'back', nx: number, ny: number) {
   const x = nx * 200, y = ny * 620;
-  const z = ZONES.find((z) => x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h);
-  return z ? (side === 'back' ? z.back ?? z.area : z.area) : side === 'back' ? 'Back' : 'Trunk';
+  // the zone the tap is in, else the nearest one: a tap just outside the outline still names the right site
+  const dist = (z: typeof ZONES[number]) => Math.hypot(Math.max(z.x - x, 0, x - (z.x + z.w)), Math.max(z.y - y, 0, y - (z.y + z.h)));
+  const z = ZONES.reduce((best, cur) => (dist(cur) < dist(best) ? cur : best), ZONES[0]);
+  return side === 'back' ? z.back ?? z.area : z.area;
 }
 export const FINDINGS = ['Macule', 'Patch', 'Papule', 'Plaque', 'Pustule', 'Nodule', 'Vesicle', 'Scale', 'Crust', 'Erosion', 'Ulcer', 'Burrow', 'Comedone', 'Hypopigmented', 'Hyperpigmented', 'Scar'];
 
-/** The silhouette. Tap to add a pin; tap a pin to pick it. Pins from earlier visits are blue, this visit's are clay, resolved ones grey. */
-export function BodyMap({ side, pins, selectedId, onSelect, onAdd, readOnly, height = 260, encounterId }: { side: 'front' | 'back'; pins: Pin[]; selectedId: string | null; onSelect: (id: string) => void; onAdd?: (x: number, y: number, area: string) => void; readOnly?: boolean; height?: number; encounterId?: string | null }) {
+// One soft outline rather than boxes: head, neck, shoulders into the torso, arms slightly away from the body, legs to the feet.
+const FIGURE = 'M100 14c15 0 26 12 26 30s-9 30-20 34v10c20 2 38 12 40 30l6 60c1 8 0 16-2 24l-7 48c-1 6-6 10-11 10s-9-4-9-10l3-44-4 2-2 40c0 10-1 22-3 32l-6 66c-1 8 1 18 2 28l2 72c0 6-4 10-10 10h-8c-6 0-10-4-10-10l-2-70c-1-10-3-20-5-30l-4-28h-4l-4 28c-2 10-4 20-5 30l-2 70c0 6-4 10-10 10h-8c-6 0-10-4-10-10l2-72c1-10 3-20 2-28l-6-66c-2-10-3-22-3-32l-2-40-4-2 3 44c0 6-4 10-9 10s-10-4-11-10l-7-48c-2-8-3-16-2-24l6-60c2-18 20-28 40-30v-10C83 74 74 62 74 44s11-30 26-30z';
+
+/** The silhouette. Tap to propose a pin; tap a pin to pick it; drag a picked pin to move it. Earlier visits blue, this visit clay, resolved grey. */
+export function BodyMap({ side, pins, selectedId, onSelect, onPropose, onMove, pending, readOnly, height = 260, encounterId }: {
+  side: 'front' | 'back'; pins: Pin[]; selectedId: string | null; onSelect: (id: string) => void; onPropose?: (x: number, y: number) => void; onMove?: (id: string, x: number, y: number) => void;
+  pending?: { x: number; y: number } | null; readOnly?: boolean; height?: number; encounterId?: string | null }) {
   const w = Math.round(height * 200 / 620);
   const mine = pins.filter((p) => p.side === side);
+  const box = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ id: string; moved: boolean } | null>(null);
+  const [live, setLive] = useState<{ id: string; x: number; y: number } | null>(null);
+  const norm = (e: { clientX: number; clientY: number }) => { const r = box.current!.getBoundingClientRect(); return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) }; };
+  useEffect(() => {
+    if (!drag.current) return;
+    const move = (e: PointerEvent) => { if (!drag.current) return; drag.current.moved = true; setLive({ id: drag.current.id, ...norm(e) }); };
+    const up = (e: PointerEvent) => { const d = drag.current; drag.current = null; if (d?.moved && onMove) onMove(d.id, norm(e).x, norm(e).y); setLive(null); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+  }, [live?.id]);
+  const color = (p: Pin) => p.resolvedAt ? 'var(--color-muted)' : p.encounterId && encounterId && p.encounterId === encounterId ? 'var(--color-clay)' : 'var(--color-sky)';
   return (
-    <div className="relative select-none" style={{ width: w, height }}>
-      <svg viewBox="0 0 200 620" width={w} height={height} className={readOnly || !onAdd ? '' : 'cursor-crosshair'} role="img" aria-label={`${side} of the body, ${mine.length} pins`}
-        onClick={(e) => { if (readOnly || !onAdd) return; const r = e.currentTarget.getBoundingClientRect(); const nx = (e.clientX - r.left) / r.width, ny = (e.clientY - r.top) / r.height; onAdd(nx, ny, areaAt(side, nx, ny)); }}>
-        <g fill="var(--color-paper-2)" stroke="var(--color-line-2)" strokeWidth="2.5">
-          <ellipse cx="100" cy="48" rx="30" ry="36" /><rect x="60" y="92" width="80" height="150" rx="26" /><rect x="24" y="100" width="30" height="150" rx="14" /><rect x="146" y="100" width="30" height="150" rx="14" />
-          <rect x="18" y="246" width="26" height="40" rx="12" /><rect x="156" y="246" width="26" height="40" rx="12" /><rect x="62" y="240" width="76" height="60" rx="18" />
-          <rect x="62" y="296" width="34" height="200" rx="16" /><rect x="104" y="296" width="34" height="200" rx="16" /><rect x="58" y="494" width="40" height="34" rx="12" /><rect x="102" y="494" width="40" height="34" rx="12" />
-        </g>
-        {side === 'back' && <text x="100" y="52" textAnchor="middle" fontSize="18" fill="var(--color-muted)">back</text>}
+    <div ref={box} className="relative select-none touch-none" style={{ width: w, height }}>
+      <svg viewBox="0 0 200 620" width={w} height={height} className={readOnly || !onPropose ? '' : 'cursor-crosshair'} role="img" aria-label={`${side} of the body, ${mine.length} pins`}
+        onClick={(e) => { if (readOnly || !onPropose) return; const n = norm(e); onPropose(n.x, n.y); }}>
+        <path d={FIGURE} fill="var(--color-paper-2)" stroke="var(--color-line-2)" strokeWidth="2.5" strokeLinejoin="round" />
+        {side === 'back' && <text x="100" y="50" textAnchor="middle" fontSize="16" fontWeight="600" fill="var(--color-muted)">back</text>}
       </svg>
-      {mine.map((p, i) => { const on = p.id === selectedId; const tone = p.resolvedAt ? 'var(--color-muted)' : p.encounterId && encounterId && p.encounterId === encounterId ? 'var(--color-clay)' : 'var(--color-sky)'; return (
-        <button key={p.id} type="button" aria-label={`${p.area}${p.diagnosis ? `, ${p.diagnosis}` : ''}`} title={`${p.area}${p.diagnosis ? ` · ${p.diagnosis}` : ''}${p.finding ? ` · ${p.finding}` : ''}`}
-          className={`absolute grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-[10px] font-bold text-white transition-transform ${on ? 'h-6 w-6 ring-4 ring-clay/25 scale-110' : 'h-5 w-5 ring-4 ring-black/5 hover:scale-110'}`}
-          style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%`, background: tone }} onClick={(e) => { e.stopPropagation(); onSelect(p.id); }}>{i + 1}</button>); })}
+      {pending && <span className="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed border-clay bg-clay/15 anim-scale-in" style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%` }} />}
+      {mine.map((p, i) => { const on = p.id === selectedId; const pos = live?.id === p.id ? live : p; return (
+        <button key={p.id} type="button" aria-label={`${p.area}${p.diagnosis ? `, ${p.diagnosis}` : ''}`} title={`${p.area}${p.diagnosis ? ` · ${p.diagnosis}` : ''}${p.finding ? ` · ${p.finding}` : ''}${on && !readOnly ? ' · drag to move' : ''}`}
+          className={`absolute grid -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full text-[10px] font-bold text-white shadow-md ${on ? 'h-6 w-6 ring-4 ring-clay/25 cursor-grab active:cursor-grabbing' : 'h-5 w-5 ring-4 ring-black/5 hover:scale-110'} ${live?.id === p.id ? '' : 'transition-transform'}`}
+          style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%`, background: color(p) }}
+          onClick={(e) => { e.stopPropagation(); if (!drag.current?.moved) onSelect(p.id); }}
+          onPointerDown={(e) => { if (readOnly || !on || !onMove) return; e.stopPropagation(); drag.current = { id: p.id, moved: false }; setLive({ id: p.id, x: p.x, y: p.y }); }}>{i + 1}</button>); })}
     </div>
   );
 }
@@ -51,65 +71,82 @@ export function BodyMap({ side, pins, selectedId, onSelect, onAdd, readOnly, hei
 const refresh = (patientId: string) => { qc.invalidateQueries({ queryKey: ['pins', patientId] }); qc.invalidateQueries({ queryKey: ['photos', patientId] }); };
 export const usePins = (patientId: string) => useQuery<Pin[]>({ queryKey: ['pins', patientId], queryFn: () => get(`/patients/${patientId}/pins`), enabled: !!patientId });
 
-/** The panel: the body on the left, the chosen pin on the right (finding chips, diagnosis, photos, then-and-now). Lives in the pad's Examination and on the patient record. */
+/** The panel: the body on the left, the proposed or chosen pin on the right. Lives in the pad's Examination and on the patient record. */
 export function SkinMapPanel({ patientId, patientName, encounterId, readOnly, defaultDx, onAreaAdded, compact }: { patientId: string; patientName: string; encounterId?: string | null; readOnly?: boolean; defaultDx?: string; onAreaAdded?: (area: string) => void; compact?: boolean }) {
   const pins = usePins(patientId); const photosQ = usePhotos(patientId);
   const [side, setSide] = useState<'front' | 'back'>('front');
   const [sel, setSel] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ x: number; y: number; area: string } | null>(null);
   const [capture, setCapture] = useState<Pin | null>(null); const [compare, setCompare] = useState<[any, any] | null>(null);
   const list = pins.data ?? []; const pin = list.find((p) => p.id === sel) ?? null;
   const photos: any[] = useMemo(() => (photosQ.data?.photos ?? []).filter((x: any) => pin && (x.pinId === pin.id || (!x.pinId && x.area === pin.area))), [photosQ.data, pin]);
-  const add = useMutation({ mutationFn: (b: { x: number; y: number; area: string }) => post(`/patients/${patientId}/pins`, { ...b, side, encounterId: encounterId ?? null, diagnosis: defaultDx || null }),
-    onSuccess: (row: Pin, b) => { refresh(patientId); setSel(row.id); onAreaAdded?.(b.area); }, onError: (e) => toast(errText(e), 'err') });
-  const upd = useMutation({ mutationFn: ({ id, ...b }: any) => api('PATCH', `/pins/${id}`, b), onSuccess: () => refresh(patientId), onError: (e) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/pins/${id}`), onSuccess: () => { refresh(patientId); setSel(null); }, onError: (e: any) => toast(e?.body?.code === 'PIN_HAS_PHOTOS' ? 'This pin has photos; mark it resolved instead.' : errText(e), 'err') });
+  const add = useMutation({ mutationFn: (b: { x: number; y: number; area: string }) => post(`/patients/${patientId}/pins`, { ...b, side, encounterId: encounterId ?? null, diagnosis: defaultDx || null }),
+    onSuccess: (row: Pin, b) => { refresh(patientId); setPending(null); setSel(row.id); onAreaAdded?.(b.area); toast(`Pinned ${b.area}`, 'ok', { label: 'Undo', run: () => del.mutate(row.id) }); }, onError: (e) => toast(errText(e), 'err') });
+  const upd = useMutation({ mutationFn: ({ id, ...b }: any) => api('PATCH', `/pins/${id}`, b), onSuccess: () => refresh(patientId), onError: (e) => toast(errText(e), 'err') });
   const findings = (pin?.finding ?? '').split(',').map((x) => x.trim()).filter(Boolean);
   const toggleFinding = (f: string) => pin && upd.mutate({ id: pin.id, finding: (findings.includes(f) ? findings.filter((x) => x !== f) : [...findings, f]).join(', ') || null });
-  const height = compact ? 220 : 300;
+  const height = compact ? 230 : 310;
   const counts = { front: list.filter((p) => p.side === 'front').length, back: list.filter((p) => p.side === 'back').length };
+  const numberOf = (p: Pin) => list.filter((q) => q.side === p.side).indexOf(p) + 1;
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (!pending) return; if (e.key === 'Escape') setPending(null); if (e.key === 'Enter') { e.preventDefault(); add.mutate(pending); } }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [pending]);
   return (
-    <div className="flex flex-wrap gap-4">
+    <div className="flex flex-wrap gap-5">
       <div className="flex flex-col items-center gap-2">
-        <div className="seg !p-[2px]" role="tablist">{(['front', 'back'] as const).map((s) => <button key={s} role="tab" aria-selected={side === s} className={`!px-2.5 !py-1 !text-[12px] ${side === s ? 'on relative z-[1] !bg-surface' : ''}`} onClick={() => setSide(s)}>{s === 'front' ? 'Front' : 'Back'}{counts[s] ? <span className="ml-1 text-muted">{counts[s]}</span> : null}</button>)}</div>
-        <BodyMap side={side} pins={list} selectedId={sel} onSelect={setSel} onAdd={readOnly ? undefined : (x, y, area) => add.mutate({ x, y, area })} readOnly={readOnly} height={height} encounterId={encounterId} />
-        <div className="text-[11px] text-muted">{readOnly ? 'Tap a pin' : 'Tap the body to pin a site · tap a pin to open it'}</div>
+        <div className="seg !p-[2px]" role="tablist">{(['front', 'back'] as const).map((s) => <button key={s} role="tab" aria-selected={side === s} className={`!px-3 !py-1 !text-[12px] ${side === s ? 'on relative z-[1] !bg-surface' : ''}`} onClick={() => { setSide(s); setPending(null); }}>{s === 'front' ? 'Front' : 'Back'}{counts[s] ? <span className="ml-1 text-muted">{counts[s]}</span> : null}</button>)}</div>
+        <BodyMap side={side} pins={list} selectedId={sel} onSelect={(id) => { setSel(id); setPending(null); }} pending={pending} encounterId={encounterId} readOnly={readOnly} height={height}
+          onPropose={readOnly ? undefined : (x, y) => { setSel(null); setPending({ x, y, area: areaAt(side, x, y) }); }}
+          onMove={readOnly ? undefined : (id, x, y) => upd.mutate({ id, x, y, area: areaAt(side, x, y) })} />
+        <div className="max-w-[200px] text-center text-[11px] leading-snug text-muted">{readOnly ? 'Tap a pin to see it' : pin ? 'Drag the pin to move it' : 'Tap the body where the problem is'}</div>
       </div>
-      <div className="min-w-0 flex-1" style={{ minWidth: 220 }}>
-        {!pin ? (
+      <div className="min-w-0 flex-1" style={{ minWidth: 240 }}>
+        {pending ? (
+          <div className="rounded-xl border border-clay-line bg-clay-soft/50 p-3.5 anim-scale-in" role="dialog" aria-label="Pin a site">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-clay-ink">Pin here</div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <select aria-label="Site" className="input !w-auto !py-1.5 text-[13.5px] font-semibold" value={pending.area} onChange={(e) => setPending({ ...pending, area: e.target.value })}>{[...new Set([pending.area, ...AREAS(side)])].map((a) => <option key={a} value={a}>{a}</option>)}</select>
+              {defaultDx && <span className="text-[12.5px] text-muted">· {defaultDx}</span>}
+            </div>
+            <div className="mt-3 flex items-center gap-2"><button type="button" className="btn btn-primary btn-sm" disabled={add.isPending} onClick={() => add.mutate(pending)}><Icon name="check" className="h-3.5 w-3.5" />Add pin</button><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPending(null)}>Cancel</button><span className="ml-auto text-[11px] text-muted">Enter · Esc</span></div>
+          </div>
+        ) : !pin ? (
           <div>
-            {list.length === 0 ? <div className="rounded-xl border border-dashed border-line-2 p-4 text-[13px] text-muted">No pins yet. {readOnly ? '' : 'Tap where the problem is: the pin keeps the photos, the finding and the diagnosis for that spot across visits.'}</div>
-              : <div className="space-y-1">{list.map((p, i) => <button key={p.id} type="button" className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-surface-2" onClick={() => { setSide(p.side); setSel(p.id); }}>
-                  <span className="grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold text-white" style={{ background: p.resolvedAt ? 'var(--color-muted)' : p.encounterId && encounterId && p.encounterId === encounterId ? 'var(--color-clay)' : 'var(--color-sky)' }}>{list.filter((q) => q.side === p.side).indexOf(p) + 1}</span>
+            {list.length === 0 ? <div className="rounded-xl border border-dashed border-line-2 p-4 text-[13px] leading-relaxed text-muted">No pins yet.{readOnly ? '' : ' Tap where the problem is, confirm the site, and the pin keeps the photos, the finding and the diagnosis for that spot across visits.'}</div>
+              : <div className="space-y-0.5">{list.map((p) => <button key={p.id} type="button" className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13.5px] hover:bg-surface-2" onClick={() => { setSide(p.side); setSel(p.id); }}>
+                  <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold text-white" style={{ background: p.resolvedAt ? 'var(--color-muted)' : p.encounterId && encounterId && p.encounterId === encounterId ? 'var(--color-clay)' : 'var(--color-sky)' }}>{numberOf(p)}</span>
                   <span className="min-w-0 flex-1 truncate"><b>{p.area}</b>{p.diagnosis ? ` · ${p.diagnosis}` : ''}{p.finding ? <span className="text-muted"> · {p.finding}</span> : ''}</span>
-                  <span className="text-[11.5px] text-muted">{p.photos ? `${p.photos} photo${p.photos === 1 ? '' : 's'}` : ''}{p.resolvedAt ? ' · resolved' : p.encounterAt ? ` · ${fmtDate(p.encounterAt)}` : ''}</span></button>)}</div>}
+                  <span className="shrink-0 text-[11.5px] text-muted">{p.photos ? `${p.photos} photo${p.photos === 1 ? '' : 's'} · ` : ''}{p.resolvedAt ? 'resolved' : p.encounterAt ? fmtDate(p.encounterAt) : fmtDate(p.createdAt)}</span>
+                  <Icon name="chevR" className="h-3.5 w-3.5 shrink-0 text-muted" /></button>)}</div>}
           </div>
         ) : (
           <div className="anim-fade-in">
             <div className="flex flex-wrap items-center gap-2">
-              <b className="text-[14px]">{pin.area}</b>
+              <span className="grid h-6 w-6 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: pin.resolvedAt ? 'var(--color-muted)' : pin.encounterId === encounterId ? 'var(--color-clay)' : 'var(--color-sky)' }}>{numberOf(pin)}</span>
+              <b className="text-[15px]">{pin.area}</b>
               {pin.resolvedAt ? <Chip>resolved {fmtDate(pin.resolvedAt)}</Chip> : pin.encounterAt ? <Chip tone={pin.encounterId === encounterId ? 'clay' : 'sky'}>{pin.encounterId === encounterId ? 'this visit' : `since ${fmtDate(pin.encounterAt)}`}</Chip> : null}
               <span className="ml-auto flex items-center gap-1">
-                {!readOnly && <button type="button" className="btn btn-sm" onClick={() => setCapture(pin)}><Icon name="spark" className="h-3.5 w-3.5" />Take photo</button>}
-                {photos.length >= 2 && <button type="button" className="btn btn-sm" onClick={() => setCompare([photos[photos.length - 1], photos[0]])}>Then / now</button>}
+                {!readOnly && <button type="button" className="btn btn-ghost btn-sm text-rose" onClick={() => del.mutate(pin.id)}>Remove</button>}
                 <button type="button" className="btn btn-ghost btn-icon !h-8 !w-8" aria-label="Close pin" onClick={() => setSel(null)}><Icon name="x" className="h-3.5 w-3.5" /></button>
               </span>
             </div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-muted">Seen here</span>
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span className="w-16 text-xs text-muted">Seen here</span>
               {[...new Set([...findings, ...FINDINGS.slice(0, compact ? 8 : 12)])].map((f) => <button key={f} type="button" disabled={readOnly} className={`toggle-opt !min-h-7 !py-0.5 ${findings.includes(f) ? 'on' : ''}`} onClick={() => toggleFinding(f)}>{f}</button>)}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted">Which is</span>
-              <input aria-label="Diagnosis at this site" className="input !w-56 !py-1 text-[12.5px]" placeholder={defaultDx || 'diagnosis'} defaultValue={pin.diagnosis ?? ''} disabled={readOnly} key={pin.id} onBlur={(e) => { const v = e.target.value.trim(); if ((pin.diagnosis ?? '') !== v) upd.mutate({ id: pin.id, diagnosis: v || null }); }} />
+              <span className="w-16 text-xs text-muted">Which is</span>
+              <input aria-label="Diagnosis at this site" className="input !w-60 !py-1.5 text-[13px]" placeholder={defaultDx || 'diagnosis'} defaultValue={pin.diagnosis ?? ''} disabled={readOnly} key={pin.id} onBlur={(e) => { const v = e.target.value.trim(); if ((pin.diagnosis ?? '') !== v) upd.mutate({ id: pin.id, diagnosis: v || null }); }} />
               {defaultDx && !pin.diagnosis && !readOnly && <button type="button" className="btn btn-sm" onClick={() => upd.mutate({ id: pin.id, diagnosis: defaultDx })}>Use {defaultDx}</button>}
             </div>
-            <div className="mt-3">
-              {photos.length === 0 ? <div className="text-xs text-muted">No photos of this site yet.</div>
-                : <div className="flex flex-wrap gap-1.5">{photos.slice(0, compact ? 4 : 8).map((x) => <button key={x.id} type="button" className="relative h-16 w-16 overflow-hidden rounded-lg bg-paper-2" onClick={() => setCompare([photos[photos.length - 1], x])} title={fmtDate(x.takenAt)}><img src={`/api/documents/${x.id}/file`} alt={x.area ?? 'photo'} className="h-full w-full object-cover" /><span className="absolute bottom-0.5 left-0.5 rounded bg-black/55 px-1 text-[9px] font-semibold text-white">{new Date(x.takenAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span></button>)}</div>}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="w-16 text-xs text-muted">Photos</span>
+              {photos.length === 0 ? <span className="text-xs text-muted">none of this site yet</span>
+                : <span className="flex flex-wrap gap-1.5">{photos.slice(0, compact ? 4 : 8).map((x) => <button key={x.id} type="button" className="relative h-14 w-14 overflow-hidden rounded-lg bg-paper-2" onClick={() => setCompare([photos[photos.length - 1], x])} title={fmtDate(x.takenAt)}><img src={`/api/documents/${x.id}/file`} alt={x.area ?? 'photo'} className="h-full w-full object-cover" /><span className="absolute bottom-0.5 left-0.5 rounded bg-black/55 px-1 text-[9px] font-semibold text-white">{new Date(x.takenAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span></button>)}</span>}
+              {!readOnly && <button type="button" className="btn btn-sm" onClick={() => setCapture(pin)}><Icon name="spark" className="h-3.5 w-3.5" />Take photo</button>}
+              {photos.length >= 2 && <button type="button" className="btn btn-sm" onClick={() => setCompare([photos[photos.length - 1], photos[0]])}>Then / now</button>}
             </div>
-            {!readOnly && <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-2">
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => upd.mutate({ id: pin.id, resolved: !pin.resolvedAt })}>{pin.resolvedAt ? 'Reopen' : 'Resolved · cleared'}</button>
-              <button type="button" className="btn btn-ghost btn-sm text-rose" onClick={() => del.mutate(pin.id)}>Remove pin</button>
+            {!readOnly && <div className="mt-3 border-t border-line pt-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => upd.mutate({ id: pin.id, resolved: !pin.resolvedAt })}>{pin.resolvedAt ? 'Reopen' : 'Mark resolved · cleared'}</button>
             </div>}
           </div>
         )}

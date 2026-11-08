@@ -490,7 +490,7 @@ export function Encounter() {
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 gap-3 ${isDoctor ? (act === 'medicines' || act === 'review' ? 'xl:grid-cols-[minmax(0,1fr)_600px]' : 'xl:grid-cols-[minmax(0,1fr)_420px] 2xl:grid-cols-[minmax(0,1fr)_460px]') : ''}`}>
+      <div className={`grid grid-cols-1 gap-4 ${isDoctor ? (act === 'medicines' || act === 'review' ? 'xl:grid-cols-[minmax(0,1fr)_minmax(560px,46%)]' : 'xl:grid-cols-[minmax(0,1fr)_minmax(440px,38%)]') : ''}`}>
         {/* the pad */}
         <section className="card-flat min-w-0 overflow-hidden !p-0">
           {isDoctor && !readOnly && <div className="px-4 pb-2 pt-3">
@@ -519,10 +519,10 @@ export function Encounter() {
           {/* the note as it reads: one row per section, the open one marked; tap a row to edit it on the right */}
           {isDoctor && <div className="border-t border-line">
             {rowKeys.map((k) => { const v = summary[k]; const on = act === k; const bad = errors.some((x) => secOf(x.path) === k); return (
-              <button key={k} type="button" aria-current={on || undefined} className={`grid w-full grid-cols-[104px_minmax(0,1fr)_auto] items-start gap-3 border-t border-line px-4 py-2.5 text-left first:border-t-0 transition-colors ${on ? 'bg-surface-2 shadow-[inset_3px_0_0_var(--color-clay)]' : 'hover:bg-surface-2'}`} onClick={() => { setActive(k); if (window.innerWidth < 1280) setTimeout(() => document.getElementById('palette')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); }}>
-                <span className="pt-px text-[12px] font-semibold text-muted">{LABEL[k] ?? k}{isRequired(k) && <span className="text-clay"> *</span>}</span>
-                <span className={`min-w-0 text-[13.5px] leading-snug ${v ? '' : bad ? 'text-rose' : 'text-[#A3A9B2]'}`}>{v ?? (bad ? `${LABEL[k]} is required` : HINT[k] ?? 'Tap to add')}</span>
-                <span className={`pt-px text-xs ${on ? 'text-clay font-semibold' : 'text-muted'}`}>{on ? 'editing' : v ? 'edit' : ''}</span>
+              <button key={k} type="button" aria-current={on || undefined} className={`group grid w-full grid-cols-[128px_minmax(0,1fr)_auto] items-start gap-4 border-t border-line/70 px-5 py-3.5 text-left first:border-t-0 transition-colors ${on ? 'bg-clay-soft/40 shadow-[inset_3px_0_0_var(--color-clay)]' : 'hover:bg-surface-2'}`} onClick={() => { setActive(k); if (window.innerWidth < 1280) setTimeout(() => document.getElementById('palette')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); }}>
+                <span className="pt-[3px] text-[12.5px] font-semibold text-muted">{LABEL[k] ?? k}{isRequired(k) && <span className="text-clay"> *</span>}</span>
+                <span className={`min-w-0 text-[15px] leading-snug ${v ? 'text-ink' : bad ? 'text-rose' : 'text-muted/70'}`}>{v ?? (bad ? `${LABEL[k]} is required` : HINT[k] ?? 'Tap to add')}</span>
+                <span className={`flex items-center gap-1 pt-[3px] text-xs ${on ? 'font-semibold text-clay' : 'text-muted opacity-0 group-hover:opacity-100'}`}>{on ? 'editing' : 'edit'}<Icon name="chevR" className="h-3.5 w-3.5" /></span>
               </button>); })}
           </div>}
 
