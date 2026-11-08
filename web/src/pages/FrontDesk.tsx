@@ -108,8 +108,8 @@ export function FrontDesk() {
   const who = (p: any) => <><b className="text-[14px]">{p.fullName}</b><FlagChips flags={p.flags} /><span className="text-muted">{[p.ageYears, p.sex].filter(Boolean).join(' ')}</span></>;
   const meta = (xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ');
   const Row = ({ token, tokenCls = '', top, sub, actions, cls = '' }: { token: React.ReactNode; tokenCls?: string; top: React.ReactNode; sub: React.ReactNode; actions: React.ReactNode; cls?: string }) => (
-    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line px-4 py-2.5 first:border-t-0 hover:bg-surface-2 anim-fade-up ${cls}`}>
-      <span className={`w-[72px] shrink-0 text-[15px] font-bold tracking-tight ${tokenCls}`}>{token}</span>
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line/70 px-5 py-3.5 first:border-t-0 hover:bg-surface-2 anim-fade-up ${cls}`}>
+      <span className={`w-[76px] shrink-0 text-[16px] font-bold tracking-tight ${tokenCls}`}>{token}</span>
       <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-2 gap-y-1">{top}</div><div className="mt-0.5 text-[12px] text-muted">{sub}</div></div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">{actions}</div>
     </div>);
@@ -162,7 +162,7 @@ export function FrontDesk() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
-        <div className="mr-auto"><h1 className="text-[18px] leading-tight font-semibold">Front desk</h1>
+        <div className="mr-auto"><h1 className="text-[26px] leading-tight font-semibold">Front desk</h1>
           <div className="text-sm text-muted mt-0.5">{dayLabel}{d && <> · <b className="text-ink">{waiting.length} waiting</b>{waiting.length ? ` · longest ${longest} min` : ''} · {inConsult.length} with the doctor{(can(perms, 'report.daily') || can(perms, 'finance.read')) ? ` · ${money(collected)} collected` : ''}</>}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
         {tab === 'history'
           ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab('waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>

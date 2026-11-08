@@ -64,8 +64,8 @@ export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?
 
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
-      <div className="mr-auto"><h1 className="text-[18px] leading-tight font-semibold text-ink">{title}</h1>{subtitle && <div className="text-[13px] text-muted mt-0.5">{subtitle}</div>}</div>
+    <div className="anim-fade-up flex flex-wrap items-end gap-3 mb-6">
+      <div className="mr-auto"><h1 className="text-[26px] leading-tight font-semibold text-ink">{title}</h1>{subtitle && <div className="text-[14px] text-muted mt-1">{subtitle}</div>}</div>
       {children}
     </div>
   );
@@ -74,7 +74,7 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
 export function Section({ title, aside, children, className = '', delay = 0 }: { title?: ReactNode; aside?: ReactNode; children: ReactNode; className?: string; delay?: number }) {
   return (
     <section className={`card-flat anim-fade-up overflow-hidden ${className}`} style={{ animationDelay: `${delay}ms` }}>
-      {title && <div className="flex items-center gap-2 px-4 py-2.5 border-b border-line"><div className="text-[13.5px] font-semibold text-ink">{title}</div><div className="ml-auto flex items-center gap-2">{aside}</div></div>}
+      {title && <div className="flex items-center gap-2 px-5 py-3.5 border-b border-line/70"><div className="text-[15px] font-semibold text-ink">{title}</div><div className="ml-auto flex items-center gap-2">{aside}</div></div>}
       {children}
     </section>
   );
@@ -96,9 +96,9 @@ export const Skeleton = ({ rows = 3 }: { rows?: number }) => (
 export function Stat({ label, value, sub, tone = '', delay = 0 }: { label: string; value: ReactNode; sub?: ReactNode; tone?: '' | 'clay' | 'sage'; delay?: number }) {
   return (
     <div className="card anim-fade-up" style={{ animationDelay: `${delay}ms` }}>
-      <div className="text-[12px] font-medium text-muted">{label}</div>
-      <div className={`serif text-[24px] leading-none mt-1.5 ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : 'text-ink'}`}>{value}</div>
-      {sub && <div className="text-xs text-muted mt-2">{sub}</div>}
+      <div className="text-[13px] font-medium text-muted">{label}</div>
+      <div className={`serif text-[26px] leading-none mt-2 ${tone === 'clay' ? 'text-clay' : tone === 'sage' ? 'text-sage' : 'text-ink'}`}>{value}</div>
+      {sub && <div className="text-xs text-muted mt-2.5">{sub}</div>}
     </div>
   );
 }

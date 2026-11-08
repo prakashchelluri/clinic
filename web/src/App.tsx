@@ -177,9 +177,9 @@ export function App() {
       )}
 
       <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-        <header className="no-print sticky top-0 z-30 flex h-12 shrink-0 items-center gap-1.5 border-b border-line/70 bg-surface/80 px-3 backdrop-blur-xl md:px-5">
+        <header className="no-print sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-line/60 bg-surface/75 px-3 backdrop-blur-xl md:px-6">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-          <span className="truncate text-[14px] font-semibold">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : clinic)}</span><span className="hidden truncate text-[12.5px] text-muted lg:inline">· {clinic}</span>
+          <span className="truncate text-[15px] font-semibold">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : clinic)}</span><span className="hidden truncate text-[13px] text-muted lg:inline">· {clinic}</span>
           <span className="ml-auto" />
           {!platform && <button onClick={() => setPalette(true)} className="mr-1.5 hidden h-8 w-[260px] items-center gap-2 rounded-lg border border-line-2 bg-surface-2 px-2.5 text-[12.5px] text-muted hover:border-muted lg:flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-3.5 w-3.5" /><span className="flex-1 text-left">Patient, phone or ID</span><span className="kbd">Ctrl K</span></button>}
           {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-ghost btn-icon lg:hidden"><Icon name="search" /></button>}
@@ -203,7 +203,7 @@ export function App() {
             </div>
         </header>
 
-        <div className={`mx-auto w-full px-4 py-4 md:px-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1440px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
+        <div className={`mx-auto w-full px-4 py-5 md:px-6 md:py-6 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1440px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <Outlet context={{ me: me.data, perms, cfg: cfg.data }} />}</main>
         </div>
       </div>

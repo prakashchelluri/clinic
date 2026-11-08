@@ -85,71 +85,87 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
 
 .no-scrollbar { scrollbar-width: none; } .no-scrollbar::-webkit-scrollbar { display: none; }
 
+/* ---------- Type scale: six steps, nothing under 12 px. The pages' many ad-hoc sizes fold onto these. ---------- */
+@layer utilities {
+  .text-\[10px\], .text-\[10\.5px\], .text-\[11px\], .text-\[11\.5px\] { font-size: 12px; line-height: 1.35; }
+  .text-xs, .text-\[12px\], .text-\[12\.5px\] { font-size: 13px; line-height: 1.4; }
+  .text-sm, .text-\[13px\], .text-\[13\.5px\] { font-size: 14px; line-height: 1.45; }
+  .text-\[14px\], .text-\[14\.5px\] { font-size: 15px; line-height: 1.45; }
+  .text-\[15px\] { font-size: 16px; line-height: 1.4; }
+  .text-\[16px\] { font-size: 17px; line-height: 1.35; }
+  .text-\[18px\] { font-size: 22px; line-height: 1.2; letter-spacing: -0.02em; }
+  .text-\[24px\], .text-\[26px\] { font-size: 28px; line-height: 1.1; letter-spacing: -0.025em; }
+}
+
 /* ---------- Components ---------- */
 @layer components {
   /* Panels: white, one hairline, 10 px corners. The old frosted glass and the dark card map here so every page follows. */
-  .card { @apply rounded-[14px] border border-line/70 bg-surface p-4; box-shadow: var(--shadow-soft); }
-  .card-flat, .glass { @apply rounded-[14px] border border-line/70 bg-surface; box-shadow: var(--shadow-soft); }
+  .card { @apply rounded-2xl border border-line/60 bg-surface p-5; box-shadow: var(--shadow-soft); }
+  .card-flat, .glass { @apply rounded-2xl border border-line/60 bg-surface; box-shadow: var(--shadow-soft); }
   .card-hover:hover { @apply bg-surface-2; }
-  .dark-card { @apply rounded-xl border border-line bg-surface; }
+  .dark-card { @apply rounded-2xl border border-line/60 bg-surface; }
 
-  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-[10px] px-3 text-[13px] font-semibold border border-line bg-surface text-ink select-none; min-height: 36px; box-shadow: 0 1px 1px rgba(0,0,0,.03);
-    transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease); }
-  .btn:hover { @apply bg-surface-2; }
+  /* Buttons: filled, no outline. Secondary is a quiet grey fill, primary is clay, ghost is bare. */
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-[10px] px-3.5 text-[14px] font-semibold border border-transparent bg-paper-2 text-ink select-none; min-height: 36px;
+    transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
+  .btn:hover { @apply bg-line; }
   .btn:disabled { @apply opacity-45 cursor-not-allowed; }
   .btn-primary, .btn-accent { @apply bg-clay border-clay text-white; }
   .btn-primary:hover, .btn-accent:hover { @apply bg-clay-2 border-clay-2; }
   .btn:active { transform: scale(0.985); }
-  .btn-ghost { @apply border-transparent bg-transparent text-ink-2; box-shadow: none; }
+  .btn-ghost { @apply border-transparent bg-transparent text-ink-2; }
   .btn-ghost:hover { @apply bg-paper-2 border-transparent text-ink; }
-  .btn-sm { @apply px-2.5 text-[12.5px]; min-height: 30px; }
-  .btn-icon { @apply h-9 w-9 p-0 rounded-[9px]; min-height: 0; }
+  .btn-sm { @apply px-3 text-[13px]; min-height: 32px; }
+  .btn-icon { @apply h-9 w-9 p-0 rounded-[10px]; min-height: 0; }
 
-  .input { @apply w-full rounded-[10px] border border-line-2 bg-surface px-3 py-2 text-[13.5px] text-ink placeholder:text-muted/80;
-    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease); }
-  .input:hover { @apply border-muted; }
-  .input:focus { @apply outline-none border-clay; box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-clay) 18%, transparent); }
-  .input:disabled { @apply bg-surface-2 text-muted; }
+  /* Inputs: a filled field, no outline until focus */
+  .input { @apply w-full rounded-[10px] border border-transparent bg-paper-2 px-3.5 py-2.5 text-[14px] text-ink placeholder:text-muted/70;
+    transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease); }
+  .input:hover { @apply bg-line/70; }
+  .input:focus { @apply outline-none bg-surface border-clay; box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-clay) 18%, transparent); }
+  .input:disabled { @apply bg-paper-2/60 text-muted; }
   select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%236F7681' stroke-width='1.8' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; padding-right: 2.2rem; }
-  .label { @apply block text-[12px] font-semibold text-ink-2 mb-1; }
+  .label { @apply block text-[13px] font-semibold text-ink-2 mb-1.5; }
 
   /* Tags: small, flat, sentence case */
-  .chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold bg-paper-2 text-ink-2; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[12px] font-semibold bg-paper-2 text-ink-2; }
   .chip-clay { @apply bg-clay-soft text-clay-ink; }
   .chip-sage { @apply bg-sage-soft text-sage; }
   .chip-amber { @apply bg-amber-soft text-amber; }
   .chip-rose { @apply bg-rose-soft text-rose; }
   .chip-sky { @apply bg-sky-soft text-sky; }
 
-  /* Option chips: outlined, selected in clay soft */
-  .toggle-opt { @apply rounded-full border border-line-2 bg-surface px-3 py-1 text-[12.5px] font-medium text-ink-2; min-height: 28px; transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease); }
-  .toggle-opt:hover { @apply bg-surface-2 border-muted; }
-  .toggle-opt.on { @apply bg-clay-soft text-clay-ink border-clay-line font-semibold; }
-  .toggle-opt.on::before { content: "✓"; margin-right: 5px; font-size: 0.85em; }
+  /* Option chips: a quiet filled pill; the chosen one is solid ink */
+  .toggle-opt { @apply rounded-full border border-transparent bg-paper-2 px-3.5 py-1.5 text-[13px] font-medium text-ink; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
+  .toggle-opt:hover { @apply bg-line; }
+  .toggle-opt:active { transform: scale(0.97); }
+  .toggle-opt.on { @apply bg-ink text-paper font-semibold; }
+  .toggle-opt.on:hover { @apply bg-ink-2; }
+  .toggle-opt:disabled { @apply opacity-60; }
 
   /* Segmented control: a grey track, a white pill that slides */
-  .seg { @apply relative inline-flex rounded-[10px] bg-paper-2 p-[2px] gap-0.5 flex-wrap; }
-  .seg > button { @apply relative z-[1] rounded-md px-3 py-1.5 text-[12.5px] font-medium text-ink-2; transition: color 0.2s var(--ease); }
+  .seg { @apply relative inline-flex rounded-[11px] bg-paper-2 p-[3px] gap-0.5 flex-wrap; }
+  .seg > button { @apply relative z-[1] rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium text-ink-2; transition: color 0.2s var(--ease); }
   .seg > button.on { @apply text-ink font-semibold; }
   .seg > button:not(.on):hover { @apply text-ink; }
-  .seg-pill { @apply absolute z-0 rounded-md bg-surface; top: 2px; bottom: 2px; box-shadow: 0 1px 2px rgba(21, 24, 27, 0.08); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
+  .seg-pill { @apply absolute z-0 rounded-[9px] bg-surface; top: 3px; bottom: 3px; box-shadow: 0 1px 2px rgba(21, 24, 27, 0.08); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
 
-  .row { @apply flex items-center gap-3 px-4 py-2.5 border-t border-line first:border-t-0; transition: background-color 0.12s var(--ease); }
+  .row { @apply flex items-center gap-3 px-5 py-3 border-t border-line/70 first:border-t-0; min-height: 52px; transition: background-color 0.12s var(--ease); }
   .row:hover { background: var(--color-surface-2); }
 
   .kbd { @apply inline-block rounded-[5px] border border-line-2 bg-surface-2 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted; }
 
   /* Tables: 40 px rows, header on the quiet surface, numbers right and tabular */
-  .table { @apply w-full text-[13px]; font-variant-numeric: tabular-nums; }
-  .table th { @apply text-left text-[11.5px] font-semibold text-muted px-3 py-2 border-b border-line whitespace-nowrap bg-surface-2; }
-  .table td { @apply px-3 py-2.5 border-b border-line align-middle; }
+  .table { @apply w-full text-[14px]; font-variant-numeric: tabular-nums; }
+  .table th { @apply text-left text-[12.5px] font-semibold text-muted px-4 py-3 border-b border-line whitespace-nowrap bg-transparent; }
+  .table td { @apply px-4 py-3 border-b border-line/70 align-middle; }
   .table.sticky-head th { position: sticky; top: 0; z-index: 2; }
   .table tbody tr { transition: background-color 0.12s var(--ease); }
   .table tbody tr:hover { background: var(--color-surface-2); }
   .table tr:last-child td { @apply border-b-0; }
 
-  .menu { @apply absolute right-0 z-30 mt-1.5 min-w-48 rounded-[10px] border border-line bg-surface p-1; box-shadow: var(--shadow-lift); }
-  .menu button, .menu a { @apply flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-medium text-ink; transition: background-color 0.12s var(--ease); }
+  .menu { @apply absolute right-0 z-30 mt-1.5 min-w-52 rounded-xl border border-line/60 bg-surface p-1.5; box-shadow: var(--shadow-lift); }
+  .menu button, .menu a { @apply flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[14px] font-medium text-ink; transition: background-color 0.12s var(--ease); }
   .menu button:hover, .menu a:hover { @apply bg-paper-2; }
   .menu .danger { @apply text-rose; }
 
@@ -157,7 +173,7 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
   .nav-item:hover { @apply bg-paper-2 text-ink; }
   .nav-item.active { @apply bg-nav-active text-ink font-semibold; }
   /* the rail: icon above a short label, 84 px wide */
-  .rail-item { @apply relative flex w-full flex-col items-center gap-1 rounded-[10px] px-1 py-2 text-[10.5px] font-semibold text-ink-2 leading-none; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .rail-item { @apply relative flex w-full flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 text-[11px] font-semibold text-ink-2 leading-none; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .rail-item:hover { @apply bg-paper-2 text-ink; }
   .rail-item.active { @apply bg-nav-active text-ink; }
   .rail-item.active svg { color: var(--color-clay); }
