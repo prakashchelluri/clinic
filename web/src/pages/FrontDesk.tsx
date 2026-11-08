@@ -147,7 +147,7 @@ export function FrontDesk() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
         <div className="mr-auto"><h1 className="text-[18px] leading-tight font-semibold">Front desk</h1>
-          <div className="text-sm text-muted mt-0.5">{dayLabel}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
+          <div className="text-sm text-muted mt-0.5">{dayLabel}{d && <> · <b className="text-ink">{waiting.length} waiting</b>{waiting.length ? ` · longest ${longest} min` : ''} · {inConsult.length} with the doctor{(can(perms, 'report.daily') || can(perms, 'finance.read')) ? ` · ${money(collected)} collected` : ''}</>}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
         {tab === 'history'
           ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab('waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
           : <div className="flex items-center gap-1.5 no-print">{canDesk && <button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button>}{canList && <button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => listOut(`Printed the front desk list (${tab})`, undefined, () => window.print())}><Icon name="print" /></button>}{canDesk && canList && <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={() => listOut(`Downloaded the front desk list (${tab})`, undefined, exportRows)}><Icon name="export" /></button>}</div>}
@@ -155,16 +155,9 @@ export function FrontDesk() {
 
       {calling.length > 0 && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-[10px] border border-[#E8A68F] bg-clay-soft px-4 py-3 text-[14px] anim-fade-up"><Icon name="bell" className="h-5 w-5 text-clay" />{calling.map((v) => <span key={v.id}><b>{v.doctor ?? 'The doctor'}</b> is calling <b>{v.patient.fullName}</b> · token {v.opNumber}</span>)}<button className="btn btn-sm ml-auto" onClick={() => setCalling([])}>Sent</button></div>}
       {!d ? <Skeleton rows={3} /> : (<>
-        <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-4 sm:gap-3 xl:grid-cols-8 mb-4 stagger [&>*]:min-w-[132px] [&>*]:shrink-0 sm:[&>*]:min-w-0">
-          <FilterCard i={0} label="Waiting" value={waiting.length} sub={waiting.length ? `longest ${longest} min` : 'nobody waiting'} tone="clay" on={tab === 'waiting'} onClick={() => setTab('waiting')} />
-          {canDesk && <FilterCard i={1} label="Not yet arrived" value={scheduled.length} sub={late.length ? `${late.length} late` : 'booked'} on={tab === 'scheduled'} onClick={() => setTab('scheduled')} />}
-          <FilterCard i={2} label="With doctor" value={inConsult.length} sub="in consultation" on={tab === 'doctor'} onClick={() => setTab('doctor')} />
-          <FilterCard i={3} label="Checkout" value={checkout.length} sub={checkout.length ? 'plans to arrange' : 'nothing pending'} tone={checkout.length ? 'clay' : undefined} on={tab === 'checkout'} onClick={() => setTab('checkout')} />
-          <FilterCard i={3} label="Reports pending" value={reportsOpen.length} sub={reportsOpen.filter((o) => o.state === 'ready' || o.state === 'partial').length ? `${reportsOpen.filter((o) => o.state === 'ready' || o.state === 'partial').length} with results in` : reportsOpen.length ? 'waiting for the lab' : 'none'} on={tab === 'reports'} onClick={() => setTab('reports')} />
-          <FilterCard i={3} label="Completed" value={completed.length + noShows.length} sub={`${completed.filter((v) => v.status === 'done').length} seen`} on={tab === 'completed'} onClick={() => setTab('completed')} />
-          <FilterCard i={4} label="All" value={visits.length + scheduled.length + noShows.length} sub="everyone today" on={tab === 'all'} onClick={() => setTab('all')} />
-          {canDesk && <FilterCard i={5} label="Needs you" value={needsCount} sub={dueTotal ? `${money(dueTotal)} due` : needsCount ? 'late arrivals' : 'all clear'} tone="rose" on={tab === 'needs'} onClick={() => setTab('needs')} />}
-          {(can(perms, 'report.daily') || can(perms, 'finance.read')) && <div style={{ ['--i' as any]: 6 }} className="rounded-[10px] border border-white/80 bg-white/35 px-4 py-3.5"><div className="text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Collected</div><div className="mt-1 text-[24px] font-semibold leading-none tracking-tight text-sage"><Num value={collected} format={money} /></div><div className="mt-1.5 text-xs text-muted truncate">{(d.payments ?? []).length ? d.payments.map((p: any) => `${p.method} ${money(p.total)}`).join(' · ') : 'nothing yet'}</div></div>}
+        <div className="mb-3 flex gap-0.5 overflow-x-auto no-scrollbar border-b border-line" role="tablist">
+          {([['waiting', 'Waiting', waiting.length, waiting.length > 0], ...(canDesk ? [['scheduled', 'Not yet arrived', scheduled.length, late.length > 0]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Checkout', checkout.length, checkout.length > 0], ['reports', 'Reports pending', reportsOpen.length, reportsOpen.some((o) => o.state === 'ready' || o.state === 'partial')], ['completed', 'Completed', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false], ...(canDesk ? [['needs', 'Needs you', needsCount, needsCount > 0]] : [])] as [Tab, string, number, boolean][]).map(([k, l, n, hot]) => (
+            <button key={k} role="tab" aria-selected={tab === k} className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] whitespace-nowrap ${tab === k ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-muted hover:text-ink'}`} onClick={() => setTab(k)}>{l}<span className={`tabular-nums ${hot && tab !== k ? 'text-clay font-semibold' : tab === k ? 'text-ink' : 'text-muted'}`}>{n}</span></button>))}
         </div>
 
         {tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
@@ -183,18 +176,6 @@ export function FrontDesk() {
 }
 
 /** A stat that is also a filter: click it to show exactly those patients. */
-function FilterCard({ i, label, value, sub, tone, on, onClick }: { i: number; label: string; value: number; sub?: string; tone?: 'clay' | 'rose'; on: boolean; onClick: () => void }) {
-  const alert = tone === 'rose' && value > 0;
-  return (
-    <button type="button" onClick={onClick} aria-pressed={on}
-      className={`rounded-[10px] border px-4 py-3.5 text-left transition-[background-color,box-shadow,transform,border-color,color] duration-300 ease-[var(--ease)] ${on ? 'border-ink bg-surface shadow-[inset_0_0_0_1px_var(--color-ink)]' : alert ? 'border-rose/25 bg-rose-soft text-rose' : 'border-white/80 bg-white/55 hover:bg-white'}`}
-      style={on ? { boxShadow: '0 22px 40px -22px rgba(23,25,26,.7)', ['--i' as any]: i } : { boxShadow: 'var(--shadow-soft)', ['--i' as any]: i }}>
-      <div className={`text-[11px] font-bold uppercase tracking-[0.09em] ${on ? 'text-ink-2' : alert ? 'text-rose' : 'text-muted'}`}>{label}</div>
-      <div className={`mt-1 text-[24px] font-semibold leading-none tracking-tight ${!on && tone === 'clay' && value > 0 ? 'text-clay' : ''}`}><Num value={value} /></div>
-      {sub && <div className={`mt-1.5 truncate text-xs ${on ? 'text-ink-2' : alert ? 'text-rose/80' : 'text-muted'}`}>{sub}</div>}
-    </button>
-  );
-}
 
 const Sep = () => <span className="w-px h-9 bg-ink/10 hidden sm:block" />;
 function Stat({ label, value, sub, tone = '' }: { label: string; value: any; sub?: string; tone?: '' | 'clay' | 'sage' }) {
