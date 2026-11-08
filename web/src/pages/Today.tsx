@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, qc, today, fmtTime, errText } from '../api';
 import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
-import { Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
+import { Chip, Icon, Num, Skeleton, toast, fmtDate } from '../ui';
 import { ChangeMyDay, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 
@@ -32,6 +32,8 @@ export function Today() {
   const fd = useQuery({ queryKey: ['frontdesk', 'today-doc'], queryFn: () => get('/frontdesk'), refetchInterval: 5000 });
   const cal = useQuery({ queryKey: ['calendar', today(), doc ?? 'all'], queryFn: () => get(`/calendar?day=${today()}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 30000 });
   const tom = useQuery({ queryKey: ['calendar', tmr, doc ?? 'all'], queryFn: () => get(`/calendar?day=${tmr}${doc ? `&practitionerId=${doc}` : ''}`) });
+  const lw = addDay(today(), -7);
+  const lastWk = useQuery({ queryKey: ['calendar', lw, doc ?? 'all'], queryFn: () => get(`/calendar?day=${lw}${doc ? `&practitionerId=${doc}` : ''}`), staleTime: 3600_000 });
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), enabled: can(perms, 'worklist.read') });
   const fus = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), enabled: can(perms, 'worklist.read') });
   const allProcs = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
@@ -105,6 +107,10 @@ export function Today() {
   const toCome = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => !byAppt.has(a.id) && ['booked', 'confirmed', 'requested'].includes(a.status) && w.endTime >= now).length, 0);
   const apptCount = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => a.status !== 'no_show').length, 0) + visits.filter((v) => !v.appointmentId).length;
   const lastEnd = windows.length ? windows[windows.length - 1].endTime : null;
+  const lwCount: number | null = lastWk.data ? (lastWk.data.windows ?? []).reduce((n: number, w: any) => n + (w.appointments ?? []).filter((a: any) => a.status !== 'no_show').length, 0) : null;
+  const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hour12: false }).format(new Date()));
+  const greet = `${hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'}, ${docName}`;
 
   // --- before you leave ---
   const drafts = visits.filter((v) => v.encounterStatus === 'draft' && v.status !== 'in_consult');
@@ -135,7 +141,7 @@ export function Today() {
           {can(perms, 'encounter.intake') && <button className="btn btn-primary" disabled={open.isPending} onClick={() => open.mutate(sentIn.id)}>Open</button>}</div>
       </div>}
       {withYou && !sentIn ? <>
-        <div className="text-[11px] font-bold uppercase tracking-wider text-muted">With you now</div>
+        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted"><span className="breathe h-2 w-2 rounded-full bg-sage" />With you now</div>
         <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{withYou.patient.fullName}</div>
           <div className="text-xs text-muted">{[withYou.patient.ageYears ? `${withYou.patient.ageYears} ${withYou.patient.sex ?? ''}` : null, withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint, withYou.details?.bp && `BP ${withYou.details.bp}`].filter(Boolean).join(' · ')}</div></div>
           {can(perms, 'encounter.intake') && <button className="btn btn-accent" disabled={open.isPending} onClick={() => open.mutate(withYou.id)}>Continue</button>}</div>
@@ -155,15 +161,24 @@ export function Today() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3 anim-fade-up">
-        <div className="min-w-0"><h1 className="text-[18px] font-semibold leading-tight">{dateLabel}</h1>
-          <div className="text-sm text-muted"><b className="text-ink">{apptCount} patient{apptCount === 1 ? '' : 's'}{c.procedures?.length ? ` · ${c.procedures.length} procedure${c.procedures.length === 1 ? '' : 's'}` : ''}</b> · {seen} seen · {waiting.length} waiting · {toCome} still to come{lastEnd ? ` · you finish at ${lastEnd}` : doc ? ' · not working today' : ''}</div>
-          {(late || breakNow || away) && <div className="mt-1 flex flex-wrap gap-1.5">{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}</div>}</div>
+        <div className="min-w-0"><h1 className="text-[26px] font-semibold leading-tight" aria-label={greet}><Letters text={greet} /></h1>
+          <p className="mt-1.5 text-sm text-muted">{dateLabel}. <b className="text-ink">{apptCount} patient{apptCount === 1 ? '' : 's'}{c.procedures?.length ? ` and ${c.procedures.length} procedure${c.procedures.length === 1 ? '' : 's'}` : ''}</b>, {seen} seen, {waiting.length} waiting, {toCome} still to come.{lastEnd ? ` You finish at ${lastEnd}.` : doc ? ' Not working today.' : ''}</p>
+          {(late || breakNow || away) && <div className="mt-1.5 flex flex-wrap gap-1.5">{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}</div>}</div>
         {canChange && <div className="ml-auto hidden flex-wrap gap-2 sm:flex">
           <button className="btn btn-sm" onClick={() => quick('late')}><Icon name="clock" className="h-3.5 w-3.5" />Running late</button>
           <button className="btn btn-sm" onClick={() => quick('break')}><Icon name="moon" className="h-3.5 w-3.5" />Break</button>
           <button className="btn btn-sm" onClick={() => quick('early')}><Icon name="door" className="h-3.5 w-3.5" />Leave early</button>
           <button className="btn btn-sm btn-primary" onClick={() => quick('early')}>Change my day</button>
         </div>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 anim-fade-up sm:grid-cols-4">
+        <Tile label="Booked" value={apptCount} sub={lwCount === null ? '' : `${lwCount} last ${new Date(lw + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'UTC' })}`}>
+          {apptCount > 0 && <div className="mt-2.5 flex gap-1" aria-label={`${seen} of ${apptCount} seen`}>{Array.from({ length: Math.min(apptCount, 16) }, (_, i) => <i key={i} className={`h-1.5 flex-1 rounded-full ${i < Math.round((seen / apptCount) * Math.min(apptCount, 16)) ? 'bg-ink' : 'bg-ink/15'}`} />)}</div>}
+        </Tile>
+        <Tile label="Waiting" value={waiting.length} sub={longest ? `longest ${longest} min` : 'nobody in the line'} overdue={longest >= 30} />
+        <Tile label="With you" value={withYou ? withYou.patient.fullName : '—'} sub={withYou ? withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint ?? 'in the room now' : 'the room is empty'} live={!!withYou} />
+        <Tile label="Reports" value={readyOrders.length} sub={readyOrders.length ? 'all received, to review' : 'nothing to review'} onClick={readyOrders.length ? () => nav('/tests?tab=review') : undefined} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
@@ -179,7 +194,7 @@ export function Today() {
               {drafts.map((v: any) => <Attn key={v.id} tag="note" title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {review.slice(0, 4).map((r: any) => <Attn key={r.id} tag="plan" title={`${r.procedure} for ${r.patient.fullName}`} sub={r.sittings ? `approve ${r.sittings} sittings` : 'approve the plan'} action="Open" onClick={() => nav(`/patients/${r.patient.id}`)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} tag="no doctor" title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}
-              {overdue.length > 0 && <Attn tag="follow-up" title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them" action="See" onClick={() => nav('/worklist?tab=plans')} />}
+              {overdue.length > 0 && <Attn tag="follow-up" overdue title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them" action="See" onClick={() => nav('/worklist?tab=plans')} />}
               {stopped.map((x: any) => <Attn key={x.id} tag="sign-in" title={`${x.name} was stopped`} sub={`new internet address ${x.ip}: at the clinic? allow it`} action="Open" onClick={() => nav('/settings?tab=privacy')} />)}
             </div>}
           </section>
@@ -224,10 +239,29 @@ function NowLine({ at }: { at: string }) {
   return <div className="relative ml-[52px] h-0 border-t-2 border-clay"><span className="absolute -left-[52px] -top-2.5 rounded-full bg-clay px-1.5 py-0.5 text-[10.5px] font-bold text-white">{at}</span></div>;
 }
 
-function Attn({ tag, title, sub, action, onClick }: { tag: string; title: string; sub: string; action: string; onClick: () => void }) {
+/** The greeting lands letter by letter; the h1 carries the readable text. */
+function Letters({ text }: { text: string }) {
+  let i = 0;
+  return <span className="letters" aria-hidden>{text.split(' ').map((w, wi) => <Fragment key={wi}>{wi > 0 && ' '}<span>{[...w].map((ch) => <span key={i} style={{ '--i': i++ } as any}>{ch}</span>)}</span></Fragment>)}</span>;
+}
+
+/** A filled stat tile: label, one big value, one line under it. A number counts up and flashes when it changes. */
+function Tile({ label, value, sub, live, overdue, onClick, children }: { label: string; value: number | string; sub: string; live?: boolean; overdue?: boolean; onClick?: () => void; children?: ReactNode }) {
+  const Tag: any = onClick ? 'button' : 'div';
+  return (
+    <Tag type={onClick ? 'button' : undefined} onClick={onClick} className={`flex min-h-[108px] min-w-0 flex-col rounded-2xl bg-paper-2 p-4 text-left ${onClick ? 'transition-colors hover:bg-line/70' : ''} ${overdue ? 'overdue' : ''}`}>
+      <div className="flex items-center gap-1.5 text-[12px] font-semibold text-muted">{live && <span className="breathe h-2 w-2 rounded-full bg-sage" />}{label}</div>
+      <div className="mt-auto truncate pt-2 text-[26px] font-semibold leading-none">{typeof value === 'number' ? <Num value={value} /> : value}</div>
+      <div className="mt-1.5 truncate text-xs text-muted">{sub || ' '}</div>
+      {children}
+    </Tag>
+  );
+}
+
+function Attn({ tag, title, sub, action, overdue, onClick }: { tag: string; title: string; sub: string; action: string; overdue?: boolean; onClick: () => void }) {
   return (
     <div className="flex items-center gap-3 border-t border-line/60 py-2.5 first:border-t-0">
-      <span className="shrink-0 rounded-full bg-ink/7 px-2 py-0.5 text-[10.5px] font-bold text-ink-2">{tag}</span>
+      <span className={`shrink-0 rounded-full bg-ink/7 px-2 py-0.5 text-[10.5px] font-bold text-ink-2 ${overdue ? 'overdue' : ''}`}>{tag}</span>
       <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{title}</div><div className="truncate text-xs text-muted">{sub}</div></div>
       <button className="btn btn-sm" onClick={onClick}>{action}</button>
     </div>

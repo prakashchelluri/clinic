@@ -53,35 +53,44 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
 ::selection { background: var(--color-clay-soft); }
 
 /* ---------- Motion: short, no lift ---------- */
-@keyframes fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes scale-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } to { opacity: 1; transform: none; } }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgba(197, 59, 20, 0.35); } 100% { box-shadow: 0 0 0 10px rgba(197, 59, 20, 0); } }
 @keyframes slide-in-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
-@keyframes flash { 0% { color: var(--color-clay); } 100% { color: inherit; } }
+@keyframes flash { 0% { color: var(--color-clay); opacity: 0.3; transform: translateY(6px); } 40% { opacity: 1; transform: none; } 100% { color: inherit; } }
+@keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.6); opacity: 0.5; } }
+@keyframes overdue { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-amber) 35%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
+@keyframes letter { from { opacity: 0; transform: translateY(16px) rotate(5deg); } to { opacity: 1; transform: none; } }
 @keyframes draw { from { stroke-dashoffset: var(--len, 2000); } to { stroke-dashoffset: 0; } }
 @keyframes area-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 
-.anim-fade-up { animation: fade-up 0.28s var(--ease) both; }
+.anim-fade-up { animation: fade-up 0.36s var(--ease) both; }
+/* cards on a page settle one after another; browsers without sibling-index() drop the line and animate together */
+.page .anim-fade-up { animation-delay: min(calc((sibling-index() - 1) * 45ms), 320ms); }
+.breathe { animation: breathe 1.6s ease-in-out infinite; }
+.overdue { animation: overdue 1.8s ease-out infinite; }
+.letters > span { display: inline-block; white-space: nowrap; } /* a word stays whole when the line wraps */
+.letters > span > span { display: inline-block; animation: letter 0.55s cubic-bezier(0.2, 0.8, 0.2, 1.15) both; animation-delay: calc(var(--i, 0) * 16ms); }
 .anim-fade-in { animation: fade-in 0.22s var(--ease) both; }
 .anim-scale-in { animation: scale-in 0.18s var(--ease) both; }
 .anim-slide-in { animation: slide-in-right 0.2s var(--ease) both; }
 .anim-menu { animation: menu-in 0.12s var(--ease) both; }
 .stagger > * { animation: fade-up 0.2s var(--ease) both; animation-delay: calc(var(--i, 0) * 20ms); }
 .live-dot { animation: pulse-ring 1.8s ease-out infinite; }
-.is-flash { animation: flash 0.9s var(--ease); }
+.is-flash { display: inline-block; animation: flash 0.7s var(--ease); }
 .draw-line { stroke-dasharray: var(--len, 2000); animation: draw 1s var(--ease) both; }
 .area-in { animation: area-in 0.8s var(--ease) 0.1s both; }
 .skeleton { background: linear-gradient(90deg, var(--color-paper-2) 25%, var(--color-surface-2) 50%, var(--color-paper-2) 75%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 0.375rem; }
-.page { animation: fade-in 0.15s var(--ease) both; }
+.page { animation: fade-up 0.3s var(--ease) both; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
 /* Route transitions (React Router viewTransition) */
-::view-transition-old(root) { animation: fade-in 0.12s var(--ease) reverse; }
-::view-transition-new(root) { animation: fade-in 0.15s var(--ease); }
+::view-transition-old(root) { animation: fade-in 0.1s var(--ease) reverse; }
+::view-transition-new(root) { animation: fade-up 0.26s var(--ease); }
 
 .no-scrollbar { scrollbar-width: none; } .no-scrollbar::-webkit-scrollbar { display: none; }
 
