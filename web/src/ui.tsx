@@ -111,7 +111,7 @@ export function Stat({ label, value, sub, tone = '', delay = 0 }: { label: strin
 }
 
 /** Segmented control with one dark pill that glides to the chosen option. */
-export function Segmented<T extends string>({ options, value, onChange }: { options: { value: T; label: string; count?: number; tone?: 'rose' }[]; value: T; onChange: (v: T) => void }) {
+export function Segmented<T extends string>({ options, value, onChange, size, disabled }: { options: { value: T; label: string; count?: number; tone?: 'rose' }[]; value: T; onChange: (v: T) => void; size?: 'sm'; disabled?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; width: number; top: number; height: number } | null>(null);
   useLayoutEffect(() => {
@@ -123,10 +123,10 @@ export function Segmented<T extends string>({ options, value, onChange }: { opti
     return () => { window.removeEventListener('resize', measure); ro?.disconnect(); };
   }, [value, options.length, options.map((o) => o.count).join(',')]);
   return (
-    <div className="seg" ref={box}>
+    <div className={`seg ${size === 'sm' ? 'seg-sm' : ''}`} ref={box}>
       {pos && <span className="seg-pill" style={{ left: pos.left, width: pos.width, top: pos.top, height: pos.height, bottom: 'auto' }} />}
       {options.map((o) => (
-        <button key={o.value} type="button" onClick={() => onChange(o.value)} className={value === o.value ? 'on' : ''} style={o.tone === 'rose' && value !== o.value ? { color: 'var(--color-rose)' } : undefined}>
+        <button key={o.value} type="button" disabled={disabled} onClick={() => onChange(o.value)} className={value === o.value ? 'on' : ''} style={o.tone === 'rose' && value !== o.value ? { color: 'var(--color-rose)' } : undefined}>
           {o.label}{o.count !== undefined && <span className="ml-1.5 opacity-60 font-medium">{o.count}</span>}
         </button>
       ))}

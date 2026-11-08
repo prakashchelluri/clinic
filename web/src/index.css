@@ -157,6 +157,8 @@ h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-we
   .seg > button { @apply relative z-[1] rounded-[9px] px-3.5 py-1.5 text-[13px] font-medium text-ink-2; transition: color 0.2s var(--ease); }
   .seg > button.on { @apply text-ink font-semibold; }
   .seg > button:not(.on):hover { @apply text-ink; }
+  .seg-sm > button { @apply px-2.5 py-1 text-[12px] rounded-[7px]; }
+  .seg-sm { @apply rounded-[9px] p-[2px]; }
   .seg-pill { @apply absolute z-0 rounded-[9px] bg-surface; top: 3px; bottom: 3px; box-shadow: 0 1px 2px rgba(21, 24, 27, 0.08); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
 
   .row { @apply flex items-center gap-3 px-5 py-3 border-t border-line/70 first:border-t-0; min-height: 52px; transition: background-color 0.12s var(--ease); }

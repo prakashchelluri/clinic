@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Floating, Icon, MoreMenu, Skeleton, fmtDate, toast, NumInput, ask } from '../ui';
+import { Avatar, Chip, Floating, Icon, MoreMenu, Segmented, Skeleton, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare } from '../photos';
@@ -136,6 +136,7 @@ export function Encounter() {
   const [side, setSide] = useState<'visits' | 'docs' | 'photos'>('visits');
   const [testDraft, setTestDraft] = useState(''); const [line, setLine] = useState(''); const [pendingLine, setPendingLine] = useState<string | null>(null);
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
+  const [seOpen, setSeOpen] = useState(false); const [allSugg, setAllSugg] = useState(false); // side effects and the suggestion strip are folded by default
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
   const [active, setActive] = useState<string | null>(null); // the section whose editor is open on the right (direction A)
@@ -336,7 +337,7 @@ export function Encounter() {
         {syms.map((s, i) => <div key={s.name + i} className="flex flex-wrap items-center gap-1.5 border-t border-line py-1.5 first:border-t-0 first:pt-0">
           <span className="toggle-opt on">{s.name}{!readOnly && <button type="button" aria-label={`Remove ${s.name}`} className="ml-1.5" onClick={() => setSyms(syms.filter((_, j) => j !== i))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>
           <input aria-label={`${s.name}: since`} className="input !w-28 !py-1 text-[12.5px]" placeholder="since" maxLength={30} value={s.since ?? ''} disabled={readOnly} onChange={(ev) => setSyms(syms.map((x, j) => (j === i ? { ...x, since: ev.target.value } : x)))} />
-          <span className="flex gap-1" role="radiogroup" aria-label={`${s.name}: severity`}>{SEVERITIES.map((sv) => <button key={sv} type="button" role="radio" aria-checked={s.severity === sv} disabled={readOnly} className={`toggle-opt !min-h-7 !py-0.5 ${s.severity === sv ? 'on' : ''}`} onClick={() => setSyms(syms.map((x, j) => (j === i ? { ...x, severity: x.severity === sv ? undefined : sv } : x)))}>{sv}</button>)}</span>
+          <Segmented size="sm" disabled={readOnly} value={s.severity ?? ''} onChange={(sv) => setSyms(syms.map((x, j) => (j === i ? { ...x, severity: sv || undefined } : x)))} options={SEVERITIES.map((sv) => ({ value: sv, label: sv }))} />
           <input aria-label={`${s.name}: note`} className="input min-w-32 flex-1 !py-1 text-[12.5px]" placeholder="note" maxLength={120} value={s.note ?? ''} disabled={readOnly} onChange={(ev) => setSyms(syms.map((x, j) => (j === i ? { ...x, note: ev.target.value } : x)))} />
         </div>)}
         {!readOnly && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{(symField?.options ?? []).filter((o: string) => !syms.some((s) => norm(s.name) === norm(o))).slice(0, 6).map((o: string) => <button key={o} type="button" className="opt" onClick={() => addSyms([{ name: o }])}>{o}</button>)}<TagDraft placeholder="symptom" invalid={!!err('complaint', 'chief_complaint')} onAdd={(t) => addSyms([{ name: t }])} /></div>}
@@ -347,8 +348,8 @@ export function Encounter() {
       <div data-invalid={!!err('assessment', 'diagnosis')}>
         {dxs.map((d, i) => <div key={d.name} className="flex flex-wrap items-center gap-1.5 border-t border-line py-1.5 first:border-t-0 first:pt-0">
           <span className="chip chip-clay !py-1 !text-[12.5px]">{d.name}{!readOnly && <button type="button" aria-label={`Remove ${d.name}`} className="ml-1" onClick={() => setDxs(dxs.filter((_, j) => j !== i))}><Icon name="x" className="inline h-3 w-3" /></button>}</span>
-          <span className="flex gap-1" role="radiogroup" aria-label={`${d.name}: severity`}>{SEVERITIES.map((sv) => <button key={sv} type="button" role="radio" aria-checked={d.severity === sv} disabled={readOnly} className={`toggle-opt !min-h-7 !py-0.5 ${d.severity === sv ? 'on' : ''}`} onClick={() => setDxs(dxs.map((x, j) => (j === i ? { ...x, severity: x.severity === sv ? undefined : sv } : x)))}>{sv}</button>)}</span>
-          <span className="ml-1 flex gap-1" role="radiogroup" aria-label={`${d.name}: status`}>{DX_STATUS.map((st) => <button key={st} type="button" role="radio" aria-checked={d.status === st} disabled={readOnly} className={`toggle-opt !min-h-7 !py-0.5 ${d.status === st ? 'on' : ''}`} onClick={() => setDxs(dxs.map((x, j) => (j === i ? { ...x, status: x.status === st ? undefined : st } : x)))}>{st}</button>)}</span>
+          <Segmented size="sm" disabled={readOnly} value={d.severity ?? ''} onChange={(sv) => setDxs(dxs.map((x, j) => (j === i ? { ...x, severity: sv || undefined } : x)))} options={SEVERITIES.map((sv) => ({ value: sv, label: sv }))} />
+          <Segmented size="sm" disabled={readOnly} value={d.status ?? ''} onChange={(st) => setDxs(dxs.map((x, j) => (j === i ? { ...x, status: st || undefined } : x)))} options={DX_STATUS.map((st) => ({ value: st, label: st }))} />
         </div>)}
         {!readOnly && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">{(dxField?.options ?? DX_OPTIONS).filter((o: string) => !dxs.some((d) => d.name === o)).slice(0, 6).map((o: string) => <button key={o} type="button" className="opt" onClick={() => addDxs([{ name: o }])}>{o}</button>)}
           <DxDraft options={dxField?.options ?? DX_OPTIONS} invalid={!!err('assessment', 'diagnosis')} onAdd={(t) => addDxs([{ name: t }])} /></div>}
@@ -546,34 +547,36 @@ export function Encounter() {
         {/* right side: the open section's editor, then the story so far */}
         {isDoctor && <aside className="flex flex-col gap-3 self-start xl:sticky xl:top-28">
           <div id="palette" className="card-flat overflow-hidden anim-fade-in" key={act}>
-          {!readOnly && (sugg.length > 0 || protoSugg.length > 0) && <div className="flex flex-col gap-2 border-b border-line px-4 py-2.5" id="sec-suggest">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">Goes with it</div>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-              {sugg.map((t) => <button key={t.id} type="button" title={`${t.name}: one tap adds it; anything already on the pad is kept once`} className={`toggle-opt ${appliedIds.includes(t.id) ? 'on' : '!border-dashed'}`} onClick={() => setSetNote(applySet(t))}>{t.name}<span className="ml-1.5 font-medium text-muted">{size(t)}</span></button>)}
-              {protoSugg.map((t: any) => <button key={t.id} type="button" title="A whole protocol: medicines, advice, tests and review. Only what is missing is added." className={`toggle-opt ${appliedIds.includes(t.id) ? 'on' : '!border-dashed'}`} onClick={() => setSetNote(stackProtocol(t))}>{t.name}<span className="ml-1.5 font-medium text-muted">protocol</span></button>)}
-              <span className="text-xs text-muted">· one tap each, nothing is added twice</span>
-            </div>
-          </div>}
+          {!readOnly && (sugg.length > 0 || protoSugg.length > 0) && (() => {
+            const all = [...protoSugg.map((t: any) => ({ id: t.id, name: t.name, meta: 'protocol', go: () => setSetNote(stackProtocol(t)) })), ...sugg.map((t) => ({ id: t.id, name: t.name, meta: size(t), go: () => setSetNote(applySet(t)) }))];
+            const shown = allSugg ? all : all.slice(0, 3); const hidden = all.length - shown.length;
+            return <div className="flex flex-wrap items-center gap-1 border-b border-line/70 px-4 py-2" id="sec-suggest">
+              <span className="mr-1 text-[12px] text-muted">Goes with it</span>
+              {shown.map((t) => <button key={t.id} type="button" title="One tap adds it; anything already on the pad is kept once" className={`!min-h-7 !py-0.5 ${appliedIds.includes(t.id) ? 'toggle-opt on' : 'opt'}`} onClick={t.go}>{t.name}<span className="ml-1.5 text-[11px] font-medium opacity-60">{t.meta}</span></button>)}
+              {hidden > 0 && <button type="button" className="opt !min-h-7 !py-0.5 text-muted" onClick={() => setAllSugg(true)}>+{hidden} more</button>}
+              {allSugg && all.length > 3 && <button type="button" className="opt !min-h-7 !py-0.5 text-muted" onClick={() => setAllSugg(false)}>less</button>}
+            </div>; })()}
             {act === 'review' ? <>
-          <div className="px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2"><b className="text-[13.5px]">How is it since {fmtDate(lastDone.createdAt)}?</b>
-              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How is it">{RESPONSES.map((r) => <button key={r} type="button" role="radio" aria-checked={data.review?.response === r} disabled={readOnly} className={`toggle-opt ${data.review?.response === r ? 'on' : ''}`} onClick={() => set('review', 'response', data.review?.response === r ? undefined : r)}>{r}</button>)}</div></div>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5"><span className="mr-1 text-xs text-muted">Side effects</span>{SIDE_EFFECTS.map((s) => { const on = (data.review?.sideEffects ?? []).includes(s); return <button key={s} type="button" disabled={readOnly} className={`toggle-opt ${on ? 'on' : ''}`} onClick={() => { const cur: string[] = data.review?.sideEffects ?? []; set('review', 'sideEffects', s === 'None' ? (on ? [] : ['None']) : on ? cur.filter((x) => x !== s) : [...cur.filter((x) => x !== 'None'), s]); }}>{s}</button>; })}</div>
-            <div className="mt-3 flex items-center gap-2"><b className="text-[13px]">Last prescription</b><span className="text-xs text-muted">{fmtDate(lastDone.createdAt)} · {joinList(lastDone.data?.assessment?.diagnosis) || 'consultation'}</span>
-              {!readOnly && <button className="btn btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
-            <div className="mt-1">{lastRx.map((l, k) => {
-              const cur = rx.find((r) => r.name === l.name); const st = !cur ? (rx.length ? 'stop' : '') : sameLine(cur, l) ? 'continue' : 'change';
-              const raw = lastRaw[k];
-              return (
-                <div key={l.name + k} className="flex flex-wrap items-center gap-2 border-t border-line py-2 text-[13px] first:border-t-0">
-                  <span className="min-w-0 flex-1"><b>{l.name}</b><span className="block text-xs text-muted">{[l.dose, l.frequency, l.durationDays ? `${l.durationDays} days` : null, l.instructions].filter(Boolean).join(' · ')}{raw && raw.medicineId && !raw.issuedQty ? ' · patient did not buy' : ''}</span></span>
-                  {st === 'change' && cur && <span className="text-xs text-amber">now {[cur.dose, cur.frequency, cur.durationDays ? `${cur.durationDays}d` : null].filter(Boolean).join(' · ')}</span>}
-                  {!readOnly && <div className="flex gap-1">
-                    <button type="button" className={`toggle-opt ${st === 'continue' ? 'on' : ''}`} onClick={() => setRx((r) => cur ? r.map((x) => (x.name === l.name ? withQty({ ...l }) : x)) : [...r.filter((x) => x.name), withQty({ ...l })])}>Continue</button>
-                    <button type="button" className={`toggle-opt ${st === 'change' ? 'on' : ''}`} onClick={() => { if (!cur) setRx((r) => [...r.filter((x) => x.name), withQty({ ...l })]); setTimeout(() => document.getElementById(`rx-${l.name}`)?.focus(), 50); }}>Change</button>
-                    <button type="button" className={`toggle-opt ${st === 'stop' ? 'on' : ''}`} onClick={() => setRx((r) => r.filter((x) => x.name !== l.name))}>Stop</button>
-                  </div>}
-                </div>); })}</div>
+          <div className="space-y-4 px-5 py-4">
+            <div className="flex flex-wrap items-center gap-3"><b className="text-[15px]">How is it since {fmtDate(lastDone.createdAt)}?</b>
+              <Segmented disabled={readOnly} value={data.review?.response ?? ''} onChange={(r) => set('review', 'response', r || undefined)} options={RESPONSES.map((r) => ({ value: r, label: r }))} /></div>
+            {(() => { const se: string[] = data.review?.sideEffects ?? []; const real = se.filter((x) => x !== 'None'); return (
+              <div>
+                <div className="flex flex-wrap items-center gap-2 text-[14px]"><span className="text-muted">Side effects</span><span className={real.length ? 'font-medium text-amber' : ''}>{real.length ? real.join(', ') : 'none reported'}</span>{!readOnly && <button type="button" className="opt !min-h-7 !py-0.5 text-muted" onClick={() => setSeOpen(!seOpen)}>{seOpen ? 'Done' : 'Change'}</button>}</div>
+                {seOpen && !readOnly && <div className="mt-2 flex flex-wrap gap-1 anim-fade-in">{SIDE_EFFECTS.filter((x) => x !== 'None').map((x) => { const on = se.includes(x); return <button key={x} type="button" className={`!min-h-7 !py-0.5 ${on ? 'toggle-opt on' : 'opt'}`} onClick={() => set('review', 'sideEffects', on ? se.filter((y) => y !== x) : [...se.filter((y) => y !== 'None'), x])}>{x}</button>; })}</div>}
+              </div>); })()}
+            <div>
+              <div className="flex items-center gap-2"><b className="text-[15px]">Last prescription</b><span className="text-xs text-muted">{fmtDate(lastDone.createdAt)} · {joinList(lastDone.data?.assessment?.diagnosis) || 'consultation'}</span>
+                {!readOnly && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
+              <div className="mt-1">{lastRx.map((l, k) => {
+                const cur = rx.find((r) => r.name === l.name); const st = !cur ? (rx.length ? 'stop' : '') : sameLine(cur, l) ? 'continue' : 'change';
+                const raw = lastRaw[k];
+                return (
+                  <div key={l.name + k} className="flex flex-wrap items-center gap-3 border-t border-line/70 py-2.5 text-[14px] first:border-t-0">
+                    <span className="min-w-0 flex-1"><b>{l.name}</b><span className="block text-[12.5px] text-muted">{[l.dose, l.frequency, l.durationDays ? `${l.durationDays} days` : null, l.instructions].filter(Boolean).join(' · ')}{raw && raw.medicineId && !raw.issuedQty ? ' · patient did not buy' : ''}{st === 'change' && cur ? ` · now ${[cur.dose, cur.frequency, cur.durationDays ? `${cur.durationDays}d` : null].filter(Boolean).join(' · ')}` : ''}</span></span>
+                    {!readOnly && <Segmented size="sm" value={st} onChange={(v) => { if (v === 'continue') setRx((r) => cur ? r.map((x) => (x.name === l.name ? withQty({ ...l }) : x)) : [...r.filter((x) => x.name), withQty({ ...l })]); else if (v === 'change') { if (!cur) setRx((r) => [...r.filter((x) => x.name), withQty({ ...l })]); setActive('medicines'); setTimeout(() => document.getElementById(`rx-${l.name}`)?.focus(), 80); } else setRx((r) => r.filter((x) => x.name !== l.name)); }} options={[{ value: 'continue', label: 'Continue' }, { value: 'change', label: 'Change' }, { value: 'stop', label: 'Stop' }]} />}
+                  </div>); })}</div>
+            </div>
           </div>
             </> : customSections.some((x: any) => x.key === act) ? (() => { const x = customSections.find((y: any) => y.key === act); return (
               <section className="px-4 py-3">
