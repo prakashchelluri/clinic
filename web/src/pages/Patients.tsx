@@ -35,8 +35,8 @@ export function Patients() {
         <div className="relative anim-fade-up max-w-xl"><Icon name="search" className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-9" placeholder="Phone, name or patient ID" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <Section delay={60}>
           {list.isLoading ? <Skeleton rows={5} /> : (list.data ?? []).length === 0 ? <Empty icon="user" title="No patients found" /> :
-            (list.data ?? []).map((p: any, i: number) => (
-              <button key={p.id} className="row w-full text-left anim-fade-up md:grid md:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" style={{ animationDelay: `${Math.min(i, 10) * 15}ms` }} onClick={() => nav(`/patients/${p.id}`, { viewTransition: true })}>
+            (list.data ?? []).map((p: any) => (
+              <button key={p.id} className="row w-full text-left anim-fade-up md:grid md:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" onClick={() => nav(`/patients/${p.id}`, { viewTransition: true })}>
                 <Avatar name={p.fullName} size="h-8 w-8 text-[11px]" />
                 <div className="min-w-0 flex-1"><div className="text-[13px] font-semibold truncate">{p.fullName} <span className="text-xs text-muted font-normal">{p.ageYears ? `${p.ageYears} ` : ''}{p.sex ?? ''}</span> <FlagChips flags={p.flags} /></div></div>
                 <div className="text-xs text-muted truncate">{p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div>

@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, ask, toast } from '../ui';
+import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast } from '../ui';
 import { RoutineModal } from '../routine';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -81,8 +81,8 @@ export function Calendar() {
   const keyed = (cfg?.services ?? []).filter((s: any) => s.color);
   return (
     <div className="space-y-3" style={{ zoom }}>
-      {keyed.length > 0 && <div className="flex flex-wrap items-center gap-3 text-xs text-muted" aria-label="Colour key"><span className="font-semibold">Colour key</span>{keyed.map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</span>)}<span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px] bg-sky" />Procedure</span></div>}
-      <div className="flex flex-wrap items-center gap-2.5">
+      {keyed.length > 0 && <div className="flex flex-wrap items-center gap-3 text-xs text-muted anim-fade-up" aria-label="Colour key"><span className="font-semibold">Colour key</span>{keyed.map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</span>)}<span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px] bg-sky" />Procedure</span></div>}
+      <div className="flex flex-wrap items-center gap-2.5 anim-fade-up">
         <SearchBox onOpen={setOpenId} onBook={canBook ? (patient) => setPanel({ patient }) : undefined} />
         {canBook && <button className="btn btn-primary" onClick={() => setPanel({})}><Icon name="plus" />Book</button>}
         <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -96,7 +96,7 @@ export function Calendar() {
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Show">
+      <div className="flex flex-wrap items-center gap-1.5 anim-fade-up" role="radiogroup" aria-label="Show">
         {docs.length > 0 && <span className="mr-1 text-[11px] font-bold uppercase tracking-wider text-muted">Doctor</span>}
         {docs.map((d) => <button key={d.id} role="radio" aria-checked={pick.k === 'doc' && pick.id === d.id} className={`toggle-opt ${pick.k === 'doc' && pick.id === d.id ? 'on' : ''}`} onClick={() => setPick({ k: 'doc', id: d.id })}>{d.name.replace(/^Dr\.?\s*/i, 'Dr. ').replace(/\s+Doctor$/, '')} <span className="ml-1 text-[11px] opacity-60">{countFor(d.id)}</span></button>)}
         {rooms.length > 0 && <span className="ml-3 mr-1 text-[11px] font-bold uppercase tracking-wider text-muted">Room</span>}
@@ -145,14 +145,14 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
     <section className="card-flat p-4 sm:p-5 anim-fade-up">
       <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <b className="text-[16px]">{doc.name}</b>
-        <span className="text-sm text-muted">{away ? away.note : ws.length ? `${booked} booked · ${free} free${d.procedures.length ? ` · ${d.procedures.length} procedure${d.procedures.length === 1 ? '' : 's'}` : ''} · ${hoursOf(ws)}` : 'not working this day'}{notes.length ? ` · ${notes.join(', ')}` : ''}</span>
+        <span className="text-sm text-muted">{away ? away.note : ws.length ? <><Num value={booked} /> booked · <Num value={free} /> free{d.procedures.length ? ` · ${d.procedures.length} procedure${d.procedures.length === 1 ? '' : 's'}` : ''} · {hoursOf(ws)}</> : 'not working this day'}{notes.length ? ` · ${notes.join(', ')}` : ''}</span>
         <span className="ml-auto flex gap-2">{onChange && !past && <button className="btn btn-sm" onClick={onChange}>Change this day</button>}{onRoutine && <button className="btn btn-ghost btn-sm" onClick={onRoutine}>Weekly hours</button>}</span>
       </div>
       {rows.length === 0 ? <Empty icon="calendar" title={away ? 'Away this day' : doc.routine ? 'Not a working day' : 'No weekly hours set for this doctor'} hint={onRoutine && !doc.routine ? 'Set the weekly hours once; the calendar fills itself.' : undefined} /> : rows.map((r, i) => {
         const w = r.w; const closed = w && w.effectiveCapacity === 0 && (w.reductions ?? []).length > 0;
         const gap = i > 0 && toMin(r.time) - toMin(rows[i - 1].end) >= 30 ? `${rows[i - 1].end}–${r.time} · not working` : null;
         return (
-          <div key={r.time + i}>
+          <div key={r.time + i} className="anim-fade-up">
             {i === nowIdx && <NowLine at={now} />}
             {gap && <div className="grid grid-cols-[56px_1fr] border-t border-line/60"><span /><div className="my-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-muted" style={stripe}>{gap}</div></div>}
             <div className={`grid min-h-[52px] grid-cols-[56px_1fr_64px] items-start border-t border-line/60 ${over === w?.id ? 'bg-white' : ''}`}
