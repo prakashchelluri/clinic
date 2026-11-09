@@ -11,15 +11,23 @@ export const createActions = (can: (p: string) => boolean, path = ''): Action[] 
   const first = path.startsWith('/patients') ? 'R' : path.startsWith('/calendar') || path.startsWith('/bookings') ? 'B' : path.startsWith('/pharmacy') ? 'SOD' : path.startsWith('/inventory') ? 'OD' : path.startsWith('/worklist') ? 'P' : path.startsWith('/expenses') ? 'E' : path.startsWith('/queue') ? 'A' : '';
   const list = [
   can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/queue?arrive=1' },
-  can('appointment.write') && { key: 'B', label: 'New booking', icon: 'calendar', hint: 'Pick a window', to: '/calendar?book=1' },
+  can('appointment.write') && { key: 'B', label: 'New booking', icon: 'calendar', hint: 'Pick a window', to: '/calendar?add=book' },
   can('patient.write') && { key: 'R', label: 'Register a patient', icon: 'user', hint: 'New record', to: '/patients?new=1' },
-  can('worklist.write') && { key: 'P', label: 'Schedule a procedure', icon: 'stetho', hint: 'Open procedures', to: '/worklist' },
-  can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: 'Expenses', to: '/expenses' },
+  can('worklist.write') && { key: 'P', label: 'Schedule a procedure', icon: 'stetho', hint: 'Plans waiting for a date', to: '/worklist?tab=plans' },
+  can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: 'Expenses', to: '/expenses?add=expense' },
   can('pharmacy.bill') && { key: 'S', label: 'New pharmacy sale', icon: 'pill', hint: 'Without a prescription', to: '/pharmacy?sale=1' },
   can('stock.write') && { key: 'O', label: 'New purchase order', icon: 'list', hint: 'Order from a vendor', to: '/inventory?tab=orders&order=new' },
   can('stock.write') && { key: 'D', label: 'Receive a delivery', icon: 'inbox', hint: 'Stock in, with or without an order', to: '/inventory?tab=orders&receive=new' },
   ].filter(Boolean) as Action[];
-  return [...list.filter((a) => first.includes(a.key)), ...list.filter((a) => !first.includes(a.key))];
+  // what this page itself adds: listed right after the page's main action
+  const tab = new URLSearchParams(path.split('?')[1] ?? '').get('tab') ?? '';
+  const SETTINGS: Record<string, [string, string, string][]> = { people: [['user', 'Add a user', 'user'], ['doctor', 'Add a doctor', 'stetho']], fees: [['category', 'Add a fee category', 'rupee']], medicines: [['medicine', 'Add a medicine', 'pill']], procedures: [['procedure', 'Add a procedure', 'spark']], rooms: [['room', 'Add a room', 'door']], services: [['service', 'Add a visit type', 'calendar']], templates: [['template', 'New template', 'list']], roles: [['role', 'New role', 'lock']] };
+  const here: Action[] = [
+    ...(path.startsWith('/settings') && can('config.write') ? (SETTINGS[tab] ?? []).map(([w, label, icon], n) => ({ key: `H${n}`, label, icon, hint: 'On this page', to: `/settings?tab=${tab}&add=${w}` })) : []),
+    ...(path.startsWith('/inventory') && can('stock.write') ? [{ key: 'V', label: 'Add a vendor', icon: 'users', hint: 'Inventory', to: '/inventory?tab=vendors&add=vendor' }] : []),
+    ...(path.startsWith('/patients') && can('message.broadcast') ? [{ key: 'M', label: 'Message patients', icon: 'message', hint: 'WhatsApp to many', to: '/patients?add=message' }] : []),
+  ];
+  return [...list.filter((a) => first.includes(a.key)), ...here, ...list.filter((a) => !first.includes(a.key))];
 };
 
 /** ⌘K: find any patient, or do the common things from anywhere. The same list powers the Create button. */

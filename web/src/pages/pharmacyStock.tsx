@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
+import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch, useAddFromNew } from '../ui';
 
 type Go = (next: Record<string, string>) => void;
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
@@ -66,7 +66,7 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const { perms } = useOutletContext<any>();
   const item = sp.get('item'); const count = sp.get('count');
   const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 30000 });
-  const [filter, setFilter] = useState<string>(sp.get('show') ?? 'all'); const [find, setFind] = useState('');
+  const [filter, setFilter] = useState<string>(sp.get('show') ?? 'all'); const [find] = usePageSearch('Find a medicine', !item && !count);
   useEffect(() => { const v = sp.get('show'); if (v) setFilter(v); }, [sp]);
   const [review, setReview] = useState<string | null>(null);
   const countOne = useMutation({ mutationFn: (medicineId: string) => post('/stock/counts', { medicineId }), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
@@ -90,7 +90,6 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
       </div>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-64" aria-label="Find a medicine" placeholder="Find a medicine" value={find} onChange={(e) => setFind(e.target.value)} /></div>
         <Filter value={filter} onChange={setFilter} options={chips.map(([value, label, count]) => ({ value, label, count }))} />
         {t.count && <button type="button" className="ml-auto text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>}
       </div>
@@ -576,11 +575,11 @@ function VendorsTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const { perms } = useOutletContext<any>();
   const list = useQuery({ queryKey: ['vendors'], queryFn: () => get('/vendors') });
   const sel = sp.get('vendor') ?? list.data?.[0]?.id ?? null;
-  const [edit, setEdit] = useState<any>(sp.get('add') ? {} : null);
+  const [edit, setEdit] = useState<any>(null);
+  useAddFromNew((w) => { if (w === 'vendor') setEdit({}); });
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start">
       <div className="card !p-3 space-y-1">
-        {can(perms, 'stock.write') && <button className="btn w-full justify-center mb-2" onClick={() => setEdit({})}><Icon name="plus" />Add vendor</button>}
         {list.isLoading ? <Skeleton rows={3} /> : (list.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No vendors yet.</div> : list.data.map((v: any) => (
           <button key={v.id} onClick={() => go({ tab: 'vendors', vendor: v.id })} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left ${sel === v.id ? 'bg-[#E9EBEF]' : 'hover:bg-surface-2'}`}>
             <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{v.name}</span><span className={`block text-xs text-muted`}>{v.address ?? ''}{v.orders30 ? ` · ${v.orders30} order${v.orders30 === 1 ? '' : 's'} this month` : ''}{!v.active ? ' · inactive' : ''}</span></span>

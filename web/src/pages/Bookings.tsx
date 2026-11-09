@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams, Link } from 'react-router';
 import { get, post, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, PageHeader, Segmented, Skeleton, toast } from '../ui';
+import { Chip, Empty, Icon, PageHeader, Segmented, Skeleton, toast, usePageSearch } from '../ui';
 import { AppointmentDrawer, StatusChip, refreshBookings } from '../apptDrawer';
 
 type Tab = 'requests' | 'upcoming' | 'unconfirmed' | 'past' | 'no_show' | 'cancelled';
@@ -17,7 +17,7 @@ export function Bookings() {
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') as Tab) || 'upcoming';
   const setTab = (t: Tab) => { const p = new URLSearchParams(params); p.set('tab', t); setParams(p, { replace: true }); };
-  const [doc, setDoc] = useState(''); const [svc, setSvc] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [q, setQ] = useState('');
+  const [doc, setDoc] = useState(''); const [svc, setSvc] = useState(''); const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [q, setQ] = usePageSearch('Find a booking: name, phone or patient no.');
   const [open, setOpen] = useState<string | null>(null);
   const canWrite = can(perms, 'appointment.write');
   const qs = new URLSearchParams({ tab, ...(doc && { practitionerId: doc }), ...(svc && { serviceId: svc }), ...(from && { from }), ...(to && { to }), ...(q.trim().length >= 2 && { q: q.trim() }) });
@@ -46,7 +46,6 @@ export function Bookings() {
         <Segmented<Tab> value={tab} onChange={setTab} options={[{ value: 'requests', label: 'Requests', count: counts.data?.requests }, { value: 'upcoming', label: 'Upcoming' }, { value: 'unconfirmed', label: 'Unconfirmed', count: counts.data?.unconfirmed }, { value: 'past', label: 'Past' }, { value: 'no_show', label: 'No-shows' }, { value: 'cancelled', label: 'Cancelled' }]} />
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[200px] flex-1 sm:flex-none"><Icon name="search" className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><input aria-label="Search bookings" className="input !pl-10" placeholder="Name, phone or patient no." maxLength={60} value={q} onChange={(e) => setQ(e.target.value)} /></div>
         {(cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">All doctors</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
         {(cfg?.services ?? []).length > 0 && <select aria-label="Visit type" className="input !w-auto" value={svc} onChange={(e) => setSvc(e.target.value)}><option value="">All visit types</option>{cfg.services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
         <label className="flex items-center gap-1.5 text-sm text-muted">From<input type="date" aria-label="From date" className="input !w-auto" value={from} onChange={(e) => setFrom(e.target.value)} /></label>

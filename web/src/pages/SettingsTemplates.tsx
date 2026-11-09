@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, get, patch, post, qc, errText } from '../api';
-import { Chip, Empty, Icon, Modal, MoreMenu, NumInput, MoneyInput, Skeleton, ask, money, toPaise, toast, Tabs } from '../ui';
+import { Chip, Empty, Icon, Modal, MoreMenu, NumInput, MoneyInput, Skeleton, ask, money, toPaise, toast, Tabs, useAddFromNew } from '../ui';
 import { KINDS, norm, type Linked, type Tmpl, type TmplKind } from '../templates';
 
 const FREQ = ['1-0-0', '0-0-1', '1-0-1', '1-1-1', 'at night', 'once daily', 'twice daily', 'alternate days', 'weekly', 'SOS'];
@@ -122,6 +122,7 @@ const summary = (t: Tmpl) => t.kind === 'medicine' ? n(t.payload.items?.length ?
 export function TemplatesTab({ cfg }: { cfg: any }) {
   const [kind, setKind] = useState<TmplKind | 'protocol'>('medicine');
   const [edit, setEdit] = useState<{ t: Tmpl | null } | null>(null);
+  useAddFromNew(() => setEdit({ t: null }));
   const all = useQuery<Tmpl[]>({ queryKey: ['templates', 'settings'], queryFn: () => get('/templates?all=1') });
   const protos = useQuery<any[]>({ queryKey: ['rx-templates', 'settings'], queryFn: () => get('/rx-templates') });
   const [q, setQ] = useState('');
@@ -151,7 +152,7 @@ export function TemplatesTab({ cfg }: { cfg: any }) {
         </div>
       ) : (
         <div className="card !p-0">
-          <div className="flex items-center gap-2 border-b border-line/70 px-4 py-3"><input aria-label="Search" className="input !py-2 max-w-xs" placeholder={`Search ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}`} value={q} onChange={(e) => setQ(e.target.value)} /><button className="btn btn-primary ml-auto" onClick={() => setEdit({ t: null })}><Icon name="plus" />New {KINDS.find((k) => k.kind === kind)!.one}</button></div>
+          <div className="flex items-center gap-2 border-b border-line/70 px-4 py-3"><input aria-label="Search" className="input !py-2 max-w-xs" placeholder={`Search ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()}`} value={q} onChange={(e) => setQ(e.target.value)} /></div>
           {all.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <Empty icon="list" title={q ? 'Nothing by that name' : `No ${KINDS.find((k) => k.kind === kind)!.label.toLowerCase()} yet`} hint={q ? undefined : KINDS.find((k) => k.kind === kind)!.hint} /> :
             rows.map((t) => (
               <div key={t.id} className={`flex flex-wrap items-center gap-2 border-t border-line/70 px-4 py-3 first:border-t-0 ${t.active ? '' : 'opacity-55'}`}>

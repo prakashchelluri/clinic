@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, api, qc, errText, post } from '../api';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast, Filter } from '../ui';
+import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast, Filter, usePageSearch } from '../ui';
 
 const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Junior doctor', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -113,7 +113,7 @@ export function AuditLog() {
   const { me } = useOutletContext<any>();
   const nav = useNavigate();
   const [days, setDays] = useState('1'); const [kind, setKind] = useState(''); const [userId, setUserId] = useState(''); const [unusual, setUnusual] = useState(false);
-  const [pq, setPq] = useState(''); const [patient, setPatient] = useState<any>(null); const [open, setOpen] = useState<any>(null);
+  const [pq, setPq] = usePageSearch('Find a patient’s actions: name, phone or OP no.'); const [patient, setPatient] = useState<any>(null); const [open, setOpen] = useState<any>(null);
   const users = useQuery({ queryKey: ['users'], queryFn: () => get('/users') });
   const found = useQuery({ queryKey: ['patients', pq], queryFn: () => get(`/patients?q=${encodeURIComponent(pq)}`), enabled: pq.trim().length >= 2 && !patient });
   const qs = new URLSearchParams({ days, ...(kind ? { kind } : {}), ...(userId ? { userId } : {}), ...(unusual ? { unusual: 'true' } : {}), ...(patient ? { patientId: patient.id } : {}) }).toString();
@@ -135,8 +135,8 @@ export function AuditLog() {
         <select aria-label="Staff" className="input !w-auto !py-2" value={userId} onChange={(e) => setUserId(e.target.value)}><option value="">All staff</option>{(users.data ?? []).map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
         <div className="relative">
           {patient ? <span className="toggle-opt on">{patient.fullName}<button aria-label="Clear patient" className="ml-1" onClick={() => { setPatient(null); setPq(''); }}><Icon name="x" className="inline h-3 w-3" /></button></span>
-            : <input aria-label="Patient" className="input !w-56 !py-2" placeholder="Patient name, phone or OP no." value={pq} onChange={(e) => setPq(e.target.value)} />}
-          {!patient && (found.data ?? []).length > 0 && <div className="menu anim-menu !left-0 !right-auto !top-full !mt-1 !w-72 p-1">{found.data.slice(0, 6).map((p: any) => <button key={p.id} className="w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setPatient(p)}><b>{p.fullName}</b> <span className="text-xs text-muted">{p.patientNo}</span></button>)}</div>}
+            : null}
+          {!patient && (found.data ?? []).length > 0 && <div className="menu anim-menu !left-0 !right-auto !top-full !mt-1 !w-72 p-1">{found.data.slice(0, 6).map((p: any) => <button key={p.id} className="w-full rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => { setPatient(p); setPq(''); }}><b>{p.fullName}</b> <span className="text-xs text-muted">{p.patientNo}</span></button>)}</div>}
         </div>
         <label className="ml-1 flex items-center gap-1.5 text-sm"><input type="checkbox" checked={unusual} onChange={(e) => setUnusual(e.target.checked)} />Only unusual</label>
       </div>

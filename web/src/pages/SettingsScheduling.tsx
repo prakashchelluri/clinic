@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { openPrint } from '../printPreview';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, errText } from '../api';
-import { Chip, Empty, Icon, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise } from '../ui';
+import { Chip, Empty, Icon, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, useAddFromNew } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 
 /* Scheduling settings: availability, visit types, booking rules, online booking, reminders. All data, no deploy. */
@@ -60,12 +60,13 @@ export function AvailabilityTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
 export function ServicesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const list = useQuery({ queryKey: ['admin-services'], queryFn: () => get('/admin/services') });
   const [edit, setEdit] = useState<any>(null);
+  useAddFromNew(() => setEdit(blank));
   const refresh = () => { list.refetch(); onSaved(); };
   const items: any[] = list.data ?? [];
   const blank = { name: '', description: '', minutes: 60, price: '', feeCategoryId: '', color: COLORS[items.length % COLORS.length], bufferMinutes: 0, places: 1, practitionerIds: [], onlineBookable: false, sortOrder: items.length, active: true };
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-      <Section title={<>Visit types <span className="font-normal text-muted">· what patients book</span></>} aside={<button className="btn btn-sm btn-accent" onClick={() => setEdit(blank)}><Icon name="plus" className="h-3.5 w-3.5" />Visit type</button>}>
+      <Section title={<>Visit types <span className="font-normal text-muted">· what patients book</span></>}>
         {list.isLoading ? <div className="p-4"><Skeleton rows={3} /></div> : items.length === 0 ? <Empty icon="calendar" title="No visit types yet" hint="Add what patients come for: new consultation, review, procedure follow-up." /> : items.map((s) => (
           <button key={s.id} className={`row w-full text-left ${s.active ? '' : 'opacity-50'} ${edit?.id === s.id ? 'bg-white' : ''}`} onClick={() => setEdit({ ...s, price: s.pricePaise == null ? '' : String(s.pricePaise / 100), feeCategoryId: s.feeCategoryId ?? '', description: s.description ?? '' })}>
             <i className="h-3.5 w-3.5 shrink-0 rounded" style={{ background: s.color }} />

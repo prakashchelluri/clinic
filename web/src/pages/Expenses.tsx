@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter } from '../ui';
+import { Chip, Empty, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter, useAddFromNew } from '../ui';
 
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 type Range = 'today' | '7' | '30' | 'month';
@@ -22,6 +22,8 @@ export function Expenses() {
   const d = q.data; const refresh = () => { qc.invalidateQueries({ queryKey: ['expenses'] }); qc.invalidateQueries({ queryKey: ['daily'] }); };
   const [form, setForm] = useState(blank());
   const [edit, setEdit] = useState<any>(null);
+  const [adding, setAdding] = useState(false);
+  useAddFromNew(() => setAdding(true)); // New in the header: Add an expense
   const [voiding, setVoiding] = useState<any>(null);
   type F = ReturnType<typeof blank>;
   const valid = (f: F) => f.description.trim().length >= 2 && toPaise(f.amount) > 0 && f.day <= today();
@@ -39,21 +41,23 @@ export function Expenses() {
         <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: 'month', label: 'This month' }]} />
       </PageHeader>
 
-      {canWrite && (
-        <form className="card !p-4 mb-5 anim-fade-up" onSubmit={(e) => { e.preventDefault(); if (valid(form) && !add.isPending) add.mutate(); }}>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_190px_150px_150px_auto] items-end">
-            <div className="sm:col-span-2 xl:col-span-1"><label className="label" htmlFor="ex-desc">What was paid for</label><input id="ex-desc" className="input" maxLength={200} placeholder="e.g. Gloves and syringes" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+      {canWrite && adding && (
+        <Modal title="Add an expense" subtitle="Stays open after each one, for the next" onClose={() => setAdding(false)} width="max-w-xl">
+        <form onSubmit={(e) => { e.preventDefault(); if (valid(form) && !add.isPending) add.mutate(); }}>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 items-end">
+            <div className="sm:col-span-2"><label className="label" htmlFor="ex-desc">What was paid for</label><input id="ex-desc" className="input" maxLength={200} placeholder="e.g. Gloves and syringes" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
             <div><label className="label" htmlFor="ex-cat">Category</label><select id="ex-cat" className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>{(d?.categories ?? ['Other']).map((c: string) => <option key={c}>{c}</option>)}</select></div>
             <div><label className="label" htmlFor="ex-amt">Amount</label><MoneyInput id="ex-amt" value={form.amount} onChange={(v) => setForm({ ...form, amount: v })} /></div>
             <div><label className="label" htmlFor="ex-day">Date</label><input id="ex-day" type="date" className="input" max={today()} value={form.day} onChange={(e) => setForm({ ...form, day: e.target.value || today() })} /></div>
-            <button className="btn btn-primary !h-11 sm:col-span-2 xl:col-span-1" disabled={!valid(form) || add.isPending}><Icon name="plus" className="h-4 w-4" />Add expense</button>
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <span className="text-xs text-muted mr-1">Paid by</span>
             {METHODS.map(([m, l]) => <button type="button" key={m} className={`toggle-opt ${form.method === m ? 'on' : ''}`} onClick={() => setForm({ ...form, method: m })}>{l}</button>)}
             <span className="ml-auto text-xs text-muted">{why(form) && (form.description || form.amount) ? why(form) : ' '}</span>
           </div>
+          <div className="modal-foot"><button type="button" className="btn btn-ghost" onClick={() => setAdding(false)}>Done</button><button className="btn btn-primary" disabled={!valid(form) || add.isPending}><Icon name="plus" className="h-4 w-4" />Add expense</button></div>
         </form>
+        </Modal>
       )}
 
       {!d ? <Skeleton rows={4} /> : (<>
@@ -64,7 +68,7 @@ export function Expenses() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 mt-5 items-start">
           <Section title={<>Entries <span className="text-muted font-normal">· {rows.length}</span></>} delay={120}>
-            {rows.length === 0 ? <Empty icon="wallet" title="No expenses in this period" hint={canWrite ? 'Add the first one above.' : undefined} /> : (
+            {rows.length === 0 ? <Empty icon="wallet" title="No expenses in this period" hint={canWrite ? 'Add one with New at the top.' : undefined} /> : (
               <div className="overflow-x-auto"><table className="table"><thead><tr><th className="pl-4">Date</th><th>For</th><th>Category</th><th>Paid by</th><th className="text-right">Amount</th><th className="pr-4" /></tr></thead>
                 <tbody>{rows.map((r) => (
                   <tr key={r.id} className={r.voidedAt ? 'opacity-50' : ''}>

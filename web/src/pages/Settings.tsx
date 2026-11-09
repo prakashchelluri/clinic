@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
-import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, ask } from '../ui';
+import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
@@ -194,12 +194,13 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const roleList: { key: string; name: string }[] = (useRoles().data ?? []).map((r: any) => ({ key: r.key, name: r.name })); const ROLES: [string, string][] = roleList.map((r) => [r.key, r.name]);
   const roleName = (k: string) => roleList.find((r) => r.key === k)?.name ?? k;
   const [edit, setEdit] = useState<any>(null); const [doc, setDoc] = useState<any>(null);
+  useAddFromNew((w) => { if (w === 'user') setEdit({ name: '', email: '', password: '', roles: ['receptionist'], practitionerId: null, active: true }); if (w === 'doctor') setDoc({ name: '', regNo: '', qualification: '', active: true }); });
   const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const saveDoc = useMutation({ mutationFn: async ({ routine, ...p }: any) => { const row = p.id ? await patch(`/admin/practitioners/${p.id}`, p) : await post('/admin/practitioners', p); if (routine) await api('PUT', `/calendar/routine/${row.id}`, routine); return row; }, onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); } });
   const toggleRole = (r: string) => setEdit({ ...edit, roles: edit.roles.includes(r) ? edit.roles.filter((x: string) => x !== r) : [...edit.roles, r] });
   return (
     <div className="space-y-4">
-      <Section title="Staff accounts" aside={<button className="btn btn-sm btn-primary" onClick={() => setEdit({ name: '', email: '', password: '', roles: ['receptionist'], practitionerId: null, active: true })}><Icon name="plus" className="h-3.5 w-3.5" />Add user</button>}>
+      <Section title="Staff accounts">
         {(users.data ?? []).map((u: any) => (
           <div key={u.id} className={`row ${u.active ? '' : 'opacity-50'}`}>
             <div className="flex-1 min-w-0"><div className="text-sm font-medium">{u.name}</div><div className="text-xs text-muted">{u.email}{u.practitionerId ? ` · ${cfg.practitioners.find((p: any) => p.id === u.practitionerId)?.name ?? ''}` : ''}</div></div>
@@ -208,7 +209,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
           </div>
         ))}
       </Section>
-      <Section title="Doctors (practitioners)" aside={<button className="btn btn-sm" onClick={() => setDoc({ name: '', regNo: '', qualification: '', active: true })}><Icon name="plus" className="h-3.5 w-3.5" />Add doctor</button>}>
+      <Section title="Doctors (practitioners)">
         {cfg.practitioners.map((p: any) => <div key={p.id} className="row"><div className="flex-1"><div className="text-sm font-medium">{p.name}</div><div className="text-xs text-muted">{[p.qualification, p.regNo && `Reg. ${p.regNo}`].filter(Boolean).join(' · ')}</div></div><Chip tone={p.routine ? 'sage' : 'amber'}>{routineSummary(p.routine)}</Chip><button className="btn btn-ghost btn-icon" onClick={() => setDoc({ ...p, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" /></button></div>)}
         <div className="px-4 py-2 text-xs text-muted">A doctor who also signs in needs a user account linked to their practitioner record (People → user → "Signs prescriptions as").</div>
       </Section>
@@ -289,9 +290,10 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Fees ---------------- */
 function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
+  useAddFromNew(() => setEdit({ code: '', name: '', amount: '', priority: 0, affectsCapacity: true, active: true }));
   const save = useMutation({ mutationFn: (c: any) => c.id ? patch(`/admin/fee-categories/${c.id}`, c) : post('/admin/fee-categories', c), onSuccess: () => { toast('Fee saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
-    <Section title="Visit categories & fees" aside={<button className="btn btn-sm btn-primary" onClick={() => setEdit({ code: '', name: '', amount: '', priority: 0, affectsCapacity: true, active: true })}><Icon name="plus" className="h-3.5 w-3.5" />Add category</button>}>
+    <Section title="Visit categories & fees">
       <table className="table"><thead><tr><th className="pl-4">Code</th><th>Name</th><th className="text-right">Fee</th><th>Rule</th><th>Queue</th><th /></tr></thead>
         <tbody>{cfg.feeCategories.map((c: any) => <tr key={c.id}><td className="pl-4 font-mono text-xs">{c.code}</td><td>{c.name}</td><td className="text-right">{money(c.amountPaise)}</td><td className="text-xs text-muted">{c.eligibilityNote ?? (c.eligibility ? 'auto-suggested by rule' : 'manual')}</td><td>{c.priority > 0 && <Chip tone="amber">jumps queue</Chip>}</td><td className="text-right pr-3"><button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...c, amount: c.amountPaise / 100 })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
@@ -313,11 +315,12 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Medicines ---------------- */
 function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null); const [q, setQ] = useState('');
+  useAddFromNew(() => setEdit({ name: '', form: 'tab', scheduleClass: 'H', defaults: {}, packSize: 10, reorderLevel: 5 }));
   const save = useMutation({ mutationFn: ({ mrp, id, ...m }: any) => { const b = { ...m, mrpPaise: mrp !== undefined ? toPaise(mrp || '0') : m.mrpPaise, gstBp: m.gstBp ?? 1200, hsn: m.hsn || null }; delete b.createdAt; delete b.tenantId; return id ? patch(`/admin/medicines/${id}`, b) : post('/admin/medicines', b); }, onSuccess: () => { toast('Medicine saved'); setEdit(null); onSaved(); } });
   const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/admin/medicines/${id}`), onSuccess: () => { toast('Removed', 'info'); setEdit(null); onSaved(); }, onError: () => toast('In use by a prescription; cannot delete', 'err') });
   const list = cfg.medicines.filter((m: any) => m.name.toLowerCase().includes(q.toLowerCase()));
   return (
-    <Section title={<>Favourites <span className="text-muted font-normal">· {cfg.medicines.length}</span></>} aside={<><input className="input !w-48 !py-1.5" placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} /><button className="btn btn-sm btn-primary" onClick={() => setEdit({ name: '', form: 'tab', scheduleClass: 'H', defaults: {}, packSize: 10, reorderLevel: 5 })}><Icon name="plus" className="h-3.5 w-3.5" />Add</button></>}>
+    <Section title={<>Favourites <span className="text-muted font-normal">· {cfg.medicines.length}</span></>} aside={<><input className="input !w-48 !py-1.5" placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} /></>}>
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Form</th><th>Schedule</th><th>Price</th><th>Default</th><th /></tr></thead>
         <tbody>{list.map((m: any) => <tr key={m.id}><td className="pl-4 font-medium">{m.name}</td><td className="text-muted">{m.form}</td><td><Chip tone={m.scheduleClass === 'OTC' ? '' : 'amber'}>{m.scheduleClass ?? '—'}</Chip></td><td className={m.mrpPaise ? '' : 'text-rose text-xs'}>{m.mrpPaise ? `${money(m.mrpPaise)} · ${m.gstBp / 100}%` : 'not set'}</td><td className="text-xs text-muted">{[m.defaults?.dose, m.defaults?.frequency, m.defaults?.durationDays ? `${m.defaults.durationDays}d` : null].filter(Boolean).join(' · ')}</td><td className="text-right pr-3"><button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...m, defaults: m.defaults ?? {} })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
@@ -383,10 +386,11 @@ function LeafletField({ med, onChange, onSaved }: { med: any; onChange: (url: st
 /* ---------------- Procedures ---------------- */
 function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
+  useAddFromNew(() => setEdit({ name: '', typicalMinutes: 30, bufferMinutes: 0, typicalSittings: 1, price: '', requiresMainDoctor: false, requiresReview: false, requiredCapability: '', taxRateBp: 0, active: true }));
   const caps = [...new Set<string>(cfg.rooms.flatMap((r: any) => r.capabilities))];
   const save = useMutation({ mutationFn: (p: any) => p.id ? patch(`/admin/procedures/${p.id}`, p) : post('/admin/procedures', p), onSuccess: () => { toast('Procedure saved'); setEdit(null); onSaved(); } });
   return (
-    <Section title="Procedure catalogue" aside={<button className="btn btn-sm btn-primary" onClick={() => setEdit({ name: '', typicalMinutes: 30, bufferMinutes: 0, typicalSittings: 1, price: '', requiresMainDoctor: false, requiresReview: false, requiredCapability: '', taxRateBp: 0, active: true })}><Icon name="plus" className="h-3.5 w-3.5" />Add procedure</button>}>
+    <Section title="Procedure catalogue">
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Typical</th><th>Sittings</th><th>Needs room with</th><th className="text-right">Price</th><th>GST</th><th>Rules</th><th /></tr></thead>
         <tbody>{cfg.procedures.map((p: any) => <tr key={p.id}><td className="pl-4 font-medium">{p.name}</td><td className="text-muted">{p.typicalMinutes} min{p.bufferMinutes ? ` +${p.bufferMinutes}` : ''}</td><td>{p.typicalSittings}</td><td>{p.requiredCapability ? <Chip>{p.requiredCapability}</Chip> : <span className="text-muted text-xs">any</span>}</td><td className="text-right">{p.pricePaise != null ? money(p.pricePaise) : '—'}</td><td className="text-xs text-muted">{p.taxRateBp ? `${p.taxRateBp / 100}%` : 'exempt'}</td><td><div className="flex gap-1 flex-wrap">{p.requiresMainDoctor && <Chip tone="clay">doctor</Chip>}{p.requiresReview && <Chip tone="amber">review</Chip>}</div></td><td className="text-right pr-3"><button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...p, price: p.pricePaise != null ? p.pricePaise / 100 : '', requiredCapability: p.requiredCapability ?? '' })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
@@ -415,10 +419,11 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Rooms ---------------- */
 function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
+  useAddFromNew(() => setEdit({ name: '', capabilities: ['procedure'], active: true, newCap: '' }));
   const allCaps = [...new Set<string>([...cfg.rooms.flatMap((r: any) => r.capabilities), 'procedure', 'laser', 'cryo', 'minor_ot'])];
   const save = useMutation({ mutationFn: (r: any) => r.id ? patch(`/admin/rooms/${r.id}`, r) : post('/admin/rooms', r), onSuccess: () => { toast('Room saved'); setEdit(null); onSaved(); } });
   return (
-    <Section title={<>Rooms <span className="text-muted font-normal">· {cfg.rooms.length}</span></>} aside={<button className="btn btn-sm btn-primary" onClick={() => setEdit({ name: '', capabilities: ['procedure'], active: true, newCap: '' })}><Icon name="plus" className="h-3.5 w-3.5" />Add room</button>}>
+    <Section title={<>Rooms <span className="text-muted font-normal">· {cfg.rooms.length}</span></>}>
       {cfg.rooms.map((r: any) => <div key={r.id} className="row"><div className="flex-1"><div className="text-sm font-medium">{r.name}</div></div><div className="flex gap-1 flex-wrap">{r.capabilities.map((c: string) => <Chip key={c}>{c}</Chip>)}</div><button className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...r, newCap: '' })}><Icon name="edit" /></button></div>)}
       <div className="px-4 py-2 text-xs text-muted">A capability is a tag such as "laser" or "minor_ot". Procedures declare which tag they need; scheduling only offers rooms that have it. Rooms cannot be treated as interchangeable.</div>
       {edit && (

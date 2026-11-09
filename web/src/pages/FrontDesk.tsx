@@ -8,7 +8,7 @@ import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { FlagChips } from '../flags';
 import { CourseDialog } from '../courses';
-import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter } from '../ui';
+import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 
@@ -238,7 +238,8 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
   const [period, setPeriod] = useState('7');
   const [custom, setCustom] = useState({ from: shiftDay(today(), -13), to: today() });
   const [filter, setFilter] = useState('all');
-  const [term, setTerm] = useState(find); const [qd, setQd] = useState(find);
+  const [term, setTerm] = usePageSearch('Search all days: name, phone or token'); const [qd, setQd] = useState(term || find);
+  useEffect(() => { if (find && !term) setTerm(find); }, []);
   const [open, setOpen] = useState(false); const fbtn = useRef<HTMLButtonElement>(null);
   const t0 = today();
   const { from, to } = period === 'today' ? { from: t0, to: t0 } : period === 'yesterday' ? { from: shiftDay(t0, -1), to: shiftDay(t0, -1) } : period === '7' ? { from: shiftDay(t0, -6), to: t0 } : period === '30' ? { from: shiftDay(t0, -29), to: t0 } : custom;
@@ -254,7 +255,6 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
   const Opt = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button type="button" onClick={onClick} className={on ? '!font-semibold' : ''}><span className="flex-1">{children}</span>{on && <Icon name="check" className="h-4 w-4" />}</button>;
   const controls = (
     <>
-      <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !h-10 !py-0 !pl-10 !w-48 !rounded-full" placeholder="Search all days" value={term} onChange={(e) => setTerm(e.target.value)} /></div>
       <button ref={fbtn} type="button" className={`btn ${open ? '!bg-white' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="filter" className="h-4 w-4" />{periodLabel}{filter !== 'all' && <span className="text-muted font-medium">· {showLabel}</span>}<Icon name="chevR" className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? '-rotate-90' : 'rotate-90'}`} /></button>
       <Floating anchor={fbtn} open={open} onClose={() => setOpen(false)} width={300}>
         <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Period</div>

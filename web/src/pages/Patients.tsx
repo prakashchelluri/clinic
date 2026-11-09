@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, money, toast, NumInput, Filter } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, money, toast, NumInput, Filter, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
@@ -16,11 +16,12 @@ import { FlagChips, CarefulBanner, FlagEditor, GuardianPick } from '../flags';
 
 export function Patients() {
   const { id } = useParams(); const nav = useNavigate(); const { perms } = useOutletContext<any>();
-  const [q, setQ] = useState('');
+  const [q] = usePageSearch('Find a patient: name, phone or ID', !id);
   const list = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`) });
   const [showNew, setShowNew] = useState(false);
   const canMsg = can(perms, 'message.broadcast');
   const [view, setView] = useState<'patients' | 'sent'>('patients'); const [bulk, setBulk] = useState(false);
+  useAddFromNew((w) => { if (w === 'message' && canMsg) setBulk(true); });
   const [sp, setSp] = useSearchParams();
   useEffect(() => { if (sp.get('new')) { setShowNew(true); setSp({}, { replace: true }); } }, [sp]);
   return (
@@ -29,10 +30,8 @@ export function Patients() {
       {id ? null
         : <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
           {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
-          {canMsg && <button className="btn" onClick={() => setBulk(true)}><Icon name="message" className="h-4 w-4" />Message patients</button>}
         </PageHeader>}
       {id ? <Timeline key={id} id={id} /> : canMsg && view === 'sent' ? <SentMessages /> : <div className="space-y-3">
-        <div className="relative anim-fade-up max-w-xl"><Icon name="search" className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-9" placeholder="Phone, name or patient ID" value={q} onChange={(e) => setQ(e.target.value)} /></div>
         <Section delay={60}>
           {list.isLoading ? <Skeleton rows={5} /> : (list.data ?? []).length === 0 ? <Empty icon="user" title="No patients found" /> :
             (list.data ?? []).map((p: any) => (

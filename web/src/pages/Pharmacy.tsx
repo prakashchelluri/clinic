@@ -4,7 +4,7 @@ import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router'
 import { get, post, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
+import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 
@@ -83,7 +83,7 @@ function fly(from: Element | null, to: Element | null) {
 
 function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) => void }) {
   const { perms, cfg } = useOutletContext<any>(); const canBill = can(perms, 'pharmacy.bill');
-  const [q, setQ] = useState(''); const [earlier, setEarlier] = useState(false);
+  const [q] = usePageSearch('Find a prescription: name, phone or OP no.'); const [earlier, setEarlier] = useState(false);
   const term = q.trim().length >= 2 ? q.trim() : '';
   const list = useQuery({ queryKey: ['pharmacy', 'counter', term], queryFn: () => get(`/pharmacy/counter${term ? `?q=${encodeURIComponent(term)}` : ''}`), refetchInterval: 15000 });
   const meds = useQuery({ queryKey: ['pharmacy', 'medicines'], queryFn: () => get('/pharmacy/medicines'), staleTime: 30_000 });
@@ -180,7 +180,6 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
           <section className="card anim-fade-up">
             <div className="mb-3 flex flex-wrap items-start gap-3">
               <div className="mr-auto"><div className="card-title">Today's prescriptions</div><div className="text-[12.5px] text-muted">From the doctors. Tap one, or drag it onto the bill.</div></div>
-              <div className="relative w-full sm:w-64"><Icon name="search" className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><input className="input !pl-10" aria-label="Find a prescription" placeholder="Name, phone or OP number" value={q} onChange={(e) => setQ(e.target.value)} /></div>
             </div>
             {list.isLoading ? <Skeleton rows={3} /> : term ? (
               (d?.found ?? []).length === 0 ? <div className="py-4 text-sm text-muted">No prescription in the last 30 days matches.</div>
@@ -409,7 +408,7 @@ const minusDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z
 
 function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string | null) => void; onIssue: (rx: string) => void }) {
   const [range, setRange] = useState<'today' | 'yesterday' | 'week' | 'custom'>('today');
-  const [from, setFrom] = useState(today()); const [to, setTo] = useState(today()); const [q, setQ] = useState('');
+  const [from, setFrom] = useState(today()); const [to, setTo] = useState(today()); const [q] = usePageSearch('Find a bill: number, patient or phone');
   const span = range === 'today' ? [today(), today()] : range === 'yesterday' ? [minusDays(today(), 1), minusDays(today(), 1)] : range === 'week' ? [minusDays(today(), 6), today()] : [from, to];
   const bad = span[0] > span[1];
   const list = useQuery({ queryKey: ['pharmacy', 'bills', span[0], span[1], q], queryFn: () => get(`/pharmacy/bills?from=${span[0]}&to=${span[1]}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`), enabled: !bad });
@@ -419,7 +418,6 @@ function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string |
       <div className="flex flex-wrap items-center gap-2">
         <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'week', label: 'Last 7 days' }, { value: 'custom', label: 'Pick dates' }]} />
         {range === 'custom' && <><input type="date" aria-label="From" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} /><span className="text-sm text-muted">to</span><input type="date" aria-label="To" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />{bad && <span className="text-xs text-rose">“From” is after “to”.</span>}</>}
-        <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-64" aria-label="Search bills" placeholder="Bill no., patient or phone" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       </div>
       {t && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[['Bills', money(t.total - t.refunds), `${t.count} bills${t.returns ? ` · ${t.returns} return${t.returns === 1 ? '' : 's'}` : ''}`], ['Cash in drawer should be', money(t.cash ?? 0), t.refunds ? `after ${money(t.refunds)} refunds` : 'cash payments'], ['UPI', money(t.upi ?? 0), ''], ['Card', money(t.card ?? 0), ''],

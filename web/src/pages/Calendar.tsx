@@ -1,9 +1,9 @@
-import { useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter } from '../ui';
+import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, usePageSearch, useAddFromNew } from '../ui';
 import { RoutineModal } from '../routine';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -33,6 +33,7 @@ const stripe = { background: 'repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 
 export function Calendar() {
   const { cfg, perms, me } = useOutletContext<any>();
   const [params, setParams] = useSearchParams();
+  useAddFromNew((w) => { if (w === 'book') setPanel({}); });
   const day = params.get('day') && /^\d{4}-\d{2}-\d{2}$/.test(params.get('day')!) ? params.get('day')! : today();
   const setDay = (d: string) => setParams((p) => { const n = new URLSearchParams(p); if (d === today()) n.delete('day'); else n.set('day', d); return n; }, { replace: true });
   const [view, setViewS] = useState<View>(() => (store.get('cal.view2') === 'week' ? 'week' : 'day'));
@@ -84,7 +85,6 @@ export function Calendar() {
       {keyed.length > 0 && <div className="flex flex-wrap items-center gap-3 text-xs text-muted anim-fade-up" aria-label="Colour key"><span className="font-semibold">Colour key</span>{keyed.map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</span>)}<span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px] bg-sky" />Procedure</span></div>}
       <div className="flex flex-wrap items-center gap-2.5 anim-fade-up">
         <SearchBox onOpen={setOpenId} onBook={canBook ? (patient) => setPanel({ patient }) : undefined} />
-        {canBook && <button className="btn btn-primary" onClick={() => setPanel({})}><Icon name="plus" />Book</button>}
         <span className="ml-auto flex flex-wrap items-center gap-2">
           <div className="card flex items-center gap-1 !rounded-full !p-1">
             <button className="btn btn-ghost btn-icon" aria-label={step === 7 ? 'Previous week' : 'Previous day'} onClick={() => setDay(shift(day, -step))}><Icon name="chevL" /></button>
@@ -253,26 +253,24 @@ function WeekGrid({ from, docs, onOpenDay }: { from: string; docs: any[]; onOpen
   );
 }
 
-/** One search for a name, phone or OP number: the patient's upcoming bookings, or book them. */
+/** The header box on the calendar: a patient's upcoming bookings, or book them. */
 function SearchBox({ onOpen, onBook }: { onOpen: (id: string) => void; onBook?: (patient: any) => void }) {
-  const [q, setQ] = useState(''); const [sel, setSel] = useState<any>(null); const [open, setOpen] = useState(false);
+  const [q, setQ] = usePageSearch('Find a patient’s bookings: name, phone or OP no.');
+  const [sel, setSel] = useState<any>(null);
+  useEffect(() => { setSel(null); }, [q]);
   const found = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 && !sel });
   const appts = useQuery({ queryKey: ['appointments', 'patient', sel?.id], queryFn: () => get(`/appointments?patientId=${sel.id}`), enabled: !!sel });
+  if (q.trim().length < 2) return null;
   return (
-    <div className="relative w-full sm:w-[380px]" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false); }}>
-      <Icon name="search" className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-      <input aria-label="Search patient" className="input !rounded-full !pl-10" maxLength={60} placeholder="Name, phone or OP no." value={sel ? sel.fullName : q} onFocus={() => setOpen(true)}
-        onChange={(e) => { setSel(null); setQ(e.target.value); setOpen(true); }} />
-      {open && (sel || q.trim().length >= 2) && <div className="menu anim-menu !left-0 !right-auto !top-full !mt-1 !w-full max-h-80 overflow-y-auto p-1.5">
-        {!sel ? (found.isLoading ? <div className="p-3 text-sm text-muted">Searching…</div> : (found.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No patient found.</div>
-          : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{p.fullName}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
-          : <div className="p-1.5">
-            <div className="px-1 pb-1.5 text-xs text-muted">{[sel.patientNo, sel.phone].filter(Boolean).join(' · ')}</div>
-            {appts.isLoading ? <div className="p-2 text-sm text-muted">…</div> : (appts.data ?? []).length === 0 ? <div className="px-1 py-2 text-sm text-muted">No upcoming bookings.</div>
-              : appts.data.map((x: any) => <button key={x.id} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-paper" onClick={() => { onOpen(x.id); setOpen(false); }}><b className="w-28 shrink-0">{label(x.window.day, { weekday: 'short', day: 'numeric', month: 'short' })}</b><span>{x.window.startTime}{x.status === 'requested' ? ' · request' : ''}{x.service ? ` · ${x.service.name}` : ''}</span></button>)}
-            {onBook && <button className="btn btn-sm mt-1.5 w-full justify-center" onClick={() => { onBook(sel); setOpen(false); }}><Icon name="plus" className="h-3.5 w-3.5" />Book {sel.fullName.split(' ')[0]}</button>}
-          </div>}
-      </div>}
+    <div className="card-flat anim-fade-up w-full max-w-xl !p-1.5" aria-label="Patients found">
+      {!sel ? (found.isLoading ? <div className="p-3 text-sm text-muted">Searching…</div> : (found.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No patient found.</div>
+        : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{p.fullName}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
+        : <div className="p-1.5">
+          <div className="flex items-baseline gap-2 px-1 pb-1.5"><b className="text-sm">{sel.fullName}</b><span className="text-xs text-muted">{[sel.patientNo, sel.phone].filter(Boolean).join(' · ')}</span><button className="ml-auto text-xs text-muted hover:text-ink" onClick={() => setSel(null)}>Other matches</button></div>
+          {appts.isLoading ? <div className="p-2 text-sm text-muted">…</div> : (appts.data ?? []).length === 0 ? <div className="px-1 py-2 text-sm text-muted">No upcoming bookings.</div>
+            : appts.data.map((x: any) => <button key={x.id} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-paper" onClick={() => { onOpen(x.id); setQ(''); }}><b className="w-28 shrink-0">{label(x.window.day, { weekday: 'short', day: 'numeric', month: 'short' })}</b><span>{x.window.startTime}{x.status === 'requested' ? ' · request' : ''}{x.service ? ` · ${x.service.name}` : ''}</span></button>)}
+          {onBook && <button className="btn btn-sm mt-1.5 w-full justify-center" onClick={() => { onBook(sel); setQ(''); }}><Icon name="plus" className="h-3.5 w-3.5" />Book {sel.fullName.split(' ')[0]}</button>}
+        </div>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router';
 import { LayoutList, Calendar, Users, List, BarChart3, LogOut, Plus, Printer, Phone, Check, CircleHelp, X, Undo2, ChevronUp, Search, Pill, Sparkles, User, Clock, DoorOpen, IndianRupee, Pencil, ChevronLeft, ChevronRight, MoreHorizontal, Filter as FilterIcon, FileDown, Moon, Home, Lock, Wallet, Bell, Settings, Menu, Repeat, Link as LinkIcon, Download, Copy, MessageCircle, Inbox, Globe, Stethoscope, type LucideIcon } from 'lucide-react';
 
 /** The icon set: Lucide, one stroke weight everywhere. The names stay the app's own so pages did not change. */
@@ -177,6 +178,34 @@ export function Floating({ anchor, open, onClose, children, width, align = 'righ
 
 /** The ⋯ menu: secondary actions live here so a row shows one clear button. */
 export type MenuItem = { label: string; onClick?: () => void; href?: string; danger?: boolean; hidden?: boolean };
+/* ---------- one search box per screen: the header's ---------- */
+/** A page tells the header what its box searches; the text lives in the address as ?q=, so Back and a shared link keep it. */
+export const PageSearchCtx = createContext<(placeholder: string | null) => void>(() => {});
+export function usePageSearch(placeholder: string, on = true): [string, (v: string) => void] {
+  const announce = useContext(PageSearchCtx);
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => { if (!on) return; announce(placeholder); return () => announce(null); }, [placeholder, on]);
+  const set = (v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set('q', v); else n.delete('q'); return n; }, { replace: true });
+  return [on ? sp.get('q') ?? '' : '', set];
+}
+/** The header's box when the page has a list of its own. */
+export function PageSearchBox({ placeholder, className = '' }: { placeholder: string; className?: string }) {
+  const [sp, setSp] = useSearchParams(); const q = sp.get('q') ?? '';
+  const set = (v: string) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set('q', v); else n.delete('q'); return n; }, { replace: true });
+  return (
+    <label className={`toppill !font-medium ${className}`}>
+      <Icon name="search" className="h-4 w-4 shrink-0 text-muted" />
+      <input type="text" role="searchbox" aria-label={placeholder} className="min-w-0 flex-1 bg-transparent text-ink outline-none placeholder:text-muted" placeholder={placeholder} value={q} onChange={(e) => set(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') set(''); }} />
+      {q && <button type="button" className="text-muted hover:text-ink" aria-label="Clear the search" onClick={() => set('')}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+    </label>
+  );
+}
+/** New in the header opens a page's own add form by sending ?add=…; the page opens it and clears the word. */
+export function useAddFromNew(open: (what: string) => void) {
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => { const w = sp.get('add'); if (!w) return; open(w); setSp((p) => { const n = new URLSearchParams(p); n.delete('add'); return n; }, { replace: true }); }, [sp]);
+}
+
 /** Sub-sections of a page: text with a green underline. Pills are kept for the page's own sections. */
 export function Tabs<T extends string>({ value, onChange, options, className = '' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string; count?: number }[]; className?: string }) {
   return (
