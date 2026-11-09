@@ -159,7 +159,7 @@ function DayTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       <div className="card space-y-3">
         <div className="card-title">Junior doctor screening</div>
         <div className="flex flex-wrap gap-1">{([['off', 'Off', 'Reception sends patients straight to the doctor'], ['first', 'When a junior is on', 'The junior screens whoever is waiting; the doctor takes screened patients first, others when nobody is screened'], ['required', 'Every patient', 'The doctor sees only patients the junior has screened']] as const).map(([v, l, h]) => <button key={v} type="button" title={h} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF({ ...f, screening: v })}>{l}</button>)}</div>
-        <div className="text-xs text-muted">{f.screening === 'off' ? 'Reception sends patients straight to the doctor. Junior doctors see no Intake button.' : f.screening === 'first' ? 'The junior takes patients from the waiting list for screening. The doctor sees screened patients first and is never shown someone mid-screening.' : 'Reception cannot send a patient to the doctor until the junior has screened them.'}</div>
+        <div className="text-xs text-muted">{f.screening === 'off' ? 'Reception sends patients straight to the doctor. A junior doctor can still screen anyone waiting; the doctor does not wait for it.' : f.screening === 'first' ? 'The junior takes patients from the waiting list for screening. The doctor sees screened patients first and is never shown someone mid-screening.' : 'Reception cannot send a patient to the doctor until the junior has screened them.'}</div>
       </div>
       <div className="card space-y-3">
         <div className="card-title">Coming back with test reports</div>

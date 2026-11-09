@@ -7,7 +7,7 @@ const DEMO = [
   ['owner@demo.clinic', 'Owner and doctor', 'Everything, with finance'],
   ['reception@demo.clinic', 'Reception', 'Front desk and booking'],
   ['procedures@demo.clinic', 'Coordinator', 'Procedures and rooms'],
-  ['assistant@demo.clinic', 'Assistant', 'Intake before the doctor'],
+  ['assistant@demo.clinic', 'Junior doctor', 'Screening before the doctor'],
   ['pharmacy@demo.clinic', 'Pharmacy', 'Dispense and bill'],
   ['superadmin@cubott.in', 'CUBOTT admin', 'Onboard clinics'],
 ];

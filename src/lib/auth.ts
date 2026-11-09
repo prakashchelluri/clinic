@@ -84,7 +84,7 @@ export function expandPerms(perms: string[]): string[] {
 export const isKnownPerm = (k: string) => PERM_KEYS.has(k);
 
 export type RoleDef = { key: string; name: string; perms: string[]; builtin: boolean; locked: boolean };
-export const BUILTIN_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', assistant: 'Assistant', receptionist: 'Reception', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
+export const BUILTIN_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', assistant: 'Junior doctor', receptionist: 'Reception', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 
 /** All roles a clinic has: built-in ones (optionally re-tuned) plus its own. settings.roles = perms, settings.roleNames = display names of custom roles. */
 export function rolesFor(settings: any): RoleDef[] {

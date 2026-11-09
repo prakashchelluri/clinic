@@ -62,6 +62,10 @@ export function useTheme() {
 }
 
 /** Open (icons with names, the default) or collapsed to an icon rail, kept on this device. */
+/** Role names as people say them; a custom role shows its own name from Settings. */
+const ROLE_LABEL: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', assistant: 'Junior doctor', receptionist: 'Reception', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
+const roleLabel = (r: string) => ROLE_LABEL[r] ?? r.replace(/_/g, ' ');
+
 export function useNav() {
   const [open, setOpen] = useState(() => { try { return localStorage.getItem('nav') !== 'rail'; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem('nav', open ? 'open' : 'rail'); } catch { /* private mode */ } }, [open]);
@@ -121,7 +125,7 @@ function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavi
       <Link to="/help" onClick={onNavigate} className="nav-item mt-auto"><Icon name="help" className="h-4 w-4" /><span>Help</span></Link>
       <div className="mt-1.5 flex items-center gap-2.5 border-t border-line px-2 pt-3">
         <Avatar name={me.name} size="h-7 w-7 text-[11px]" />
-        <div className="min-w-0 flex-1"><div className="truncate text-[12.5px] font-semibold">{me.name}</div><div className="truncate text-[11px] capitalize text-muted">{roles.join(' · ')}</div></div>
+        <div className="min-w-0 flex-1"><div className="truncate text-[12.5px] font-semibold">{me.name}</div><div className="truncate text-[11px] text-muted">{roles.map(roleLabel).join(' · ')}</div></div>
         <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon !h-8 !w-8"><Icon name="logout" /></button>
       </div>
     </div>
@@ -220,7 +224,7 @@ export function App() {
               </div>); })()}
             <div className="relative md:hidden">
               <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-8 w-8 text-xs" /></button>
-              {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted capitalize">{roles.join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
+              {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted">{roles.map(roleLabel).join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
             </div>
         </header>
 

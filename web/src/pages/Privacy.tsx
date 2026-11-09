@@ -4,7 +4,7 @@ import { useNavigate, useOutletContext } from 'react-router';
 import { get, api, qc, errText, post } from '../api';
 import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast } from '../ui';
 
-const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Assistant', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
+const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Junior doctor', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$|^[0-9a-f:]{2,39}$/i;
 

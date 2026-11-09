@@ -48,11 +48,11 @@ export function Today() {
   // Everyone inside the room, in the order they were sent in: the first is with you, the rest sit inside and wait.
   const inRoom = visits.filter((v) => v.status === 'in_consult').sort((a, b) => String(a.details?.calledAt ?? a.arrivedAt).localeCompare(String(b.details?.calledAt ?? b.arrivedAt)));
   const withYou = inRoom[0];
-  // The line: screened patients first, then the rest; never someone who is with the junior right now. With screening required, only screened patients.
+  // The line: screened patients first, then the rest; never someone who is with the junior right now. With screening required, only screened patients. A junior may screen in any mode, so a screened patient is never dropped.
   const screening: 'off' | 'first' | 'required' = cfg?.tenant?.settings?.screening ?? 'off';
   const withJunior = visits.filter((v) => v.status === 'intake');
   const unscreened = visits.filter((v) => v.status === 'waiting');
-  const waiting = screening === 'off' ? unscreened : [...visits.filter((v) => v.status === 'screened'), ...(screening === 'required' ? [] : unscreened)];
+  const waiting = [...visits.filter((v) => v.status === 'screened'), ...(screening === 'required' ? [] : unscreened)];
   const next = waiting[0];
   // Reception sent someone in: the pad is not open yet, so say so once, with a chime.
   const notOpened = (v: any) => v.details?.calledBy === 'desk' && !v.details?.doctorOpenedAt;
