@@ -4,11 +4,12 @@ import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
-import { StockTab, OrdersTab, VendorsTab } from './pharmacyStock';
+import { Chip, Empty, Icon, Modal, Segmented, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
+import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 
-type Tab = 'counter' | 'bills' | 'register' | 'stock' | 'orders' | 'vendors';
+type Tab = 'counter' | 'bills' | 'register' | InvTab;
+const INV: string[] = ['stock', 'batches', 'orders', 'vendors'];
 const REASONS = ['Has at home', 'Will buy later', 'Bought outside', 'Out of stock', 'Too costly', 'Doctor said not needed'];
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
 const rupees2 = (p: number) => (p / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -25,19 +26,19 @@ export function Pharmacy() {
   const go = (next: Record<string, string>) => setSp(next);
   useEffect(() => { if (sp.get('sale')) go({ tab: 'counter', rx: 'walkin' }); }, [sp]);
   const stock = can(perms, 'stock.read');
-  const tabs: { value: Tab; label: string }[] = [{ value: 'counter', label: 'Counter' }, { value: 'bills', label: 'Bills' }, { value: 'register', label: 'Register' }, ...(stock ? [{ value: 'stock' as Tab, label: 'Stock' }, { value: 'orders' as Tab, label: 'Orders' }, { value: 'vendors' as Tab, label: 'Vendors' }] : [])];
+  const tabs: { value: string; label: string }[] = [{ value: 'counter', label: 'Counter' }, { value: 'bills', label: 'Bills' }, { value: 'register', label: 'Register' }, ...(stock ? [{ value: 'inventory', label: 'Inventory' }] : [])];
+  const inv = INV.includes(tab) && stock;
   return (
     <div>
-      <PageHeader title="Pharmacy">
-        <Segmented<Tab> value={tab} onChange={(v) => go({ tab: v })} options={tabs} />
-        {can(perms, 'pharmacy.bill') && <button className="btn btn-primary" onClick={() => go({ tab: 'counter', rx: 'walkin' })}><Icon name="plus" />Walk-in sale</button>}
-      </PageHeader>
+      {/* the page name is in the top bar; here only the sections and the counter's main action */}
+      <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-3">
+        <Segmented value={inv ? 'inventory' : tab} onChange={(v) => go({ tab: v === 'inventory' ? 'stock' : v })} options={tabs} />
+        {can(perms, 'pharmacy.bill') && !inv && <button className="btn btn-primary ml-auto" onClick={() => go({ tab: 'counter', rx: 'walkin' })}><Icon name="plus" />Walk-in sale</button>}
+      </div>
       {tab === 'counter' && <Counter sel={sp.get('rx')} pick={(rx) => go(rx ? { tab: 'counter', rx } : { tab: 'counter' })} />}
       {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => go(bill ? { tab: 'bills', bill } : { tab: 'bills' })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
       {tab === 'register' && <RegisterTab clinic={cfg?.tenant?.name ?? ''} licence={cfg?.tenant?.settings?.print?.drugLicence ?? cfg?.tenant?.settings?.drugLicence} />}
-      {tab === 'stock' && stock && <StockTab sp={sp} go={go} />}
-      {tab === 'orders' && stock && <OrdersTab sp={sp} go={go} />}
-      {tab === 'vendors' && stock && <VendorsTab sp={sp} go={go} />}
+      {inv && <Inventory tab={tab as InvTab} sp={sp} go={go} />}
     </div>
   );
 }
@@ -297,13 +298,19 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
         items: issuing.map((l) => ({ medicineId: l.medicineId!, qty: Number(l.qty), batchId: l.batchId || undefined, prescriptionItemId: l.rxItemId })),
         notIssued: rxLines.filter((l) => (l.left ?? 0) > (Number(l.qty) || 0)).map((l) => ({ prescriptionItemId: l.rxItemId!, reason: l.reason || null })),
       })} onDone={(s) => { setPaying(false); setSale({ ...s, rows: issuing.map((l) => ({ name: l.name, qty: Number(l.qty), amount: lineAmount(l), rx: !!l.rxItemId })), gross, disc, total, who: who?.fullName }); }} />}
-      {sale && <Receipt sale={sale} clinic={cfg?.tenant?.name ?? ''} onNew={() => { setSale(null); reset(); }} />}
+      {sale && <Receipt sale={sale} clinic={cfg?.tenant?.name ?? ''} onNew={() => { setSale(null); reset(); }} onVoid={() => {
+        // the bill was never cleared, so it is simply there again; a new walk-in is now a patient on file
+        setSale(null); if (!who?.id) setBill((b) => ({ ...b, who: { ...b.who, id: sale.patientId } }));
+        ['pharmacy', 'stock', 'reports', 'patients'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+        toast('Sale voided · the bill is back');
+      }} />}
     </div>
   );
 }
 
 /** Payment taken: a stamp lands, the receipt reads like paper; Print or start the next sale. */
-function Receipt({ sale, clinic, onNew }: { sale: any; clinic: string; onNew: () => void }) {
+function Receipt({ sale, clinic, onNew, onVoid }: { sale: any; clinic: string; onNew: () => void; onVoid: () => void }) {
+  const voiding = useMutation({ mutationFn: () => post(`/pharmacy/sale/${sale.id}/void`, {}), onSuccess: onVoid, onError: (e) => toast(errText(e), 'err') });
   return (
     <Modal title="Payment taken" subtitle={`${sale.invoiceNo} · ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`} onClose={onNew} width="max-w-md">
       <div className="stamp mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-clay text-white shadow-[0_12px_26px_-12px_var(--color-clay)]"><Icon name="check" className="h-7 w-7" /></div>
@@ -317,7 +324,7 @@ function Receipt({ sale, clinic, onNew }: { sale: any; clinic: string; onNew: ()
         <div className="mt-1 flex justify-between text-[17px] font-semibold"><span>Total</span><span>{money(sale.total)}</span></div>
         {sale.who && <div className="mt-3 text-center text-[12px] text-muted">Customer: {sale.who}</div>}
       </div>
-      <div className="modal-foot"><button type="button" className="btn" onClick={() => printSale(sale.id)}><Icon name="print" />Print</button><button type="button" className="btn btn-primary" onClick={onNew}>New sale</button></div>
+      <div className="modal-foot"><button type="button" className="btn btn-ghost mr-auto" disabled={voiding.isPending} title="Wrong patient or item? Undo this bill: stock goes back and the money is refunded" onClick={() => voiding.mutate()}><Icon name="undo" />Void</button><button type="button" className="btn" onClick={() => printSale(sale.id)}><Icon name="print" />Print</button><button type="button" className="btn btn-primary" onClick={onNew}>New sale</button></div>
     </Modal>
   );
 }

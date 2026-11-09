@@ -26,37 +26,68 @@ const Tile = ({ label, value, sub, on, onClick }: { label: string; value: React.
   </button>
 );
 
-/* ---------------- Stock ---------------- */
+/* ---------------- Inventory: stat chips, then Stock, Batches & expiry, Orders, Vendors (Vialo's layout) ---------------- */
 
-export function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
+export type InvTab = 'stock' | 'batches' | 'orders' | 'vendors';
+const Stat = ({ icon, value, label, extra, lead, onClick }: { icon: string; value: React.ReactNode; label: string; extra?: React.ReactNode; lead?: boolean; onClick?: () => void }) => (
+  <button type="button" disabled={!onClick} onClick={onClick} className="group flex items-center gap-3 text-left disabled:cursor-default">
+    <span className={`grid h-11 w-11 place-items-center rounded-[14px] transition-transform group-enabled:group-hover:-translate-y-0.5 ${lead ? 'bg-clay text-white shadow-[0_10px_22px_-12px_var(--color-clay)]' : 'bg-surface text-ink-2 shadow-[var(--shadow-soft)]'}`}><Icon name={icon} className="h-5 w-5" /></span>
+    <span><span className="flex items-center gap-2"><b className="text-[20px] leading-tight">{value}</b>{extra}</span><small className="block text-[12.5px] text-muted">{label}</small></span>
+  </button>);
+const soonDate = () => { const d = new Date(today()); d.setDate(d.getDate() + 90); return d.toISOString().slice(0, 10); };
+
+export function Inventory({ tab, sp, go }: { tab: InvTab; sp: URLSearchParams; go: Go }) {
+  const { perms } = useOutletContext<any>();
+  const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 30000 });
+  const startCount = useMutation({ mutationFn: () => post('/stock/counts'), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
+    onError: (e: any) => { if (e?.body?.code === 'COUNT_OPEN') go({ tab: 'stock', count: e.body.id }); else toast(errText(e), 'err'); } });
+  const deep = ['item', 'count', 'order', 'receive'].some((k) => sp.get(k));
+  const d = q.data; const t = d?.tiles; const soon = soonDate();
+  const flagged = (d?.batches ?? []).filter((b: any) => b.expiry <= soon).length;
+  return (
+    <div className="space-y-5">
+      {!deep && <>
+        {t && <div className="anim-fade-up flex flex-wrap items-center gap-x-9 gap-y-3">
+          <Stat lead icon="pill" value={t.low} label="Lines at or under reorder" onClick={() => go({ tab: 'stock', show: 'low' })} />
+          <Stat icon="clock" value={money(t.expiringValuePaise)} extra={t.expired > 0 ? <span className="rounded-full bg-rose-soft px-2 py-0.5 text-[11.5px] font-semibold text-rose">{t.expired} expired</span> : null} label="Expired or within 90 days, at cost" onClick={() => go({ tab: 'batches' })} />
+          <Stat icon="inbox" value={t.ordersOpen} label="Orders on the way" onClick={() => go({ tab: 'orders' })} />
+          {d.reviews.length > 0 && <Stat icon="bell" value={d.reviews.length} label="Deliveries waiting for a decision" onClick={() => go({ tab: 'stock' })} />}
+        </div>}
+        <div className="anim-fade-up flex flex-wrap items-center gap-2" style={{ animationDelay: '60ms' }}>
+          <Segmented<InvTab> value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Stock' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
+          <span className="ml-auto flex flex-wrap gap-2">
+            <button className="btn" disabled={startCount.isPending} onClick={() => startCount.mutate()}>{t?.count && t.count.status !== 'closed' ? 'Continue stock count' : 'Count the shelf'}</button>
+            {can(perms, 'stock.write') && <><button className="btn" onClick={() => go({ tab: 'orders', receive: 'new' })}>Receive without order</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}><Icon name="plus" />New purchase order</button></>}
+          </span>
+        </div>
+      </>}
+      {tab === 'stock' && <StockTab sp={sp} go={go} />}
+      {tab === 'batches' && <BatchesTab go={go} />}
+      {tab === 'orders' && <OrdersTab sp={sp} go={go} />}
+      {tab === 'vendors' && <VendorsTab sp={sp} go={go} />}
+    </div>
+  );
+}
+
+function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const { perms } = useOutletContext<any>();
   const item = sp.get('item'); const count = sp.get('count');
   const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 30000 });
-  const [filter, setFilter] = useState<'all' | 'low' | 'expiring' | 'out'>('all'); const [find, setFind] = useState('');
+  const [filter, setFilter] = useState<string>(sp.get('show') ?? 'all'); const [find, setFind] = useState('');
+  useEffect(() => { const v = sp.get('show'); if (v) setFilter(v); }, [sp]);
   const [review, setReview] = useState<string | null>(null);
-  const startCount = useMutation({ mutationFn: () => post('/stock/counts'), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
-    onError: (e: any) => { if (e?.body?.code === 'COUNT_OPEN') go({ tab: 'stock', count: e.body.id }); else toast(errText(e), 'err'); } });
+  const countOne = useMutation({ mutationFn: (medicineId: string) => post('/stock/counts', { medicineId }), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
+    onError: (e: any) => { if (e?.body?.code === 'COUNT_OPEN') { toast('A count is already open: finish it first', 'info'); go({ tab: 'stock', count: e.body.id }); } else toast(errText(e), 'err'); } });
   if (item) return <ItemView id={item} go={go} />;
   if (count) return <CountView id={count} go={go} />;
   if (q.isLoading || !q.data) return <Skeleton rows={6} />;
   const d = q.data; const t = d.tiles;
   const rows = d.items.filter((i: any) => (filter === 'all' || i.status === filter || (filter === 'low' && i.status === 'out')) && (!find.trim() || i.name.toLowerCase().includes(find.trim().toLowerCase())));
   const n = (s: string) => d.items.filter((i: any) => i.status === s).length;
+  const chips: [string, string, number][] = [['all', 'All', d.items.length], ['low', 'Running low', n('low') + n('out')], ['out', 'Out of stock', n('out')], ['expiring', 'Expiring', n('expiring')]];
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 justify-end">
-        <button className="btn" disabled={startCount.isPending} onClick={() => startCount.mutate()}>{t.count && t.count.status !== 'closed' ? 'Continue stock count' : 'Stock count'}</button>
-        {can(perms, 'stock.write') && <><button className="btn" onClick={() => go({ tab: 'orders', receive: 'new' })}>Receive without order</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}><Icon name="plus" />New purchase order</button></>}
-      </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile on={d.reviews.length > 0} label="Deliveries with differences" value={d.reviews.length} sub={d.reviews.length ? `Waiting for the owner · ${money(d.reviews.reduce((n: number, r: any) => n + r.extraPaise, 0))} extra, ${d.reviews.reduce((n: number, r: any) => n + r.freeShort, 0)} free short` : 'Every delivery matched its order'} />
-        <Tile label="Low stock" value={t.low} sub="Below reorder level" onClick={() => setFilter('low')} />
-        <Tile label="Expiring in 90 days" value={`${t.expiringBatches} batch${t.expiringBatches === 1 ? '' : 'es'}`} sub={`${money(t.expiringValuePaise)} at cost · sell or return first${t.expired ? ` · ${t.expired} expired on shelf` : ''}`} onClick={() => setFilter('expiring')} />
-        <Tile label="Stock count" value={t.count ? (t.count.status === 'closed' ? 'Done' : t.count.status === 'open' ? 'Open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`) : 'None yet'}
-          sub={t.count ? `${t.count.docNo} · ${fmtDate(t.count.at)}${t.count.gapUnits ? ` · ${t.count.gapUnits} units unexplained` : ''}` : 'Count the shelf against the system'} onClick={t.count ? () => go({ tab: 'stock', count: t.count.id }) : undefined} />
-      </div>
-
-      {d.reviews.length > 0 && <div className="card !p-0 overflow-x-auto">
+      {d.reviews.length > 0 && <div className="card !p-0 overflow-x-auto anim-fade-up">
         <div className="flex flex-wrap items-baseline gap-2 px-5 pt-4 pb-2"><b>Deliveries waiting for a decision</b><span className="text-xs text-muted">Stock is already on the shelf; only the money and free goods need a decision.</span></div>
         <table className="table min-w-[760px]"><thead><tr><th>Received</th><th>Vendor</th><th>Bill no.</th><th>What differs from the order</th><th className="!text-right">Effect</th><th></th></tr></thead>
           <tbody>{d.reviews.map((r: any) => <tr key={r.id}><td><div className="font-medium">{fmtDate(r.at)} {fmtTime(r.at)}</div><div className="text-xs text-muted">by {r.by}</div></td><td>{r.vendor}</td><td>{r.billNo}</td>
@@ -65,20 +96,82 @@ export function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
             <td className="text-right"><button className="btn btn-sm btn-primary" onClick={() => setReview(r.id)}>Review</button></td></tr>)}</tbody></table>
       </div>}
 
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-64" aria-label="Find a medicine" placeholder="Find a medicine" value={find} onChange={(e) => setFind(e.target.value)} /></div>
+        {chips.map(([k, label, c]) => <button key={k} type="button" className={`toggle-opt ${filter === k ? 'on' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)}>{label}{k !== 'all' && c > 0 ? <span className="ml-1 opacity-70">{c}</span> : null}</button>)}
+        {t.count && <button type="button" className="ml-auto text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>}
+      </div>
+
       <div className="card !p-0 overflow-x-auto">
-        <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2">
-          <b className="mr-2">Stock</b>
-          <Segmented value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All', count: d.items.length }, { value: 'low', label: 'Low', count: n('low') + n('out') }, { value: 'expiring', label: 'Expiring', count: n('expiring') }, { value: 'out', label: 'Out', count: n('out') }]} />
-          <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-60" aria-label="Find medicine" placeholder="Medicine" value={find} onChange={(e) => setFind(e.target.value)} /></div>
-        </div>
-        {rows.length === 0 ? <Empty icon="pill" title="Nothing here" /> : <table className="table min-w-[820px]"><thead><tr><th>Medicine</th><th className="!text-right">On hand</th><th className="!text-right">Free received, 90 days</th><th className="!text-right">Batches</th><th>Nearest expiry</th><th className="!text-right">Reorder at</th><th className="!text-right">Cost value</th><th></th></tr></thead>
+        {rows.length === 0 ? <Empty icon="pill" title="Nothing here" /> : <table className="table min-w-[880px]"><thead><tr><th>Medicine</th><th>On hand</th><th className="!text-right">Reorder at</th><th className="!text-right">Batches</th><th>Next out</th><th className="!text-right">Cost value</th><th className="!text-right">Actions</th></tr></thead>
           <tbody>{rows.map((i: any) => <tr key={i.id} className="cursor-pointer hover:bg-surface-2" onClick={() => go({ tab: 'stock', item: i.id })}>
-            <td><button className="font-semibold text-left hover:underline" onClick={(e) => { e.stopPropagation(); go({ tab: 'stock', item: i.id }); }}>{i.name}</button><div className="text-xs text-muted">{['tab', 'cap'].includes(i.form) ? `strip of ${i.packSize}` : i.form ?? ''} · MRP {money(i.mrpPaise)}</div></td>
-            <td className="text-right font-semibold"><span className="inline-flex items-center gap-3"><span className="hidden h-1.5 w-24 overflow-hidden rounded-full bg-paper-2 sm:block" aria-hidden><span className={`bar-grow block h-full rounded-full ${i.onHand <= 0 ? 'bg-rose' : i.onHand <= i.reorderLevel ? 'bg-[#E39A1D]' : 'bg-clay'}`} style={{ width: `${Math.max(i.onHand > 0 ? 4 : 0, Math.min(100, (i.onHand / Math.max(1, i.reorderLevel * 3)) * 100))}%` }} /></span><span className={`w-10 ${i.onHand <= 0 ? 'text-rose' : i.onHand <= i.reorderLevel ? 'text-amber' : ''}`}>{i.onHand}</span></span>{i.expired > 0 && <div className="text-xs text-rose font-normal">+{i.expired} expired</div>}</td><td className="text-right">{i.free90}</td><td className="text-right">{i.batches}</td>
-            <td>{i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">{exp(i.nearestExpiry)}</Chip> : exp(i.nearestExpiry)) : '—'}</td><td className="text-right">{i.reorderLevel}</td><td className="text-right">{money(i.costValuePaise)}</td>
-            <td className="text-right">{i.status === 'ok' ? <Chip tone="sage">ok</Chip> : i.status === 'low' ? <Chip tone="amber">low</Chip> : i.status === 'out' ? <Chip tone="rose">out</Chip> : <Chip tone="rose">expiring</Chip>}</td></tr>)}</tbody></table>}
+            <td><div className="flex items-center gap-3"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${i.onHand <= 0 ? 'bg-rose-soft text-rose' : 'bg-clay-soft text-clay-ink'}`}><Icon name="pill" className="h-3.5 w-3.5" /></span>
+              <span><button className="font-semibold text-left hover:underline" onClick={(e) => { e.stopPropagation(); go({ tab: 'stock', item: i.id }); }}>{i.name}</button><div className="text-xs text-muted">{['tab', 'cap'].includes(i.form) ? `strip of ${i.packSize}` : i.form ?? ''} · MRP {money(i.mrpPaise)}{i.free90 ? ` · ${i.free90} free in 90 days` : ''}</div></span></div></td>
+            <td className="font-semibold"><span className="inline-flex items-center gap-3"><span className="h-1.5 w-24 overflow-hidden rounded-full bg-paper-2" aria-hidden><span className={`bar-grow block h-full rounded-full ${i.onHand <= 0 ? 'bg-rose' : i.onHand <= i.reorderLevel ? 'bg-[#E39A1D]' : 'bg-clay'}`} style={{ width: `${Math.max(i.onHand > 0 ? 4 : 0, Math.min(100, (i.onHand / Math.max(1, i.reorderLevel * 3)) * 100))}%` }} /></span><span className={`w-10 ${i.onHand <= 0 ? 'text-rose' : i.onHand <= i.reorderLevel ? 'text-amber' : ''}`}>{i.onHand}</span></span>{i.expired > 0 && <div className="text-xs text-rose font-normal">+{i.expired} expired</div>}</td>
+            <td className="text-right">{i.reorderLevel}</td><td className="text-right">{i.batches}</td>
+            <td>{i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">exp {exp(i.nearestExpiry)}</Chip> : <span className="text-muted">exp {exp(i.nearestExpiry)}</span>) : '—'}</td><td className="text-right">{money(i.costValuePaise)}</td>
+            <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+              {i.onHand + i.expired > 0 && <button type="button" className="btn btn-sm btn-ghost" disabled={countOne.isPending} title="Count this medicine on the shelf" onClick={() => countOne.mutate(i.id)}><Icon name="edit" className="h-3.5 w-3.5" />Count</button>}
+              {can(perms, 'stock.write') && <button type="button" className={`btn btn-sm ml-1 ${i.status === 'low' || i.status === 'out' ? 'btn-primary' : ''}`} onClick={() => go({ tab: 'orders', order: 'new', med: i.id, ...(i.vendorId ? { vendor: i.vendorId } : {}) })}><Icon name="plus" className="h-3.5 w-3.5" />Reorder</button>}
+            </td></tr>)}</tbody></table>}
       </div>
       {review && <DecisionDialog id={review} onClose={() => setReview(null)} />}
+    </div>
+  );
+}
+
+/** Batches & expiry: every batch as a bar from delivery to expiry, numbered in the order it leaves the shelf; expired ones listed to take off. */
+function BatchesTab({ go }: { go: Go }) {
+  const { perms } = useOutletContext<any>();
+  const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock') });
+  const [range, setRange] = useState<'soon' | 'all'>('soon');
+  const adjust = useMutation({ mutationFn: (b: any) => post(`/stock/batches/${b.id}/adjust`, { change: -b.qty, reason: 'Expired: taken off the shelf' }), onSuccess: () => { toast('Taken off the shelf'); refresh(); }, onError: (e) => toast(errText(e), 'err') });
+  if (q.isLoading || !q.data) return <Skeleton rows={6} />;
+  const now = today(); const soon = soonDate();
+  const all: any[] = q.data.batches;
+  const meds = [...new Set(all.map((b) => b.medicineId))].map((id) => ({ id, name: all.find((b) => b.medicineId === id).name as string, bs: all.filter((b) => b.medicineId === id) }))
+    .filter((m) => range === 'all' || m.bs.some((b) => b.expiry <= soon)).sort((a, b) => a.bs[0].expiry.localeCompare(b.bs[0].expiry));
+  const expired = all.filter((b) => b.expiry < now);
+  // the axis: two months back to the furthest expiry shown, at most three years out
+  const day = (x: string) => new Date(x).getTime();
+  const start = day(now) - 60 * 864e5; const lastExp = Math.max(day(soon), ...meds.flatMap((m) => m.bs.map((b) => day(b.expiry))));
+  const end = Math.min(lastExp + 30 * 864e5, day(now) + 3 * 365 * 864e5);
+  const pct = (x: number) => Math.max(0, Math.min(100, ((x - start) / (end - start)) * 100));
+  const ticks: { at: number; label: string }[] = []; const m0 = new Date(start); m0.setDate(1); m0.setMonth(m0.getMonth() + 1);
+  const span = (end - start) / (30 * 864e5); const every = span > 18 ? 3 : span > 8 ? 2 : 1;
+  for (const dt = new Date(m0); dt.getTime() < end; dt.setMonth(dt.getMonth() + every)) ticks.push({ at: pct(dt.getTime()), label: dt.getMonth() === 0 ? `Jan '${String(dt.getFullYear()).slice(2)}` : dt.toLocaleDateString('en-IN', { month: 'short' }) });
+  const tone = (b: any) => (b.expiry < now ? 'bg-rose' : b.expiry <= soon ? 'bg-[#E39A1D]' : 'bg-clay');
+  return (
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="card anim-fade-up overflow-hidden">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="mr-auto"><div className="card-title">Expiry runway</div><div className="text-[12.5px] text-muted">Each bar is a batch, from delivery to expiry. The number is the order it leaves the shelf.</div></div>
+          <Segmented value={range} onChange={setRange} size="sm" options={[{ value: 'soon', label: 'Within 90 days' }, { value: 'all', label: 'Everything' }]} />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-4 text-[12px] text-muted">{[['bg-clay', 'More than 90 days'], ['bg-[#E39A1D]', 'Within 90 days'], ['bg-rose', 'Expired · not sold']].map(([c, l]) => <span key={l} className="flex items-center gap-1.5"><i className={`h-2 w-4 rounded-full ${c}`} />{l}</span>)}</div>
+        {meds.length === 0 ? <Empty icon="check" title="Nothing expires in the next 90 days" hint="Switch to Everything to see every batch." /> : <div className="mt-3 overflow-x-auto overflow-y-hidden"><div className="min-w-[620px] pr-6">
+          <div className="relative ml-[180px] h-5 border-b border-line text-[11px] text-muted">{ticks.map((x) => <span key={x.at} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${x.at}%` }}>{x.label}</span>)}<span className="absolute bottom-0 top-0 w-0.5 rounded bg-ink/50" style={{ left: `${pct(day(now))}%` }} title="Today" /></div>
+          {meds.map((m, mi) => <div key={m.id} className="grid grid-cols-[180px_minmax(0,1fr)] items-center border-b border-line/60 py-2.5 last:border-b-0 anim-fade-up" style={{ animationDelay: `${Math.min(mi, 14) * 30}ms` }}>
+            <button type="button" className="min-w-0 pr-3 text-left" onClick={() => go({ tab: 'stock', item: m.id })}><b className="block truncate text-[13px] hover:underline">{m.name}</b><small className="text-[11.5px] text-muted">{m.bs.filter((b) => b.expiry >= now).reduce((k, b) => k + b.qty, 0)} usable</small></button>
+            <div className="relative space-y-1.5">
+              {m.bs.map((b, k) => { const from = pct(Math.max(day(b.at), start)); const to = pct(day(b.expiry)); const order = m.bs.filter((x) => x.expiry >= now).indexOf(b) + 1;
+                return <div key={b.id} className="relative h-3" title={`${b.batchNo} · ${b.qty} · expires ${fmtDate(b.expiry)}`}>
+                  <span className={`bar-grow absolute top-0 h-full rounded-full ${tone(b)}`} style={{ left: `${from}%`, width: `${Math.max(1.5, to - from)}%`, animationDelay: `${150 + k * 60}ms` }} />
+                  <span className={`absolute top-1/2 grid h-[18px] min-w-[18px] -translate-y-1/2 place-items-center rounded-full border bg-surface px-1 text-[10px] font-bold ${b.expiry < now ? 'border-rose text-rose' : 'border-line-2'}`} style={{ left: `calc(${to}% + 4px)` }}>{b.expiry < now ? '!' : order}</span>
+                </div>; })}
+            </div>
+          </div>)}
+        </div></div>}
+      </section>
+      <section className="card anim-fade-up" style={{ animationDelay: '80ms' }}>
+        <div className="card-title">Expired on the shelf</div><div className="text-[12.5px] text-muted">The counter will not sell these. Take them off, or return them to the vendor from the medicine.</div>
+        {expired.length === 0 ? <div className="mt-4 rounded-[16px] bg-surface-2 p-4 text-center text-[13px] text-muted">Nothing expired on the shelf.</div>
+          : <div className="mt-3 space-y-2">{expired.map((b) => <div key={b.id} className="flex items-center gap-3 rounded-[16px] bg-surface-2 p-3 shadow-[var(--ring)]">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-rose-soft text-center text-[10.5px] font-bold leading-tight text-rose">{b.qty}<br />out</span>
+            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => go({ tab: 'stock', item: b.medicineId })}><b className="block truncate text-[13px] hover:underline">{b.name}</b><small className="block truncate text-[11.5px] text-muted">{b.batchNo} · expired {fmtDate(b.expiry)} · {money(b.qty * b.costPaise)} at cost</small></button>
+            {can(perms, 'stock.approve') && <button type="button" className="btn btn-sm" disabled={adjust.isPending} onClick={async () => { if (await ask({ title: `Take ${b.qty} of ${b.name} off the shelf?`, body: `Batch ${b.batchNo}, expired ${fmtDate(b.expiry)}. Stock goes down by ${b.qty} with the reason "Expired".`, confirmLabel: 'Take off the shelf' })) adjust.mutate(b); }}>Take off</button>}
+          </div>)}</div>}
+      </section>
     </div>
   );
 }
@@ -256,25 +349,42 @@ function GapCard({ countId, line: l, canApprove }: { countId: string; line: any;
 
 /* ---------------- Orders and receiving ---------------- */
 
-export function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
+function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const { perms } = useOutletContext<any>();
   const order = sp.get('order'); const receive = sp.get('receive');
   const [kind, setKind] = useState<'order' | 'receipt' | 'return'>('order');
   const docs = useQuery({ queryKey: ['stockdocs', 'list', kind], queryFn: () => get(`/stock/docs?kind=${kind}`), enabled: !order && !receive });
   const [open, setOpen] = useState<string | null>(null);
   const cancel = useMutation({ mutationFn: (id: string) => post(`/stock/orders/${id}/cancel`), onSuccess: () => { toast('Order cancelled'); refresh(); }, onError: (e) => toast(errText(e), 'err') });
-  if (order) return <OrderEditor go={go} vendorId={sp.get('vendor') ?? ''} />;
+  if (order) return <OrderEditor go={go} vendorId={sp.get('vendor') ?? ''} med={sp.get('med')} />;
   if (receive) return <ReceiveView go={go} orderId={receive === 'new' ? null : receive} />;
   const rows: any[] = docs.data ?? [];
+  const steps = ['Ordered', 'Part received', 'Received']; const at = (s: string) => (s === 'closed' ? 2 : s === 'part' ? 1 : 0);
   const tone = (s: string) => (['open', 'review'].includes(s) ? 'amber' : s === 'part' ? 'sky' : s === 'cancelled' ? '' : 'sage') as any;
-  const label: Record<string, string> = { open: 'open', part: 'part received', closed: 'closed', cancelled: 'cancelled', review: 'waiting for owner', ok: 'matched', settled: 'decided', done: 'done' };
+  const label: Record<string, string> = { open: 'open', part: 'part received', closed: 'received', cancelled: 'cancelled', review: 'waiting for owner', ok: 'matched', settled: 'decided', done: 'done' };
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Segmented value={kind} onChange={setKind} options={[{ value: 'order', label: 'Purchase orders' }, { value: 'receipt', label: 'Deliveries' }, { value: 'return', label: 'Returns' }]} />
-        {can(perms, 'stock.write') && <span className="ml-auto flex gap-2"><button className="btn" onClick={() => go({ tab: 'orders', receive: 'new' })}>Receive without order</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}><Icon name="plus" />New purchase order</button></span>}
       </div>
-      <div className="card !p-0 overflow-x-auto">
+      {kind === 'order' && rows.length > 0 ? <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{rows.map((r, ri) => { const n = at(r.status); const off = r.status === 'cancelled'; const total = r.lines.reduce((a: number, l: any) => a + (l.amountPaise ?? 0), 0);
+        return <div key={r.id} className={`card card-hover flex cursor-pointer flex-col anim-fade-up ${off ? 'opacity-60' : ''}`} style={{ animationDelay: `${Math.min(ri, 9) * 50}ms` }} onClick={() => setOpen(r.id)}>
+          <div className="flex items-start gap-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-[12px] ${n === 2 ? 'bg-clay-soft text-clay-ink' : 'bg-surface-2 text-ink-2 shadow-[var(--ring)]'}`}><Icon name={n === 2 ? 'check' : 'inbox'} className="h-4 w-4" /></span>
+            <span className="min-w-0 flex-1"><b className="block truncate text-[14px]">{r.docNo} · {r.vendor}</b><small className="text-[12px] text-muted">{fmtDate(r.createdAt)} · {r.lines.length} line{r.lines.length === 1 ? '' : 's'} · {money(total)}</small></span>
+            <Chip tone={tone(r.status)}>{label[r.status] ?? r.status}</Chip></div>
+          {!off && <div className="mt-4 grid grid-cols-3">{steps.map((st, k) => <div key={st} className="relative flex flex-col items-center gap-1.5">
+            {k > 0 && <span className="absolute right-1/2 top-[9px] h-[3px] w-full -translate-y-1/2 bg-line">{k <= n && <span className="bar-grow block h-full w-full bg-clay" style={{ animationDelay: `${200 + k * 120}ms` }} />}</span>}
+            <span className={`relative z-[1] grid h-[18px] w-[18px] place-items-center rounded-full border-2 ${k <= n ? 'border-clay bg-clay text-white' : 'border-line-2 bg-surface'}`}>{k <= n && <Icon name="check" className="h-2.5 w-2.5" />}</span>
+            <small className={`text-[11.5px] ${k <= n ? 'font-semibold text-ink' : 'text-muted'}`}>{st}</small></div>)}</div>}
+          <div className="mt-4 flex-1 divide-y divide-line/60 text-[13px]">{r.lines.slice(0, 4).map((l: any, k: number) => <div key={k} className="flex justify-between gap-3 py-1.5"><span className="min-w-0"><span className="block truncate font-medium">{l.name}</span><small className="text-muted">{l.qty}{l.freeQty ? ` + ${l.freeQty} free` : ''} × {rupees2(l.ratePaise)}</small></span><b className="shrink-0">{money(l.amountPaise ?? 0)}</b></div>)}
+            {r.lines.length > 4 && <div className="py-1.5 text-[12px] text-muted">+{r.lines.length - 4} more</div>}</div>
+          <div className="mt-3 flex items-center gap-2 border-t border-line/60 pt-3" onClick={(e) => e.stopPropagation()}>
+            <small className="mr-auto text-[12px] text-muted">{r.dueDate ? `Deliver by ${fmtDate(r.dueDate)}` : `By ${r.createdByName ?? 'staff'}`}</small>
+            {['open', 'part'].includes(r.status) && can(perms, 'stock.write') && <>
+              {r.status === 'open' && <button className="btn btn-sm btn-ghost" onClick={async () => { if (await ask({ title: `Cancel ${r.docNo}?`, confirmLabel: 'Cancel order', cancelLabel: 'Keep', tone: 'danger' })) cancel.mutate(r.id); }}>Cancel</button>}
+              <button className="btn btn-sm btn-primary" onClick={() => go({ tab: 'orders', receive: r.id })}><Icon name="inbox" className="h-3.5 w-3.5" />Receive</button></>}
+          </div>
+        </div>; })}</div> : <div className="card !p-0 overflow-x-auto">
         {docs.isLoading ? <div className="p-5"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="inbox" title={kind === 'order' ? 'No purchase orders yet' : kind === 'receipt' ? 'No deliveries yet' : 'No returns yet'} /> : (
           <table className="table min-w-[760px]"><thead><tr><th>{kind === 'order' ? 'Order' : kind === 'receipt' ? 'Delivery' : 'Return'}</th><th>Date</th><th>Vendor</th><th>{kind === 'receipt' ? 'Bill' : kind === 'order' ? 'Deliver by' : 'Reason'}</th><th>Items</th><th className="!text-right">{kind === 'return' ? 'Credit' : 'Amount'}</th><th>Status</th><th></th></tr></thead>
             <tbody>{rows.map((r) => <tr key={r.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpen(r.id)}>
@@ -285,7 +395,7 @@ export function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
               <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>{kind === 'order' && ['open', 'part'].includes(r.status) && can(perms, 'stock.write') && <>
                 {r.status === 'open' && <button className="btn btn-sm btn-ghost" onClick={async () => { if (await ask({ title: `Cancel ${r.docNo}?`, confirmLabel: 'Cancel order', cancelLabel: 'Keep', tone: 'danger' })) cancel.mutate(r.id); }}>Cancel</button>}
                 <button className="btn btn-sm btn-primary" onClick={() => go({ tab: 'orders', receive: r.id })}>Receive</button></>}</td></tr>)}</tbody></table>)}
-      </div>
+      </div>}
       {open && (kind === 'receipt' ? <DecisionDialog id={open} onClose={() => setOpen(null)} /> : <DocDialog id={open} onClose={() => setOpen(null)} />)}
     </div>
   );
@@ -304,13 +414,14 @@ function DocDialog({ id, onClose }: { id: string; onClose: () => void }) {
 
 type OLine = { medicineId: string; name: string; qty: string; scheme: string; rate: string; disc: string; gstBp: number; onHand?: number; lastPaidPaise?: number | null; packSize?: number; form?: string };
 
-function OrderEditor({ go, vendorId: initial }: { go: Go; vendorId: string }) {
+function OrderEditor({ go, vendorId: initial, med }: { go: Go; vendorId: string; med?: string | null }) {
   const vendors = useQuery({ queryKey: ['vendors'], queryFn: () => get('/vendors') });
   const [vendorId, setVendorId] = useState(initial); const [due, setDue] = useState(''); const [ref, setRef] = useState('');
+  useEffect(() => { if (!vendorId && vendors.data?.length === 1) setVendorId(vendors.data[0].id); }, [vendors.data]); // one vendor: no need to choose
   const draft = useQuery({ queryKey: ['stock', 'draft', vendorId], queryFn: () => get(`/stock/order-draft?vendorId=${vendorId}`), enabled: !!vendorId });
   const [lines, setLines] = useState<OLine[]>([]); const [tried, setTried] = useState(false);
   const toLine = (x: any): OLine => ({ medicineId: x.medicineId, name: x.name, qty: String(x.qty), scheme: x.scheme ?? '', rate: toRupees(x.ratePaise), disc: x.discBp ? String(x.discBp / 100) : '', gstBp: x.gstBp, onHand: x.onHand, lastPaidPaise: x.lastPaidPaise, packSize: x.packSize, form: x.form });
-  useEffect(() => { if (draft.data) setLines(draft.data.lines.map(toLine)); }, [draft.data]);
+  useEffect(() => { if (!draft.data) return; const one = med && draft.data.all.find((x: any) => x.medicineId === med); setLines(one ? [toLine(one)] : draft.data.lines.map(toLine)); }, [draft.data]);
   const set = (i: number, p: Partial<OLine>) => setLines((ls) => ls.map((l, k) => k === i ? { ...l, ...p } : l));
   const calc = lines.map((l) => { const qty = Number(l.qty) || 0; const rate = toPaise(l.rate); const disc = Math.round(Number(l.disc || 0) * 100); const free = schemeFree(l.scheme, qty); const amt = taxable(qty, rate, disc);
     return { qty, rate, disc, free, amt, gross: withGst(amt, l.gstBp), cost: qty + free ? Math.round(amt / (qty + free)) : 0 }; });
@@ -333,7 +444,7 @@ function OrderEditor({ go, vendorId: initial }: { go: Go; vendorId: string }) {
             <label><span className="label">Deliver by</span><input type="date" className="input" min={today()} value={due} onChange={(e) => setDue(e.target.value)} /></label>
             <label><span className="label">Vendor's quote ref (optional)</span><input className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="WhatsApp, call or quote no." /></label>
           </div>
-          {vendorId && <div className="mt-2 text-xs text-muted">Pre-filled with the medicines below their reorder level. Rates and schemes come from the last order; change only what the vendor quoted differently.{draft.data?.owed?.length ? ` This vendor still owes: ${draft.data.owed.map((o: any) => `${o.qty} ${o.name}`).join(', ')}.` : ''}</div>}
+          {vendorId && <div className="mt-2 text-xs text-muted">{med ? 'Started with the medicine you chose to reorder; add more below.' : 'Pre-filled with the medicines below their reorder level.'} Rates and schemes come from the last order; change only what the vendor quoted differently.{draft.data?.owed?.length ? ` This vendor still owes: ${draft.data.owed.map((o: any) => `${o.qty} ${o.name}`).join(', ')}.` : ''}</div>}
           <div className="mt-3 -mx-5 overflow-x-auto">
             <table className="table min-w-[940px]"><thead><tr><th>Medicine</th><th className="!text-right">Order qty</th><th>Scheme promised</th><th className="!text-right">Free</th><th className="!text-right">Rate ₹</th><th className="!text-right">Disc %</th><th className="!text-right">GST</th><th className="!text-right">Real cost</th><th className="!text-right">Amount</th><th></th></tr></thead>
               <tbody>{lines.length === 0 ? <tr><td colSpan={10} className="text-center text-muted">{vendorId ? 'Nothing is low. Add medicines below.' : 'Pick the vendor first.'}</td></tr> : lines.map((l, i) => { const c = calc[i]; const up = l.lastPaidPaise && c.rate > l.lastPaidPaise; return (
@@ -465,7 +576,7 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
 
 /* ---------------- Vendors ---------------- */
 
-export function VendorsTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
+function VendorsTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const { perms } = useOutletContext<any>();
   const list = useQuery({ queryKey: ['vendors'], queryFn: () => get('/vendors') });
   const sel = sp.get('vendor') ?? list.data?.[0]?.id ?? null;

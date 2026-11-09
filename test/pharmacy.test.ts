@@ -197,4 +197,18 @@ test('counter: issue a prescription in full, short or not at all; split payment;
   // walk-in sale with the older single-payment shape still works
   const w = await P('POST', '/pharmacy/sale', { newPatient: { fullName: 'Walk In', phone: '9876500001' }, items: [{ medicineId: iso.id, qty: 1 }], method: 'cash' });
   assert.equal(w.statusCode, 200, w.body); assert.equal(w.json().encounterId, null);
+
+  // void: the person who took the bill undoes it at once; everything goes back, the money is refunded, once only
+  const isoBefore = (await P('GET', `/stock/medicines/${iso.id}`)).json().onHand;
+  const v1 = await P('POST', '/pharmacy/sale', { newPatient: { fullName: 'Void Test', phone: '9876500002' }, items: [{ medicineId: iso.id, qty: 2 }], method: 'upi', reference: 'UPI12345' });
+  assert.equal(v1.statusCode, 200, v1.body); const vs = v1.json();
+  assert.equal((await P('GET', `/stock/medicines/${iso.id}`)).json().onHand, isoBefore - 2);
+  const vd = await P('POST', `/pharmacy/sale/${vs.id}/void`, {}); assert.equal(vd.statusCode, 200, vd.body);
+  assert.equal(vd.json().refundPaise, vs.totalPaise); assert.equal(vd.json().method, 'upi');
+  assert.equal((await P('GET', `/stock/medicines/${iso.id}`)).json().onHand, isoBefore, 'stock is back');
+  assert.equal((await P('POST', `/pharmacy/sale/${vs.id}/void`, {})).json().code, 'ALREADY_RETURNED', 'only once');
+  const v2 = (await O('POST', '/pharmacy/sale', { newPatient: { fullName: 'Void Two', phone: '9876500003' }, items: [{ medicineId: iso.id, qty: 1 }], method: 'cash' })).json();
+  assert.equal((await P('POST', `/pharmacy/sale/${v2.id}/void`, {})).statusCode, 403, 'only whoever took the bill, or the owner');
+  await db.update(S.pharmacySale).set({ createdAt: new Date(Date.now() - 11 * 60_000).toISOString() }).where(eq(S.pharmacySale.id, v2.id));
+  assert.equal((await O('POST', `/pharmacy/sale/${v2.id}/void`, {})).json().code, 'VOID_TOO_LATE', 'ten minutes, then it is a return');
 });

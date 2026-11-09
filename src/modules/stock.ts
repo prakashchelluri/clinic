@@ -166,17 +166,20 @@ export function stockRoutes(app: FastifyInstance) {
       const onHand = sellable.reduce((n, b) => n + b.qty, 0); const nearest = sellable.map((b) => b.expiry).sort()[0] ?? null;
       const status = onHand === 0 ? 'out' : nearest && nearest <= soon ? 'expiring' : onHand < m.reorderLevel ? 'low' : 'ok';
       return { id: m.id, name: m.name, form: m.form, packSize: m.packSize, mrpPaise: m.mrpPaise, reorderLevel: m.reorderLevel, onHand, expired: bs.filter((b) => b.expiry < d).reduce((n, b) => n + b.qty, 0),
-        batches: sellable.length, nearestExpiry: nearest, costValuePaise: sellable.reduce((n, b) => n + b.qty * b.costPaise, 0), free90: free90(m.id), status };
+        batches: sellable.length, nearestExpiry: nearest, vendorId: [...bs].sort((x, y) => +y.createdAt - +x.createdAt)[0]?.vendorId ?? null, costValuePaise: sellable.reduce((n, b) => n + b.qty * b.costPaise, 0), free90: free90(m.id), status };
     });
     const reviews = await tx.select({ d: stockDoc, vendor: vendor.name }).from(stockDoc).leftJoin(vendor, eq(vendor.id, stockDoc.vendorId)).where(and(eq(stockDoc.tenantId, t), eq(stockDoc.kind, 'receipt'), eq(stockDoc.status, 'review'))).orderBy(desc(stockDoc.createdAt));
     const expiring = batches.filter((b) => b.expiry >= d && b.expiry <= soon);
     const count = (await tx.select().from(stockDoc).where(and(eq(stockDoc.tenantId, t), eq(stockDoc.kind, 'count'))).orderBy(desc(stockDoc.createdAt)).limit(1))[0];
     const gaps = count ? count.lines.filter((l: any) => l.state === 'gap') : [];
+    const onTheWay = await tx.select({ id: stockDoc.id }).from(stockDoc).where(and(eq(stockDoc.tenantId, t), eq(stockDoc.kind, 'order'), inArray(stockDoc.status, ['open', 'part'])));
+    const name = (id: string) => meds.find((m) => m.id === id)?.name ?? '';
     return {
       items,
+      batches: batches.map((b) => ({ id: b.id, medicineId: b.medicineId, name: name(b.medicineId), batchNo: b.batchNo, expiry: b.expiry, qty: b.qty, costPaise: b.costPaise, at: b.createdAt })).sort((a, b) => a.expiry.localeCompare(b.expiry)),
       reviews: reviews.map((r) => ({ id: r.d.id, docNo: r.d.docNo, billNo: r.d.billNo, vendor: r.vendor, at: r.d.createdAt, by: r.d.createdByName, lines: r.d.lines.filter((l: any) => l.extraPaise > 0 || l.freeShort > 0),
         extraPaise: r.d.lines.reduce((n: number, l: any) => n + l.extraPaise, 0), freeShort: r.d.lines.reduce((n: number, l: any) => n + l.freeShort, 0) })),
-      tiles: { low: items.filter((i) => i.status === 'low' || i.status === 'out').length, expiringBatches: expiring.length, expiringValuePaise: expiring.reduce((n, b) => n + b.qty * b.costPaise, 0),
+      tiles: { ordersOpen: onTheWay.length, low: items.filter((i) => i.status === 'low' || i.status === 'out').length, expiringBatches: expiring.length, expiringValuePaise: expiring.reduce((n, b) => n + b.qty * b.costPaise, 0),
         expired: items.reduce((n, i) => n + i.expired, 0), count: count ? { id: count.id, docNo: count.docNo, at: count.createdAt, status: count.status, gapLines: gaps.length, gapUnits: gaps.reduce((n: number, l: any) => n + Math.abs(l.counted - l.system), 0) } : null },
     };
   });
@@ -352,10 +355,11 @@ export function stockRoutes(app: FastifyInstance) {
 
   // --- stock count: counted blind, gaps need the owner ---
   route(app, 'post', '/stock/counts', 'stock.write', async (req, tx) => {
-    const t = req.ctx.tenantId;
+    const t = req.ctx.tenantId; const only = z.object({ medicineId: z.string().uuid().optional() }).parse(req.body ?? {}).medicineId;
     const open = await tx.select({ id: stockDoc.id }).from(stockDoc).where(and(eq(stockDoc.tenantId, t), eq(stockDoc.kind, 'count'), inArray(stockDoc.status, ['open', 'review']))).limit(1);
     if (open.length) throw new HttpError(409, 'COUNT_OPEN', { id: open[0].id });
-    const bs = await tx.select({ b: stockBatch, name: medicine.name }).from(stockBatch).innerJoin(medicine, eq(medicine.id, stockBatch.medicineId)).where(and(eq(stockBatch.tenantId, t), gt(stockBatch.qty, 0))).orderBy(asc(medicine.name), asc(stockBatch.expiry));
+    const bs = await tx.select({ b: stockBatch, name: medicine.name }).from(stockBatch).innerJoin(medicine, eq(medicine.id, stockBatch.medicineId)).where(and(eq(stockBatch.tenantId, t), gt(stockBatch.qty, 0), only ? eq(stockBatch.medicineId, only) : undefined)).orderBy(asc(medicine.name), asc(stockBatch.expiry));
+    if (!bs.length) throw new HttpError(409, 'NOTHING_TO_COUNT');
     const n = await nextNumber(tx, t, 'stock_cnt', 'tenant');
     return (await tx.insert(stockDoc).values({ tenantId: t, kind: 'count', docNo: `CNT-${String(n).padStart(4, '0')}`, status: 'open',
       lines: bs.map((x) => ({ batchId: x.b.id, medicineId: x.b.medicineId, name: x.name, batchNo: x.b.batchNo, expiry: x.b.expiry, counted: null, state: 'todo' })), createdBy: req.ctx.userId, createdByName: req.ctx.name }).returning())[0];

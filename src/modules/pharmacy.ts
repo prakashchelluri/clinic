@@ -188,6 +188,18 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const b = ReturnIn.parse(req.body);
     return returnItems(tx, { tenantId: req.ctx.tenantId, userId: req.ctx.userId, name: req.ctx.name }, (req.params as any).id, b, req.ctx);
   });
+  /** Void: undo a bill just taken (wrong patient, wrong item). Whoever took it, within ten minutes, before any return; everything goes back and the money is refunded the way it came. */
+  route(app, 'post', '/pharmacy/sale/:id/void', 'pharmacy.bill', async (req, tx) => {
+    const [s] = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.id, (req.params as any).id), eq(pharmacySale.tenantId, req.ctx.tenantId)));
+    if (!s) throw new HttpError(404, 'NOT_FOUND');
+    if (s.createdBy !== req.ctx.userId && !can(req.perms, 'stock.approve')) throw new HttpError(403, 'FORBIDDEN_NOT_YOURS');
+    if (Date.now() - new Date(s.createdAt).getTime() > 10 * 60_000) throw new HttpError(409, 'VOID_TOO_LATE');
+    if (s.returns.length) throw new HttpError(409, 'ALREADY_RETURNED');
+    // ponytail: a split bill would need one refund per method; those are cancelled from Bills
+    if (s.method === 'split') throw new HttpError(409, 'VOID_SPLIT');
+    const reference = s.method === 'cash' ? undefined : (s.reference ?? '').length >= 4 ? s.reference! : `VOID ${s.invoiceNo}`;
+    return returnItems(tx, { tenantId: req.ctx.tenantId, userId: req.ctx.userId, name: req.ctx.name }, s.id, { lines: s.items.map((l, i) => ({ line: i, qty: l.qty })), reason: 'Voided at the counter', method: s.method as 'cash' | 'upi' | 'card', reference }, req.ctx);
+  });
   /** Cancel a whole bill: everything not yet returned comes back. Owner only. */
   route(app, 'post', '/pharmacy/sale/:id/cancel', 'stock.approve', async (req, tx) => {
     const b = z.object({ reason: z.string().trim().min(3).max(200), method: z.enum(['cash', 'upi', 'card']), reference: z.string().trim().max(40).optional() }).parse(req.body);
