@@ -26,7 +26,7 @@ export function Patients() {
   return (
     <div>
       {/* One record is a full page; the list is a full-width search. Nobody flips between patients the way they flip between mails. */}
-      {id ? <div className="mb-3 anim-fade-up"><button className="btn btn-ghost btn-sm -ml-2" onClick={() => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav('/patients', { viewTransition: true }))}><Icon name="chevL" className="h-4 w-4" />Back</button></div>
+      {id ? null
         : <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
           {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
           {canMsg && <button className="btn" onClick={() => setBulk(true)}><Icon name="message" className="h-4 w-4" />Message patients</button>}

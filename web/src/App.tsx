@@ -5,6 +5,7 @@ import { useMe, useConfig, post, get, patch, qc, ApiError } from './api';
 import { Avatar, Icon, NoAccess, ToastHost, useScrollLock } from './ui';
 import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
+import { settingsTopic } from './pages/Settings';
 import { refreshBookings } from './apptDrawer';
 import { PrintHost } from './printPreview';
 import { ViewerHost } from './viewer';
@@ -185,12 +186,17 @@ export function App() {
   if (me.isError) { if (!(me.error instanceof ApiError && me.error.body?.code === 'IP_NOT_ALLOWED')) location.href = '/login'; return null; }
   const signOut = async () => { await post('/auth/logout'); qc.clear(); nav('/login'); };
   const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
+  const topic = loc.pathname === '/settings' ? settingsTopic(new URLSearchParams(loc.search).get('tab')) : null;
+  // Back: the screen you came from; opened from a link or a fresh tab, the page above this one
+  const seg = loc.pathname.split('/').filter(Boolean);
+  const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? (perms.includes('encounter.complete') || perms.includes('*') ? '/today' : '/queue') : seg[0] === 'help' ? '/' : null;
+  const goBack = () => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(parent ?? '/', { viewTransition: true }));
   const roles: string[] = me.data.roles ?? [me.data.role];
   const side = { items, active, clinic, me: me.data, roles, requests, onSignOut: signOut };
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${navOpen ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: '1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
+      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${navOpen ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
         {navOpen ? <Sidebar {...side} onCollapse={toggleNav} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} onExpand={toggleNav} />}
       </aside>
       {drawer && (
@@ -202,7 +208,8 @@ export function App() {
       <div className={`${navOpen ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
         <header className="no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[13.5px] font-semibold text-muted"><span className="hidden truncate sm:inline">{clinic}</span><Icon name="chevR" className="hidden h-3.5 w-3.5 sm:block" /><span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span></nav>
+          {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[13.5px] font-semibold text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-3.5 w-3.5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>
           <span className="ml-auto" />
           {!platform && <button onClick={() => setPalette(true)} className="toppill mr-1 hidden w-[280px] !font-medium !text-muted lg:inline-flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-4 w-4" /><span className="flex-1 truncate text-left">Patients, phone or ID…</span><span className="kbd">Ctrl K</span></button>}
           {!platform && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-icon lg:hidden"><Icon name="search" /></button>}

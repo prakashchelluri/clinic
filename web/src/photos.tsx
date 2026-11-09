@@ -199,7 +199,8 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
                       <button className="h-full w-full" aria-pressed={n >= 0} aria-label={`${n >= 0 ? 'Unpick' : 'Pick'} ${p.area ?? 'photo'} ${viewLabel(p.view)} for comparing`} onClick={() => toggle(p.id)}><img src={fileUrl(p.id)} alt={`${p.area ?? 'Photo'}, ${viewLabel(p.view)}, ${shortDay(p.takenAt)}`} loading="lazy" className="h-full w-full object-cover" /></button>
                       <span className="pointer-events-none absolute bottom-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-bold text-white">{area === 'all' && p.area ? `${p.area} · ` : ''}{viewLabel(p.view)}</span>
                       {n >= 0 && <span className="pointer-events-none absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-full bg-clay text-xs font-bold text-white">{n + 1}</span>}
-                      <button className="absolute left-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/55 text-white opacity-90 sm:opacity-0 sm:transition-opacity sm:group-hover:opacity-100" aria-label="Open photo" onClick={() => setViewing(p)}><Icon name="search" className="h-3.5 w-3.5" /></button>
+                      <button className="absolute left-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/55 text-white" aria-label="Open photo" title="Open, tag or note" onClick={() => setViewing(p)}><Icon name="search" className="h-3.5 w-3.5" /></button>
+                      {canWrite && n < 0 && <RemovePhoto photo={p} patientId={patient.id} className="absolute right-2 top-2" />}
                     </div>);
                 })}</div>
               </div>
@@ -218,6 +219,13 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
       {viewing && <PhotoViewer photo={viewing} list={shown} areas={q.data?.areas ?? []} canWrite={canWrite} patientId={patient.id} onClose={() => setViewing(null)} onMove={setViewing} />}
     </Section>
   );
+}
+
+/** The × on a thumbnail: removes the photo after one confirm. */
+export function RemovePhoto({ photo, patientId, className = '' }: { photo: any; patientId: string; className?: string }) {
+  const del = useMutation({ mutationFn: () => api('DELETE', `/documents/${photo.id}`), onSuccess: () => { refresh(patientId); toast('Photo removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
+  return <button type="button" className={`grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-rose disabled:opacity-50 ${className}`} aria-label={`Remove photo: ${photo.area ?? 'untagged'}, ${viewLabel(photo.view)}`} title="Remove photo" disabled={del.isPending}
+    onClick={async (e) => { e.stopPropagation(); const r = await ask({ title: 'Remove this photo?', body: `${photo.area ?? 'Photo'}, ${viewLabel(photo.view).toLowerCase()}, taken ${dayLabel(photo.takenAt)}. It is deleted for good: it leaves the patient's record and any comparison.`, confirmLabel: 'Remove photo', tone: 'danger' }); if (r) del.mutate(); }}><Icon name="x" className="h-3.5 w-3.5" /></button>;
 }
 
 /* ---------------- Compare ---------------- */

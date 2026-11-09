@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
+import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
 import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, ask } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
@@ -48,6 +48,8 @@ const GROUPS: [string, string, TabDef[]][] = [
 ];
 const OWNER_ONLY = new Set<Tab>(['privacy', 'testdata']);
 const TABS: TabDef[] = GROUPS.flatMap(([, , t]) => t);
+/** The topic's name for the breadcrumb: Settings › Privacy and security. */
+export const settingsTopic = (k: string | null) => TABS.find((t) => t[0] === k)?.[1] ?? null;
 const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'Long text'], ['number', 'Number'], ['select', 'Pick one'], ['multiselect', 'Pick many'], ['tags', 'List (type several)'], ['diagnoses', 'Diagnoses with severity'], ['date', 'Date']];
 
 /** Owner's control panel. Everything here is data: no deploy needed to change it.
@@ -56,11 +58,10 @@ export function Settings() {
   const { cfg, me } = useOutletContext<any>();
   const owner = (me?.roles ?? []).includes('owner');
   const visible = (k: Tab) => owner || !OWNER_ONLY.has(k);
-  const [params, setParams] = useSearchParams(); const nav = useNavigate();
-  // opened on a topic from another screen (Configure pad, an alert): Back returns there; opened from the home of cards, Back is the home
-  const [deep] = useState(() => params.get('tab') !== null && ((window.history.state as any)?.idx ?? 0) > 0);
+  const [params, setParams] = useSearchParams();
   const tab = TABS.find((t) => t[0] === params.get('tab') && visible(t[0]))?.[0] ?? null;
-  const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: true }); window.scrollTo({ top: 0 }); };
+  // from the cards to a topic is a step of its own (Back returns to the cards); topic to topic replaces it
+  const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: tab !== null && k !== null }); window.scrollTo({ top: 0 }); };
   const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); };
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
 
@@ -91,7 +92,6 @@ export function Settings() {
   const siblings = group[2].filter(([k]) => k !== tab && visible(k));
   return (
     <div>
-      <button type="button" onClick={() => (deep ? nav(-1) : setTab(null))} className="btn btn-ghost btn-sm mb-3 -ml-2 anim-fade-up"><Icon name="chevL" className="h-4 w-4" />{deep ? 'Back' : 'All settings'}</button>
       <PageHeader title={cur[1]} subtitle={cur[3]} />
       {siblings.length > 0 && <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted"><span className="mr-1">Also in {group[0]}:</span>{siblings.map(([k, label]) => <button key={k} type="button" className="toggle-opt" onClick={() => setTab(k)}>{label}</button>)}</div>}
       <div key={tab} id="settings-body" className="anim-fade-up min-w-0 max-w-[1100px]">
