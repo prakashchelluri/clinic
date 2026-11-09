@@ -61,7 +61,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
           <span className="label">Medicines</span>
           <datalist id="t-meds">{meds.map((m: any) => <option key={m.id} value={m.name} />)}</datalist><datalist id="t-freq">{FREQ.map((x) => <option key={x} value={x} />)}</datalist>
           <div className="overflow-x-auto"><div className="min-w-[640px] space-y-1.5">
-            <div className="grid grid-cols-[1.6fr_70px_100px_60px_1.2fr_32px] gap-1.5 text-[11px] uppercase tracking-wider text-muted"><span>Medicine</span><span>Dose</span><span>When</span><span>Days</span><span>How</span><span /></div>
+            <div className="grid grid-cols-[1.6fr_70px_100px_60px_1.2fr_32px] gap-1.5 card-title"><span>Medicine</span><span>Dose</span><span>When</span><span>Days</span><span>How</span><span /></div>
             {items.map((i, k) => (
               <div key={k} className="grid grid-cols-[1.6fr_70px_100px_60px_1.2fr_32px] items-center gap-1.5">
                 <input aria-label="Medicine" list="t-meds" className="input !py-1.5 text-sm font-semibold" maxLength={120} value={i.name} onChange={(e) => { const m = meds.find((x: any) => x.name === e.target.value); upd(k, { name: e.target.value, medicineId: m?.id ?? null, ...(m ? { dose: m.defaults?.dose ?? null, frequency: m.defaults?.frequency ?? null, durationDays: m.defaults?.durationDays ?? null, instructions: m.defaults?.instructions ?? null } : {}) }); }} />

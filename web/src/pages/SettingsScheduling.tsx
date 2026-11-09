@@ -133,7 +133,7 @@ export function BookingRulesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Windows</div>
+        <div className="card-title">Windows</div>
         <div className="grid gap-3 sm:grid-cols-3">
           <div><label className="label" htmlFor="br-arrive">Arrive early (minutes)</label><NumInput id="br-arrive" max={240} className={`input ${bad.arrive ? '!border-rose' : ''}`} value={f.arriveEarlyMinutes} onChange={(e) => set('arriveEarlyMinutes', e.target.value)} /></div>
           <div><label className="label" htmlFor="br-cap">Places per window (new doctors)</label><NumInput id="br-cap" max={99} className={`input ${bad.cap ? '!border-rose' : ''}`} value={f.defaultCapacity} onChange={(e) => set('defaultCapacity', e.target.value)} /></div>
@@ -142,7 +142,7 @@ export function BookingRulesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
         <div className="text-xs text-muted">Patients are told to arrive this many minutes before their window. Each doctor's own places per window are set under Availability.</div>
       </div>
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Cancelling and changing</div>
+        <div className="card-title">Cancelling and changing</div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div><label className="label" htmlFor="br-cancel">Patients can cancel or move until (hours before)</label><NumInput id="br-cancel" max={168} className={`input ${bad.cancel ? '!border-rose' : ''}`} value={f.cancelWindowHours} onChange={(e) => set('cancelWindowHours', e.target.value)} /></div>
           <div><label className="label" htmlFor="br-warn">Warn after this many no-shows</label><NumInput id="br-warn" max={20} className={`input ${bad.warn ? '!border-rose' : ''}`} value={f.noShowWarnAt} onChange={(e) => set('noShowWarnAt', e.target.value)} /></div>
@@ -177,7 +177,7 @@ export function OnlineBookingTab({ cfg, onSaved }: { cfg: any; onSaved: () => vo
         <div className="text-xs text-muted">Share it on WhatsApp, Google Maps and your clinic board. {online.length ? `${online.length} visit type${online.length === 1 ? ' is' : 's are'} offered online.` : <span className="text-amber">No visit type is marked “online” yet: set one under Visit types.</span>}</div>
       </div>
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Rules</div>
+        <div className="card-title">Rules</div>
         <Toggle id="ob-approve" on={f.requireApproval} onChange={(v) => set('requireApproval', v)} label="Reception approves each request" hint="Requests hold the place and wait in Bookings → Requests. Off: bookings are confirmed straight away" />
         <div className="grid gap-3 sm:grid-cols-3">
           <div><label className="label" htmlFor="ob-notice">Minimum notice (hours)</label><NumInput id="ob-notice" max={336} className={`input ${bad.notice ? '!border-rose' : ''}`} value={f.minNoticeHours} onChange={(e) => set('minNoticeHours', e.target.value)} /></div>
@@ -237,7 +237,7 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
         <div><span className="label">Language</span><div className="flex gap-1">{[['en', 'English'], ['te', 'Telugu']].map(([k, l]) => <button key={k} type="button" className={`toggle-opt ${f.language === k ? 'on' : ''}`} onClick={() => setF({ ...f, language: k })}>{l}</button>)}</div></div>
       </div>
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Message text</div>
+        <div className="card-title">Message text</div>
         <div className="flex flex-wrap gap-1.5">{KINDS.map(([k, l]) => <button key={k} type="button" className={`toggle-opt ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{l}{tpl[k] && tpl[k] !== defaults[k] ? ' •' : ''}</button>)}</div>
         <div className="text-xs text-muted">{KINDS.find((k) => k[0] === kind)?.[2]}</div>
         <textarea aria-label="Message text" className={`input min-h-[96px] ${unknown.length ? '!border-rose' : ''}`} maxLength={900} value={cur} onChange={(e) => setTpl({ ...tpl, [kind]: e.target.value })} />

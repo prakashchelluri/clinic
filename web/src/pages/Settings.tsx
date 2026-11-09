@@ -12,123 +12,163 @@ import { PadTab } from './SettingsPad';
 import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy';
+type Tab = 'clinic' | 'day' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy' | 'testdata';
+/** key, name, icon, what it is for (one plain sentence) */
 type TabDef = [Tab, string, string, string];
-const GROUPS: [string, TabDef[]][] = [
-  ['Practice', [
-    ['clinic', 'Clinic details', 'door', 'Name, prescription header, vitals'],
-    ['people', 'Team members', 'users', 'Staff accounts and doctors'],
-    ['roles', 'Roles and access', 'lock', 'What each role can see and do'],
-    ['rooms', 'Rooms', 'door', 'Rooms and what each can do'],
-    ['privacy', 'Privacy & access', 'lock', 'Work only from the clinic, audit log'],
+const GROUPS: [string, string, TabDef[]][] = [
+  ['Your clinic', 'Who works here, where, and how the day runs.', [
+    ['clinic', 'Clinic details', 'home', 'Name, address and phone as printed on prescriptions, and how token numbers run.'],
+    ['day', 'The day at the desk', 'queue', 'Vitals taken at arrival, junior screening, free return with reports, the waiting-room screen.'],
+    ['people', 'Staff and doctors', 'users', 'Who can sign in, and the doctors whose names go on prescriptions.'],
+    ['roles', 'What each role can do', 'lock', 'Which screens and actions reception, doctors, pharmacy and others have.'],
+    ['rooms', 'Rooms', 'door', 'Procedure rooms and what each is equipped for.'],
+    ['privacy', 'Privacy and security', 'lock', 'Work only from the clinic, idle sign-out, and the audit log.'],
   ]],
-  ['Scheduling', [
-    ['availability', 'Availability', 'clock', 'Each doctor’s weekly hours'],
-    ['services', 'Visit types', 'calendar', 'What patients book, colour, fee'],
-    ['rules', 'Booking rules', 'list', 'Arrive early, cancel window, policy'],
-    ['online', 'Online booking', 'globe', 'Your booking page and its rules'],
-    ['messages', 'Reminders and messages', 'message', 'WhatsApp confirmations and reminders'],
+  ['Bookings and reminders', 'What patients can book, when, and how they are reminded.', [
+    ['availability', 'Doctors’ weekly hours', 'clock', 'When each doctor sits for OP. The calendar fills from this every week.'],
+    ['services', 'Visit types', 'calendar', 'What a patient books: name, length, colour on the calendar, fee.'],
+    ['rules', 'Booking rules', 'list', 'How early to arrive, how late one can cancel, how the calendar looks.'],
+    ['online', 'Online booking page', 'globe', 'Your public booking link and QR code, and what patients can book there.'],
+    ['messages', 'WhatsApp reminders', 'message', 'Confirmations, reminders and follow-up messages sent to patients.'],
   ]],
-  ['Clinical', [
-    ['pad', 'Rx pad', 'stetho', 'Sections, required fields, what prints'],
-    ['forms', 'Consultation form', 'edit', 'Complaints, examination, diagnoses'],
-    ['templates', 'Templates', 'list', 'Sets for medicines, complaints, advice, tests'],
-    ['medicines', 'Medicines', 'pill', 'Favourites with default dosing'],
-    ['procedures', 'Procedures', 'stetho', 'Catalogue, duration, room needs'],
-    ['photos', 'Photo areas', 'spark', 'Body areas for clinical photos'],
+  ['Consultations', 'What the doctor sees and prescribes.', [
+    ['pad', 'Prescription pad', 'stetho', 'What the doctor fills in, which parts are required, and what prints.'],
+    ['forms', 'Consultation form fields', 'edit', 'The complaints, examination findings and diagnoses the doctor picks from.'],
+    ['templates', 'Templates', 'list', 'Ready sets of medicines, complaints, advice and tests, filled in one click.'],
+    ['medicines', 'Medicines', 'pill', 'The medicines the doctor prescribes, with usual dosing and price.'],
+    ['procedures', 'Procedures and packages', 'spark', 'Each procedure’s duration, price and room needs; multi-sitting packages.'],
+    ['photos', 'Photo areas', 'user', 'Body areas for before and after photos.'],
   ]],
-  ['Billing', [
-    ['fees', 'Fees', 'rupee', 'Visit categories and amounts'],
+  ['Money', 'What a visit costs.', [
+    ['fees', 'Consultation fees', 'rupee', 'The fee for each visit category, and which categories jump the queue.'],
+  ]],
+  ['Testing', 'Only on a test clinic.', [
+    ['testdata', 'Test data', 'repeat', 'Wipe everything this clinic has done and load a week of sample data.'],
   ]],
 ];
-const TABS: TabDef[] = GROUPS.flatMap(([, t]) => t);
+const OWNER_ONLY = new Set<Tab>(['privacy', 'testdata']);
+const TABS: TabDef[] = GROUPS.flatMap(([, , t]) => t);
 const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'Long text'], ['number', 'Number'], ['select', 'Pick one'], ['multiselect', 'Pick many'], ['tags', 'List (type several)'], ['diagnoses', 'Diagnoses with severity'], ['date', 'Date']];
 
-/** Owner's control panel. Everything here is data: no deploy needed to change it. */
+/** Owner's control panel. Everything here is data: no deploy needed to change it.
+ *  A home of plain cards, one per topic; opening one shows that topic alone with a way back and its neighbours. */
 export function Settings() {
   const { cfg, me } = useOutletContext<any>();
   const owner = (me?.roles ?? []).includes('owner');
+  const visible = (k: Tab) => owner || !OWNER_ONLY.has(k);
   const [params, setParams] = useSearchParams();
-  const tab: Tab = TABS.some((t) => t[0] === params.get('tab')) ? (params.get('tab') as Tab) : 'clinic';
-  const setTab = (k: Tab) => setParams({ tab: k }, { replace: true });
+  const tab = TABS.find((t) => t[0] === params.get('tab') && visible(t[0]))?.[0] ?? null;
+  const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: true }); window.scrollTo({ top: 0 }); };
   const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); };
-  const cur = TABS.find((t) => t[0] === tab)!;
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
-  return (
+
+  if (!tab) return (
     <div>
-      <PageHeader title="Settings" subtitle="Everything the clinic runs on is yours to change here. It applies straight away." />
-      <div className="grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-5">
-        <nav className="card-flat !p-2 anim-fade-up self-start" aria-label="Settings sections">
-          {GROUPS.map(([g, tabs]) => (
-            <div key={g}>
-              <div className="px-3 pb-1 pt-3 text-[10.5px] font-bold uppercase tracking-[.1em] text-muted first:pt-1">{g}</div>
-              {tabs.filter(([k]) => k !== 'privacy' || owner).map(([k, label, icon, hint]) => (
-                <button key={k} onClick={() => { setTab(k); if (innerWidth < 1024) setTimeout(() => document.getElementById('settings-body')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60); }} aria-current={tab === k ? 'page' : undefined} className={`nav-item w-full text-left ${tab === k ? 'active' : ''}`}><span className={tab === k ? 'text-clay' : 'text-muted'}><Icon name={icon} className="h-[18px] w-[18px]" /></span><span><div>{label}</div><div className="text-[11px] text-muted font-normal leading-tight">{hint}</div></span></button>
+      <PageHeader title="Settings" subtitle="How the clinic runs. A change applies straight away, for everyone." />
+      <div className="space-y-8">
+        {GROUPS.filter(([, , tabs]) => tabs.some(([k]) => visible(k))).map(([g, about, tabs]) => (
+          <section key={g} className="anim-fade-up">
+            <div className="mb-3 flex items-baseline gap-3"><h2 className="text-[17px] font-semibold text-ink">{g}</h2><span className="text-[13.5px] text-muted">{about}</span></div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {tabs.filter(([k]) => visible(k)).map(([k, label, icon, hint]) => (
+                <button key={k} type="button" onClick={() => setTab(k)} className="card flex items-start gap-3.5 text-left transition-colors hover:bg-surface-2">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-paper-2 text-ink"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold text-ink">{label}</span><span className="mt-0.5 block text-[13px] leading-snug text-muted">{hint}</span></span>
+                  <Icon name="chevR" className="mt-2.5 h-4 w-4 shrink-0 text-muted" />
+                </button>
               ))}
             </div>
-          ))}
-        </nav>
-        <div key={tab} id="settings-body" className="anim-fade-up min-w-0 scroll-mt-4">
-          <h2 className="text-xl font-medium mb-3">{cur[1]}</h2>
-          {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
-          {tab === 'online' && <OnlineBookingTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'roles' && <><RolesTab onSaved={refresh} /><DiscountCap cfg={cfg} onSaved={refresh} /></>}
-          {tab === 'pad' && <PadTab onSaved={refresh} />}
-          {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'templates' && <TemplatesTab cfg={cfg} />}
-          {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'procedures' && <><ProceduresTab cfg={cfg} onSaved={refresh} /><PackagesCard cfg={cfg} onSaved={refresh} /></>}
-          {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'privacy' && owner && <PrivacyTab />}
-        </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+
+  const cur = TABS.find((t) => t[0] === tab)!;
+  const group = GROUPS.find(([, , tabs]) => tabs.some(([k]) => k === tab))!;
+  const siblings = group[2].filter(([k]) => k !== tab && visible(k));
+  return (
+    <div>
+      <button type="button" onClick={() => setTab(null)} className="btn btn-ghost btn-sm mb-3 -ml-2 anim-fade-up"><Icon name="chevL" className="h-4 w-4" />All settings</button>
+      <PageHeader title={cur[1]} subtitle={cur[3]} />
+      {siblings.length > 0 && <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted"><span className="mr-1">Also in {group[0]}:</span>{siblings.map(([k, label]) => <button key={k} type="button" className="toggle-opt" onClick={() => setTab(k)}>{label}</button>)}</div>}
+      <div key={tab} id="settings-body" className="anim-fade-up min-w-0 max-w-[1100px]">
+        {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
+        {tab === 'online' && <OnlineBookingTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'day' && <DayTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'roles' && <><RolesTab onSaved={refresh} /><DiscountCap cfg={cfg} onSaved={refresh} /></>}
+        {tab === 'pad' && <PadTab onSaved={refresh} />}
+        {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'templates' && <TemplatesTab cfg={cfg} />}
+        {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'procedures' && <><ProceduresTab cfg={cfg} onSaved={refresh} /><PackagesCard cfg={cfg} onSaved={refresh} /></>}
+        {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'privacy' && owner && <PrivacyTab />}
+        {tab === 'testdata' && owner && <TestDataCard />}
       </div>
     </div>
   );
 }
 
-/* ---------------- Clinic ---------------- */
+/* ---------------- Clinic: what prints, how tokens count ---------------- */
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
-  const [vitals, setVitals] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
-  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category', screening: s.screening ?? 'off', freeDays: String(s.reports?.freeDays ?? 30) });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { vitals, print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope }, screening: f.screening, reports: { freeDays: Math.max(0, Math.min(365, Number(f.freeDays) || 0)) } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Profile & prescription header</div>
+        <div className="card-title">Printed on every prescription</div>
         <div><label className="label">Clinic name</label><input className="input" value={f.name} onChange={set('name')} /></div>
-        <div><label className="label">Address (printed on Rx)</label><input className="input" value={f.address} onChange={set('address')} /></div>
-        <div className="grid grid-cols-2 gap-3"><div><label className="label">Phone</label><input className="input" value={f.phone} onChange={set('phone')} /></div><div><label className="label">Footer line</label><input className="input" value={f.footer} onChange={set('footer')} /></div></div>
+        <div><label className="label">Address</label><input className="input" value={f.address} onChange={set('address')} /></div>
+        <div className="grid grid-cols-2 gap-3"><div><label className="label">Phone</label><input className="input" value={f.phone} onChange={set('phone')} /></div><div><label className="label">Line at the bottom</label><input className="input" value={f.footer} onChange={set('footer')} placeholder="e.g. Get well soon" /></div></div>
       </div>
       <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">Vitals taken at arrival</div>
-        <div className="flex flex-wrap gap-1.5">{VITAL_FIELDS.map((v) => <button key={v.key} type="button" className={`toggle-opt ${vitals.includes(v.key) ? 'on' : ''}`} onClick={() => setVitals(vitals.includes(v.key) ? vitals.filter((x) => x !== v.key) : VITAL_FIELDS.map((x) => x.key).filter((k) => k === v.key || vitals.includes(k)))}>{v.label} ({v.unit})</button>)}</div>
-        <div className="text-xs text-muted">These appear on the arrival sheet and on the doctor's screen. Switch off what your clinic does not measure.</div>
-      </div>
-      <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">OP numbers</div>
-        <div><label className="label">Daily OP number resets</label><div className="flex gap-1">{[['day+category', 'Per category (GEN-1, REN-1…)'], ['day', 'One sequence per day']].map(([v, l]) => <button key={v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div></div>
-      </div>
-      <div className="card space-y-3">
-        <div className="text-[11px] uppercase tracking-wider text-muted">The day's flow</div>
-        <div><label className="label">Junior doctor screening before the doctor</label>
-          <div className="flex flex-wrap gap-1">{([['off', 'Off', 'Reception sends patients straight to the doctor'], ['first', 'When a junior is on', 'The junior screens whoever is waiting; the doctor takes screened patients first, others when nobody is screened'], ['required', 'Every patient', 'The doctor sees only patients the junior has screened']] as const).map(([v, l, h]) => <button key={v} type="button" title={h} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF({ ...f, screening: v })}>{l}</button>)}</div>
-          <div className="mt-1 text-xs text-muted">{f.screening === 'off' ? 'Users with the Junior doctor role see no Intake button.' : f.screening === 'first' ? 'The junior sees the waiting list and takes patients for screening; the doctor is never shown someone mid-screening.' : 'Reception cannot send an unscreened patient to the doctor.'}</div></div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div><label className="label">Free return with reports (days)</label><NumInput max={365} className="input" value={f.freeDays} onChange={(e: any) => setF({ ...f, freeDays: e.target.value })} /><div className="mt-1 text-xs text-muted">Within this many days of the tests, coming back with reports has no fee; the desk sees it pre-filled.</div></div>
-        </div>
-        <DisplayLinkCard />
+        <div className="card-title">Token numbers</div>
+        <div className="flex flex-wrap gap-1">{[['day+category', 'One series per visit type (GEN-1, REN-1…)'], ['day', 'One series for the whole day (1, 2, 3…)']].map(([v, l]) => <button key={v} type="button" className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div>
+        <div className="text-xs text-muted">Numbers start again every morning.</div>
       </div>
       <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
-      <TestDataCard />
+    </div>
+  );
+}
+
+/* ---------------- The day at the desk: arrival, screening, reports, the waiting-room screen ---------------- */
+function DayTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const s = cfg.tenant.settings ?? {};
+  const [vitals, setVitals] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
+  const [f, setF] = useState({ screening: s.screening ?? 'off', freeDays: String(s.reports?.freeDays ?? 30) });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { vitals, screening: f.screening, reports: { freeDays: Math.max(0, Math.min(365, Number(f.freeDays) || 0)) } } }), onSuccess: () => { toast('Saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  return (
+    <div className="space-y-4">
+      <div className="card space-y-3">
+        <div className="card-title">Vitals taken at arrival</div>
+        <div className="flex flex-wrap gap-1.5">{VITAL_FIELDS.map((v) => <button key={v.key} type="button" className={`toggle-opt ${vitals.includes(v.key) ? 'on' : ''}`} onClick={() => setVitals(vitals.includes(v.key) ? vitals.filter((x) => x !== v.key) : VITAL_FIELDS.map((x) => x.key).filter((k) => k === v.key || vitals.includes(k)))}>{v.label} ({v.unit})</button>)}</div>
+        <div className="text-xs text-muted">The dark ones are asked for on the arrival sheet and shown to the doctor. Switch off what your clinic does not measure.</div>
+      </div>
+      <div className="card space-y-3">
+        <div className="card-title">Junior doctor screening</div>
+        <div className="flex flex-wrap gap-1">{([['off', 'Off', 'Reception sends patients straight to the doctor'], ['first', 'When a junior is on', 'The junior screens whoever is waiting; the doctor takes screened patients first, others when nobody is screened'], ['required', 'Every patient', 'The doctor sees only patients the junior has screened']] as const).map(([v, l, h]) => <button key={v} type="button" title={h} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF({ ...f, screening: v })}>{l}</button>)}</div>
+        <div className="text-xs text-muted">{f.screening === 'off' ? 'Reception sends patients straight to the doctor. Junior doctors see no Intake button.' : f.screening === 'first' ? 'The junior takes patients from the waiting list for screening. The doctor sees screened patients first and is never shown someone mid-screening.' : 'Reception cannot send a patient to the doctor until the junior has screened them.'}</div>
+      </div>
+      <div className="card space-y-3">
+        <div className="card-title">Coming back with test reports</div>
+        <div className="flex flex-wrap items-center gap-2 text-sm"><span>Free within</span><NumInput max={365} className="input !w-24" value={f.freeDays} onChange={(e: any) => setF({ ...f, freeDays: e.target.value })} /><span>days of the tests</span></div>
+        <div className="text-xs text-muted">Within this time, coming back with reports has no fee, and the desk sees it pre-filled at check-in.</div>
+      </div>
+      <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
+      <div className="card space-y-3">
+        <div className="card-title">Waiting-room screen</div>
+        <DisplayLinkCard />
+      </div>
     </div>
   );
 }
@@ -140,7 +180,7 @@ function DisplayLinkCard() {
   const url: string = q.data?.url ?? '';
   const copy = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { toast('Copy the link from the box', 'info'); } };
   return (
-    <div><label className="label">Waiting-room display</label>
+    <div>
       <div className="flex flex-wrap items-center gap-2"><input className="input min-w-0 flex-1 text-xs" readOnly value={url} onFocus={(e) => e.target.select()} /><button className="btn btn-sm" disabled={!url} onClick={copy}>Copy</button><a className="btn btn-sm" href={url || '#'} target="_blank" rel="noreferrer">Open</a><button className="btn btn-sm btn-ghost" disabled={regen.isPending} onClick={() => regen.mutate()}>New link</button></div>
       <div className="mt-1 text-xs text-muted">Shows Now and Next by token for each doctor, with a chime when a token is called. Anyone with the link can see tokens, so make a new link if a screen is lost.</div></div>
   );
@@ -188,7 +228,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
           <div className="space-y-3">
             <div><label className="label">Name (as printed)</label><input className="input" value={doc.name} onChange={(e) => setDoc({ ...doc, name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="label">Registration no.</label><input className="input" value={doc.regNo ?? ''} onChange={(e) => setDoc({ ...doc, regNo: e.target.value })} /></div><div><label className="label">Qualification</label><input className="input" value={doc.qualification ?? ''} onChange={(e) => setDoc({ ...doc, qualification: e.target.value })} /></div></div>
-            <div className="pt-3 border-t border-line"><div className="text-[11px] uppercase tracking-wider text-muted mb-2">Weekly routine</div><RoutineEditor value={doc.routine ?? DEFAULT_ROUTINE} onChange={(r) => setDoc({ ...doc, routine: r })} /></div>
+            <div className="pt-3 border-t border-line"><div className="card-title mb-2">Weekly routine</div><RoutineEditor value={doc.routine ?? DEFAULT_ROUTINE} onChange={(r) => setDoc({ ...doc, routine: r })} /></div>
             {doc.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={doc.active} onChange={(e) => setDoc({ ...doc, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setDoc(null)}>Cancel</button><button className="btn btn-primary" disabled={!doc.name} onClick={() => saveDoc.mutate({ id: doc.id, name: doc.name, regNo: doc.regNo || null, qualification: doc.qualification || null, active: doc.active, routine: doc.routine })}>Save</button></div>
           </div>
@@ -286,7 +326,7 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">Form</label><div className="flex flex-wrap gap-1">{['tab', 'cap', 'cream', 'gel', 'lotion', 'syrup', 'inj', 'soap'].map((x) => <button key={x} className={`toggle-opt ${edit.form === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, form: x })}>{x}</button>)}</div></div>
               <div><label className="label">Schedule</label><div className="flex gap-1">{['OTC', 'H', 'H1', 'X'].map((x) => <button key={x} className={`toggle-opt ${edit.scheduleClass === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, scheduleClass: x })}>{x}</button>)}</div></div>
             </div>
-            <div className="text-[11px] uppercase tracking-wider text-muted">Pharmacy counter</div>
+            <div className="card-title">Pharmacy counter</div>
             <div className="grid grid-cols-3 gap-2">
               <div><label className="label">Price per unit (MRP, GST included)</label><MoneyInput value={edit.mrp ?? String((edit.mrpPaise ?? 0) / 100 || '')} onChange={(v: string) => setEdit({ ...edit, mrp: v })} /></div>
               <div><label className="label">GST</label><div className="flex flex-wrap gap-1">{[0, 500, 1200, 1800].map((x) => <button key={x} className={`toggle-opt ${(edit.gstBp ?? 1200) === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, gstBp: x })}>{x / 100}%</button>)}</div></div>
@@ -296,7 +336,7 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">{['tab', 'cap'].includes(edit.form) ? 'Tablets per strip (price is per strip)' : 'Units per pack'}</label><NumInput max={1000} className={`input ${Number(edit.packSize ?? 1) >= 1 ? '' : '!border-rose'}`} value={edit.packSize ?? 1} onChange={(e) => setEdit({ ...edit, packSize: e.target.value })} /></div>
               <div><label className="label">Low stock below (packs)</label><NumInput max={100000} className="input" value={edit.reorderLevel ?? 0} onChange={(e) => setEdit({ ...edit, reorderLevel: e.target.value })} /></div>
             </div>
-            <div className="text-[11px] uppercase tracking-wider text-muted">Defaults filled into the prescription</div>
+            <div className="card-title">Defaults filled into the prescription</div>
             <div className="grid grid-cols-4 gap-2">
               <div><label className="label">Dose</label><input className="input" value={edit.defaults.dose ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, dose: e.target.value } })} /></div>
               <div><label className="label">Route</label><input className="input" value={edit.defaults.route ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, route: e.target.value } })} /></div>
@@ -304,7 +344,7 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">Days</label><NumInput max={365} className="input" value={edit.defaults.durationDays ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, durationDays: e.target.value ? Number(e.target.value) : undefined } })} /></div>
             </div>
             <div><label className="label">Instructions</label><input className="input" value={edit.defaults.instructions ?? ''} onChange={(e) => setEdit({ ...edit, defaults: { ...edit.defaults, instructions: e.target.value } })} /></div>
-            <div className="text-[11px] uppercase tracking-wider text-muted">How to use leaflet</div>
+            <div className="card-title">How to use leaflet</div>
             <LeafletField med={edit} onChange={(leafletUrl) => setEdit({ ...edit, leafletUrl })} onSaved={onSaved} />
             <div className="modal-foot !justify-between">{edit.id ? <button className="btn btn-ghost text-rose" onClick={() => del.mutate(edit.id)}>Delete</button> : <span />}<div className="flex gap-2"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name || !(Number(edit.packSize ?? 1) >= 1)} onClick={() => save.mutate({ id: edit.id, name: edit.name, form: edit.form, scheduleClass: edit.scheduleClass, defaults: edit.defaults, mrp: edit.mrp, mrpPaise: edit.mrpPaise, gstBp: edit.gstBp, hsn: edit.hsn, leafletUrl: edit.leafletUrl?.trim() || null, packSize: Number(edit.packSize ?? 1), reorderLevel: Number(edit.reorderLevel ?? 0) })}>Save</button></div></div>
           </div>
@@ -411,7 +451,7 @@ function TestDataCard() {
   };
   return (
     <div className="card space-y-3">
-      <div className="text-[11px] uppercase tracking-wider text-muted">Test data</div>
+      <div className="card-title">Test data</div>
       <div className="text-sm text-ink-2">Clears everything this clinic has done and starts fresh with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, online requests, repeat visits, patient messages and two procedure courses with before/after photos. Staff, doctors, rooms, prices, forms and templates are kept. Use it on a test clinic, not one with real patients.</div>
       {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.requested} online requests, {result.series} repeat visits, {result.sittings} procedure sittings, {result.photos} photos.</div>}
       <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : 'Clear everything and load test data'}</button>

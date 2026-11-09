@@ -117,6 +117,7 @@ h1 { letter-spacing: -0.025em; }
 @layer components {
   /* Panels: near-white, no border, an inset hairline, 16 px corners. The old glass and dark card map here so every page follows. */
   .card { @apply rounded-2xl border-0 bg-surface p-5; box-shadow: var(--shadow-soft); }
+  .card-title { @apply text-[15px] font-semibold text-ink; }
   .card-flat, .glass { @apply rounded-2xl border-0 bg-surface; box-shadow: var(--shadow-soft); }
   .card-hover:hover { @apply bg-surface-2; }
   .dark-card { @apply rounded-2xl border-0 bg-surface; box-shadow: var(--shadow-soft); }
