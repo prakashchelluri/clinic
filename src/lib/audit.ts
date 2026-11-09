@@ -1,5 +1,5 @@
 import type { FastifyRequest } from 'fastify';
-import { and, eq, gte, sql } from 'drizzle-orm';
+import { and, eq, gte, notInArray, sql } from 'drizzle-orm';
 import { auditLog, visit, appointment, session, pharmacySale, procedureSession } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import type { Ctx } from './auth.js';
@@ -77,7 +77,7 @@ export async function auditView(tx: Tx, req: FastifyRequest, patientId: string, 
   const t = c.tenantId;
   const any = async (q: Promise<any[]>) => (await q).length > 0;
   const reason = await any(tx.select({ id: visit.id }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, patientId), eq(visit.day, day))).limit(1))
-    || await any(tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), eq(session.day, day))).limit(1))
+    || await any(tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), eq(session.day, day), notInArray(appointment.status, ['cancelled', 'no_show']))).limit(1)) // a cancelled booking is no reason to open the record
     || await any(tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), eq(pharmacySale.patientId, patientId), gte(pharmacySale.createdAt, sql`now() - interval '1 day'`))).limit(1))
     || await any(tx.select({ id: procedureSession.id }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, patientId), eq(procedureSession.day, day))).limit(1));
   await writeAudit(tx, c, { kind: 'view', action: 'patient.viewed', summary: what, entity: 'patient', entityId: patientId, patientId, unusual: !reason || outsideHours(c.timezone) });
