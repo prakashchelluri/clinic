@@ -202,9 +202,11 @@ h1 { letter-spacing: -0.025em; }
   .table tr:last-child td { @apply border-b-0; }
 
   .menu { @apply absolute right-0 z-30 mt-1.5 min-w-52 rounded-[12px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift), inset 0 0 0 1px rgba(0,0,0,.06); }
-  .menu button, .menu a { @apply flex w-full items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-left text-[13.5px] font-semibold text-ink; transition: background-color 0.12s var(--ease); }
-  .menu button:hover, .menu a:hover { @apply bg-ink/6; }
-  .menu .danger { @apply text-rose; }
+  /* .pop is the same panel for popovers that hold their own controls (forms, lists with buttons): nothing inside is restyled */
+  .pop { @apply min-w-52 rounded-[12px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift), inset 0 0 0 1px rgba(0,0,0,.06); }
+  .menu button, .menu a, .menu-list button, .menu-list a { @apply flex w-full items-center gap-2.5 rounded-[9px] px-3 py-2.5 text-left text-[13.5px] font-semibold text-ink; transition: background-color 0.12s var(--ease); }
+  .menu button:hover, .menu a:hover, .menu-list button:hover, .menu-list a:hover { @apply bg-ink/6; }
+  .menu .danger, .menu-list .danger { @apply text-rose; }
 
   .nav-item { @apply flex items-center gap-2.5 rounded-[11px] px-2.5 text-[13.5px] font-semibold text-ink-2; min-height: 38px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
   .nav-item:hover { @apply bg-ink/6 text-ink; }

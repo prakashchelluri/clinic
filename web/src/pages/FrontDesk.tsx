@@ -37,6 +37,8 @@ export function FrontDesk() {
   const day = today(); const isToday = true;
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
   const [tab, setTab] = useState<Tab>('waiting');
+  const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not yet arrived; null when not selecting
+  useEffect(() => setSel(null), [tab]);
   const [docFilter, setDocFilter] = useState<string | null>(null); // one doctor's queue, or everyone
   const [arriveKey, setArriveKey] = useState(0);
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }>(null);
@@ -47,6 +49,19 @@ export function FrontDesk() {
   const refresh = () => { qc.invalidateQueries({ queryKey: ['frontdesk'] }); qc.invalidateQueries({ queryKey: ['queue'] }); };
   const upVisit = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/visits/${id}`, b), onSuccess: refresh });
   const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: () => { refresh(); toast('Updated', 'info'); } });
+  // end of the day: everyone who did not turn up, or walked out, in one go; each one can still be undone on its own
+  const bulk = useMutation({
+    mutationFn: async ({ ids, kind }: { ids: string[]; kind: 'noshow' | 'left' }) => { for (const id of ids) await (kind === 'noshow' ? patch(`/appointments/${id}`, { status: 'no_show' }) : patch(`/visits/${id}`, { status: 'left' })); return ids.length; },
+    onSuccess: (n, { kind }) => { refresh(); setSel(null); toast(kind === 'noshow' ? `${n} marked no-show` : `${n} marked as left`); },
+    onError: (e) => { refresh(); toast(errText(e), 'err'); },
+  });
+  const toggleSel = (id: string) => setSel((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const pick = (id: string) => sel && <input type="checkbox" className="h-4 w-4 accent-ink" aria-label="Select" checked={sel.has(id)} onChange={() => toggleSel(id)} />;
+  const bulkAsk = async () => {
+    if (!sel?.size) return; const n = sel.size; const kind = tab === 'scheduled' ? 'noshow' : 'left';
+    const r = await ask({ title: kind === 'noshow' ? `Mark ${n} as no-show?` : `Mark ${n} as left?`, body: kind === 'noshow' ? 'They did not arrive for the booking today. Each one can be undone from the booking, and rebooked from Completed.' : 'They left before seeing the doctor. Any fee paid shows under Completed for a refund.', confirmLabel: kind === 'noshow' ? 'Mark no-show' : 'Mark as left', tone: 'danger' });
+    if (r) bulk.mutate({ ids: [...sel], kind });
+  };
   const collect = useMutation({ mutationFn: ({ c, method }: any) => post('/payments', { patientId: c.patientId, chargeId: c.id, amountPaise: c.amountPaise, method, idempotencyKey: uuid() }), onSuccess: () => { refresh(); toast('Collected'); } });
   const openEncounter = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }) });
   const d = q.data;
@@ -116,7 +131,7 @@ export function FrontDesk() {
   const render = (r: Row) => {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting';
       const inside = visitsAll.filter((x) => x.status === 'in_consult' && (!v.practitionerId || !x.practitionerId || x.practitionerId === v.practitionerId)).length; const full = inside >= ROOM_MAX; return (
-      <Row key={v.id} token={v.opNumber} tokenCls={i === 0 && !withJr ? 'text-clay' : ''}
+      <Row key={v.id} token={<span className="flex items-center gap-2">{pick(v.id)}{v.opNumber}</span>} tokenCls={`${i === 0 && !withJr ? 'text-clay' : ''} ${sel ? '!w-[108px]' : ''}`}
         top={<>{who(v.patient)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
         sub={meta([v.patient.patientNo, v.patient.phone, `arrived ${hhmm(v.arrivedAt)} · waited ${minsSince(v.arrivedAt)} min`, v.category, v.details?.complaint, v.details?.weight_kg && `${v.details.weight_kg} kg`, v.details?.bp && `BP ${v.details.bp}`])}
         actions={<>
@@ -132,7 +147,7 @@ export function FrontDesk() {
         sub={meta([v.patient.patientNo, v.details?.calledAt && `${v.details.calledBy === 'desk' ? 'sent in' : 'called by doctor'} ${hhmm(v.details.calledAt)}`, v.details?.complaint])}
         actions={<>{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}{canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}</>} />); }
     if (r.type === 'appt') { const a = r.a; const isLate = isToday && toMin(a.window.endTime) < nowMin(); return (
-      <Row key={a.id} token={a.window.startTime} tokenCls={isLate ? 'text-rose' : ''} cls={isLate ? 'bg-rose-soft/30' : ''}
+      <Row key={a.id} token={<span className="flex items-center gap-2">{pick(a.id)}{a.window.startTime}</span>} tokenCls={`${isLate ? 'text-rose' : ''} ${sel ? '!w-[108px]' : ''}`} cls={isLate ? 'bg-rose-soft/30' : ''}
         top={<>{who(a.patient)}{isLate ? <Chip tone="rose">not arrived</Chip> : a.status === 'confirmed' ? <Chip tone="sage">confirmed</Chip> : a.status === 'requested' ? <Chip tone="clay">online request</Chip> : <Chip>booked</Chip>}<Chip>{docName(a.window.practitionerId)}</Chip></>}
         sub={meta([a.patient.patientNo, a.patient.phone, a.patient.locality, a.service, a.note])}
         actions={<>{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>}{canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}`, hidden: !dialable(a.patient.phone) }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</>} />); }
@@ -183,7 +198,16 @@ export function FrontDesk() {
             <div className="mb-3 flex gap-0.5 overflow-x-auto no-scrollbar border-b border-line" role="tablist">
               {([['waiting', 'Waiting', waiting.length, waiting.length > 0], ...(canDesk ? [['scheduled', 'Not yet arrived', scheduled.length, late.length > 0]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Checkout', checkout.length, checkout.length > 0], ['reports', 'Reports pending', reportsOpen.length, reportsOpen.some((o) => o.state === 'ready' || o.state === 'partial')], ['completed', 'Completed', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false], ...(canDesk ? [['needs', 'Needs you', needsCount, needsCount > 0]] : [])] as [Tab, string, number, boolean][]).map(([k, l, n, hot]) => (
                 <button key={k} role="tab" aria-selected={tab === k} className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] whitespace-nowrap ${tab === k ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-muted hover:text-ink'}`} onClick={() => setTab(k)}>{l}<span className={`tabular-nums ${hot && tab !== k ? 'text-clay font-semibold' : tab === k ? 'text-ink' : 'text-muted'}`}><Num value={n} /></span></button>))}
+              {canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="ml-auto shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>}
             </div>
+            {sel && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-[13px] text-paper anim-fade-up" role="toolbar" aria-label="Selected rows">
+              <b>{sel.size} selected</b>
+              <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set((tab === 'waiting' ? waiting.map((v) => v.id) : scheduled.map((a) => a.id))))}>All</button>
+              {tab === 'scheduled' && late.length > 0 && <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set(late.map((a) => a.id)))}>Late only</button>}
+              <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set())}>None</button>
+              <span className="ml-auto" />
+              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-paper px-3 font-semibold text-ink hover:bg-paper-2 disabled:opacity-50" disabled={!sel.size || bulk.isPending} onClick={bulkAsk}>{tab === 'scheduled' ? 'Mark no-show' : 'Mark as left'}{sel.size ? ` · ${sel.size}` : ''}</button>
+            </div>}
             {tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
               <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
@@ -419,7 +443,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
               {fee > 0 && can(perms, 'payment.waive') && <input className="input mt-2 !py-1.5 text-xs" placeholder="Waive? type the reason (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
             </div>
           </div>
-          <div className={inline ? 'flex flex-wrap items-center gap-2 pt-1' : 'modal-foot'}><span className="mr-auto text-xs text-muted" role="status">{blocker}</span>{!inline && <button className="btn btn-ghost" onClick={onClose}>Cancel</button>}
+          <div className={inline ? 'flex flex-wrap items-center gap-2 pt-1' : 'modal-foot'}><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn btn-primary" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{fee > 0 && !waive && !blocker ? ` · collect ${money(toPaise(amount === '' ? String(fee / 100) : amount))}` : ''}</button></div>
         </div>
       )}

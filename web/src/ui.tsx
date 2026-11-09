@@ -154,8 +154,14 @@ export function Num({ value, format = (n: number) => String(n) }: { value: numbe
 /** A panel that floats above everything, anchored under a button. Used by the ⋯ menu and filters, so rows never cover it. */
 export function Floating({ anchor, open, onClose, children, width }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; width?: number }) {
   const panel = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  useLayoutEffect(() => { if (!open) { setPos(null); return; } const r = anchor.current?.getBoundingClientRect(); if (r) setPos({ top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) }); }, [open]);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; maxH: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const r = anchor.current?.getBoundingClientRect(); if (!r) return;
+    // below the button when there is room, above it when the button sits near the foot of the screen; never taller than the room it has
+    const below = window.innerHeight - r.bottom - 16, above = r.top - 16; const flip = below < 300 && above > below;
+    setPos({ ...(flip ? { bottom: window.innerHeight - r.top + 8 } : { top: r.bottom + 8 }), right: Math.max(8, window.innerWidth - r.right), maxH: Math.max(160, flip ? above : below) });
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const down = (e: MouseEvent) => { const t = e.target as Node; if (!panel.current?.contains(t) && !anchor.current?.contains(t)) onClose(); };
@@ -165,7 +171,7 @@ export function Floating({ anchor, open, onClose, children, width }: { anchor: R
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); window.removeEventListener('resize', onClose); window.removeEventListener('scroll', away, true); };
   }, [open]);
   if (!open || !pos) return null;
-  return createPortal(<div ref={panel} className="menu anim-menu" style={{ position: 'fixed', top: pos.top, right: pos.right, left: 'auto', zIndex: 70, width, marginTop: 0 }}>{children}</div>, document.body);
+  return createPortal(<div ref={panel} className="pop anim-menu" style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, right: pos.right, left: 'auto', zIndex: 70, width: width ? Math.min(width, window.innerWidth - 16) : undefined, maxHeight: pos.maxH, overflowY: 'auto' }}>{children}</div>, document.body);
 }
 
 /** The ⋯ menu: secondary actions live here so a row shows one clear button. */
@@ -179,7 +185,7 @@ export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?:
     <>
       <button ref={btn} type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" className="h-5 w-5" /></button>
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)}>
-        <div role="menu">{shown.map((i) => i.href
+        <div role="menu" className="menu-list">{shown.map((i) => i.href
           ? <a key={i.label} href={i.href} role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => setOpen(false)}>{i.label}</a>
           : <button key={i.label} type="button" role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => { setOpen(false); i.onClick?.(); }}>{i.label}</button>)}</div>
       </Floating>
