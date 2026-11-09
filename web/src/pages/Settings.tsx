@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
-import { Chip, Icon, Modal, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew } from '../ui';
+import { Chip, Icon, Modal, PageHeader, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
@@ -11,6 +11,7 @@ import { TemplatesTab } from './SettingsTemplates';
 import { PadTab } from './SettingsPad';
 import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
+import '../settings.css';
 
 type Tab = 'clinic' | 'day' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy' | 'testdata';
 /** key, name, icon, what it is for (one plain sentence) */
@@ -62,38 +63,43 @@ export function Settings() {
   // from the cards to a topic is a step of its own (Back returns to the cards); topic to topic replaces it
   const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: tab !== null && k !== null }); window.scrollTo({ top: 0 }); };
   const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); };
+  // the header's search box finds a setting by its name or what it is for
+  const [find] = usePageSearch('Search settings', !tab);
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
 
-  if (!tab) return (
-    <div>
-      <PageHeader title="Settings" subtitle="How the clinic runs. A change applies straight away, for everyone." />
-      <div className="space-y-8">
-        {GROUPS.filter(([, , tabs]) => tabs.some(([k]) => visible(k))).map(([g, about, tabs]) => (
-          <section key={g} className="anim-fade-up">
-            <div className="mb-3 flex items-baseline gap-3"><h2 className="text-[17px] font-semibold text-ink">{g}</h2><span className="text-[13.5px] text-muted">{about}</span></div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {tabs.filter(([k]) => visible(k)).map(([k, label, icon, hint]) => (
-                <button key={k} type="button" onClick={() => setTab(k)} className="card flex items-start gap-3.5 text-left transition-colors hover:bg-surface-2">
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-paper-2 text-ink"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold text-ink">{label}</span><span className="mt-0.5 block text-[13px] leading-snug text-muted">{hint}</span></span>
-                  <Icon name="chevR" className="mt-2.5 h-4 w-4 shrink-0 text-muted" />
-                </button>
-              ))}
-            </div>
-          </section>
-        ))}
+  if (!tab) {
+    const q = find.trim().toLowerCase();
+    const groups = GROUPS.map(([g, about, tabs]) => [g, about, tabs.filter(([k, label, , hint]) => visible(k) && (!q || `${label} ${hint} ${g}`.toLowerCase().includes(q)))] as const).filter(([, , tabs]) => tabs.length);
+    return (
+      <div>
+        <PageHeader title="Settings" subtitle="How the clinic runs. A change applies straight away, for everyone." />
+        {groups.length === 0 && <div className="card py-10 text-center text-muted">No setting matches “{find}”.</div>}
+        {/* one list per area, two areas side by side on a wide screen */}
+        <div className="settings-home">
+          {groups.map(([g, about, tabs], gi) => (
+            <section key={g} className="settings-group card-flat" style={{ '--tone': TONES[GROUPS.findIndex((x) => x[0] === g) % TONES.length] } as React.CSSProperties}>
+              <header className="settings-group-head"><h2>{g}</h2><p>{about}</p></header>
+              {tabs.map(([k, label, icon, hint], i) => (
+                <button key={k} type="button" onClick={() => setTab(k)} className="settings-row" style={{ animationDelay: `${Math.min(gi * 60 + i * 30, 360)}ms` }}>
+                  <span className="settings-row-icon"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-[14.5px] font-semibold text-ink">{label}</span><span className="block text-[12.5px] leading-snug text-muted">{hint}</span></span>
+                  <Icon name="chevR" className="settings-row-chev h-4 w-4 shrink-0 text-muted" />
+                </button>))}
+            </section>))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
   const cur = TABS.find((t) => t[0] === tab)!;
   const group = GROUPS.find(([, , tabs]) => tabs.some(([k]) => k === tab))!;
-  const siblings = group[2].filter(([k]) => k !== tab && visible(k));
+  const neighbours = group[2].filter(([k]) => visible(k));
   return (
     <div>
       <PageHeader title={cur[1]} subtitle={cur[3]} />
-      {siblings.length > 0 && <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted"><span className="mr-1">Also in {group[0]}:</span>{siblings.map(([k, label]) => <button key={k} type="button" className="toggle-opt" onClick={() => setTab(k)}>{label}</button>)}</div>}
-      <div key={tab} id="settings-body" className="anim-fade-up min-w-0 max-w-[1100px]">
+      {/* the other topics of the same area, as tabs; the top bar's Settings and Back lead to all of them */}
+      {neighbours.length > 1 && <Tabs value={tab} onChange={(k) => setTab(k)} options={neighbours.map(([k, label]) => ({ value: k, label }))} className="anim-fade-up mb-5" />}
+      <div key={tab} id="settings-body" className={`settings-body anim-fade-up min-w-0 ${NARROW.has(tab) ? 'max-w-[860px]' : ''}`}>
         {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
         {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
         {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
@@ -116,6 +122,10 @@ export function Settings() {
     </div>
   );
 }
+/** Topics whose content is a short form or a short list: kept to a readable width instead of stretching across the screen. */
+/** One soft colour per area, for the icon tiles on the Settings home. */
+const TONES = ['var(--color-clay)', 'var(--color-sky)', 'var(--color-amber)', 'var(--color-sage)', 'var(--color-rose)'];
+const NARROW = new Set<Tab>(['clinic', 'day', 'people', 'rooms', 'availability', 'rules', 'photos', 'fees', 'testdata']);
 
 /* ---------------- Clinic: what prints, how tokens count ---------------- */
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
@@ -136,7 +146,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div className="flex flex-wrap gap-1">{[['day+category', 'One series per visit type (GEN-1, REN-1…)'], ['day', 'One series for the whole day (1, 2, 3…)']].map(([v, l]) => <button key={v} type="button" className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div>
         <div className="text-xs text-muted">Numbers start again every morning.</div>
       </div>
-      <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
+      <div className="settings-save"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );
 }
@@ -164,11 +174,11 @@ function DayTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div className="flex flex-wrap items-center gap-2 text-sm"><span>Free within</span><NumInput max={365} className="input !w-24" value={f.freeDays} onChange={(e: any) => setF({ ...f, freeDays: e.target.value })} /><span>days of the tests</span></div>
         <div className="text-xs text-muted">Within this time, coming back with reports has no fee, and the desk sees it pre-filled at check-in.</div>
       </div>
-      <div className="flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
       <div className="card space-y-3">
         <div className="card-title">Waiting-room screen</div>
         <DisplayLinkCard />
       </div>
+      <div className="settings-save"><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );
 }
@@ -280,7 +290,7 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
           )}
         </div>
       </div>
-      <div className="flex justify-end gap-2"><button className="btn btn-ghost" onClick={() => setSchema(JSON.parse(JSON.stringify(current.schema)))}>Discard changes</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Publish new version</button></div>
+      <div className="settings-save"><button className="btn btn-ghost" onClick={() => setSchema(JSON.parse(JSON.stringify(current.schema)))}>Discard changes</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Publish new version</button></div>
     </div>
   );
 }

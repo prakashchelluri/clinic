@@ -54,7 +54,7 @@ export function PadTab({ onSaved }: { onSaved: () => void }) {
         </div>
       </div>
       <TeluguTable value={telugu} defaults={d.teluguDefaults} onChange={setTelugu} />
-      <div className="sticky bottom-0 z-10 flex justify-end gap-2 border-t border-line bg-paper/95 py-3 backdrop-blur"><button className="btn btn-ghost" disabled={!dirty} onClick={() => reset(d)}>Discard</button><button className="btn btn-primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
+      <div className="settings-save"><button className="btn btn-ghost" disabled={!dirty} onClick={() => reset(d)}>Discard</button><button className="btn btn-primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );
 }

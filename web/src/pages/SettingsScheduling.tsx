@@ -148,7 +148,7 @@ export function BookingRulesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
         <div><label className="label" htmlFor="br-policy">Cancellation policy shown to patients</label><textarea id="br-policy" className="input min-h-[72px]" maxLength={500} value={f.cancellationPolicy} onChange={(e) => set('cancellationPolicy', e.target.value)} placeholder="e.g. Please cancel at least 4 hours before so another patient can use your place." /><div className="mt-1 text-right text-[11px] text-muted">{f.cancellationPolicy.length}/500</div></div>
       </div>
       {Object.values(bad).some(Boolean) && <div className="text-sm text-rose">Check the boxes outlined in red: arrive early 0–240, places 1–99, cancel window 0–168 hours, no-show warning 1–20.</div>}
-      <div className="flex justify-end"><button className="btn btn-primary" disabled={m.isPending || Object.values(bad).some(Boolean)} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
+      <div className="settings-save"><button className="btn btn-primary" disabled={m.isPending || Object.values(bad).some(Boolean)} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );
 }
@@ -208,7 +208,7 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
         {tpl[kind] && tpl[kind] !== defaults[kind] && <button className="btn btn-ghost btn-sm" onClick={() => { const n = { ...tpl }; delete n[kind]; setTpl(n); }}>Reset to the standard text</button>}
       </div>
       {allUnknown && <div className="text-sm text-rose">One of the messages has an unknown word in braces. Fix it before saving.</div>}
-      <div className="flex justify-end"><button className="btn btn-primary" disabled={m.isPending || allUnknown || hBad} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
+      <div className="settings-save"><button className="btn btn-primary" disabled={m.isPending || allUnknown || hBad} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
 
       <Section title="Recent messages">
         {outbox.isLoading ? <div className="p-4"><Skeleton rows={3} /></div> : (outbox.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">Nothing yet.</div> : (outbox.data ?? []).map((x: any) => (
@@ -252,7 +252,7 @@ export function PhotoAreasTab({ cfg, onSaved }: { cfg: any; onSaved: () => void 
         {dup && <div className="px-4 pb-3 text-xs text-rose">“{clean}” is already in the list.</div>}
         {areas.length >= 40 && <div className="px-4 pb-3 text-xs text-muted">That is the most areas the list can hold (40).</div>}
       </Section>
-      <div className="flex justify-between gap-2"><button className="btn btn-ghost" onClick={() => setAreas(STOCK_AREAS)}>Use the standard list</button><button className="btn btn-primary" disabled={m.isPending || areas.length === 0} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
+      <div className="settings-save"><button className="btn btn-ghost" onClick={() => setAreas(STOCK_AREAS)}>Use the standard list</button><button className="btn btn-primary" disabled={m.isPending || areas.length === 0} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );
 }
