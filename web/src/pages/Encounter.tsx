@@ -59,7 +59,7 @@ function Card({ id, title, meta, actions, children, required }: { id: string; ti
     <section id={`sec-${id}`} className="border-t border-line px-4 py-3 first:border-t-0 [#palette>&]:border-t-0">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <span className="grid h-[22px] w-[22px] place-items-center rounded-[6px] text-[11px] font-bold text-white" style={{ background: color }} aria-hidden>{ch}</span>
-        <span className="text-[13.5px] font-semibold">{title}{required && <span className="text-clay"> *</span>}</span>
+        <span className="text-[13.5px] font-semibold">{title}{required && <span className="text-rose" title="Required to finish"> *</span>}</span>
         {meta && <span className="text-xs text-muted">{meta}</span>}
         {actions && <span className="ml-auto flex flex-wrap items-center gap-0.5">{actions}</span>}
       </div>
@@ -131,6 +131,7 @@ export function Encounter() {
   const [rx, setRx] = useState<RxItem[]>([]);
   const [recs, setRecs] = useState<Rec[]>([]);
   const [errors, setErrors] = useState<{ path: string; message: string }[]>([]);
+  const [showMissing, setShowMissing] = useState(false); // Finish was tried: list what is still missing until it is complete
   const [savedAt, setSavedAt] = useState<string>('');
   const [viewing, setViewing] = useState<string | null>(null);
   const [side, setSide] = useState<'edit' | 'visits' | 'skin' | 'docs' | 'photos'>('edit'); // what the drawer shows: the open section, or one of the patient's collections
@@ -169,7 +170,7 @@ export function Encounter() {
   const save = useMutation({
     mutationFn: ({ complete }: { complete: boolean; back?: boolean }) => patch(`/encounters/${id}`, { data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
     onSuccess: (_e, { complete, back }) => {
-      setErrors([]); dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+      if (complete) { setErrors([]); setShowMissing(false); } dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       ['queue', 'frontdesk', 'timeline'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       if (complete && held) { toast('Consultation completed'); openPrint({ title: 'Results sheet', rx: id, mode: 'results' }); nav('/today', { viewTransition: true }); }
       else if (complete) { toast(willHold ? 'Prescription issued · held open for the reports' : 'Consultation completed'); openPrint({ title: 'Prescription', rx: id }); nav(isDoctor ? '/today' : '/queue', { viewTransition: true }); }
@@ -246,7 +247,7 @@ export function Encounter() {
   const testRecs: any[] = e.recommendations.filter((r: any) => r.kind === 'investigation' && r.status !== 'cancelled'); const testsIn = testRecs.filter((r: any) => r.status === 'done').length; const testsOpen = testRecs.length > testsIn;
   const willHold = !held && recs.some((r) => r.kind === 'investigation' && r.notes && r.status !== 'done'); // what Finish will do with the tests on the pad right now
   const set = (s: string, k: string, v: any) => { setErrors((er) => er.filter((x) => x.path !== `${s}.${k}`)); setData((d) => ({ ...d, [s]: { ...(d[s] ?? {}), [k]: v } })); };
-  const err = (s: string, k: string) => errors.find((x) => x.path === `${s}.${k}`)?.message;
+  const err = (s: string, k: string) => missingList.find((x) => x.path === `${s}.${k}`)?.message; // missingList is built below; err runs at render time
   const meds: any[] = cfg?.medicines ?? [];
   const lastRx: RxItem[] = (lastDone?.prescription ?? []).map(strip);
   const lastRaw: any[] = lastDone?.prescription ?? [];
@@ -328,11 +329,24 @@ export function Encounter() {
   const leaflets = rx.filter((i) => i.medicineId).map((i) => meds.find((m: any) => m.id === i.medicineId)).filter((m: any) => m?.leafletUrl);
   const upd = (k: number, patchI: Partial<RxItem>) => setRx(rx.map((r, j) => { if (j !== k) return r; const n = { ...r, ...patchI }; return 'qty' in patchI ? { ...n, _qtyTouched: true } : n._qtyTouched ? n : { ...n, qty: qtyFor(n) ?? undefined }; }));
   /** Finish: the clinic's required sections are checked here in words; the form's own required fields are checked by the server. */
+  /** Everything Finish needs that is still empty, as the same {path, message} rows the server sends, so the rows light up and the footer lists them. */
+  const missingNow = (): { path: string; message: string }[] => {
+    const out: { path: string; message: string }[] = [];
+    if (padOf('symptoms').required && !syms.length) out.push({ path: 'complaint.chief_complaint', message: 'Complaints is required' });
+    if (!dxs.length) out.push({ path: 'assessment.diagnosis', message: 'Diagnosis is required' });
+    if (padOf('exam').required && !Object.values(data.exam ?? {}).some((v: any) => (Array.isArray(v) ? v.length : v))) out.push({ path: 'exam._', message: 'Examination is required' });
+    if (padOf('medicines').required && !rx.some((i) => i.name)) out.push({ path: 'medicines._', message: 'Medicines is required' });
+    for (const s of formSections as any[]) for (const f of (s.fields ?? []) as Field[]) { const v = data[s.key]?.[f.key]; if (f.required && !(Array.isArray(v) ? v.length : v) && !out.some((x) => x.path === `${s.key}.${f.key}`)) out.push({ path: `${s.key}.${f.key}`, message: `${(s.fields as Field[]).filter((x) => x.required).length > 1 ? `${s.title} › ${f.label}` : f.label} is required` }); }
+    return out;
+  };
   const finish = () => {
-    const missing = [padOf('symptoms').required && !syms.length ? 'Symptoms' : null, padOf('exam').required && !Object.values(data.exam ?? {}).some((v: any) => (Array.isArray(v) ? v.length : v)) ? 'Examination' : null, padOf('medicines').required && !rx.some((i) => i.name) ? 'Medicines' : null].filter(Boolean);
-    if (missing.length) return toast(`Please fill in: ${missing.join(', ')}`, 'err');
+    const missing = missingNow();
+    if (missing.length) { setShowMissing(true); setActive(secOf(missing[0].path)); setSide('edit'); toast(`Cannot finish yet: ${missing.map((m) => m.message.replace(/ is required$/, '')).join(', ')}`, 'err'); return; }
     save.mutate({ complete: true });
   };
+  // what the footer lists: the live check once Finish was tried, plus anything the server still rejected
+  const live = showMissing ? missingNow() : [];
+  const missingList = [...live, ...errors.filter((e) => !live.some((m) => m.path === e.path))];
   const clearSection = async (what: string, fn: () => void) => { const r = await ask({ title: `Clear ${what}?`, body: 'Everything in this section goes; the rest of the pad stays.', confirmLabel: 'Clear', tone: 'danger' }); if (r) fn(); };
 
   // --- the cards, in the clinic's order ---
@@ -521,7 +535,7 @@ export function Encounter() {
             {order.map((k) => cards[k] ?? null)}
             {customSections.map((x: any) => (
               <section key={x.key} id={`sec-${x.key}`} className="border-t border-line px-4 py-3">
-                <div className="mb-2 text-[13.5px] font-semibold">{x.title}{x.fields.some((f: Field) => f.required) && <span className="text-clay"> *</span>}</div>
+                <div className="mb-2 text-[13.5px] font-semibold">{x.title}{x.fields.some((f: Field) => f.required) && <span className="text-rose" title="Required to finish"> *</span>}</div>
                 <div className="space-y-2">{x.fields.map((f: Field) => <div key={f.key} data-invalid={!!err(x.key, f.key)}><CompactField f={f} value={data[x.key]?.[f.key]} onChange={(v) => set(x.key, f.key, v)} disabled={readOnly} invalid={!!err(x.key, f.key)} />{err(x.key, f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div>
               </section>))}
           </>}
@@ -529,9 +543,9 @@ export function Encounter() {
           <div className="flex flex-col xl:flex-row xl:items-stretch">
           {/* the note as it reads: one row per section, the open one marked; tap a row and the drawer opens on it */}
           {isDoctor && <div className="min-w-0 flex-1 border-t border-line">
-            {rowKeys.map((k) => { const v = summary[k]; const on = act === k; const bad = errors.some((x) => secOf(x.path) === k); return (
+            {rowKeys.map((k) => { const v = summary[k]; const on = act === k; const bad = missingList.some((x) => secOf(x.path) === k); return (
               <button key={k} type="button" aria-current={on || undefined} id={`row-${k}`} className={`group grid w-full grid-cols-[128px_minmax(0,1fr)_auto] items-start gap-4 border-t border-line/70 px-5 py-3.5 text-left first:border-t-0 transition-colors ${on ? 'bg-clay-soft/40 shadow-[inset_3px_0_0_var(--color-clay)]' : 'hover:bg-surface-2'}`} onClick={() => { setActive(k); setSide('edit'); if (window.innerWidth < 1280) setTimeout(() => document.getElementById('palette')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); }}>
-                <span className="pt-[3px] text-[12.5px] font-semibold text-muted">{LABEL[k] ?? k}{isRequired(k) && <span className="text-clay"> *</span>}</span>
+                <span className="pt-[3px] text-[12.5px] font-semibold text-muted">{LABEL[k] ?? k}{isRequired(k) && <span className="text-rose" title="Required to finish"> *</span>}</span>
                 <span className={`min-w-0 text-[15px] leading-snug ${v ? 'text-ink' : bad ? 'text-rose' : 'text-muted/70'}`}>{v ?? (bad ? `${LABEL[k]} is required` : HINT[k] ?? 'Tap to add')}</span>
                 <span className={`flex items-center gap-1 pt-[3px] text-xs ${on ? 'font-semibold text-clay' : 'text-muted opacity-0 group-hover:opacity-100'}`}>{on ? 'editing' : 'edit'}<Icon name="chevR" className="h-3.5 w-3.5" /></span>
               </button>); })}
@@ -578,7 +592,7 @@ export function Encounter() {
           </div>
             </> : customSections.some((x: any) => x.key === act) ? (() => { const x = customSections.find((y: any) => y.key === act); return (
               <section className="px-4 py-3">
-                <div className="mb-2 text-[13.5px] font-semibold">{x.title}{x.fields.some((f: Field) => f.required) && <span className="text-clay"> *</span>}</div>
+                <div className="mb-2 text-[13.5px] font-semibold">{x.title}{x.fields.some((f: Field) => f.required) && <span className="text-rose" title="Required to finish"> *</span>}</div>
                 <div className="space-y-2">{x.fields.map((f: Field) => <div key={f.key} data-invalid={!!err(x.key, f.key)}><CompactField f={f} value={data[x.key]?.[f.key]} onChange={(v) => set(x.key, f.key, v)} disabled={readOnly} invalid={!!err(x.key, f.key)} />{err(x.key, f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div>
               </section>); })()
             : (cards[act] ?? cards.medicines)}
@@ -616,7 +630,8 @@ export function Encounter() {
           {/* action bar */}
           <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-line bg-surface/95 px-4 py-2.5 backdrop-blur">
             <button className="btn btn-ghost !px-2.5" aria-label="Back" onClick={() => nav(isDoctor ? '/today' : '/queue', { viewTransition: true })}><Icon name="chevL" /></button>
-            {errors.length > 0 ? <button type="button" className="text-xs text-rose underline" onClick={() => { if (isDoctor) setActive(secOf(errors[0].path)); else document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }}>{errors.length} required field{errors.length > 1 ? 's' : ''} missing · show</button>
+            {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet · missing:</span>
+                {missingList.map((e) => <button key={e.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => { if (isDoctor) { setActive(secOf(e.path)); setSide('edit'); } else document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }}>{e.message.replace(/ is required$/, '')}</button>)}</div>
               : <span className="text-xs text-muted">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves'}{isDoctor && !readOnly ? ` · ${[padOf('symptoms').required ? 'Symptoms' : null, 'Diagnosis', padOf('exam').required ? 'Examination' : null, padOf('medicines').required ? 'Medicines' : null].filter(Boolean).join(', ')} required` : ''}</span>}
             <span className="ml-auto" />
             {!readOnly && !isDoctor && <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}

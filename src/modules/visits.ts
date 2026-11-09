@@ -8,6 +8,9 @@ import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, daysBetween, addDays } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 
+/** How many patients may be inside the consultation room at once. ponytail: fixed for every clinic; a tenant setting if one asks. */
+export const ROOM_MAX = 3;
+
 /** Facts the fee-category eligibility rules can look at. */
 async function eligibilityContext(tx: Tx, ctx: Ctx, patientId: string) {
   const t = ctx.tenantId; const today = todayIn(ctx.timezone);
@@ -195,6 +198,11 @@ export function visitRoutes(app: FastifyInstance) {
     // Sending a patient in: who did it decides who gets the chime (the desk sends, the doctor is told; the doctor pulls, the desk is told).
     if (body.status === 'in_consult' && cur.status !== 'in_consult') {
       if (cur.status === 'intake') throw new HttpError(409, 'WITH_JUNIOR');
+      // The room holds three: one with the doctor, two on the chairs inside. The desk waits for someone to come out before sending a fourth.
+      const docId = body.practitionerId ?? cur.practitionerId;
+      const inside = await tx.select({ n: sql<number>`count(*)` }).from(visit)
+        .where(and(eq(visit.tenantId, t), eq(visit.day, cur.day), eq(visit.status, 'in_consult'), docId ? eq(visit.practitionerId, docId) : sql`true`)).then((r) => Number(r[0]?.n ?? 0));
+      if (inside >= ROOM_MAX) throw new HttpError(409, 'ROOM_FULL', { max: ROOM_MAX, inside });
       set.details = { ...(set.details ?? cur.details), calledBy: can(req.perms, 'encounter.complete') ? 'doctor' : 'desk', calledAt: new Date().toISOString() };
     }
     if (body.afterVisitId !== undefined) {

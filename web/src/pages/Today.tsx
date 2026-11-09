@@ -45,7 +45,9 @@ export function Today() {
 
   const d = fd.data; const c = cal.data;
   const visits: any[] = (d?.visits ?? []).filter((v: any) => !doc || !v.practitionerId || v.practitionerId === doc);
-  const withYou = visits.find((v) => v.status === 'in_consult');
+  // Everyone inside the room, in the order they were sent in: the first is with you, the rest sit inside and wait.
+  const inRoom = visits.filter((v) => v.status === 'in_consult').sort((a, b) => String(a.details?.calledAt ?? a.arrivedAt).localeCompare(String(b.details?.calledAt ?? b.arrivedAt)));
+  const withYou = inRoom[0];
   // The line: screened patients first, then the rest; never someone who is with the junior right now. With screening required, only screened patients.
   const screening: 'off' | 'first' | 'required' = cfg?.tenant?.settings?.screening ?? 'off';
   const withJunior = visits.filter((v) => v.status === 'intake');
@@ -53,9 +55,10 @@ export function Today() {
   const waiting = screening === 'off' ? unscreened : [...visits.filter((v) => v.status === 'screened'), ...(screening === 'required' ? [] : unscreened)];
   const next = waiting[0];
   // Reception sent someone in: the pad is not open yet, so say so once, with a chime.
-  const sentIn = withYou && withYou.details?.calledBy === 'desk' && !withYou.details?.doctorOpenedAt ? withYou : null;
+  const notOpened = (v: any) => v.details?.calledBy === 'desk' && !v.details?.doctorOpenedAt;
+  const sentIn = inRoom.filter(notOpened);
   const heard = useRef(makeOnceWatcher<string>());
-  useEffect(() => { heard.current(sentIn ? [sentIn.id] : [], () => chime('call')); }, [sentIn?.id]);
+  useEffect(() => { heard.current(sentIn.map((v) => v.id), () => chime('call')); }, [sentIn.map((v) => v.id).join(',')]);
   const nextTl = useQuery({ queryKey: ['timeline', next?.patient?.id], queryFn: () => get(`/patients/${next.patient.id}/timeline`), enabled: !!next });
   if (!d || !c) return <div className="space-y-4"><Skeleton rows={2} /><Skeleton rows={8} /></div>;
 
@@ -135,18 +138,16 @@ export function Today() {
 
   const nextCard = (
     <section className="card-flat order-1 p-4 anim-fade-up">
-      {sentIn && <div className="mb-3 rounded-[12px] border border-line-2 bg-paper-2 px-3 py-2.5 anim-fade-up" role="alert">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-clay">Coming in now</div>
-        <div className="mt-1 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{sentIn.patient.fullName}</div><div className="text-xs text-muted">{[sentIn.patient.ageYears ? `${sentIn.patient.ageYears} ${sentIn.patient.sex ?? ''}` : null, sentIn.details?.reportsEncounterId ? 'back with reports' : sentIn.details?.complaints?.[0]?.text ?? sentIn.details?.complaint, `sent in ${minsSince(sentIn.details.calledAt)} min ago`].filter(Boolean).join(' · ')}</div></div>
-          {can(perms, 'encounter.intake') && <button className="btn btn-primary" disabled={open.isPending} onClick={() => open.mutate(sentIn.id)}>Open</button>}</div>
-      </div>}
-      {withYou && !sentIn ? <>
-        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted"><span className="breathe h-2 w-2 rounded-full bg-sage" />With you now</div>
-        <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{withYou.patient.fullName}</div>
-          <div className="text-xs text-muted">{[withYou.patient.ageYears ? `${withYou.patient.ageYears} ${withYou.patient.sex ?? ''}` : null, withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint, withYou.details?.bp && `BP ${withYou.details.bp}`].filter(Boolean).join(' · ')}</div></div>
-          {can(perms, 'encounter.intake') && <button className="btn btn-accent" disabled={open.isPending} onClick={() => open.mutate(withYou.id)}>Continue</button>}</div>
+      {inRoom.length > 0 && <>
+        <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted"><span className="breathe h-2 w-2 rounded-full bg-sage" />In your room{inRoom.length > 1 ? <span className="font-semibold normal-case tracking-normal"> · {inRoom.length} of 3</span> : null}</div>
+        {inRoom.map((v, i) => { const fresh = notOpened(v); return (
+          <div key={v.id} className={`flex items-center gap-3 ${i === 0 ? 'mt-1.5' : 'mt-2 border-t border-line/60 pt-2'} ${fresh ? 'anim-fade-up' : ''}`} role={fresh ? 'alert' : undefined}>
+            <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><div className="truncate text-lg font-semibold">{v.patient.fullName}</div>{fresh && <Chip tone="amber">sent in {minsSince(v.details.calledAt)} min ago</Chip>}{!fresh && i > 0 && <Chip>inside</Chip>}</div>
+              <div className="text-xs text-muted">{[v.patient.ageYears ? `${v.patient.ageYears} ${v.patient.sex ?? ''}` : null, v.details?.reportsEncounterId ? 'back with reports' : v.details?.complaints?.[0]?.text ?? v.details?.complaint, v.details?.bp && `BP ${v.details.bp}`].filter(Boolean).join(' · ')}</div></div>
+            {can(perms, 'encounter.intake') && <button className={`btn ${fresh || i === 0 ? 'btn-primary' : ''}`} disabled={open.isPending} onClick={() => open.mutate(v.id)}>{fresh ? 'Open' : 'Continue'}</button>}
+          </div>); })}
         {next && <div className="my-3 border-t border-line" />}
-      </> : null}
+      </>}
       {next ? <>
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted">Next</div>
         <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{next.patient.fullName}</div>
@@ -177,7 +178,7 @@ export function Today() {
           {apptCount > 0 && <div className="mt-2.5 flex gap-1" aria-label={`${seen} of ${apptCount} seen`}>{Array.from({ length: Math.min(apptCount, 16) }, (_, i) => <i key={i} className={`h-1.5 flex-1 rounded-full ${i < Math.round((seen / apptCount) * Math.min(apptCount, 16)) ? 'bg-ink' : 'bg-ink/15'}`} />)}</div>}
         </Tile>
         <Tile label="Waiting" value={waiting.length} sub={longest ? `longest ${longest} min` : 'nobody in the line'} overdue={longest >= 30} />
-        <Tile label="With you" value={withYou ? withYou.patient.fullName : '—'} sub={withYou ? withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint ?? 'in the room now' : 'the room is empty'} live={!!withYou} />
+        <Tile label={inRoom.length > 1 ? `In your room · ${inRoom.length} of 3` : 'With you'} value={withYou ? withYou.patient.fullName : '—'} sub={inRoom.length > 1 ? `then ${inRoom.slice(1).map((v) => v.patient.fullName).join(', ')}` : withYou ? withYou.details?.complaints?.[0]?.text ?? withYou.details?.complaint ?? 'in the room now' : 'the room is empty'} live={!!withYou} />
         <Tile label="Reports" value={readyOrders.length} sub={readyOrders.length ? 'all received, to review' : 'nothing to review'} onClick={readyOrders.length ? () => nav('/tests?tab=review') : undefined} />
       </div>
 

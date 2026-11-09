@@ -114,7 +114,8 @@ export function FrontDesk() {
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">{actions}</div>
     </div>);
   const render = (r: Row) => {
-    if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting'; return (
+    if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting';
+      const inside = visitsAll.filter((x) => x.status === 'in_consult' && (!v.practitionerId || !x.practitionerId || x.practitionerId === v.practitionerId)).length; const full = inside >= ROOM_MAX; return (
       <Row key={v.id} token={v.opNumber} tokenCls={i === 0 && !withJr ? 'text-clay' : ''}
         top={<>{who(v.patient)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
         sub={meta([v.patient.patientNo, v.patient.phone, `arrived ${hhmm(v.arrivedAt)} · waited ${minsSince(v.arrivedAt)} min`, v.category, v.details?.complaint, v.details?.weight_kg && `${v.details.weight_kg} kg`, v.details?.bp && `BP ${v.details.bp}`])}
@@ -122,12 +123,12 @@ export function FrontDesk() {
           {isJunior && screening !== 'off' && v.status === 'waiting' && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>Intake</button>}
           {isDoctorUser && <button className="btn btn-sm" disabled={withJr} title={withJr ? 'With the junior doctor right now' : 'Open the consultation yourself; the desk is told'} onClick={() => openEncounter.mutate(v.id)}>Open</button>}
           {canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}
-          {canDesk && <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>Send in</button>}
+          {canDesk && <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || full || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : full ? `${inside} already inside: the room takes ${ROOM_MAX}. Send the next one in when someone comes out.` : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>{full ? 'Room full' : 'Send in'}</button>}
           {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Change doctor', hidden: !(d?.doctors ?? []).length, onClick: () => { const next = (d?.doctors ?? []).find((x: any) => x.id !== v.practitionerId); if (next) upVisit.mutate({ id: v.id, practitionerId: next.id }); } }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}
         </>} />); }
     if (r.type === 'doctor') { const v = r.v; return (
       <Row key={v.id} token={v.opNumber}
-        top={<>{who(v.patient)}<Chip tone="clay"><span className="h-1.5 w-1.5 rounded-full bg-clay live-dot inline-block mr-1" />in consult</Chip>{v.doctor && <Chip>{v.doctor}</Chip>}</>}
+        top={<>{who(v.patient)}<Chip tone={v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'sage' : 'amber'}><span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'bg-sage breathe' : 'bg-amber'}`} />{v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'with the doctor' : 'inside · waiting'}</Chip>{v.doctor && <Chip>{v.doctor}</Chip>}</>}
         sub={meta([v.patient.patientNo, v.details?.calledAt && `${v.details.calledBy === 'desk' ? 'sent in' : 'called by doctor'} ${hhmm(v.details.calledAt)}`, v.details?.complaint])}
         actions={<>{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}{canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}</>} />); }
     if (r.type === 'appt') { const a = r.a; const isLate = isToday && toMin(a.window.endTime) < nowMin(); return (
@@ -172,7 +173,7 @@ export function FrontDesk() {
       {calling.length > 0 && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-[12px] border border-line-2 bg-paper-2 px-4 py-3 text-[14px] anim-fade-up"><Icon name="bell" className="h-5 w-5 text-clay" />{calling.map((v) => <span key={v.id}><b>{v.doctor ?? 'The doctor'}</b> is calling <b>{v.patient.fullName}</b> · token {v.opNumber}</span>)}<button className="btn btn-sm ml-auto" onClick={() => setCalling([])}>Sent</button></div>}
       {!d ? <Skeleton rows={3} /> : (
         <div className={`grid items-start gap-4 ${canDesk && tab !== 'history' ? 'xl:grid-cols-[380px_minmax(0,1fr)]' : ''}`}>
-          {canDesk && tab !== 'history' && <div className="xl:sticky xl:top-16 xl:self-start"><ArrivalSheet key={`${arriveKey}:${arrive?.patientId ?? ''}:${arrive?.appointmentId ?? ''}:${arrive?.reports?.encounterId ?? ''}`} inline init={arrive ?? {}} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} /></div>}
+          {canDesk && tab !== 'history' && <div className="xl:sticky xl:top-[84px] xl:max-h-[calc(100dvh-100px)] xl:self-start xl:overflow-y-auto xl:rounded-2xl"><ArrivalSheet key={`${arriveKey}:${arrive?.patientId ?? ''}:${arrive?.appointmentId ?? ''}:${arrive?.reports?.encounterId ?? ''}`} inline init={arrive ?? {}} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} /></div>}
           <div className="min-w-0">
             {(d?.doctors ?? []).length > 1 && tab !== 'history' && <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <button type="button" className={`toggle-opt ${!docFilter ? 'on' : ''}`} onClick={() => setDocFilter(null)}>All doctors<span className="ml-1.5 text-muted">{visitsAll.filter((v) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length}</span></button>
@@ -426,6 +427,8 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   );
 }
 
+/** How many patients may be inside the consultation room at once (the server enforces the same number). */
+const ROOM_MAX = 3;
 const visitClosed = (v: any) => !!v.details?.checkoutClosedAt;
 const testsOf = (v: any): any[] => (v.recommendations ?? []).filter((r: any) => r.kind === 'investigation' && r.status !== 'cancelled');
 /** The lab slip is given for every test, but the doctor has not reviewed and the patient has not been told yet. */
@@ -469,6 +472,7 @@ function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: b
               <div className="flex items-start gap-2 px-3 py-1 text-xs text-muted"><Chip>hand-off</Chip><span>Consultation was paid at check-in.{v.rxCount > 0 ? ` Medicines (${v.rxCount}) are waiting at the pharmacy counter; the pharmacist collects.` : ''}{procs.length > 0 ? ' Procedures are paid on the procedure day.' : ''}</span></div>
             </div>
             {canDesk && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-3"><span className="text-xs text-muted">{open.length ? 'Close visit unlocks when the plans above are arranged or marked not needed.' : 'Everything is arranged.'}</span><span className="ml-auto" />
+              {v.encounterId && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Print Rx</button>}
               {canForce && open.length > 0 && <button className="btn btn-sm" disabled={close.isPending} onClick={() => closeWithReason(v.id)}>Close with a reason</button>}
               <button className="btn btn-sm btn-primary" disabled={close.isPending || open.length > 0} onClick={() => close.mutate({ id: v.id })}><Icon name="check" className="h-3.5 w-3.5" />Close visit</button></div>}
           </div>);

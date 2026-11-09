@@ -206,7 +206,7 @@ export function clinicalRoutes(app: FastifyInstance) {
   });
 
   /** Everything needed to render the printed prescription. */
-  route(app, 'get', '/encounters/:id/print', 'encounter.intake', async (req, tx) => {
+  route(app, 'get', '/encounters/:id/print', 'visit.read', async (req, tx) => { // the desk reprints when the doctor did not
     const t = req.ctx.tenantId;
     const e = await getEncounter(tx, t, (req.params as any).id);
     const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);

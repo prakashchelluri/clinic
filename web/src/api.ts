@@ -68,6 +68,8 @@ export function errText(e: any): string {
   const b = e?.body; if (!b) return e?.message && !/^HTTP \d+$/.test(e.message) ? e.message : 'Could not reach the server. Check the connection and try again.';
   const code: string = b.code ?? '';
   if (code.startsWith('FORBIDDEN')) return "You don't have permission to do that.";
+  if (code === 'ROOM_FULL') return `${b.inside} patients are already inside with the doctor (the room takes ${b.max}). Send the next one in when someone comes out.`;
+  if (code === 'WITH_JUNIOR') return 'With the junior doctor right now; send them in after the screening.';
   if (code === 'ALREADY_CHECKED_IN') return `Already checked in today${b.opNumber ? ` (token ${b.opNumber})` : ''}.`;
   if (code === 'NOT_ENOUGH_STOCK') return `${b.name ?? b.batchNo ?? 'That item'}: only ${b.onHand ?? 0} in stock.`;
   if (code === 'BILL_TOTAL_MISMATCH') return `The lines add up to ₹${((b.computedPaise ?? 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}, not the bill total. Check the rates, quantities and discounts.`;
