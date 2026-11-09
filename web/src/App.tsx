@@ -61,11 +61,19 @@ export function useTheme() {
   return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))] as const;
 }
 
-/** The desktop rail: icon above a short label, the way Eka does it, so the work area gets the width. */
-function Rail({ items, active, clinic, me, requests, onSignOut }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; requests: number; onSignOut: () => void }) {
+/** Open (icons with names, the default) or collapsed to an icon rail, kept on this device. */
+export function useNav() {
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('nav') !== 'rail'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('nav', open ? 'open' : 'rail'); } catch { /* private mode */ } }, [open]);
+  return [open, () => setOpen((o) => !o)] as const;
+}
+
+/** The collapsed rail: one icon per section with its name in a tooltip, for people who know the icons and want the width. */
+function Rail({ items, active, clinic, me, requests, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; requests: number; onSignOut: () => void; onExpand: () => void }) {
   return (
     <div className="flex h-full flex-col items-center px-3 pb-3.5 pt-4">
-      <Link to="/" title={clinic} className="mb-4 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
+      <Link to="/" title={clinic} className="mb-2 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
+      <button type="button" onClick={onExpand} aria-label="Show menu names" data-tip="Show menu names" className="tip rail-item mb-2 !h-8"><Icon name="chevR" className="h-4 w-4" /></button>
       <nav className="flex w-full flex-col items-center gap-1 overflow-y-auto no-scrollbar" aria-label="Sections">
         {items.map((n, i) => <span key={n.to} className="contents">
           {i > 0 && n.group === 'clinic' && items[i - 1].group !== 'clinic' && <span className="my-1.5 w-6 border-t border-line-2" />}
@@ -91,7 +99,7 @@ function Clock() {
   return <span className="toppill hidden !px-2.5 sm:inline-flex" aria-label={`Clinic time ${t}`}><span className="breathe h-2 w-2 rounded-full bg-sage" />{t}</span>;
 }
 
-function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void }) {
+function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
@@ -101,7 +109,10 @@ function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavi
   const main = items.filter((n) => !n.group); const clinicItems = items.filter((n) => n.group === 'clinic');
   return (
     <div className="flex h-full flex-col px-2.5 py-3">
-      <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 px-2 pb-3 pt-1"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
+      <div className="flex items-center gap-1 pb-3 pt-1">
+        <Link to="/" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5 px-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
+        {onCollapse && <button type="button" onClick={onCollapse} aria-label="Collapse menu to icons" title="Collapse menu" className="btn btn-ghost btn-icon !h-8 !w-8 shrink-0"><Icon name="chevL" className="h-4 w-4" /></button>}
+      </div>
       <nav className="flex flex-col gap-px overflow-y-auto no-scrollbar" aria-label="Sections">
         {main.map(link)}
         {clinicItems.length > 0 && <div className="px-2.5 pb-1 pt-3.5 text-[11px] font-semibold uppercase tracking-[.06em] text-muted">Clinic</div>}
@@ -141,6 +152,7 @@ export function App() {
   const plansNew = c('worklist.read') ? counts.data?.plans ?? 0 : 0; // plans the doctor made today that nobody has acted on yet
   const [bell, setBell] = useState(false);
   const [theme, toggleTheme] = useTheme();
+  const [navOpen, toggleNav] = useNav();
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
@@ -174,8 +186,8 @@ export function App() {
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[76px] bg-sidebar md:block" style={{ boxShadow: '1px 0 0 rgba(0,0,0,.15)' }} aria-label="Main">
-        <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} />
+      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${navOpen ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: '1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
+        {navOpen ? <Sidebar {...side} onCollapse={toggleNav} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} onExpand={toggleNav} />}
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
@@ -183,7 +195,7 @@ export function App() {
         </div>
       )}
 
-      <div className={`md:pl-[76px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+      <div className={`${navOpen ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
         <header className="no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[13.5px] font-semibold text-muted"><span className="hidden truncate sm:inline">{clinic}</span><Icon name="chevR" className="hidden h-3.5 w-3.5 sm:block" /><span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span></nav>
