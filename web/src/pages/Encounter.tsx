@@ -171,7 +171,10 @@ export function Encounter() {
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
   const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
-  const goTo = (k: string) => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  const [split, setSplit] = useState(() => { try { return localStorage.getItem('pad-layout') === 'split'; } catch { return false; } }); // the doctor's choice: cards stacked (Eka) or rows left, one card right
+  useEffect(() => { try { localStorage.setItem('pad-layout', split ? 'split' : 'stacked'); } catch { /* private mode */ } }, [split]);
+  const [active, setActive] = useState<string | null>(null);
+  const goTo = (k: string) => { if (split && isDoctor) { setActive(k); setTimeout(() => document.getElementById('pad-editor')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); } else document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
   const [capture, setCapture] = useState(false); const [compare, setCompare] = useState<[any, any] | null>(null);
   const [, tick] = useState(0); useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
   const loaded = useRef(false); const dirty = useRef(false);
@@ -354,7 +357,7 @@ export function Encounter() {
   /** Everything Finish needs that is still empty, as the same {path, message} rows the server sends, so the rows light up and the footer lists them. */
   const missingNow = (): { path: string; message: string }[] => {
     const out: { path: string; message: string }[] = [];
-    if (padOf('symptoms').required && !syms.length) out.push({ path: 'complaint.chief_complaint', message: 'Complaints is required' });
+    if (padOf('symptoms').required && !syms.length) out.push({ path: 'complaint.chief_complaint', message: 'Symptoms is required' });
     if (!dxs.length) out.push({ path: 'assessment.diagnosis', message: 'Diagnosis is required' });
     if (padOf('exam').required && !Object.values(data.exam ?? {}).some((v: any) => (Array.isArray(v) ? v.length : v))) out.push({ path: 'exam._', message: 'Examination is required' });
     if (padOf('medicines').required && !rx.some((i) => i.name)) out.push({ path: 'medicines._', message: 'Medicines is required' });
@@ -501,6 +504,53 @@ export function Encounter() {
       <div className="space-y-2">{x.fields.map((f: Field) => <div key={f.key} data-invalid={!!err(x.key, f.key)}><CompactField f={f} value={data[x.key]?.[f.key]} onChange={(v) => set(x.key, f.key, v)} disabled={readOnly} invalid={!!err(x.key, f.key)} />{err(x.key, f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div>
     </Card>);
 
+  const reviewCard = isReview && isDoctor ? <Card id="review" title={`Since ${fmtDate(lastDone.createdAt)}`} meta={joinList(lastDone.data?.assessment?.diagnosis) || 'last consultation'}>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3"><span className="min-w-[72px] text-xs text-muted">How is it?</span>
+              <Segmented disabled={readOnly} value={data.review?.response ?? ''} onChange={(r) => set('review', 'response', r || undefined)} options={RESPONSES.map((r) => ({ value: r, label: r }))} /></div>
+            {(() => { const se: string[] = data.review?.sideEffects ?? []; const real = se.filter((x) => x !== 'None'); return (
+              <div className="flex flex-wrap items-center gap-2"><span className="min-w-[72px] text-xs text-muted">Side effects</span><span className={`text-[13.5px] ${real.length ? 'font-medium text-amber' : ''}`}>{real.length ? real.join(', ') : 'none reported'}</span>{!readOnly && <button type="button" className="opt !min-h-7 !py-0.5" onClick={() => setSeOpen(!seOpen)}>{seOpen ? 'Done' : 'Change'}</button>}
+                {seOpen && !readOnly && <div className="flex basis-full flex-wrap gap-1 anim-fade-in">{SIDE_EFFECTS.filter((x) => x !== 'None').map((x) => { const on = se.includes(x); return <button key={x} type="button" className={`!min-h-7 !py-0.5 ${on ? 'toggle-opt on' : 'opt'}`} onClick={() => set('review', 'sideEffects', on ? se.filter((y) => y !== x) : [...se.filter((y) => y !== 'None'), x])}>{x}</button>; })}</div>}
+              </div>); })()}
+            {lastRx.length > 0 && <div>
+              <div className="flex items-center gap-2"><span className="text-xs text-muted">Last prescription · continue, change or stop each line</span>{!readOnly && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
+              {lastRx.map((l, k) => {
+                const cur = rx.find((r) => r.name === l.name); const st = !cur ? (rx.length ? 'stop' : '') : sameLine(cur, l) ? 'continue' : 'change';
+                const raw = lastRaw[k];
+                return (
+                  <Row key={l.name + k} label={l.name}>
+                    <span className="min-w-0 flex-1"><b className="text-[13.5px]">{l.name}</b><span className="block text-[12.5px] text-muted">{[l.dose, l.frequency, l.durationDays ? `${l.durationDays} days` : null, l.instructions].filter(Boolean).join(' · ')}{raw && raw.medicineId && !raw.issuedQty ? ' · patient did not buy' : ''}{st === 'change' && cur ? ` · now ${[cur.dose, cur.frequency, cur.durationDays ? `${cur.durationDays}d` : null].filter(Boolean).join(' · ')}` : ''}</span></span>
+                    {!readOnly && <Segmented size="sm" value={st} onChange={(v) => { if (v === 'continue') setRx((r) => cur ? r.map((x) => (x.name === l.name ? withQty({ ...l }) : x)) : [...r.filter((x) => x.name), withQty({ ...l })]); else if (v === 'change') { if (!cur) setRx((r) => [...r.filter((x) => x.name), withQty({ ...l })]); goTo('medicines'); setTimeout(() => document.getElementById(`rx-${l.name}`)?.focus(), 300); } else setRx((r) => r.filter((x) => x.name !== l.name)); }} options={[{ value: 'continue', label: 'Continue' }, { value: 'change', label: 'Change' }, { value: 'stop', label: 'Stop' }]} />}
+                  </Row>); })}
+            </div>}
+          </div>
+        </Card> : null;
+  // side by side: one row per section with what it says so far; the open row's card sits on the right
+  const txt = (xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ');
+  const vd = e.visit?.details ?? {};
+  const examFields: Field[] = formSections.find((x) => x.key === 'exam')?.fields ?? [];
+  const histItems: string[] = (cfg?.historyCategories ?? []).flatMap((c: any) => (Array.isArray(p.history?.[c.key]) ? p.history[c.key].map((x: any) => x.name) : []));
+  const brief: Record<string, string | null> = {
+    review: data.review?.response ?? null,
+    vitals: txt([vd.weight_kg && `${vd.weight_kg} kg`, vd.height_cm && `${vd.height_cm} cm`, vd.bp && `BP ${vd.bp}`, vd.pulse && `pulse ${vd.pulse}`, vd.temp_f && `${vd.temp_f} °F`]) || null,
+    history: histItems.length ? histItems.join(', ') : null,
+    symptoms: syms.length ? syms.map((x) => txt([x.name, x.since && `since ${x.since}`])).join('; ') : null,
+    diagnosis: dxs.length ? dxs.map((d) => txt([d.name, d.severity?.toLowerCase()])).join('; ') : null,
+    exam: txt([...examFields.map((f) => { const v = data.exam?.[f.key]; return Array.isArray(v) ? v.join(', ') : v ? String(v) : null; }), (data.complaint?.site ?? []).length ? `sites: ${(data.complaint.site as string[]).join(', ')}` : null]) || null,
+    medicines: rx.filter((i) => i.name).length ? rx.filter((i) => i.name).map((i) => i.name).join(', ') : null,
+    advice: adviceLines.length ? adviceLines.join(' · ') : null,
+    tests: tests.length ? tests.map((r) => r.notes).join(', ') : null,
+    results: testRecs.length ? `${testsIn} of ${testRecs.length} reports in` : null,
+    next: txt([followup && `Review in ${followup.intervalDays} days`, ...recs.filter((r) => r.kind === 'procedure').map((r) => `${procName(r.procedureId)}${r.sittings ? ` × ${r.sittings}` : ''}`)]) || null,
+    notes: data.notes?.private ? String(data.notes.private).slice(0, 120) : null,
+    referral: txt([data.referral?.to, data.referral?.speciality]) || null,
+  };
+  const TITLE: Record<string, string> = { review: isReview ? `Since ${fmtDate(lastDone.createdAt)}` : 'Review', vitals: 'Vitals', history: 'Medical history', symptoms: 'Symptoms', diagnosis: 'Diagnosis', exam: 'Examination findings', medicines: 'Medications', advice: 'Advice', tests: 'Lab investigations', results: 'Lab results', next: 'Follow-up and procedures', notes: 'Private notes', referral: 'Refer to a doctor' };
+  for (const x of customSections) { TITLE[x.key] = x.title; brief[x.key] = txt(x.fields.map((f: Field) => { const v = data[x.key]?.[f.key]; return Array.isArray(v) ? v.join(', ') : v ? String(v) : null; })) || null; }
+  const rowKeys: string[] = [...(isReview && isDoctor ? ['review'] : []), ...order.filter((k) => cards[k]), ...customSections.map((x: any) => x.key)];
+  const act: string = active && rowKeys.includes(active) ? active : (rowKeys.find((k) => ['review', 'symptoms', 'diagnosis', 'medicines'].includes(k) && !brief[k]) ?? (rowKeys.includes('medicines') ? 'medicines' : rowKeys[0]));
+  const isRequired = (k: string) => k === 'diagnosis' || (['symptoms', 'exam', 'medicines'].includes(k) && padOf(k).required);
+
   return (
     <div className="space-y-3 pb-4">
       {/* who: the patient, the templates, the way to the pad's settings; History, Photos and Reports as tabs beside the pad */}
@@ -529,6 +579,7 @@ export function Encounter() {
                   {applied && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => { clearLoaded(); setTplOpen(false); }}>Clear loaded ({applied})</button>}
                 </div>
               </Floating></>}
+            {isDoctor && <Segmented<'stacked' | 'split'> size="sm" value={split ? 'split' : 'stacked'} onChange={(v) => setSplit(v === 'split')} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'split', label: 'Side by side' }]} />}
             {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm" title="Which sections show, which are required, what prints" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" />Configure pad</button>}
           </span>
         </div>
@@ -552,30 +603,23 @@ export function Encounter() {
         {!isDoctor && (!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <div className="card !p-0"><ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open /></div>}
         {!isDoctor && !padOf('history').show && cards.history}
 
-        {isReview && isDoctor && <Card id="review" title={`Since ${fmtDate(lastDone.createdAt)}`} meta={joinList(lastDone.data?.assessment?.diagnosis) || 'last consultation'}>
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3"><span className="min-w-[72px] text-xs text-muted">How is it?</span>
-              <Segmented disabled={readOnly} value={data.review?.response ?? ''} onChange={(r) => set('review', 'response', r || undefined)} options={RESPONSES.map((r) => ({ value: r, label: r }))} /></div>
-            {(() => { const se: string[] = data.review?.sideEffects ?? []; const real = se.filter((x) => x !== 'None'); return (
-              <div className="flex flex-wrap items-center gap-2"><span className="min-w-[72px] text-xs text-muted">Side effects</span><span className={`text-[13.5px] ${real.length ? 'font-medium text-amber' : ''}`}>{real.length ? real.join(', ') : 'none reported'}</span>{!readOnly && <button type="button" className="opt !min-h-7 !py-0.5" onClick={() => setSeOpen(!seOpen)}>{seOpen ? 'Done' : 'Change'}</button>}
-                {seOpen && !readOnly && <div className="flex basis-full flex-wrap gap-1 anim-fade-in">{SIDE_EFFECTS.filter((x) => x !== 'None').map((x) => { const on = se.includes(x); return <button key={x} type="button" className={`!min-h-7 !py-0.5 ${on ? 'toggle-opt on' : 'opt'}`} onClick={() => set('review', 'sideEffects', on ? se.filter((y) => y !== x) : [...se.filter((y) => y !== 'None'), x])}>{x}</button>; })}</div>}
-              </div>); })()}
-            {lastRx.length > 0 && <div>
-              <div className="flex items-center gap-2"><span className="text-xs text-muted">Last prescription · continue, change or stop each line</span>{!readOnly && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
-              {lastRx.map((l, k) => {
-                const cur = rx.find((r) => r.name === l.name); const st = !cur ? (rx.length ? 'stop' : '') : sameLine(cur, l) ? 'continue' : 'change';
-                const raw = lastRaw[k];
-                return (
-                  <Row key={l.name + k} label={l.name}>
-                    <span className="min-w-0 flex-1"><b className="text-[13.5px]">{l.name}</b><span className="block text-[12.5px] text-muted">{[l.dose, l.frequency, l.durationDays ? `${l.durationDays} days` : null, l.instructions].filter(Boolean).join(' · ')}{raw && raw.medicineId && !raw.issuedQty ? ' · patient did not buy' : ''}{st === 'change' && cur ? ` · now ${[cur.dose, cur.frequency, cur.durationDays ? `${cur.durationDays}d` : null].filter(Boolean).join(' · ')}` : ''}</span></span>
-                    {!readOnly && <Segmented size="sm" value={st} onChange={(v) => { if (v === 'continue') setRx((r) => cur ? r.map((x) => (x.name === l.name ? withQty({ ...l }) : x)) : [...r.filter((x) => x.name), withQty({ ...l })]); else if (v === 'change') { if (!cur) setRx((r) => [...r.filter((x) => x.name), withQty({ ...l })]); goTo('medicines'); setTimeout(() => document.getElementById(`rx-${l.name}`)?.focus(), 300); } else setRx((r) => r.filter((x) => x.name !== l.name)); }} options={[{ value: 'continue', label: 'Continue' }, { value: 'change', label: 'Change' }, { value: 'stop', label: 'Stop' }]} />}
-                  </Row>); })}
-            </div>}
+        {split && isDoctor ? <div className="grid items-start gap-3 lg:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="card !p-0 lg:sticky lg:top-20 lg:max-h-[calc(100dvh-170px)] lg:overflow-y-auto anim-fade-up" role="tablist" aria-label="Sections">
+            {rowKeys.map((k) => { const on = act === k; const v = brief[k]; return (
+              <button key={k} type="button" role="tab" aria-selected={on} className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-t border-line/70 px-4 py-2.5 text-left transition-colors first:border-t-0 ${on ? 'bg-paper-2 shadow-[inset_3px_0_0_var(--color-ink)]' : 'hover:bg-surface-2'}`} onClick={() => setActive(k)}>
+                <span className="min-w-0"><span className="block text-[12px] font-semibold text-muted">{TITLE[k] ?? k}{isRequired(k) && <span className="text-rose" title="Required to finish"> *</span>}</span><span className={`block truncate text-[13.5px] ${v ? 'text-ink' : bad(k) ? 'text-rose' : 'text-muted/60'}`}>{v ?? (bad(k) ? 'Required' : '—')}</span></span>
+                <Icon name="chevR" className={`mt-1 h-3.5 w-3.5 ${on ? 'text-ink' : 'text-muted/40'}`} />
+              </button>); })}
           </div>
-        </Card>}
-
-        {order.map((k) => cards[k] ?? null)}
-        {customSections.map(custom)}
+          <div id="pad-editor" className="min-w-0 scroll-mt-20" key={act}>
+            {act === 'review' ? reviewCard : customSections.some((x: any) => x.key === act) ? custom(customSections.find((x: any) => x.key === act)) : cards[act] ?? null}
+            {(() => { const i = rowKeys.indexOf(act); const nx = rowKeys[i + 1]; return nx ? <button type="button" className="btn btn-sm mt-2" onClick={() => setActive(nx)}>Next · {TITLE[nx] ?? nx}<Icon name="chevR" className="h-3.5 w-3.5" /></button> : null; })()}
+          </div>
+        </div> : <>
+          {reviewCard}
+          {order.map((k) => cards[k] ?? null)}
+          {customSections.map(custom)}
+        </>}
       </>}
 
       {tab === 'visits' && <div className="card anim-fade-up">
