@@ -276,7 +276,6 @@ export function Encounter() {
   const lastRx: RxItem[] = (lastDone?.prescription ?? []).map(strip);
   const lastRaw: any[] = lastDone?.prescription ?? [];
   const isReview = isDoctor && !!lastDone && lastRx.length > 0;
-  const notBought = lastRaw.filter((i) => i.medicineId && !i.issuedQty);
   const visitNo = previous.length + 1;
   const mins = Math.max(0, Math.round((Date.now() - new Date(e.createdAt).getTime()) / 60000));
   const onHand = (i: RxItem) => (i.medicineId && stock.data ? stock.data[i.medicineId] ?? 0 : null);
@@ -511,7 +510,6 @@ export function Encounter() {
           <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5 text-[16px] font-semibold leading-tight">{p.fullName}<FlagChips flags={p.flags} /></div><CarefulBanner flags={p.flags} />
             <div className="text-xs text-muted">{[p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ')}</div></div>
           {p.allergies && <span className="chip chip-rose !py-1">Allergy: {p.allergies}</span>}
-          {isReview && notBought.length > 0 && <span className="text-xs text-muted">Last time did not buy: {notBought.map((i) => i.name).join(', ')}</span>}
           <span className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{!readOnly && isDoctor && <span title="Minutes since the consultation opened"><Icon name="clock" className="mr-1 inline h-3.5 w-3.5" />{mins} min</span>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}{held && <Chip tone="amber">Rx issued {fmtDate(e.completedAt)} · {testsIn} of {testRecs.length} reports in</Chip>}
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><Icon name="list" className="h-3.5 w-3.5" />Templates</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={540}>
