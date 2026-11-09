@@ -42,207 +42,310 @@ export function Pharmacy() {
   );
 }
 
-/* ---------------- Counter ---------------- */
-
-function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) => void }) {
-  const { perms } = useOutletContext<any>();
-  const [q, setQ] = useState(''); const [earlier, setEarlier] = useState(false);
-  const term = q.trim().length >= 2 ? q.trim() : '';
-  const list = useQuery({ queryKey: ['pharmacy', 'counter', term], queryFn: () => get(`/pharmacy/counter${term ? `?q=${encodeURIComponent(term)}` : ''}`), refetchInterval: 15000 });
-  const d = list.data;
-  const Row = ({ r, sub }: { r: any; sub?: string }) => (
-    <button onClick={() => pick(r.encounterId)} aria-pressed={sel === r.encounterId} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors ${sel === r.encounterId ? "bg-[#E9EBEF]" : "hover:bg-surface-2"}`}>
-      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{r.patient.fullName}</span>
-        <span className={`block truncate text-xs text-muted`}>{sub ?? [r.opNumber, r.doctor, fmtTime(r.completedAt), `${r.items} medicine${r.items === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</span></span>
-      {r.status === 'issued' && <Chip tone="sage">issued</Chip>}{r.status === 'part' && <span className="shrink-0 text-xs text-muted">partly here</span>}{r.status === 'nothing' && <span className="shrink-0 text-xs text-muted">not from us</span>}
-    </button>
-  );
-  return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
-      <div className={`card !p-3 ${sel ? 'hidden lg:block' : ''}`}>
-        <div className="relative mb-2"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
-          <input className="input !pl-10" aria-label="Find a prescription" placeholder="Name, phone or OP number" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        {list.isLoading ? <Skeleton rows={4} /> : term ? (
-          <>{(d?.found ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No prescription in the last 30 days matches.</div> : d.found.map((r: any) => <Row key={r.encounterId} r={r} sub={`${fmtDate(r.day)} · ${r.opNumber} · ${r.doctor ?? ''}`} />)}</>
-        ) : (
-          <>
-            <div className="flex items-baseline gap-2 px-1 pb-1"><b className="text-sm">Today's prescriptions</b><span className="text-xs text-muted">{d?.today.length ?? 0}</span></div>
-            <div className="px-1 pb-2 text-xs text-muted">Click a patient to open the doctor's prescription. Nothing here is a task.</div>
-            {(d?.today ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No prescriptions yet today.</div> : d.today.map((r: any) => <Row key={r.encounterId} r={r} />)}
-            {(d?.balances ?? []).length > 0 && <div className="mt-4 border-t border-line pt-3">
-              <button type="button" className="flex w-full items-center gap-2 px-1 pb-1 text-left" aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
-                <b className="text-sm">Earlier prescriptions</b><span className="text-xs text-muted">{d.balances.length} partly bought here</span><Icon name={earlier ? 'up' : 'chevR'} className="ml-auto h-4 w-4 text-muted" /></button>
-              {earlier && <>
-                <div className="px-1 pb-2 text-xs text-muted">For reference when the patient comes back. Nothing is owed: the rest may have been bought outside.</div>
-                {d.balances.map((r: any) => <Row key={r.encounterId} r={r} sub={`Rx ${fmtDate(r.day)} · ${r.balance.map((b: any) => `${b.name} ${b.left} left`).join(', ')}`} />)}
-              </>}
-            </div>}
-          </>
-        )}
-      </div>
-      <div className={sel ? '' : 'hidden lg:block'}>
-        {sel === 'walkin' ? <BillEditor key="walkin" onDone={() => pick(null)} onClose={() => pick(null)} canBill={can(perms, 'pharmacy.bill')} />
-          : sel ? <RxBill key={sel} encounterId={sel} onDone={() => pick(null)} onClose={() => pick(null)} canBill={can(perms, 'pharmacy.bill')} />
-          : <div className="card"><Empty icon="pill" title="Pick a patient" hint="The doctor's prescription opens here with the quantities worked out. Issue all of it, some of it, or none." /></div>}
-      </div>
-    </div>
-  );
-}
-
-function RxBill(props: { encounterId: string; onDone: () => void; onClose: () => void; canBill: boolean }) {
-  const rx = useQuery({ queryKey: ['pharmacy', 'rx', props.encounterId], queryFn: () => get(`/pharmacy/rx/${props.encounterId}`) });
-  if (rx.isLoading) return <div className="card"><Skeleton rows={5} /></div>;
-  if (rx.error || !rx.data) return <div className="card text-sm text-rose">{errText(rx.error)}</div>;
-  return <BillEditor rx={rx.data} {...props} />;
-}
+/* ---------------- Counter: the register ---------------- */
 
 type Line = { key: string; medicineId: string | null; name: string; rxItemId?: string; prescribed?: number; issued?: number; left?: number; how?: string; qty: string; batchId: string; reason: string; batches: any[]; onHand: number; mrpPaise: number; gstBp: number; med: any };
 
 const lineAmount = (l: Line) => { const b = l.batches.find((x) => x.id === l.batchId); return (Number(l.qty) || 0) * (b?.mrpPaise ?? l.mrpPaise); };
+/** Each form has its own pastel, as Vialo colours its categories. */
+const FORMS: Record<string, [string, string, string]> = { tab: ['bg-tile-1', 'Tablet', 'Tablets'], cap: ['bg-tile-3', 'Capsule', 'Capsules'], cream: ['bg-tile-4', 'Cream', 'Creams'], gel: ['bg-tile-2', 'Gel', 'Gels'], lotion: ['bg-tile-5', 'Lotion', 'Lotions'] };
+const tileOf = (form?: string | null) => FORMS[form ?? '']?.[0] ?? 'bg-tile-5';
+const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+const daysTo = (d: string) => Math.round((new Date(d + 'T00:00:00').getTime() - Date.now()) / 86400000);
+const shortDay = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+/** The doctor's prescription as bill lines: quantities pre-filled with what is left, capped by stock. */
+const rxToLines = (rx: any): Line[] => (rx?.items ?? []).map((it: any) => {
+  const qty = it.medicine ? Math.min(it.left, it.onHand) : 0;
+  return { key: it.id, medicineId: it.medicine?.id ?? null, name: it.name, rxItemId: it.id, prescribed: it.prescribed, issued: it.issuedQty, left: it.left, how: [it.dose, it.frequency, it.durationDays ? `${it.durationDays} days` : null].filter(Boolean).join(' · '),
+    qty: String(qty), batchId: it.batches[0]?.id ?? '', reason: it.medicine && it.left > it.onHand ? 'Out of stock' : '', batches: it.batches, onHand: it.onHand, mrpPaise: it.medicine?.mrpPaise ?? 0, gstBp: it.medicine?.gstBp ?? 0, med: it.medicine };
+});
 
-/** One bill at the counter: the doctor's prescription (quantities pre-filled, change to short-issue, 0 to skip) plus anything else the patient buys. */
-function BillEditor({ rx, onDone, onClose, canBill }: { rx?: any; onDone: () => void; onClose: () => void; canBill: boolean }) {
+/** A small capsule flies from what was tapped to the bill: it rises, glides across, and shrinks into the line (Vialo's flydot, as a tablet). */
+function fly(from: Element | null, to: Element | null) {
+  if (!from || !to || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+  const sx = a.left + a.width / 2, sy = a.top + a.height / 2, ex = b.left + Math.min(b.width / 2, 48), ey = b.top + Math.min(b.height / 2, 30);
+  const el = document.createElement('span'); el.className = 'flypill'; document.body.appendChild(el);
+  // a quadratic curve with its control point at (start x, end y): up first, then across
+  const frames: Keyframe[] = [];
+  for (let i = 0; i <= 12; i++) { const t = i / 12, u = 1 - t; const x = (u * u + 2 * u * t) * sx + t * t * ex; const y = u * u * sy + (2 * u * t + t * t) * ey;
+    frames.push({ transform: `translate(${x}px, ${y}px) translate(-50%, -50%) rotate(${-35 + 320 * t}deg)`, offset: t * 0.8 }); }
+  frames.push({ transform: `translate(${ex}px, ${ey}px) translate(-50%, -50%) rotate(285deg) scale(0.3)`, opacity: 0, offset: 1 });
+  // it holds its last (faded) frame until removed; the timer covers a background tab, where finish events wait
+  el.animate(frames, { duration: 680, easing: 'cubic-bezier(.3,.7,.4,1)', fill: 'forwards' }).onfinish = () => el.remove();
+  setTimeout(() => el.remove(), 900);
+}
+
+function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) => void }) {
+  const { perms, cfg } = useOutletContext<any>(); const canBill = can(perms, 'pharmacy.bill');
+  const [q, setQ] = useState(''); const [earlier, setEarlier] = useState(false);
+  const term = q.trim().length >= 2 ? q.trim() : '';
+  const list = useQuery({ queryKey: ['pharmacy', 'counter', term], queryFn: () => get(`/pharmacy/counter${term ? `?q=${encodeURIComponent(term)}` : ''}`), refetchInterval: 15000 });
   const meds = useQuery({ queryKey: ['pharmacy', 'medicines'], queryFn: () => get('/pharmacy/medicines'), staleTime: 30_000 });
-  const [lines, setLines] = useState<Line[]>(() => (rx?.items ?? []).map((it: any) => {
-    const qty = it.medicine ? Math.min(it.left, it.onHand) : 0;
-    return { key: it.id, medicineId: it.medicine?.id ?? null, name: it.name, rxItemId: it.id, prescribed: it.prescribed, issued: it.issuedQty, left: it.left, how: [it.dose, it.frequency, it.durationDays ? `${it.durationDays} days` : null].filter(Boolean).join(' · '),
-      qty: String(qty), batchId: it.batches[0]?.id ?? '', reason: it.medicine && it.left > it.onHand ? 'Out of stock' : '', batches: it.batches, onHand: it.onHand, mrpPaise: it.medicine?.mrpPaise ?? 0, gstBp: it.medicine?.gstBp ?? 0, med: it.medicine };
-  }));
-  const [who, setWho] = useState<any>(rx?.patient ?? null);
-  const [discount, setDiscount] = useState('');
-  const [paying, setPaying] = useState(false);
-  const set = (key: string, patch: Partial<Line>) => setLines((ls) => ls.map((l) => l.key === key ? { ...l, ...patch } : l));
-  const add = (m: any) => {
-    if (lines.some((l) => l.medicineId === m.id && !l.rxItemId)) { toast(`${m.name} is already on the bill`, 'info'); return; }
-    setLines((ls) => [...ls, { key: `x${m.id}`, medicineId: m.id, name: m.name, qty: m.onHand ? '1' : '0', batchId: m.batches[0]?.id ?? '', reason: '', batches: m.batches, onHand: m.onHand, mrpPaise: m.mrpPaise, gstBp: m.gstBp, med: m }]);
+  const d = list.data;
+  const [find, setFind] = useState(''); const [form, setForm] = useState('all');
+  const [bill, setBill] = useState<{ rx: any | null; who: any; lines: Line[] }>({ rx: null, who: null, lines: [] });
+  const [loading, setLoading] = useState(false);
+  const [over, setOver] = useState(false); const [dragId, setDragId] = useState<string | null>(null);
+  const [hit, setHit] = useState<[string, number]>(['', 0]); // the line just added to: it pops again
+  const [discount, setDiscount] = useState(''); const [paying, setPaying] = useState(false); const [sale, setSale] = useState<any>(null);
+  const billRef = useRef<HTMLElement>(null);
+
+  // the bill follows ?rx=: a prescription opened from the list, by drag, or from Bills
+  useEffect(() => {
+    if (!sel || sel === 'walkin') { if (sel === 'walkin') { setBill({ rx: null, who: null, lines: [] }); setDiscount(''); } return; }
+    if (bill.rx?.encounterId === sel) return;
+    let live = true; setLoading(true);
+    get(`/pharmacy/rx/${sel}`).then((rx: any) => { if (live) setBill((b) => ({ rx, who: rx.patient, lines: [...rxToLines(rx), ...(b.rx ? [] : b.lines.filter((l) => !l.rxItemId))] })); }, (e) => toast(errText(e), 'err')).finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [sel]);
+
+  const allRx: any[] = [...(d?.today ?? []), ...(d?.balances ?? []), ...(d?.found ?? [])];
+  const choose = async (r: any, from?: Element | null) => {
+    if (!canBill || r.encounterId === bill.rx?.encounterId) return;
+    if (bill.rx && bill.lines.some((l) => Number(l.qty) > 0)) {
+      const ok = await ask({ title: `Start ${r.patient.fullName}'s bill?`, body: `${bill.rx.patient.fullName}'s bill is not paid. It is set aside and their prescription stays on the list.`, confirmLabel: 'Start new bill' });
+      if (!ok) return;
+    }
+    if (from) fly(from, billRef.current);
+    pick(r.encounterId);
   };
+  const inBill = (id: string) => bill.lines.filter((l) => l.medicineId === id).reduce((n, l) => n + (Number(l.qty) || 0), 0);
+  const addMed = (m: any, from?: Element | null) => {
+    if (!canBill) return;
+    if (inBill(m.id) >= m.onHand) { toast(`Only ${m.onHand} ${packLabel(m, m.onHand)} of ${m.name} in stock`, 'info'); return; }
+    fly(from ?? null, document.querySelector(`[data-line="${m.id}"]`) ?? billRef.current);
+    const at = bill.lines.find((l) => l.medicineId === m.id);
+    setHit(([, n]) => [at?.key ?? `x${m.id}`, n + 1]);
+    setBill((b) => at ? { ...b, lines: b.lines.map((l) => (l.key === at.key ? { ...l, qty: String((Number(l.qty) || 0) + 1) } : l)) }
+      : { ...b, lines: [...b.lines, { key: `x${m.id}`, medicineId: m.id, name: m.name, qty: '1', batchId: m.batches[0]?.id ?? '', reason: '', batches: m.batches, onHand: m.onHand, mrpPaise: m.mrpPaise, gstBp: m.gstBp, med: m }] });
+  };
+  const set = (key: string, patch: Partial<Line>) => setBill((b) => ({ ...b, lines: b.lines.map((l) => (l.key === key ? { ...l, ...patch } : l)) }));
+  const step = (l: Line, by: number) => set(l.key, { qty: String(Math.max(0, Math.min(l.onHand, (Number(l.qty) || 0) + by))) });
+  const reset = () => { setBill({ rx: null, who: null, lines: [] }); setDiscount(''); pick(null); };
+  const clearBill = async () => {
+    if (bill.lines.some((l) => Number(l.qty) > 0)) { const ok = await ask({ title: 'Clear this bill?', body: 'Nothing is saved. A prescription stays on the list.', confirmLabel: 'Clear', tone: 'danger' }); if (!ok) return; }
+    reset();
+  };
+
+  const rx = bill.rx; const who = bill.who; const lines = bill.lines;
   const issuing = lines.filter((l) => l.medicineId && Number(l.qty) > 0);
   const gross = issuing.reduce((n, l) => n + lineAmount(l), 0);
   const disc = Math.min(toPaise(discount || '0'), gross); const total = gross - disc;
   const gstIn = issuing.reduce((n, l) => { const a = lineAmount(l); return n + a - Math.round((a * 10000) / (10000 + l.gstBp)); }, 0);
   const gst = gross ? Math.round((gstIn * total) / gross) : 0;
-  const over = lines.find((l) => Number(l.qty) > l.onHand);
+  const overStock = lines.find((l) => Number(l.qty) > l.onHand);
   const rxLines = lines.filter((l) => l.rxItemId);
+  const units = issuing.reduce((n, l) => n + Number(l.qty), 0);
   const nothing = useMutation({ mutationFn: (reason: string) => post(`/pharmacy/rx/${rx.encounterId}/nothing`, { reason: reason || undefined }),
-    onSuccess: () => { toast('Noted: not buying here'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); onDone(); }, onError: (e) => toast(errText(e), 'err') });
+    onSuccess: () => { toast('Noted: not buying here'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); reset(); }, onError: (e) => toast(errText(e), 'err') });
   const outside = useMutation({ mutationFn: (reason: string) => post(`/pharmacy/rx/${rx.encounterId}/outside`, { reason: reason || undefined }),
-    onSuccess: () => { toast('Noted: the rest was bought outside'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); onDone(); }, onError: (e) => toast(errText(e), 'err') });
-  const problem = !who ? 'Pick or register the patient.' : issuing.length === 0 ? 'Nothing to issue: set a quantity, or use "Not buying here".' : over ? `${over.name}: only ${over.onHand} in stock.` : total <= 0 ? 'The discount cannot be the whole bill.' : '';
+    onSuccess: () => { toast('Noted: the rest was bought outside'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); reset(); }, onError: (e) => toast(errText(e), 'err') });
+  const problem = !who ? 'Pick or register the customer.' : issuing.length === 0 ? 'Nothing to sell yet.' : overStock ? `${overStock.name}: only ${overStock.onHand} in stock.` : total <= 0 ? 'The discount cannot be the whole bill.' : '';
+
+  const medList: any[] = meds.data ?? [];
+  const forms = [...new Set(medList.map((m) => m.form).filter(Boolean))] as string[];
+  const shown = medList.filter((m) => (form === 'all' || m.form === form) && (!find.trim() || m.name.toLowerCase().includes(find.trim().toLowerCase())));
+  const waiting = (d?.today ?? []).filter((r: any) => r.status === 'none' || r.status === 'part').length;
+
+  // a plain function, not a component: a component declared here is a new type on every render, and the card being dragged would be replaced mid-drag
+  const rxCard = (r: any, sub?: string) => {
+    const on = rx?.encounterId === r.encounterId; const quiet = on || r.status === 'issued' || r.status === 'nothing';
+    return (
+      <button key={r.encounterId} type="button" draggable={canBill && !on} aria-pressed={on}
+        onDragStart={(e) => { e.dataTransfer.setData('text/rx', r.encounterId); e.dataTransfer.effectAllowed = 'copy'; setDragId(r.encounterId); }}
+        onDragEnd={() => { setDragId(null); setOver(false); }} onClick={(e) => choose(r, e.currentTarget)}
+        className={`flex min-w-0 items-center gap-2.5 rounded-[18px] p-2.5 pl-3 text-left transition-all duration-200 ${quiet ? 'bg-surface-2 text-ink-2 shadow-[var(--ring)]' : 'bg-clay text-white hover:-translate-y-0.5 hover:shadow-[0_14px_26px_-16px_var(--color-clay)]'} ${canBill && !on ? 'cursor-grab active:cursor-grabbing active:scale-[.98]' : ''} ${dragId === r.encounterId ? 'rotate-[-2deg] scale-[1.03] opacity-60' : ''}`}>
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12px] font-bold ${quiet ? 'bg-paper-2 text-ink-2' : 'bg-white/90 text-[#0B6B47]'}`}>{initials(r.patient.fullName)}</span>
+        <span className="min-w-0 flex-1"><b className="block truncate text-[13.5px]">{r.patient.fullName}</b><small className="block truncate text-[12px] opacity-75">{sub ?? [r.opNumber, r.doctor].filter(Boolean).join(' · ')}</small></span>
+        <span className="shrink-0 text-right"><b className="block text-[13px]">{r.items} {r.items === 1 ? 'medicine' : 'medicines'}</b><small className="block text-[11.5px] font-semibold opacity-80">{on ? 'On the bill' : r.status === 'issued' ? 'Issued' : r.status === 'nothing' ? 'Not from us' : r.status === 'part' ? 'Partly here' : 'Add'}</small></span>
+      </button>);
+  };
 
   return (
-    <div className="space-y-4">
-      <div className="card">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <button className="btn btn-ghost btn-icon lg:hidden" aria-label="Back to the list" onClick={onClose}><Icon name="x" /></button>
-          {rx ? <>
-            <b className="text-xl">{rx.patient.fullName}</b>
-            <span className="text-sm text-muted">{[rx.opNumber, rx.patient.patientNo, [rx.patient.ageYears, rx.patient.sex].filter(Boolean).join(' '), rx.patient.phone].filter(Boolean).join(' · ')}</span>
-            {rx.patient.allergies && <Chip tone="rose">Allergy: {rx.patient.allergies}</Chip>}
-            <span className="ml-auto text-sm text-muted">{['Prescribed by ' + (rx.doctor ?? 'the doctor'), fmtDate(rx.completedAt) + ' ' + fmtTime(rx.completedAt), rx.diagnosis].filter(Boolean).join(' · ')}</span>
-          </> : <WalkInPatient who={who} setWho={setWho} />}
-        </div>
-        {rx?.bills?.length > 0 && <div className="mt-2 text-xs text-muted">Already billed on this prescription: {rx.bills.map((b: any) => `${b.invoiceNo} (${money(b.totalPaise)})`).join(', ')}</div>}
-
-        <div className="mt-3 -mx-5 overflow-x-auto">
-          <table className="table min-w-[860px]">
-            <thead><tr><th>{rx ? 'Doctor prescribed' : 'Item'}</th>{rx && <th>How to take</th>}{rx && <th className="!text-right">Prescribed</th>}<th className="!text-right">Issue</th><th>Batch</th><th className="!text-right">MRP</th><th className="!text-right">Amount</th><th>{rx ? 'If not full' : ''}</th></tr></thead>
-            <tbody>
-              {lines.length === 0 && <tr><td colSpan={8} className="text-center text-muted">Add the first item below.</td></tr>}
-              {lines.map((l) => {
-                const n = Number(l.qty) || 0; const left = l.left ?? 0; const done = l.rxItemId !== undefined && left === 0;
-                const short = l.rxItemId ? left - n : 0; const b = l.batches.find((x) => x.id === l.batchId);
-                return (
-                  <tr key={l.key} className={n === 0 ? 'text-muted' : ''}>
-                    <td><div className="font-semibold text-ink">{l.name}</div><div className={`text-xs ${l.medicineId && l.onHand === 0 ? 'text-rose' : 'text-muted'}`}>{!l.medicineId ? 'not in the medicine list' : l.onHand === 0 ? 'out of stock' : `${l.onHand} ${packLabel(l.med, l.onHand)} in stock`}</div></td>
-                    {rx && <td className="text-xs">{l.how || '—'}</td>}
-                    {rx && <td className="text-right whitespace-nowrap">{l.prescribed ? `${l.prescribed} ${packLabel(l.med, l.prescribed ?? 1)}` : '—'}{(l.issued ?? 0) > 0 && <div className="text-xs text-muted">{l.issued} issued before</div>}</td>}
-                    <td className="text-right">{done ? <Chip tone="sage">issued</Chip> : <NumInput aria-label={`Issue ${l.name}`} className={`input !w-16 !px-2 text-right ${n > l.onHand ? '!border-rose' : ''}`} max={999} disabled={!l.medicineId || !canBill} value={l.qty} onChange={(e) => set(l.key, { qty: e.target.value })} />}</td>
-                    <td>{l.batches.length > 1 && n > 0 ? <select aria-label={`Batch for ${l.name}`} className="input !w-auto !py-1.5 !text-xs" value={l.batchId} onChange={(e) => set(l.key, { batchId: e.target.value })}>{l.batches.map((x) => <option key={x.id} value={x.id}>{x.batchNo} · {exp(x.expiry)} · {x.qty}</option>)}</select>
-                      : b && n > 0 ? <span className="text-xs">{b.batchNo} · {exp(b.expiry)}</span> : <span className="text-xs">—</span>}</td>
-                    <td className="text-right">{l.medicineId ? money(b?.mrpPaise ?? l.mrpPaise) : '—'}</td>
-                    <td className="text-right font-semibold text-ink">{n > 0 ? money(lineAmount(l)) : '—'}</td>
-                    <td>{l.rxItemId && !done && short > 0 ? <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted">{n === 0 ? 'not from us' : `${short} not taken`}</span>
-                      <select aria-label={`Reason for ${l.name}`} className="input !w-auto !py-1.5 !text-xs" value={l.reason} onChange={(e) => set(l.key, { reason: e.target.value })}><option value="">Reason (optional)</option>{REASONS.map((r) => <option key={r}>{r}</option>)}</select>
-                    </div> : !l.rxItemId ? <button className="btn btn-ghost btn-icon" aria-label={`Remove ${l.name}`} onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}><Icon name="x" /></button> : null}</td>
-                  </tr>);
-              })}
-            </tbody>
-          </table>
-        </div>
-        {canBill && <div className="mt-3 flex flex-wrap items-center gap-3"><AddItem meds={meds.data ?? []} onAdd={add} />
-          {rx && <span className="text-xs text-muted">Pre-filled with what the doctor prescribed. Lower it if the patient takes less, 0 if they buy it elsewhere. The reason is optional.</span>}</div>}
+    <div>
+      {/* the two numbers that matter at the counter, Vialo-style */}
+      <div className="anim-fade-up mb-4 flex flex-wrap items-center gap-x-8 gap-y-3">
+        <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-full bg-surface shadow-[var(--shadow-soft)]"><Icon name="list" className="h-5 w-5 text-ink-2" /></span><span><b className="block text-[20px] leading-tight">{waiting}</b><small className="text-[12.5px] text-muted">prescriptions to fill today</small></span></div>
+        <div className="flex items-center gap-3"><span className={`grid h-11 w-11 place-items-center rounded-full transition-colors ${issuing.length ? 'bg-clay text-white' : 'bg-surface text-ink-2 shadow-[var(--shadow-soft)]'}`}><Icon name="rupee" className="h-5 w-5" /></span><span><b className="block text-[20px] leading-tight"><span key={total} className="bump">{money(total)}</span></b><small className="text-[12.5px] text-muted">on this bill · {units} {units === 1 ? 'item' : 'items'}</small></span></div>
       </div>
 
-      {canBill && <div className="card grid gap-5 md:grid-cols-[minmax(0,1fr)_300px] md:items-end">
-        <div className="space-y-1.5 text-sm">
-          <div className="label">This bill</div>
-          <div className="flex justify-between"><span>{rx ? `${rxLines.filter((l) => Number(l.qty) > 0).length} of ${rxLines.length} prescribed · ` : ''}{issuing.length} item{issuing.length === 1 ? '' : 's'}</span><b>₹{rupees2(gross)}</b></div>
-          <div className="flex justify-between text-muted"><span>GST included</span><span>₹{rupees2(gst)}</span></div>
-          <div className="flex items-center justify-between gap-3"><span className="text-muted">Discount <span className="text-xs">(above 10% needs the owner)</span></span><MoneyInput label="Discount" className="!w-32" value={discount} onChange={setDiscount} /></div>
-          {rxLines.some((l) => (l.left ?? 0) - (Number(l.qty) || 0) > 0 && Number(l.qty) > 0) && <div className="text-xs text-muted pt-1">The patient can come back for the rest within 30 days, or buy it outside.</div>}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
+        <div className="min-w-0 space-y-4">
+          <section className="card anim-fade-up">
+            <div className="mb-3 flex flex-wrap items-start gap-3">
+              <div className="mr-auto"><div className="card-title">Today's prescriptions</div><div className="text-[12.5px] text-muted">From the doctors. Tap one, or drag it onto the bill.</div></div>
+              <div className="relative w-full sm:w-64"><Icon name="search" className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" /><input className="input !pl-10" aria-label="Find a prescription" placeholder="Name, phone or OP number" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+            </div>
+            {list.isLoading ? <Skeleton rows={3} /> : term ? (
+              (d?.found ?? []).length === 0 ? <div className="py-4 text-sm text-muted">No prescription in the last 30 days matches.</div>
+                : <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">{d.found.map((r: any) => rxCard(r, `${fmtDate(r.day)} · ${r.opNumber} · ${r.doctor ?? ''}`))}</div>
+            ) : (<>
+              {(d?.today ?? []).length === 0 ? <div className="py-4 text-sm text-muted">No prescriptions yet today.</div>
+                : <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">{d.today.map((r: any) => rxCard(r))}</div>}
+              {(d?.balances ?? []).length > 0 && <div className="mt-4 border-t border-line pt-3">
+                <button type="button" className="flex w-full items-center gap-2 text-left" aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
+                  <b className="text-[13.5px]">Earlier prescriptions</b><span className="text-xs text-muted">{d.balances.length} partly bought here</span><Icon name={earlier ? 'up' : 'chevR'} className="ml-auto h-4 w-4 text-muted" /></button>
+                {earlier && <><div className="py-2 text-xs text-muted">For reference when the patient comes back. Nothing is owed: the rest may have been bought outside.</div>
+                  <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">{d.balances.map((r: any) => rxCard(r, `Rx ${fmtDate(r.day)} · ${r.balance.map((b: any) => `${b.name} ${b.left} left`).join(', ')}`))}</div></>}
+              </div>}
+            </>)}
+          </section>
+
+          <section className="card anim-fade-up">
+            <div className="card-title">Medicines</div><div className="text-[12.5px] text-muted">Tap a tile to add one. Each sells from the batch that expires first.</div>
+            <div className="mt-3 flex gap-2">
+              <div className="relative flex-1"><Icon name="search" className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                <input className="input !min-h-[46px] !pl-10" aria-label="Find a medicine" placeholder="Type a medicine name" value={find} onChange={(e) => setFind(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); addMed(shown[0], document.querySelector(`[data-tile="${shown[0].id}"]`)); setFind(''); } }} /></div>
+              <button type="button" className="btn btn-ink !min-h-[46px] px-5" disabled={!shown[0] || !canBill} onClick={() => { addMed(shown[0], document.querySelector(`[data-tile="${shown[0].id}"]`)); setFind(''); }}>Add</button>
+            </div>
+            {forms.length > 1 && <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Form">
+              {['all', ...forms].map((f) => <button key={f} type="button" role="radio" aria-checked={form === f} className={`toggle-opt ${form === f ? 'on' : ''}`} onClick={() => setForm(f)}>{f === 'all' ? 'All' : FORMS[f]?.[2] ?? f}</button>)}
+            </div>}
+            {meds.isLoading ? <div className="mt-3"><Skeleton rows={3} /></div> : shown.length === 0 ? <div className="mt-3 py-4 text-sm text-muted">{find ? 'Nothing by that name. Add it under Settings → Medicines.' : 'No medicines yet.'}</div> : (
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-4">
+                {shown.map((m: any) => {
+                  const n = inBill(m.id); const left = m.onHand - n; const fefo = m.batches[0]; const days = fefo ? daysTo(fefo.expiry) : null;
+                  return (
+                    <button key={m.id} type="button" data-tile={m.id} disabled={!canBill || left <= 0} onClick={(e) => addMed(m, e.currentTarget)} aria-label={`${m.name}, ${money(m.mrpPaise)}, ${left} left`}
+                      className="relative flex min-h-[148px] flex-col gap-2.5 rounded-[20px] bg-surface-2 p-3.5 text-left shadow-[inset_0_0_0_1px_rgba(16,32,24,.08)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-surface hover:shadow-[inset_0_0_0_1px_rgba(16,32,24,.08),0_16px_30px_-22px_rgba(16,22,40,.55)] active:scale-[.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0">
+                      <span className="flex items-start justify-between gap-2">
+                        <span className={`grid h-9 w-9 place-items-center rounded-full ${tileOf(m.form)}`}><Icon name="pill" className="h-4 w-4 text-ink" /></span>
+                        {days !== null && days <= 90 && <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${days < 0 ? 'bg-rose-soft text-rose' : 'bg-amber-soft text-amber'}`}>{days < 0 ? 'expired' : `exp ${shortDay(fefo.expiry)}`}</span>}
+                      </span>
+                      <span className="min-w-0"><b className="block text-[14px] leading-snug">{m.name}</b><small className="block text-[12px] text-muted">{[FORMS[m.form]?.[1] ?? m.form, m.packSize > 1 ? `${m.packSize} per strip` : null, m.scheduleClass ? `Sch ${m.scheduleClass}` : null].filter(Boolean).join(' · ')}</small></span>
+                      <span className="mt-auto flex items-baseline justify-between gap-2"><b className="text-[15px]">{money(m.mrpPaise)}</b><small className={`text-[12px] font-semibold ${left <= 0 ? 'text-rose' : left <= 10 ? 'text-amber' : 'text-muted'}`}>{left <= 0 ? 'none left' : `${left} left`}</small></span>
+                      {n > 0 && <span key={n} className="pop-in absolute -left-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-clay px-1.5 text-[12px] font-bold text-white shadow-[0_4px_10px_-4px_var(--color-clay)]">{n}</span>}
+                    </button>);
+                })}
+              </div>)}
+          </section>
         </div>
-        <div className="space-y-2">
-          <div className="flex items-baseline justify-between"><span className="text-sm text-muted">To pay</span><span className="text-3xl font-semibold">{money(total)}</span></div>
-          {problem && issuing.length > 0 && <div className="text-xs text-rose">{problem}</div>}
-          <button className="btn btn-primary w-full justify-center !py-3" disabled={!!problem} onClick={() => setPaying(true)}><Icon name="rupee" />Take payment</button>
-          {rx && rx.status !== 'issued' && rx.status !== 'part' && <button className="btn w-full justify-center" disabled={nothing.isPending} onClick={async () => { const a = await ask({ title: 'Buying elsewhere?', body: 'The prescription stays on the patient record; it just leaves the counter list.', confirmLabel: 'Not from us', field: { label: 'Reason (optional)', maxLength: 80 } }); if (a) nothing.mutate(a.value); }}>Not buying here</button>}
-          {rx && rx.status === 'part' && <button className="btn w-full justify-center" disabled={outside.isPending} onClick={async () => { const a = await ask({ title: 'Rest bought outside?', body: 'What was issued here stays on the bills. The prescription leaves the earlier list.', confirmLabel: 'Rest bought outside', field: { label: 'Reason (optional)', maxLength: 80 } }); if (a) outside.mutate(a.value); }}>Rest bought outside</button>}
-        </div>
-      </div>}
+
+        {/* the bill: a drop target for prescriptions, the landing place for every tablet */}
+        <aside ref={billRef} aria-label="This bill"
+          onDragOver={(e) => { if (!e.dataTransfer.types.includes('text/rx')) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; if (!over) setOver(true); }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver(false); }}
+          onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/rx'); setOver(false); setDragId(null); const r = allRx.find((x) => x.encounterId === id); if (r) choose(r); }}
+          className={`card relative anim-fade-up transition-[transform,box-shadow] duration-300 xl:sticky xl:top-[84px] xl:max-h-[calc(100dvh-100px)] xl:overflow-y-auto ${over ? 'scale-[1.01] !shadow-[inset_0_0_0_2px_var(--color-clay),0_24px_48px_-28px_var(--color-clay)]' : ''}`}>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1"><div className="card-title">This bill</div><div className="truncate text-[12.5px] text-muted">{rx ? [`For ${rx.patient.fullName}`, rx.opNumber, rx.doctor].filter(Boolean).join(' · ') : 'Walk-in customer'}</div></div>
+            {lines.length > 0 && canBill && <button type="button" className="btn btn-icon" aria-label="Clear the bill" title="Clear the bill" onClick={clearBill}><Icon name="x" className="h-4 w-4" /></button>}
+          </div>
+          {rx ? <div className="mt-3 flex items-center gap-2.5 rounded-[16px] bg-surface-2 p-2.5 shadow-[var(--ring)]">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-tile-1 text-[12px] font-bold">{initials(rx.patient.fullName)}</span>
+              <span className="min-w-0 flex-1"><b className="block truncate text-[13.5px]">{rx.patient.fullName}</b><small className="block truncate text-[12px] text-muted">{[rx.patient.patientNo, [rx.patient.ageYears, rx.patient.sex].filter(Boolean).join(' '), rx.patient.phone].filter(Boolean).join(' · ')}</small></span>
+              {rx.diagnosis && <span className="max-w-[40%] truncate text-right text-[12px] text-muted">{rx.diagnosis}</span>}
+            </div>
+            : <WalkInPatient who={who} setWho={(p) => setBill((b) => ({ ...b, who: p }))} />}
+          {rx?.patient.allergies && <div className="pop-in mt-2 flex gap-2.5 rounded-[14px] bg-rose-soft px-3 py-2.5 text-rose" role="alert"><span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-rose text-[12px] font-bold text-white">!</span><span><b className="block text-[13.5px]">Allergic to {rx.patient.allergies}</b><small className="text-[12px]">Check anything you add before you sell it.</small></span></div>}
+          {rx?.bills?.length > 0 && <div className="mt-2 text-xs text-muted">Already billed on this prescription: {rx.bills.map((b: any) => `${b.invoiceNo} (${money(b.totalPaise)})`).join(', ')}</div>}
+
+          <div className="mt-3">
+            {loading ? <Skeleton rows={3} /> : lines.length === 0 ? (
+              <div className={`grid place-items-center rounded-[18px] border-2 border-dashed px-4 py-9 text-center transition-colors ${over ? 'border-clay bg-clay-soft' : 'border-line-2'}`}>
+                <span className="grid h-12 w-12 place-items-center rounded-[14px] bg-surface shadow-[var(--shadow-soft)]"><Icon name="pill" className="h-5 w-5 text-ink-2" /></span>
+                <b className="mt-3 block text-[15px]">{over ? 'Drop to start the bill' : 'Tap or drag to start'}</b>
+                <span className="mt-1 block max-w-[260px] text-[12.5px] text-muted">Drag one of today's prescriptions here, or tap a medicine.</span>
+              </div>
+            ) : lines.map((l) => {
+              const n = Number(l.qty) || 0; const done = l.rxItemId !== undefined && (l.left ?? 0) === 0; const short = l.rxItemId ? (l.left ?? 0) - n : 0; const b = l.batches.find((x) => x.id === l.batchId);
+              return (
+                <div key={l.key + (hit[0] === l.key ? `:${hit[1]}` : '')} data-line={l.medicineId ?? l.key} className={`pop-in border-t border-line/70 py-2.5 first:border-t-0 first:pt-0 ${n === 0 && !done ? 'opacity-60' : ''}`}>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${tileOf(l.med?.form)}`}><Icon name="pill" className="h-3.5 w-3.5 text-ink" /></span>
+                    <span className="min-w-0 flex-1"><b className="block text-[13.5px] leading-snug">{l.name}{l.rxItemId && <span className="ml-1.5 rounded-full bg-clay-soft px-1.5 py-px align-middle text-[10.5px] font-bold text-clay-ink">Rx</span>}</b>
+                      <small className={`block truncate text-[11.5px] ${l.medicineId && l.onHand === 0 ? 'text-rose' : 'text-muted'}`}>{!l.medicineId ? 'not in the medicine list' : l.onHand === 0 ? 'out of stock' : l.rxItemId ? [`${l.prescribed} ${packLabel(l.med, l.prescribed ?? 1)} prescribed`, (l.issued ?? 0) > 0 ? `${l.issued} issued before` : null, l.how].filter(Boolean).join(' · ') : [money(b?.mrpPaise ?? l.mrpPaise) + ' each', b ? `${b.batchNo} · exp ${exp(b.expiry)}` : null].filter(Boolean).join(' · ')}</small></span>
+                    {done ? <Chip tone="sage">issued</Chip> : <span className="flex shrink-0 items-center rounded-full bg-surface-2 p-0.5 shadow-[var(--ring)]">
+                      <button type="button" className="grid h-7 w-7 place-items-center rounded-full text-[16px] font-bold text-ink-2 hover:bg-paper-2 disabled:opacity-40" aria-label={`One less ${l.name}`} disabled={!l.medicineId || !canBill || n === 0} onClick={() => step(l, -1)}>−</button>
+                      <NumInput aria-label={`Issue ${l.name}`} className={`w-8 bg-transparent text-center text-[13.5px] font-semibold outline-none ${n > l.onHand ? 'text-rose' : ''}`} max={999} disabled={!l.medicineId || !canBill} value={l.qty} onChange={(e) => set(l.key, { qty: e.target.value })} />
+                      <button type="button" className="grid h-7 w-7 place-items-center rounded-full bg-clay text-[16px] font-bold text-white hover:bg-clay-2 disabled:opacity-40" aria-label={`One more ${l.name}`} disabled={!l.medicineId || !canBill || n >= l.onHand} onClick={() => step(l, 1)}>+</button>
+                    </span>}
+                    <b className="w-[70px] shrink-0 text-right text-[13.5px]">{n > 0 ? money(lineAmount(l)) : '—'}</b>
+                    {!l.rxItemId ? <button type="button" className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted hover:bg-ink/6 hover:text-ink" aria-label={`Remove ${l.name}`} onClick={() => setBill((bb) => ({ ...bb, lines: bb.lines.filter((x) => x.key !== l.key) }))}><Icon name="x" className="h-3.5 w-3.5" /></button> : <span className="w-7 shrink-0" />}
+                  </div>
+                  {(l.batches.length > 1 && n > 0) || (l.rxItemId && !done && short > 0) ? <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-[42px]">
+                    {l.batches.length > 1 && n > 0 && <select aria-label={`Batch for ${l.name}`} className="input !min-h-0 !w-auto !py-1 !text-xs" value={l.batchId} onChange={(e) => set(l.key, { batchId: e.target.value })}>{l.batches.map((x) => <option key={x.id} value={x.id}>{x.batchNo} · exp {exp(x.expiry)} · {x.qty} left</option>)}</select>}
+                    {l.rxItemId && !done && short > 0 && <><span className="text-[11.5px] text-muted">{n === 0 ? 'not from us' : `${short} not taken`}</span>
+                      <select aria-label={`Reason for ${l.name}`} className="input !min-h-0 !w-auto !py-1 !text-xs" value={l.reason} onChange={(e) => set(l.key, { reason: e.target.value })}><option value="">Reason (optional)</option>{REASONS.map((r) => <option key={r}>{r}</option>)}</select></>}
+                  </div> : null}
+                </div>);
+            })}
+          </div>
+
+          {lines.length > 0 && canBill && <>
+            <div className="mt-3 space-y-1.5 border-t border-line pt-3 text-[13.5px]">
+              <div className="flex justify-between"><span className="text-muted">{rx ? `${rxLines.filter((l) => Number(l.qty) > 0).length} of ${rxLines.length} prescribed · ` : ''}{units} {units === 1 ? 'item' : 'items'}</span><span>₹{rupees2(gross)}</span></div>
+              <div className="flex justify-between text-muted"><span>GST included</span><span>₹{rupees2(gst)}</span></div>
+              <div className="flex items-center justify-between gap-3"><span className="text-muted">Discount <span className="text-[11.5px]">(above 10% needs the owner)</span></span><MoneyInput label="Discount" className="!min-h-[34px] !w-28 !py-1" value={discount} onChange={setDiscount} /></div>
+              <div className="flex items-baseline justify-between pt-1.5"><span className="text-[15px] font-semibold">To pay</span><span key={total} className="bump text-[26px] font-semibold tracking-tight">{money(total)}</span></div>
+              {rxLines.some((l) => (l.left ?? 0) - (Number(l.qty) || 0) > 0 && Number(l.qty) > 0) && <div className="text-[11.5px] text-muted">The patient can come back for the rest within 30 days, or buy it outside.</div>}
+            </div>
+            {problem && issuing.length > 0 && <div className="mt-2 text-xs text-rose">{problem}</div>}
+            <button type="button" className="btn btn-primary mt-3 w-full !min-h-[52px] text-[15px]" disabled={!!problem} onClick={() => setPaying(true)}><Icon name="rupee" />Take payment{total > 0 ? ` · ${money(total)}` : ''}</button>
+          </>}
+          {rx && canBill && rx.status !== 'issued' && rx.status !== 'part' && <button type="button" className="btn btn-ghost mt-2 w-full" disabled={nothing.isPending} onClick={async () => { const a = await ask({ title: 'Buying elsewhere?', body: 'The prescription stays on the patient record; it just leaves the counter list.', confirmLabel: 'Not from us', field: { label: 'Reason (optional)', maxLength: 80 } }); if (a) nothing.mutate(a.value); }}>Not buying here</button>}
+          {rx && canBill && rx.status === 'part' && <button type="button" className="btn btn-ghost mt-2 w-full" disabled={outside.isPending} onClick={async () => { const a = await ask({ title: 'Rest bought outside?', body: 'What was issued here stays on the bills. The prescription leaves the earlier list.', confirmLabel: 'Rest bought outside', field: { label: 'Reason (optional)', maxLength: 80 } }); if (a) outside.mutate(a.value); }}>Rest bought outside</button>}
+          {over && lines.length > 0 && <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-[24px] bg-clay-soft/85 text-[15px] font-semibold text-clay-ink anim-fade-in">Drop to start this patient's bill</div>}
+        </aside>
+      </div>
+
       {paying && <PayDialog total={total} patient={who} onClose={() => setPaying(false)} build={() => ({
         ...(who.id ? { patientId: who.id } : { newPatient: { fullName: who.fullName.trim(), phone: who.phone, ageYears: who.ageYears ? Number(who.ageYears) : undefined } }),
         encounterId: rx?.encounterId, discountPaise: disc,
         items: issuing.map((l) => ({ medicineId: l.medicineId!, qty: Number(l.qty), batchId: l.batchId || undefined, prescriptionItemId: l.rxItemId })),
         notIssued: rxLines.filter((l) => (l.left ?? 0) > (Number(l.qty) || 0)).map((l) => ({ prescriptionItemId: l.rxItemId!, reason: l.reason || null })),
-      })} onDone={onDone} />}
+      })} onDone={(s) => { setPaying(false); setSale({ ...s, rows: issuing.map((l) => ({ name: l.name, qty: Number(l.qty), amount: lineAmount(l), rx: !!l.rxItemId })), gross, disc, total, who: who?.fullName }); }} />}
+      {sale && <Receipt sale={sale} clinic={cfg?.tenant?.name ?? ''} onNew={() => { setSale(null); reset(); }} />}
     </div>
   );
 }
 
-function AddItem({ meds, onAdd }: { meds: any[]; onAdd: (m: any) => void }) {
-  const [q, setQ] = useState(''); const [open, setOpen] = useState(false); const box = useRef<HTMLDivElement>(null);
-  const shown = meds.filter((m) => !q.trim() || m.name.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 8);
-  useEffect(() => { const h = (e: MouseEvent) => { if (box.current && !box.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
-  const pick = (m: any) => { onAdd(m); setQ(''); setOpen(false); };
+/** Payment taken: a stamp lands, the receipt reads like paper; Print or start the next sale. */
+function Receipt({ sale, clinic, onNew }: { sale: any; clinic: string; onNew: () => void }) {
   return (
-    <div ref={box} className="relative w-full sm:w-80">
-      <Icon name="plus" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
-      <input className="input !pl-10" aria-label="Add item to this bill" placeholder="Add item to this bill" value={q} onFocus={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); pick(shown[0]); } if (e.key === 'Escape') setOpen(false); }} />
-      {open && <div className="absolute z-20 mt-1 w-full card-flat p-1 shadow-lg max-h-72 overflow-y-auto">
-        {shown.length === 0 ? <div className="p-3 text-sm text-muted">Not in the medicine list. Add it under Settings → Medicines.</div> : shown.map((m) => (
-          <button key={m.id} className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-ink/5" onClick={() => pick(m)}>
-            <span className="flex-1 truncate">{m.name}</span><span className={`text-xs ${m.onHand ? 'text-muted' : 'text-rose'}`}>{m.onHand ? `${m.onHand} in stock` : 'out of stock'}</span><span className="w-14 text-right text-xs font-semibold">{money(m.mrpPaise)}</span>
-          </button>))}
-      </div>}
-    </div>
+    <Modal title="Payment taken" subtitle={`${sale.invoiceNo} · ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`} onClose={onNew} width="max-w-md">
+      <div className="stamp mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-clay text-white shadow-[0_12px_26px_-12px_var(--color-clay)]"><Icon name="check" className="h-7 w-7" /></div>
+      <div className="pop-in rounded-[18px] bg-surface-2 p-4 text-[13px] shadow-[var(--ring)]">
+        <div className="text-center"><b className="block text-[15px]">{clinic}</b><small className="text-muted">Pharmacy</small></div>
+        <div className="my-3 border-t border-dashed border-line-2" />
+        {sale.rows.map((r: any, i: number) => <div key={i} className="flex justify-between gap-3 py-1"><span className="min-w-0"><span className="block truncate">{r.rx ? 'Rx · ' : ''}{r.name}</span><small className="text-muted">{r.qty} × {money(Math.round(r.amount / r.qty))}</small></span><span className="shrink-0">{money(r.amount)}</span></div>)}
+        <div className="my-3 border-t border-dashed border-line-2" />
+        <div className="flex justify-between text-muted"><span>Subtotal</span><span>{money(sale.gross)}</span></div>
+        {sale.disc > 0 && <div className="flex justify-between text-muted"><span>Discount</span><span>−{money(sale.disc)}</span></div>}
+        <div className="mt-1 flex justify-between text-[17px] font-semibold"><span>Total</span><span>{money(sale.total)}</span></div>
+        {sale.who && <div className="mt-3 text-center text-[12px] text-muted">Customer: {sale.who}</div>}
+      </div>
+      <div className="modal-foot"><button type="button" className="btn" onClick={() => printSale(sale.id)}><Icon name="print" />Print</button><button type="button" className="btn btn-primary" onClick={onNew}>New sale</button></div>
+    </Modal>
   );
 }
 
+/** The bill's customer when there is no prescription: one of our patients, or a new walk-in (a name is enough). */
 function WalkInPatient({ who, setWho }: { who: any; setWho: (p: any) => void }) {
   const [mode, setMode] = useState<'existing' | 'new'>('existing'); const [find, setFind] = useState('');
   const [np, setNp] = useState({ fullName: '', phone: '', ageYears: '' });
   const pts = useQuery({ queryKey: ['palette', find], queryFn: () => get(`/patients?q=${encodeURIComponent(find)}`), enabled: mode === 'existing' && !who && find.trim().length >= 2 });
   useEffect(() => { if (mode === 'new') setWho(np.fullName.trim().length >= 2 && (!np.phone || /^[0-9]{10}$/.test(np.phone)) ? { ...np, phone: np.phone || null } : null); }, [np, mode]);
-  if (who?.id) return <div className="flex flex-1 items-center gap-3"><b className="text-xl">{who.fullName}</b><span className="text-sm text-muted">{who.patientNo} · {who.phone ?? 'no phone'}</span><span className="text-sm text-muted">Walk-in sale</span><button className="btn btn-sm ml-auto" onClick={() => setWho(null)}>Change</button></div>;
+  if (who?.id) return <div className="mt-3 flex items-center gap-2.5 rounded-[16px] bg-surface-2 p-2.5 shadow-[var(--ring)]"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-tile-3 text-[12px] font-bold">{initials(who.fullName)}</span><span className="min-w-0 flex-1"><b className="block truncate text-[13.5px]">{who.fullName}</b><small className="text-[12px] text-muted">{who.patientNo} · {who.phone ?? 'no phone'}</small></span><button type="button" className="btn btn-sm" onClick={() => setWho(null)}>Change</button></div>;
   return (
-    <div className="w-full space-y-2">
-      <div className="flex items-center gap-2"><b className="text-xl mr-auto">Walk-in sale</b>{([['existing', 'Our patient'], ['new', 'New customer']] as const).map(([k, l]) => <button key={k} className={`toggle-opt ${mode === k ? 'on' : ''}`} onClick={() => { setMode(k); setWho(null); }}>{l}</button>)}</div>
-      {mode === 'existing' ? <div className="relative max-w-md">
+    <div className="mt-3 space-y-2">
+      <div className="flex gap-1.5">{([['existing', 'Our patient'], ['new', 'New customer']] as const).map(([k, l]) => <button key={k} type="button" className={`toggle-opt flex-1 justify-center ${mode === k ? 'on' : ''}`} onClick={() => { setMode(k); setWho(null); }}>{l}</button>)}</div>
+      {mode === 'existing' ? <div>
         <input className="input" aria-label="Find patient" placeholder="Name, phone or patient ID" value={find} onChange={(e) => setFind(e.target.value)} />
-        {(pts.data ?? []).slice(0, 5).map((p: any) => <button key={p.id} className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-ink/5" onClick={() => setWho(p)}><span className="flex-1">{p.fullName}</span><span className="text-xs text-muted">{p.patientNo} · {p.phone ?? ''}</span></button>)}
-      </div> : <div className="grid max-w-xl grid-cols-6 gap-2">
-        <input className="input col-span-3" aria-label="Customer name" placeholder="Full name" value={np.fullName} onChange={(e) => setNp({ ...np, fullName: e.target.value })} />
-        <input className={`input col-span-2 ${np.phone && !/^[0-9]{10}$/.test(np.phone) ? '!border-rose' : ''}`} aria-label="Phone" inputMode="numeric" maxLength={10} placeholder="Phone (optional)" value={np.phone} onChange={(e) => setNp({ ...np, phone: e.target.value.replace(/\D/g, '') })} />
-        <input className="input col-span-1" aria-label="Age" inputMode="numeric" maxLength={3} placeholder="Age" value={np.ageYears} onChange={(e) => setNp({ ...np, ageYears: e.target.value.replace(/\D/g, '') })} />
+        {(pts.data ?? []).slice(0, 5).map((p: any) => <button key={p.id} type="button" className="mt-1 flex w-full items-center gap-2 rounded-[12px] px-3 py-2 text-left text-sm hover:bg-ink/5" onClick={() => setWho(p)}><span className="flex-1 truncate">{p.fullName}</span><span className="text-xs text-muted">{p.patientNo} · {p.phone ?? ''}</span></button>)}
+      </div> : <div className="grid grid-cols-[1fr_76px] gap-2">
+        <input className="input col-span-2" aria-label="Customer name" placeholder="Full name" value={np.fullName} onChange={(e) => setNp({ ...np, fullName: e.target.value })} />
+        <input className={`input ${np.phone && !/^[0-9]{10}$/.test(np.phone) ? '!border-rose' : ''}`} aria-label="Phone" inputMode="numeric" maxLength={10} placeholder="Phone (optional)" value={np.phone} onChange={(e) => setNp({ ...np, phone: e.target.value.replace(/\D/g, '') })} />
+        <input className="input" aria-label="Age" inputMode="numeric" maxLength={3} placeholder="Age" value={np.ageYears} onChange={(e) => setNp({ ...np, ageYears: e.target.value.replace(/\D/g, '') })} />
       </div>}
     </div>
   );
 }
 
 /** Payment: cash, UPI, card or split. Cash fills the remainder and shows the change; the receipt prints and/or goes on WhatsApp. */
-function PayDialog({ total, patient, build, onClose, onDone }: { total: number; patient: any; build: () => any; onClose: () => void; onDone: () => void }) {
+function PayDialog({ total, patient, build, onClose, onDone }: { total: number; patient: any; build: () => any; onClose: () => void; onDone: (sale: any) => void }) {
   const [mode, setMode] = useState<'cash' | 'upi' | 'card' | 'split'>('cash');
   const [upi, setUpi] = useState(''); const [upiRef, setUpiRef] = useState(''); const [card, setCard] = useState(''); const [cardRef, setCardRef] = useState(''); const [received, setReceived] = useState('');
   const [print, setPrint] = useState(() => pref('ph.print', true)); const [wa, setWa] = useState(() => pref('ph.wa', true) && !!patient?.phone);
@@ -261,7 +364,7 @@ function PayDialog({ total, patient, build, onClose, onDone }: { total: number; 
       toast(`Saved ${s.invoiceNo} · ${money(s.totalPaise)}${change > 0 ? ` · give change ${money(change)}` : ''}`);
       ['pharmacy', 'stock', 'reports', 'patients'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       if (print) printSale(s.id);
-      onDone();
+      onDone(s);
     },
     onError: (e) => toast(errText(e), 'err'),
   });

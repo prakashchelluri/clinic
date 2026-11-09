@@ -317,11 +317,11 @@ export function ToastHost() {
   return (
     <>
     <DialogHost />
-    <div className="fixed bottom-5 left-5 z-50 flex flex-col items-start gap-2 pointer-events-none">
+    <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2 pointer-events-none">
       {list.map((t) => (
-        <div key={t.id} className="anim-scale-in pointer-events-auto rounded-[10px] bg-ink px-3.5 py-2.5 text-[13px] font-medium text-white shadow-lg flex items-center gap-2.5">
+        <div key={t.id} className="pointer-events-auto flex items-center gap-2.5 rounded-full bg-[#141C18] py-2.5 pl-4 pr-2.5 text-[13.5px] font-semibold text-[#F2F6F3] shadow-[0_18px_40px_-18px_rgba(16,22,40,.7)]" style={{ animation: 'toast-in 0.5s var(--spring) both' }}>
           <Icon name={t.tone === 'err' ? 'x' : 'check'} className={`h-3.5 w-3.5 ${t.tone === 'err' ? 'text-[#FCA5A5]' : 'text-[#86EFAC]'}`} />{t.msg}
-          {t.action && <button className="-my-1 ml-1 rounded-md border border-white/30 px-2.5 py-1 text-xs font-semibold hover:bg-white/10" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action.label}</button>}
+          {t.action && <button className="-my-1 ml-1 rounded-full bg-white/12 px-3 py-1 text-xs font-semibold hover:bg-white/20" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action.label}</button>}
         </div>
       ))}
     </div>
