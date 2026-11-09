@@ -26,12 +26,11 @@ export function Overview() {
   const area = `${line} L${W},${H} L0,${H}Z`;
   const diff = d.today.visits - d.today.sameDayLastWeek;
   const hov = hover !== null ? { s: series[hover], p: pts[hover] } : null;
-  const requests = counts.data?.requests ?? 0; const unconfirmed = counts.data?.unconfirmed ?? 0;
+  const unconfirmed = counts.data?.unconfirmed ?? 0;
 
   return (
     <div>
       <PageHeader title="Overview" subtitle={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}>
-        {requests > 0 && <button className="btn" onClick={() => nav('/bookings?tab=requests')}><Icon name="inbox" className="h-4 w-4 text-clay" />{requests} online request{requests === 1 ? '' : 's'}</button>}
         {unconfirmed > 0 && <button className="btn" onClick={() => nav('/bookings?tab=unconfirmed')}><Icon name="message" className="h-4 w-4" />{unconfirmed} not yet confirmed</button>}
       </PageHeader>
 

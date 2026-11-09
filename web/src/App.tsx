@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, patch, qc, ApiError } from './api';
-import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, PageSearchCtx, PageSearchBox } from './ui';
+import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, PageSearchCtx, PageSearchBox, revealTheme } from './ui';
 import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
 import { settingsTopic } from './pages/Settings';
@@ -75,7 +75,7 @@ export function useNav() {
 }
 
 /** The collapsed rail: one icon per section with its name in a tooltip, for people who know the icons and want the width. */
-function Rail({ items, active, clinic, me, requests, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; requests: number; onSignOut: () => void; onExpand: () => void }) {
+function Rail({ items, active, clinic, me, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; onSignOut: () => void; onExpand: () => void }) {
   return (
     <div className="flex h-full flex-col items-center px-3 pb-3.5 pt-4">
       <Link to="/" title={clinic} className="mb-2 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
@@ -85,7 +85,6 @@ function Rail({ items, active, clinic, me, requests, onSignOut, onExpand }: { it
           {i > 0 && n.group === 'clinic' && items[i - 1].group !== 'clinic' && <span className="my-1.5 w-6 border-t border-line-2" />}
           <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} aria-label={n.label} data-tip={n.label} className={`tip rail-item ${active?.to === n.to ? 'active' : ''}`}>
             <Icon name={n.icon} className="h-[18px] w-[18px]" />
-            {n.to === '/bookings' && requests > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-ink" aria-label={`${requests} online requests`} />}
           </Link></span>)}
       </nav>
       <Link to="/help" aria-label="Help" data-tip="Help" className="tip rail-item mt-auto"><Icon name="help" className="h-[18px] w-[18px]" /></Link>
@@ -97,19 +96,11 @@ function Rail({ items, active, clinic, me, requests, onSignOut, onExpand }: { it
   );
 }
 
-/** The clock in the top bar: the clinic's time with a breathing dot, so the room knows the app is live. */
-function Clock() {
-  const fmt = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-  const [t, setT] = useState(fmt);
-  useEffect(() => { const i = setInterval(() => setT(fmt()), 10_000); return () => clearInterval(i); }, []);
-  return <span className="toppill hidden !px-2.5 sm:inline-flex" aria-label={`Clinic time ${t}`}><span className="breathe h-2 w-2 rounded-full bg-sage" />{t}</span>;
-}
-
-function Sidebar({ items, active, clinic, me, roles, requests, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; requests: number; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
+function Sidebar({ items, active, clinic, me, roles, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
-      {n.to === '/bookings' && requests > 0 && <span className="chip chip-clay" aria-label={`${requests} online requests`}>{requests}</span>}
+      
     </Link>
   );
   const main = items.filter((n) => !n.group); const clinicItems = items.filter((n) => n.group === 'clinic');
@@ -142,7 +133,7 @@ export function App() {
   const [drawer, setDrawer] = useState(false);
   useScrollLock(drawer);
   const [params, setParams] = useSearchParams();
-  const closeBook = () => { const p = new URLSearchParams(params); ['book', 'patient', 'pname', 'rec'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); };
+  const closeBook = () => { const p = new URLSearchParams(params); if (p.get('rec')) p.delete('day'); /* a follow-up's date, not the Calendar's own day */ ['book', 'patient', 'pname', 'rec', 'doc'].forEach((k) => p.delete(k)); setParams(p, { replace: true }); };
   const perms: string[] = me.data?.perms ?? [];
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
@@ -154,7 +145,6 @@ export function App() {
   const blocked = !!pageRule && (platform ? pageRule.to !== '/platform' : pageRule.to === '/platform' || !pageRule.show(c));
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
   const counts = useQuery({ queryKey: ['bookings', 'counts'], queryFn: () => get('/bookings/counts'), enabled: !!me.data && !platform && c('appointment.read'), refetchInterval: 30000 });
-  const requests = counts.data?.requests ?? 0;
   const plansNew = c('worklist.read') ? counts.data?.plans ?? 0 : 0; // plans the doctor made today that nobody has acted on yet
   const [bell, setBell] = useState(false);
   const [padNav, setPadNav] = useState(false); // on a consultation the sidebar starts as icons, to give the pad the room; this opens it for now
@@ -198,12 +188,13 @@ export function App() {
   const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? (perms.includes('encounter.complete') || perms.includes('*') ? '/today' : '/queue') : seg[0] === 'help' ? '/' : null;
   const goBack = () => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(parent ?? '/', { viewTransition: true }));
   const roles: string[] = me.data.roles ?? [me.data.role];
-  const side = { items, active, clinic, me: me.data, roles, requests, onSignOut: signOut };
+  const side = { items, active, clinic, me: me.data, roles, onSignOut: signOut };
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
+      <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
       <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
-        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} onExpand={toggleWide} />}
+        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} onSignOut={signOut} onExpand={toggleWide} />}
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
@@ -212,7 +203,7 @@ export function App() {
       )}
 
       <div className={`${wide ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
-        <header className="no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
+        <header className="app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
           {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
           {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[22px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-5 w-5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
@@ -220,14 +211,12 @@ export function App() {
           {!onPad && pageSearch && <PageSearchBox key={pageSearch} placeholder={pageSearch} className="mr-1 hidden w-[300px] md:inline-flex" />}
           {!platform && !onPad && !pageSearch && <button onClick={() => setPalette(true)} className="toppill mr-1 hidden w-[280px] !font-medium !text-muted lg:inline-flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-4 w-4" /><span className="flex-1 truncate text-left">Patients, phone or ID…</span><span className="kbd">Ctrl K</span></button>}
           {!platform && !onPad && !pageSearch && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-icon lg:hidden"><Icon name="search" /></button>}
-          {!onPad && <Clock />}
-          <button type="button" onClick={toggleTheme} className="btn btn-icon hidden sm:inline-flex" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
+          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="btn btn-icon hidden sm:inline-flex" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
           {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-icon hidden sm:inline-flex"><Icon name="help" className="h-4 w-4" /></Link>}
             {!platform && !onPad && c('appointment.read') && <div className="relative">
-              <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-icon"><Icon name="bell" className="h-4 w-4" />{requests + plansNew > 0 && <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-ink px-1 text-[10.5px] font-bold text-paper anim-scale-in" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }}>{requests + plansNew}</span>}</button>
+              <button onClick={() => setBell((o) => !o)} aria-label={plansNew ? `${plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-icon"><Icon name="bell" className="h-4 w-4" />{plansNew > 0 && <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-ink px-1 text-[10.5px] font-bold text-paper anim-scale-in" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }}>{plansNew}</span>}</button>
               {bell && <><div className="fixed inset-0 z-30" onClick={() => setBell(false)} /><div className="menu anim-menu z-40 !w-[270px]" role="menu">
-                {requests + plansNew === 0 && <div className="px-3 py-2.5 text-sm text-muted">Nothing new.</div>}
-                {requests > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/bookings?tab=requests'); }}><Icon name="inbox" className="h-4 w-4" />{requests} online booking request{requests === 1 ? '' : 's'}</button>}
+                {plansNew === 0 && <div className="px-3 py-2.5 text-sm text-muted">Nothing new.</div>}
                 {plansNew > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/worklist?tab=plans'); }}><Icon name="stetho" className="h-4 w-4" />{plansNew} new plan{plansNew === 1 ? '' : 's'} from the doctor</button>}
               </div></>}</div>}
             {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
@@ -248,7 +237,7 @@ export function App() {
       </div>
       <PrintHost />
       <ViewerHost />
-      {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} onClose={closeBook} onDone={() => { refreshBookings(); const rec = params.get('rec'); if (rec) patch(`/worklist/${rec}`, { status: 'scheduled' }).then(() => qc.invalidateQueries({ queryKey: ['worklist'] }), () => {}); closeBook(); }} />}
+      {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} initialDay={params.get('day') ?? undefined} initialDoc={params.get('doc') ?? undefined} onClose={closeBook} onDone={() => { refreshBookings(); const rec = params.get('rec'); if (rec) patch(`/worklist/${rec}`, { status: 'scheduled' }).then(() => qc.invalidateQueries({ queryKey: ['worklist'] }), () => {}); closeBook(); }} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />
     </div>

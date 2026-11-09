@@ -157,7 +157,7 @@ export const appointment = pgTable('appointment', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   sessionId: uuid('session_id').notNull().references(() => session.id),
-  status: text('status').notNull().default('booked'), // requested | booked | confirmed | arrived | cancelled | no_show
+  status: text('status').notNull().default('booked'), // booked | confirmed | arrived | cancelled | no_show
   source: text('source').notNull().default('phone'), // phone | walk_in | online | repeat
   note: text('note'),
   overbooked: boolean('overbooked').notNull().default(false),
@@ -170,8 +170,8 @@ export const appointment = pgTable('appointment', {
 }, (t) => [uniqueIndex('appt_idem').on(t.tenantId, t.idempotencyKey), uniqueIndex('appt_token').on(t.publicToken), index('appt_series').on(t.tenantId, t.seriesId)]);
 
 /** Statuses that hold a place in a window, and the ones still ahead of arrival (movable, cancellable). */
-export const HOLDS_PLACE = ['requested', 'booked', 'confirmed', 'arrived'] as const;
-export const OPEN_STATUSES = ['requested', 'booked', 'confirmed'] as const;
+export const HOLDS_PLACE = ['booked', 'confirmed', 'arrived'] as const;
+export const OPEN_STATUSES = ['booked', 'confirmed'] as const;
 
 /** What patients book ("visit types"). Clinic-defined; colour shows on the calendar. */
 export const service = pgTable('service', {
@@ -195,7 +195,7 @@ export const message = pgTable('message', {
   ...tenantCols,
   patientId: uuid('patient_id'),
   appointmentId: uuid('appointment_id'),
-  kind: text('kind').notNull(),        // confirmation | requested | reminder | cancelled | moved | declined
+  kind: text('kind').notNull(),        // confirmation | reminder | cancelled | moved | late | reschedule
   channel: text('channel').notNull(),  // whatsapp | sms | none
   toPhone: text('to_phone'),
   body: text('body').notNull(),

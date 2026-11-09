@@ -300,3 +300,25 @@ h1 { letter-spacing: -0.025em; }
 
 /* Printing a document from the popup: only #print-area is printed */
 @media print { body.printing-doc > *:not(#print-area) { display: none !important; } body.printing-doc #print-area { display: block !important; } }
+
+/* ---------- Login (3B): one patient walks past every role. Cubes in Cubott's isometric language, coloured from the app palette; the form on a surface panel. ---------- */
+@keyframes lg-walk {
+  0% { transform: translate(40px, 612px); opacity: 0; } 4% { opacity: 1; }
+  12%, 25% { transform: translate(180px, 542px); }
+  37%, 50% { transform: translate(360px, 452px); }
+  62%, 75% { transform: translate(540px, 362px); }
+  96% { opacity: 1; } 100% { transform: translate(700px, 282px); opacity: 0; } }
+@keyframes lg-actR { 0%, 11% { transform: none; } 14%, 24% { transform: translateY(-16px); } 28%, 100% { transform: none; } }
+@keyframes lg-actD { 0%, 36% { transform: none; } 39%, 49% { transform: translateY(-16px); } 53%, 100% { transform: none; } }
+@keyframes lg-actP { 0%, 61% { transform: none; } 64%, 74% { transform: translateY(-16px); } 78%, 100% { transform: none; } }
+@keyframes lg-rowR { 0%, 11% { opacity: .4; } 14%, 24% { opacity: 1; } 28%, 100% { opacity: .4; } }
+@keyframes lg-rowD { 0%, 36% { opacity: .4; } 39%, 49% { opacity: 1; } 53%, 100% { opacity: .4; } }
+@keyframes lg-rowP { 0%, 61% { opacity: .4; } 64%, 74% { opacity: 1; } 78%, 100% { opacity: .4; } }
+@keyframes lg-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
+@keyframes lg-dash { to { stroke-dashoffset: -40; } }
+.lg-walk { animation: lg-walk 9s cubic-bezier(.45,0,.55,1) infinite; }
+.lg-aR { animation: lg-actR 9s ease-in-out infinite; } .lg-aD { animation: lg-actD 9s ease-in-out infinite; } .lg-aP { animation: lg-actP 9s ease-in-out infinite; }
+.lg-rR { animation: lg-rowR 9s ease-in-out infinite; } .lg-rD { animation: lg-rowD 9s ease-in-out infinite; } .lg-rP { animation: lg-rowP 9s ease-in-out infinite; }
+.lg-bob { animation: lg-bob 5s ease-in-out infinite; }
+.lg-sight { stroke-dasharray: 3 7; animation: lg-dash 2.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .lg-walk, .lg-aR, .lg-aD, .lg-aP, .lg-rR, .lg-rD, .lg-rP, .lg-bob, .lg-sight { animation: none; } }

@@ -12,9 +12,9 @@ import { receiveStock, schemeFree, type Actor } from './stock.js';
 
 /**
  * Test data for the booking and photo features, on top of the base sample (patients, visits, today's queue):
- * one week of everything (today-6 to today+6): bookings across every doctor with visit types and statuses, online requests waiting for approval,
+ * one week of everything (today-6 to today+6): bookings across every doctor with visit types and statuses,
  * repeat series, queued patient messages, and two procedure courses with sittings and before/after photos.
- * Run it again to top up: bookings only fill windows below their target; the one-off parts (requests, series, courses, photos) are made once.
+ * Run it again to top up: bookings only fill windows below their target; the one-off parts (series, courses, photos) are made once.
  */
 const MARKER = 'sample-bookings-marker';
 
@@ -31,7 +31,7 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
   let seed = 7; const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; }; // repeatable
   const svcFor = (docId: string | null) => { const ok = svcs.filter((s) => !s.practitionerIds.length || (docId && s.practitionerIds.includes(docId))); return ok.length ? ok[rnd(ok.length)] : null; };
   const NOTES = [null, null, null, 'asked for the main doctor', 'coming from Kadiyam, may be late', 'review of lab reports', 'brings old prescription', null];
-  const counts = { booked: 0, confirmed: 0, arrived: 0, no_show: 0, cancelled: 0, requested: 0, series: 0, messages: 0, sittings: 0, photos: 0, visits: 0, pharmacyBills: 0, counterSales: 0, stockReceipts: 0, expenses: 0 };
+  const counts = { booked: 0, confirmed: 0, arrived: 0, no_show: 0, cancelled: 0, series: 0, messages: 0, sittings: 0, photos: 0, visits: 0, pharmacyBills: 0, counterSales: 0, stockReceipts: 0, expenses: 0 };
   const made: string[] = [];
   /** First window with room on the day or the next working days (no doctor works on Sunday). */
   const nextWindow = async (day: string, docId: string) => { for (let i = 0; i < 7; i++) { const w = (await windowsForDay(tx, t, addDays(day, i), docId)).find((x) => x.free > 0); if (w) return w; } return null; };
@@ -72,19 +72,8 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
     }
   }
 
-  // The rest is set up once: requests, repeat series, messages, procedure courses with photos, online booking switched on.
+  // The rest is set up once: repeat series, messages, procedure courses with photos, online booking switched on.
   if (first) {
-  // 2. Online requests waiting in Bookings → Requests
-  const online = svcs.filter((s) => s.onlineBookable);
-  const reqNotes = ['acne for 3 months', 'hair fall after fever', 'itchy rash on hands', null];
-  for (let i = 0; i < 4; i++) {
-    const d = docs[i % docs.length]; const day = addDays(today, 1 + i);
-    const w = await nextWindow(day, d.id); if (!w) continue;
-    const p = pts[(i * 5 + 3) % pts.length]; const svc = online[i % Math.max(1, online.length)] ?? null;
-    await tx.insert(appointment).values({ tenantId: t, patientId: p.id, sessionId: w.id, serviceId: svc?.id ?? null, status: 'requested', source: 'online', note: reqNotes[i], publicToken: newToken() });
-    counts.requested++;
-  }
-
   // 3. Repeat series: two patients every two weeks, four visits each
   const review = svcs.find((s) => /review/i.test(s.name)) ?? svcs[0];
   for (const [i, p] of [pts[1], pts[6]].entries()) {
@@ -140,17 +129,13 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
     }
   }
 
-  // 6. Online booking switched on (approval required) so the public page can be tried straight away
-  const settings = { ...ten.settings, online: { requireApproval: true, minNoticeHours: 2, maxDaysAhead: 30, dailyCap: 0, intro: '', ...(ten.settings?.online ?? {}), enabled: true } };
-  await tx.update(tenant).set({ settings }).where(eq(tenant.id, t));
-
   // marker so a second run is refused (a cancelled booking that holds no place)
   const anyWindow = (await windowsForDay(tx, t, addDays(today, 1)))[0];
   if (anyWindow) await tx.insert(appointment).values({ tenantId: t, patientId: pts[0].id, sessionId: anyWindow.id, status: 'cancelled', source: 'phone', cancelReason: 'test data marker', idempotencyKey: MARKER });
   } // end of the one-off parts
   await loadWeek(tx, t, userId, tz, today, counts);
   const open = await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), inArray(appointment.status, [...OPEN_STATUSES])));
-  return { ...counts, topUp: !first, from, to, openBookings: open.length, bookingPage: `${origin}/book/${ten.slug}` };
+  return { ...counts, topUp: !first, from, to, openBookings: open.length };
 }
 
 /* ---------- Generated "skin" photos: a warm tone with dark spots that fade over the sittings, so before/after shows a change ---------- */

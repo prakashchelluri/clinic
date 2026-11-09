@@ -1,0 +1,67 @@
+/* ---------- Front desk under glass: a living backdrop, glass sheets, motion that means something ----------
+   Its own file so the front desk can change without touching the shared stylesheet. */
+/* the front desk uses the app-wide glass tokens (glass.css); these names are kept short for its own rules */
+.fd { --fd-glass: var(--g-glass); --fd-glass-2: var(--g-glass-2); --fd-edge: var(--g-edge); --fd-mark: var(--g-mark); --fd-mark-text: var(--g-mark-text); position: relative; }
+
+/* glass is paid once per sheet, never per row */
+.fd-sheet { background: var(--g-glass); -webkit-backdrop-filter: var(--g-blur); backdrop-filter: var(--g-blur); border-radius: 24px; box-shadow: var(--g-shadow); }
+
+/* the stage strip: one ink drop slides and stretches to the chosen stage */
+.fd-tiles { position: relative; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+.fd-tile { position: relative; z-index: 1; display: flex; min-width: 108px; flex-direction: column; align-items: flex-start; gap: 2px; border-radius: 18px; padding: 10px 14px; text-align: left; background: var(--fd-glass-2); box-shadow: inset 0 0 0 1px var(--fd-edge); color: var(--color-ink); transition: color .3s var(--ease), background-color .3s; }
+.fd-tile[aria-selected="true"] { background: transparent; box-shadow: none; color: var(--fd-mark-text); }
+.fd-tile .fd-lbl { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; color: var(--color-muted); transition: color .3s; }
+.fd-tile[aria-selected="true"] .fd-lbl { color: color-mix(in srgb, var(--fd-mark-text) 70%, transparent); }
+.fd-drop { position: absolute; z-index: 0; top: 0; left: 0; height: calc(100% - 4px); border-radius: 18px; background: var(--fd-mark); transition: transform .45s cubic-bezier(.6, 0, .2, 1.15), width .45s cubic-bezier(.6, 0, .2, 1.15); }
+.fd-tile.fd-pulse { animation: fd-pulse .9s var(--ease); }
+@keyframes fd-pulse { 0% { box-shadow: inset 0 0 0 1px var(--fd-edge), 0 0 0 0 color-mix(in srgb, var(--color-clay) 45%, transparent); } 100% { box-shadow: inset 0 0 0 1px var(--fd-edge), 0 0 0 10px transparent; } }
+
+/* the wait ring: fills toward the clinic's wait target, amber once it is passed */
+@property --p { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+.fd-tok { position: relative; }
+.fd-ring { position: absolute; inset: -3px; border-radius: 16px; padding: 2.5px; pointer-events: none; background: conic-gradient(var(--fd-ring, var(--color-clay)) var(--p, 0%), transparent 0); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; transition: --p .6s var(--ease); }
+.fd-ring.over { --fd-ring: var(--color-amber); }
+
+/* Send in: the arrow walks through the door; the row lifts and leaves toward the stages */
+.fd-door { position: relative; display: inline-block; width: 14px; height: 14px; overflow: hidden; }
+.fd-door svg { transition: transform .35s var(--ease); }
+.fd-send:hover .fd-door svg, .fd-send:focus-visible .fd-door svg { transform: translateX(3px); }
+.fd-leaving { animation: fd-leave .5s cubic-bezier(.4, 0, .2, 1) forwards; pointer-events: none; }
+.fd-leaving .fd-door svg { animation: fd-walk .35s var(--ease) forwards; }
+@keyframes fd-leave { 0% { transform: none; } 30% { transform: translateY(-4px) scale(1.01); box-shadow: 0 18px 40px -20px rgba(16, 32, 24, .4); } 100% { transform: translate(40px, -60px) scale(.6); opacity: 0; } }
+@keyframes fd-walk { to { transform: translateX(16px); opacity: 0; } }
+
+/* arranged: one tick before the row leaves */
+.fd-tick { display: flex; align-items: center; gap: 10px; color: var(--color-clay); font-weight: 700; animation: fd-tick 1.8s cubic-bezier(.34, 1.56, .64, 1) both; }
+@keyframes fd-tick { 0% { opacity: 0; transform: rotateX(-80deg) scale(.7); } 18%, 80% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-6px); } }
+
+/* the journey rail draws itself and the dots pop in order */
+.fd-rail { transform-origin: top; animation: fd-draw .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 110ms); }
+.fd-dot { animation: fd-pop .4s var(--ease) both; animation-delay: calc(var(--i, 0) * 110ms); }
+@keyframes fd-draw { from { transform: scaleY(0); } }
+@keyframes fd-pop { 0% { opacity: .2; transform: scale(.4); } 60% { opacity: 1; transform: scale(1.15); } 100% { transform: none; } }
+
+/* the filmstrip: every token of the day in journey order */
+.fd-strip { position: sticky; bottom: 12px; z-index: 5; display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: none; height: 56px; padding: 0 14px; border-radius: 999px; }
+.fd-ft { flex: none; min-width: 44px; height: 36px; padding: 0 8px; border-radius: 12px; font-size: 11px; font-weight: 800; white-space: nowrap; background: var(--fd-glass-2); box-shadow: inset 0 0 0 1px var(--fd-edge); color: var(--color-muted); transition: transform .2s var(--ease); }
+.fd-ft:hover { transform: translateY(-2px); }
+.fd-ft[aria-current="true"] { background: var(--fd-mark); color: var(--fd-mark-text); box-shadow: none; }
+.fd-ft.done { opacity: .55; }
+.fd-ft.arr { background: var(--color-amber-soft); color: var(--color-amber); }
+.fd-ft.doc { background: var(--color-clay-soft); color: var(--color-clay-ink); }
+.fd-ft.jr { background: var(--color-sky-soft); color: var(--color-sky); }
+
+@media (prefers-reduced-motion: reduce) { .fd-leaving, .fd-tick, .fd-rail, .fd-dot, .fd-pulse { animation: none !important; } .fd-drop, .fd-ring { transition: none; } }
+
+/* the desk's table: a real table on the glass, group headings as rows, one status chip per row */
+.fd-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.fd-table thead th { position: sticky; top: 0; z-index: 1; padding: 12px 14px 10px; text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--color-muted); white-space: nowrap; border-bottom: 1px solid var(--color-line); }
+.fd-table thead th:first-child { padding-left: 20px; }
+.fd-table td { padding: 9px 14px; vertical-align: middle; border-bottom: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent); }
+.fd-table td:first-child { padding-left: 20px; }
+.fd-table td:last-child { padding-right: 18px; }
+.fd-gh th { padding: 16px 20px 8px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--color-line); }
+.fd-tr { transition: background-color .15s var(--ease); animation: fade-up .32s var(--ease) both; animation-delay: min(calc((sibling-index() - 1) * 30ms), 300ms); }
+.fd-tr:hover { background: color-mix(in srgb, var(--color-ink) 3.5%, transparent); }
+.fd-tr.is-sel { background: color-mix(in srgb, var(--color-clay) 10%, transparent); box-shadow: inset 3px 0 0 var(--color-clay); }
+.fd-tr.fd-leaving { animation: fd-leave .5s cubic-bezier(.4, 0, .2, 1) forwards; }

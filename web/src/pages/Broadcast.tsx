@@ -12,7 +12,7 @@ const AUDIENCES: { key: Aud; label: string; days?: number }[] = [
 const TEMPLATES = [
   { title: 'Clinic closed', text: 'Dear {name}, {clinic} will be closed on [date]. We reopen on [date]. For anything urgent please call us. Sorry for the inconvenience.' },
   { title: 'Camp or offer', text: 'Hello {name}, {clinic} is holding a skin check camp on [date], [time]. Everyone is welcome. Call us to book your place.' },
-  { title: 'Reminder to visit', text: 'Hello {name}, this is {clinic}. It has been a while since your last visit. Call us or book online to see the doctor.' },
+  { title: 'Reminder to visit', text: 'Hello {name}, this is {clinic}. It has been a while since your last visit. Call us to see the doctor.' },
   { title: 'Blank', text: '' },
 ];
 

@@ -1,4 +1,4 @@
-// Phases 2–4: visit types, repeat series, statuses, messages, online booking and the patient link.
+// Phases 2–4: visit types, repeat series, statuses, messages and the patient link.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -94,73 +94,39 @@ test('booking with a visit type, repeat series, confirm, cancel the rest of the 
   assert.equal((await reception('GET', '/bookings/counts')).status, 200);
 });
 
-test('online booking: off by default, rules, request → approve, patient link, outbox', async () => {
-  const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
-  assert.equal((await anon('GET', '/public/clinic/nope')).status, 404);
-  const pub0 = await anon('GET', '/public/clinic/sahitya');
-  assert.equal(pub0.status, 200); assert.equal(pub0.body.enabled, false);
-  assert.equal((await anon('GET', `/public/clinic/sahitya/slots?from=${today()}`)).body.code, 'ONLINE_BOOKING_OFF');
-  // staff API stays locked to anonymous callers
-  assert.equal((await anon('GET', '/bookings')).status, 401);
+test('no public booking page; the patient link from WhatsApp: view, confirm, move with the same doctor, cancel; outbox', async () => {
+  const reception = await as('reception@demo.clinic');
+  assert.equal((await anon('GET', '/public/clinic/sahitya')).status, 404, 'there is no public booking page');
+  assert.equal((await anon('POST', '/public/clinic/sahitya/book', { name: 'Someone', phone: '9876500000' })).status, 404);
 
-  await owner('PATCH', '/admin/clinic', { settings: { online: { enabled: true, requireApproval: true, minNoticeHours: 2, maxDaysAhead: 14, dailyCap: 0 }, booking: { cancelWindowHours: 4 } } });
-  const pub = (await anon('GET', '/public/clinic/sahitya')).body;
-  assert.equal(pub.enabled, true);
-  assert.ok(pub.services.length >= 2 && pub.services.every((s: any) => s.name !== 'Procedure follow-up'), 'only online visit types');
-  const svc = pub.services[0];
+  const cfg = (await reception('GET', '/config')).body;
+  const doc = cfg.practitioners.find((p: any) => p.name.startsWith('Dr. Main')).id;
+  const svc = cfg.services.find((s: any) => s.name === 'New consultation');
+  const day = addDays(today(), 3);
+  const w = (await reception('GET', `/sessions?day=${day}&practitionerId=${doc}`)).body.find((x: any) => x.free > 0);
+  assert.ok(w, 'a free window three days out');
+  const made = await reception('POST', '/appointments', { sessionId: w.id, serviceId: svc.id, newPatient: { fullName: 'Link Patient', phone: '9876500000' } });
+  assert.equal(made.status, 200, JSON.stringify(made.body));
+  const link = `/a/sahitya/${made.body.publicToken}`;
 
-  const slots = (await anon('GET', `/public/clinic/sahitya/slots?from=${addDays(today(), 3)}&days=3&serviceId=${svc.id}`)).body;
-  const pick = slots.flatMap((d: any) => d.slots.map((s: any) => ({ ...s, day: d.day })))[0];
-  assert.ok(pick, 'some open slot 3+ days out');
-  const beyond = (await anon('GET', `/public/clinic/sahitya/slots?from=${addDays(today(), 20)}&days=3&serviceId=${svc.id}`)).body;
-  assert.equal(beyond.length, 0, 'nothing past the booking horizon');
-  assert.equal((await anon('GET', `/public/clinic/sahitya/slots?from=2026-02-30`)).status, 400);
-
-  const bad = [
-    { name: 'A', phone: '9876500000' }, { name: 'Valid Name', phone: '98765' }, { name: 'Valid Name', phone: 'abcdefghij' },
-    { name: 'Valid Name', phone: '9876500000', website: 'spam' }, { name: 'x'.repeat(101), phone: '9876500000' },
-  ];
-  for (const b of bad) assert.equal((await anon('POST', '/public/clinic/sahitya/book', { sessionId: pick.id, serviceId: svc.id, ...b })).status, 400, JSON.stringify(b));
-
-  const book = await anon('POST', '/public/clinic/sahitya/book', { sessionId: pick.id, serviceId: svc.id, name: 'Online Patient', phone: '9876500000', note: 'itchy rash' });
-  assert.equal(book.status, 200, JSON.stringify(book.body)); assert.equal(book.body.status, 'requested');
-
-  const view = await anon('GET', `/public${book.body.link}`);
-  assert.equal(view.status, 200); assert.equal(view.body.status, 'requested'); assert.equal(view.body.canConfirm, false); assert.equal(view.body.canCancel, true);
+  const view = await anon('GET', `/public${link}`);
+  assert.equal(view.status, 200); assert.equal(view.body.status, 'booked'); assert.equal(view.body.canCancel, true);
   assert.equal((await anon('GET', '/public/a/sahitya/not-a-real-token-xxxxxxxxxx')).status, 404);
 
-  const reqs = (await reception('GET', '/bookings?tab=requests')).body;
-  const mine = reqs.find((x: any) => x.patient.fullName === 'Online Patient');
-  assert.ok(mine, 'request in the inbox');
-  assert.equal((await reception('POST', `/appointments/${mine.id}/approve`)).status, 200);
-  assert.equal((await reception('POST', `/appointments/${mine.id}/approve`)).body.code, 'NOT_A_REQUEST');
-
-  const confirmed = await anon('POST', `/public${book.body.link}/confirm`);
+  const confirmed = await anon('POST', `/public${link}/confirm`);
   assert.equal(confirmed.body.status, 'confirmed');
-  const linkSlots = (await anon('GET', `/public${book.body.link}/slots?from=${addDays(today(), 3)}&days=3`)).body.flatMap((d: any) => d.slots);
-  assert.ok(linkSlots.every((s: any) => s.practitionerId === pick.practitionerId), 'a patient reschedules with the same doctor');
-  const otherDoc = slots.flatMap((d: any) => d.slots).find((s: any) => s.practitionerId !== pick.practitionerId);
-  if (otherDoc) assert.equal((await anon('POST', `/public${book.body.link}/reschedule`, { sessionId: otherDoc.id })).body.code, 'SLOT_TAKEN');
-  const moveTo = linkSlots[0];
-  if (moveTo) assert.equal((await anon('POST', `/public${book.body.link}/reschedule`, { sessionId: moveTo.id })).status, 200);
-  const cancelled = await anon('POST', `/public${book.body.link}/cancel`, { reason: 'feeling better' });
+  const linkSlots = (await anon('GET', `/public${link}/slots?from=${addDays(today(), 3)}&days=3`)).body.flatMap((d: any) => d.slots);
+  assert.ok(linkSlots.every((s: any) => s.practitionerId === doc), 'a patient reschedules with the same doctor');
+  assert.ok(linkSlots.every((s: any) => s.day === undefined || s.day <= addDays(today(), 30)));
+  const moveTo = linkSlots.find((s: any) => s.id !== w.id);
+  if (moveTo) assert.equal((await anon('POST', `/public${link}/reschedule`, { sessionId: moveTo.id })).status, 200);
+  const cancelled = await anon('POST', `/public${link}/cancel`, { reason: 'feeling better' });
   assert.equal(cancelled.body.status, 'cancelled');
-  assert.equal((await anon('POST', `/public${book.body.link}/cancel`)).body.code, 'NOT_OPEN');
+  assert.equal((await anon('POST', `/public${link}/cancel`)).body.code, 'NOT_OPEN');
 
-  // a second request, declined by reception
-  const b2 = await anon('POST', '/public/clinic/sahitya/book', { sessionId: pick.id, serviceId: svc.id, name: 'Declined Patient', phone: '9876511111' });
-  const r2 = (await reception('GET', '/bookings?tab=requests')).body.find((x: any) => x.patient.fullName === 'Declined Patient');
-  assert.equal((await reception('POST', `/appointments/${r2.id}/decline`, { reason: 'Doctor on leave.' })).body.status, 'cancelled');
-  assert.equal((await anon('GET', `/public${b2.body.link}`)).body.status, 'cancelled');
-
-  // outbox: no WhatsApp configured → messages are logged, not lost
-  const sentN = await dispatchDue(new Date());
-  assert.ok(sentN > 0);
+  // outbox: no WhatsApp configured → messages are logged, not lost, and no placeholder is left unfilled
+  await dispatchDue(new Date());
   const out = (await reception('GET', '/messages?status=logged')).body;
-  assert.ok(out.some((m: any) => m.kind === 'declined' && /Doctor on leave/.test(m.body)));
-  assert.ok(out.every((m: any) => !/\{\w+\}/.test(m.body)), 'no unfilled placeholders');
-
-  // turning online booking off closes the door again
-  await owner('PATCH', '/admin/clinic', { settings: { online: { enabled: false } } });
-  assert.equal((await anon('POST', '/public/clinic/sahitya/book', { sessionId: pick.id, serviceId: svc.id, name: 'Too Late', phone: '9876522222' })).body.code, 'ONLINE_BOOKING_OFF');
+  assert.ok(out.length > 0);
+  assert.ok(out.every((m: any) => !/{w+}/.test(m.body)), 'no unfilled placeholders');
 });

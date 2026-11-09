@@ -28,9 +28,10 @@ async function clinicBySlug(slug: string) {
 const ctxFor = (t: any): Ctx => ({ tenantId: t.id, userId: SYSTEM_USER, role: 'patient', roles: ['patient'], name: 'Patient (online)', practitionerId: null, timezone: t.timezone, tenantKind: t.kind });
 const inTenant = <T>(t: any, fn: (tx: Tx) => Promise<T>) => withTenant(t.id, SYSTEM_USER, fn);
 
-/** Windows a patient may pick: inside the booking horizon, after the minimum notice, room left for the visit type, under the daily online cap. */
+/** Windows a patient may move their visit to: within 30 days, at least 2 hours ahead, room left for the visit type. */
 async function openSlots(tx: Tx, t: any, from: string, days: number, svc: any, practitionerId?: string | null) {
-  const cfg = bookingSettings(t.settings).online; const today = todayIn(t.timezone);
+  // ponytail: fixed rules (the old online-booking defaults); clinic settings again if online booking comes back
+  const cfg = { maxDaysAhead: 30, minNoticeHours: 2 }; const today = todayIn(t.timezone);
   const last = addDays(today, cfg.maxDaysAhead);
   const docs = await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(and(eq(practitioner.tenantId, t.id), eq(practitioner.active, true)));
   const docName = new Map(docs.map((d) => [d.id, d.name]));
@@ -39,13 +40,7 @@ async function openSlots(tx: Tx, t: any, from: string, days: number, svc: any, p
     const day = addDays(from < today ? today : from, i);
     if (day > last) break;
     let slots: any[] = [];
-    let capOk = true;
-    if (cfg.dailyCap > 0) {
-      const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
-        .where(and(eq(appointment.tenantId, t.id), eq(session.day, day), eq(appointment.source, 'online'), inArray(appointment.status, [...HOLDS_PLACE])));
-      capOk = n < cfg.dailyCap;
-    }
-    if (capOk) {
+    {
       const ws = await windowsForDay(tx, t.id, day);
       slots = ws.filter((w) => (!practitionerId || w.practitionerId === practitionerId)
         && (!w.practitionerId || docName.has(w.practitionerId))
@@ -77,63 +72,6 @@ function patientView(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>
 
 export function publicRoutes(app: FastifyInstance) {
   const ip = (req: FastifyRequest) => String(req.headers['x-forwarded-for'] ?? req.ip).split(',')[0].trim();
-
-  app.get('/public/clinic/:slug', async (req) => {
-    const t = await clinicBySlug((req.params as any).slug); const cfg = bookingSettings(t.settings);
-    return inTenant(t, async (tx) => {
-      const svcs = await tx.select().from(service).where(and(eq(service.tenantId, t.id), eq(service.active, true), eq(service.onlineBookable, true))).orderBy(service.sortOrder, service.name);
-      const docs = await tx.select({ id: practitioner.id, name: practitioner.name, qualification: practitioner.qualification }).from(practitioner).where(and(eq(practitioner.tenantId, t.id), eq(practitioner.active, true)));
-      return { name: t.name, slug: t.slug, phone: t.settings?.print?.phone ?? '', address: t.settings?.print?.address ?? '', enabled: cfg.online.enabled, requireApproval: cfg.online.requireApproval,
-        intro: cfg.online.intro, maxDaysAhead: cfg.online.maxDaysAhead, arriveEarlyMinutes: cfg.arriveEarlyMinutes, cancelWindowHours: cfg.booking.cancelWindowHours, policy: cfg.booking.cancellationPolicy,
-        today: todayIn(t.timezone), services: svcs.map((s) => ({ id: s.id, name: s.name, description: s.description, minutes: s.minutes, pricePaise: s.pricePaise, color: s.color, practitionerIds: s.practitionerIds })), doctors: docs };
-    });
-  });
-
-  app.get('/public/clinic/:slug/slots', async (req) => {
-    const t = await clinicBySlug((req.params as any).slug);
-    if (!bookingSettings(t.settings).online.enabled) throw new HttpError(403, 'ONLINE_BOOKING_OFF');
-    const q = z.object({ from: DAY, days: z.coerce.number().int().min(1).max(14).default(7), serviceId: z.string().uuid().optional(), practitionerId: z.string().uuid().optional() }).parse(req.query);
-    limit('slots:' + ip(req), 120, 60_000);
-    return inTenant(t, async (tx) => {
-      const svc = q.serviceId ? await tx.select().from(service).where(and(eq(service.id, q.serviceId), eq(service.tenantId, t.id), eq(service.onlineBookable, true), eq(service.active, true))).then((r) => r[0]) : null;
-      if (q.serviceId && !svc) throw new HttpError(404, 'SERVICE_NOT_FOUND');
-      return openSlots(tx, t, q.from, q.days, svc, q.practitionerId ?? null);
-    });
-  });
-
-  const BookIn = z.object({ sessionId: z.string().uuid(), serviceId: z.string().uuid(), name: z.string().trim().min(2).max(100), phone: z.string().trim().regex(/^\d{10}$/, 'PHONE_10_DIGITS'),
-    note: z.string().trim().max(300).optional(), website: z.string().max(0).optional() }); // website: honeypot, must stay empty
-  app.post('/public/clinic/:slug/book', async (req) => {
-    const t = await clinicBySlug((req.params as any).slug); const cfg = bookingSettings(t.settings);
-    if (!cfg.online.enabled) throw new HttpError(403, 'ONLINE_BOOKING_OFF');
-    const body = BookIn.parse(req.body);
-    limit('book:' + ip(req), 5, 10 * 60_000);
-    return inTenant(t, async (tx) => {
-      const svc = await tx.select().from(service).where(and(eq(service.id, body.serviceId), eq(service.tenantId, t.id), eq(service.onlineBookable, true), eq(service.active, true))).then((r) => r[0]);
-      if (!svc) throw new HttpError(404, 'SERVICE_NOT_FOUND');
-      const s = await tx.select().from(session).where(and(eq(session.id, body.sessionId), eq(session.tenantId, t.id))).for('update').then((r) => r[0]);
-      if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
-      // Re-check every rule server-side: the page may be stale.
-      const day = (await openSlots(tx, t, s.day, 1, svc, s.practitionerId)).find((d) => d.day === s.day);
-      if (!day?.slots.some((x) => x.id === s.id)) throw new HttpError(409, 'SLOT_TAKEN');
-      // Same phone + same name = same person (families share phones, so name must match too).
-      let p = await tx.select().from(patient).where(and(eq(patient.tenantId, t.id), eq(patient.phone, body.phone), sql`lower(${patient.fullName}) = ${body.name.toLowerCase()}`)).then((r) => r[0]);
-      if (p) {
-        const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
-          .where(and(eq(appointment.tenantId, t.id), eq(appointment.patientId, p.id), inArray(appointment.status, [...OPEN_STATUSES]), sql`${session.day} >= ${todayIn(t.timezone)}`));
-        if (n >= 2) throw new HttpError(409, 'TOO_MANY_OPEN_BOOKINGS');
-      } else {
-        const num = await nextNumber(tx, t.id, 'patient_no', 'tenant');
-        [p] = await tx.insert(patient).values({ tenantId: t.id, patientNo: `P${String(num).padStart(5, '0')}`, fullName: body.name, phone: body.phone }).returning();
-      }
-      const status = cfg.online.requireApproval ? 'requested' : 'booked';
-      const [row] = await tx.insert(appointment).values({ tenantId: t.id, patientId: p.id, sessionId: s.id, serviceId: svc.id, note: body.note || null, source: 'online', status, publicToken: newToken() }).returning();
-      await emit(tx, ctxFor(t), 'appointment.booked', 'appointment', row.id, { patientId: p.id, sessionId: s.id, day: s.day, window: [s.startTime, s.endTime], online: true, status });
-      await queueMessage(tx, t.id, row.id, status === 'requested' ? 'requested' : 'confirmation', originOf(req));
-      if (status === 'booked') await planReminders(tx, t.id, row.id, originOf(req));
-      return { token: row.publicToken, status, link: `/a/${t.slug}/${row.publicToken}` };
-    });
-  });
 
   // --- the patient's own link: confirm, cancel or move inside the clinic's rules ---
   async function byToken(slug: string, token: string) {

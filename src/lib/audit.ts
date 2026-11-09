@@ -90,8 +90,6 @@ type Rule = [method: string, path: RegExp, kind: string, say: (b: any) => string
 const RULES: Rule[] = [
   ['POST', /^\/appointments$/, 'change', () => 'Booked an appointment'],
   ['PATCH', /^\/appointments\/[^/]+$/, 'change', (b) => b.status === 'cancelled' ? `Cancelled a booking${b.cancelReason ? ` · ${b.cancelReason}` : ''}` : b.status === 'no_show' ? 'Marked a booking as no-show' : b.sessionId ? 'Moved a booking' : b.status === 'confirmed' ? 'Confirmed a booking' : 'Changed a booking'],
-  ['POST', /^\/appointments\/[^/]+\/approve$/, 'change', () => 'Approved an online request'],
-  ['POST', /^\/appointments\/[^/]+\/decline$/, 'cancel', (b) => `Declined an online request${b.reason ? ` · ${b.reason}` : ''}`],
   ['POST', /^\/appointments\/[^/]+\/remind$/, 'change', () => 'Sent a reminder'],
   ['POST', /^\/patients$/, 'change', (b) => `Registered a patient${b.fullName ? ` · ${b.fullName}` : ''}`],
   ['PATCH', /^\/patients\/[^/]+$/, 'change', () => 'Edited patient details'],

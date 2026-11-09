@@ -83,7 +83,7 @@ export function visitRoutes(app: FastifyInstance) {
     // No booking given (checked in from the top button): use the patient's open booking for today, if any
     if (!body.appointmentId) {
       const mine = await tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
-        .where(and(eq(appointment.tenantId, t), eq(appointment.patientId, body.patientId), eq(session.day, day), inArray(appointment.status, ['requested', 'booked', 'confirmed']))).limit(1);
+        .where(and(eq(appointment.tenantId, t), eq(appointment.patientId, body.patientId), eq(session.day, day), inArray(appointment.status, ['booked', 'confirmed']))).limit(1);
       body.appointmentId = mine[0]?.id;
     }
     const [v] = await tx.insert(visit).values({

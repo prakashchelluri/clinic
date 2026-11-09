@@ -6,11 +6,11 @@ import { get, patch, post, qc, errText, ApiError, today, dialable } from './api'
 import { Chip, Icon, Skeleton, toast, useScrollLock } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
-  requested: { label: 'requested', tone: 'clay' }, booked: { label: 'booked', tone: '' }, confirmed: { label: 'confirmed', tone: 'sage' },
+  booked: { label: 'booked', tone: '' }, confirmed: { label: 'confirmed', tone: 'sage' },
   arrived: { label: 'arrived', tone: 'sky' }, cancelled: { label: 'cancelled', tone: 'rose' }, no_show: { label: 'no-show', tone: 'rose' },
 };
 export const StatusChip = ({ s }: { s: string }) => <Chip tone={STATUS[s]?.tone ?? ''}>{STATUS[s]?.label ?? s}</Chip>;
-const MSG: Record<string, string> = { confirmation: 'Confirmation', requested: 'Request received', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', declined: 'Declined', late: 'Doctor running late', reschedule: 'Asked to pick a new time' };
+const MSG: Record<string, string> = { confirmation: 'Confirmation', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', late: 'Doctor running late', reschedule: 'Asked to pick a new time' };
 const MSG_STATUS: Record<string, string> = { pending: 'due', sent: 'sent', logged: 'ready (WhatsApp not connected)', failed: 'failed', skipped: 'not sent' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -22,18 +22,16 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
   useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['appointment', id], queryFn: () => get(`/appointments/${id}`) });
-  const [mode, setMode] = useState<null | 'cancel' | 'move' | 'decline'>(null);
+  const [mode, setMode] = useState<null | 'cancel' | 'move'>(null);
   const [reason, setReason] = useState('');
   const [seriesToo, setSeriesToo] = useState(false);
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   const done = (msg: string) => { refreshBookings(); toast(msg); setMode(null); setReason(''); };
   const fail = (e: any) => toast(errText(e), 'err');
   const update = useMutation({ mutationFn: (b: any) => patch(`/appointments/${id}`, b), onSuccess: (r: any, b: any) => done(b.status === 'cancelled' ? `Cancelled${r.alsoCancelled ? ` with ${r.alsoCancelled} later visit${r.alsoCancelled === 1 ? '' : 's'}` : ''}` : b.status === 'confirmed' ? 'Marked confirmed' : b.status === 'no_show' ? 'Marked no-show' : 'Updated'), onError: fail });
-  const approve = useMutation({ mutationFn: () => post(`/appointments/${id}/approve`), onSuccess: () => done('Approved · confirmation queued'), onError: fail });
-  const decline = useMutation({ mutationFn: () => post(`/appointments/${id}/decline`, { reason }), onSuccess: () => done('Declined · patient told'), onError: fail });
   const remind = useMutation({ mutationFn: () => post(`/appointments/${id}/remind`), onSuccess: () => done('Reminder queued'), onError: fail });
   const a = q.data;
-  const open = a && ['requested', 'booked', 'confirmed'].includes(a.status);
+  const open = a && ['booked', 'confirmed'].includes(a.status);
   const arriveEarly = cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 35;
   const warnAt = cfg?.tenant.settings.booking?.noShowWarnAt ?? 2;
 
@@ -64,16 +62,11 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
 
           {canWrite && open && mode === null && (
             <div className="grid grid-cols-2 gap-2">
-              {a.status === 'requested' ? <>
-                <button className="btn btn-primary justify-center" disabled={approve.isPending} onClick={() => approve.mutate()}><Icon name="check" />Approve</button>
-                <button className="btn justify-center" onClick={() => setMode('decline')}>Decline</button>
-              </> : <>
-                {a.status === 'booked' ? <button className="btn btn-primary justify-center" onClick={() => update.mutate({ status: 'confirmed' })}><Icon name="check" />Mark confirmed</button> : <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>}
-                <button className="btn justify-center" onClick={() => setMode('move')}><Icon name="calendar" />Move</button>
-                {a.window.day <= today() && <button className="btn justify-center" onClick={() => update.mutate({ status: 'no_show' })}>No-show</button>}
-                {a.status === 'booked' && <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>}
-                <button className="btn justify-center !text-rose" onClick={() => setMode('cancel')}>Cancel</button>
-              </>}
+              {a.status === 'booked' ? <button className="btn btn-primary justify-center" onClick={() => update.mutate({ status: 'confirmed' })}><Icon name="check" />Mark confirmed</button> : <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>}
+              <button className="btn justify-center" onClick={() => setMode('move')}><Icon name="calendar" />Move</button>
+              {a.window.day <= today() && <button className="btn justify-center" onClick={() => update.mutate({ status: 'no_show' })}>No-show</button>}
+              {a.status === 'booked' && <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>}
+              <button className="btn justify-center !text-rose" onClick={() => setMode('cancel')}>Cancel</button>
             </div>
           )}
           {canWrite && a.status === 'no_show' && mode === null && <button className="btn justify-center" onClick={() => update.mutate({ status: 'booked' })}>Undo no-show</button>}
@@ -85,13 +78,6 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
               {a.series && a.series.index < a.series.total && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={seriesToo} onChange={(e) => setSeriesToo(e.target.checked)} />Also cancel the later repeat visits</label>}
               <div className="flex gap-2"><button className="btn btn-primary !bg-rose !border-rose" disabled={update.isPending} onClick={() => update.mutate({ status: 'cancelled', cancelReason: reason || undefined, series: seriesToo ? 'future' : 'one' })}>Cancel booking</button><button className="btn btn-ghost" onClick={() => setMode(null)}>Keep it</button></div>
               <div className="text-xs text-muted">The patient gets a cancellation message.</div>
-            </div>
-          )}
-          {mode === 'decline' && (
-            <div className="card space-y-3 anim-fade-up">
-              <label className="label" htmlFor="dc-reason">Message to the patient (optional)</label>
-              <input id="dc-reason" className="input" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Doctor is on leave that day." />
-              <div className="flex gap-2"><button className="btn btn-primary" disabled={decline.isPending} onClick={() => decline.mutate()}>Decline request</button><button className="btn btn-ghost" onClick={() => setMode(null)}>Back</button></div>
             </div>
           )}
           {mode === 'move' && <MovePicker appt={a} onPick={(sessionId) => update.mutate({ sessionId })} onClose={() => setMode(null)} busy={update.isPending} />}
@@ -109,7 +95,6 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
             <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${a.patient.id}`); }}><Icon name="user" />Open record</button>
-            {dialable(a.patient.phone) && <a className="btn btn-sm" href={`tel:${a.patient.phone}`}><Icon name="phone" />Call</a>}
           </div>
         </>)}
         {q.isError && <div className="text-sm text-rose">{errText(q.error)}</div>}

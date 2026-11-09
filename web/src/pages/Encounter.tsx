@@ -71,7 +71,7 @@ function Card({ id, title, meta, actions, children, required, invalid }: { id: s
 const Act = ({ children, onClick, disabled, aria }: { children: ReactNode; onClick: () => void; disabled?: boolean; aria?: string }) => <button type="button" className="btn btn-ghost !min-h-7 !px-2 text-[12px] text-muted hover:text-ink" disabled={disabled} aria-label={aria} onClick={onClick}>{children}</button>;
 
 /** T·Sx, T·Dx …: the section's templates in one place, as in Eka. Load one, save what is on the card now, or clear the card. */
-function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, compact, id }: { kind: TmplKind; sub: string; what: string; sets: Tmpl[]; onPick: (t: Tmpl) => void; onSave: () => void; onClear: (() => void) | null; compact?: boolean; id?: string }) {
+function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, compact, id }: { kind: TmplKind; sub: string; what: string; sets: Tmpl[]; onPick: (t: Tmpl) => void; onSave?: () => void; onClear: (() => void) | null; compact?: boolean; id?: string }) {
   const [open, setOpen] = useState(false); const [q, setQ] = useState(''); const btn = useRef<HTMLButtonElement>(null);
   const mine = sets.filter((t) => t.kind === kind); const list = mine.filter((t) => !q || t.name.toLowerCase().includes(q.toLowerCase()));
   return (
@@ -84,10 +84,10 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
           {mine.length > 6 && <input autoFocus aria-label="Search templates" className="input mb-1.5 !py-1.5" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />}
           {list.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{q ? 'Nothing by that name.' : `No ${what} templates yet. Fill the card, then save it here.`}</div>
             : <div className="max-h-56 overflow-y-auto">{list.slice(0, 20).map((t) => <button key={t.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-paper-2" onClick={() => { onPick(t); setOpen(false); }}><span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>{t.uses > 0 && <span className="text-[11px] text-muted">{t.uses}×</span>}</button>)}</div>}
-          <div className="mt-1 flex items-center gap-1 border-t border-line pt-1.5">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setOpen(false); onSave(); }}><Icon name="plus" className="h-3.5 w-3.5" />Save {what} as template</button>
+          {(onSave || onClear) && <div className="mt-1 flex items-center gap-1 border-t border-line pt-1.5">
+            {onSave && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setOpen(false); onSave(); }}><Icon name="plus" className="h-3.5 w-3.5" />Save {what} as template</button>}
             {onClear && <button type="button" className="btn btn-ghost btn-sm ml-auto text-rose" onClick={() => { setOpen(false); onClear(); }}>Clear</button>}
-          </div>
+          </div>}
         </div>
       </Floating>
     </>
@@ -661,21 +661,22 @@ export function Encounter() {
     if (view === 'stacked' || readOnly || !isDoctor || tab !== 'pad' || ev.defaultPrevented) return;
     const t = ev.target as HTMLElement | null; const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
     const go = (fn: () => void) => { ev.preventDefault(); fn(); };
-    if (ev.key === '/' && !typing) return go(() => document.getElementById('pad-search')?.focus());
+    const bar = (fn: () => void) => go(() => { document.getElementById('pad-toolbar')?.scrollIntoView({ block: 'start' }); setTimeout(fn, 30); }); // the toolbar is in the page, not floating: bring it back into view first
+    if (ev.key === '/' && !typing) return bar(() => document.getElementById('pad-search')?.focus());
     if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') return go(finish);
     if (ev.key === 'Escape' && !typing && layout === 'review' && peek) return go(() => setPeek(false));
     if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
     const i = rowKeys.indexOf(act);
     if (view === 'focused' && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) return go(() => goTo(rowKeys[Math.max(0, Math.min(rowKeys.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)))]));
-    if (ev.code === 'KeyL') return go(() => document.getElementById('pad-loadprev')?.click());
-    if (ev.code === 'KeyT') return go(() => document.getElementById('pad-templates')?.click());
-    if (ev.code === 'KeyA') return go(() => { setAnywhere(!!scope); setTimeout(() => document.getElementById('pad-search')?.focus(), 30); });
+    if (ev.code === 'KeyL') return bar(() => document.getElementById('pad-loadprev')?.click());
+    if (ev.code === 'KeyT') return bar(() => document.getElementById('pad-templates')?.click());
+    if (ev.code === 'KeyA') return bar(() => { setAnywhere(!!scope); setTimeout(() => document.getElementById('pad-search')?.focus(), 30); });
     if (ev.code === 'KeyP') return go(() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); });
     if (view === 'review' && /^Digit[1-4]$/.test(ev.code)) return go(() => set('review', 'response', RESPONSES[Number(ev.code.slice(5)) - 1]));
     if (view === 'review' && ev.code === 'KeyC') return go(() => document.getElementById('pad-continue-all')?.click());
   };
   const toolbar = isDoctor && !readOnly ? (
-    <div className="sticky top-[76px] z-20 -mx-1 rounded-[30px] bg-paper/85 p-1 backdrop-blur anim-fade-up">
+    <div id="pad-toolbar" className="scroll-mt-24 anim-fade-up">
       <div className="flex flex-wrap items-center gap-2">
         <ScopedSearch key={scope ?? 'any'} preferLine={S?.preferLine}
           scope={<button type="button" className="ml-1.5 h-8 shrink-0 rounded-full bg-clay-soft px-3 text-[12.5px] font-bold text-clay-ink transition-colors hover:bg-clay-line/40" aria-label={scope ? `Searching ${TITLE[scope]}. Switch to all sections (Alt+A)` : 'Searching all sections. Switch to the open section (Alt+A)'} title="Alt+A switches between this section and all sections" onClick={() => setAnywhere(!!scope)}>{scope ? TITLE[scope] : 'All sections'}</button>}
@@ -683,7 +684,7 @@ export function Encounter() {
           options={S ? S.opts : anyOpts}
           onPick={(n) => { pin(); (S ? (S.pick ?? S.line) : smartAdd)(n); }} onLine={(t) => { pin(); (S ? S.line : smartAdd)(t); }} onChange={() => setPendingLine(null)} />
         <LoadPrevious key={`lp-${scope ?? ''}`} id="pad-loadprev" previous={previous} onLoad={loadPrevious} part={scope ? PART[scope] : undefined} />
-        {tpl ? <SectionTemplates key={`t-${scope}`} id="pad-templates" kind={tpl[0]} sub={tpl[1]} what={tpl[2]} sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} onSave={() => saveSection(tpl[0])} onClear={null} />
+        {tpl ? <SectionTemplates key={`t-${scope}`} id="pad-templates" kind={tpl[0]} sub={tpl[1]} what={tpl[2]} sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} onClear={null} />
           : <button type="button" className="btn btn-sm" disabled title="Open Symptoms, Diagnosis, Examination, Medicines, Advice or Tests to use its templates">Templates</button>}
         {tpl?.[3] && <button type="button" className="btn btn-sm text-rose" onClick={tpl[3]}>Clear</button>}
       </div>
@@ -857,20 +858,21 @@ export function Encounter() {
         {readOnly && <button type="button" className={BP} onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
       </div>
       </> : <>
-      {/* the action bar: what is saved or missing on the left, Preview and Finish on the right */}
-      <div className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-[14px] bg-ink px-3 py-2 text-paper shadow-lg anim-fade-up">
-        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-paper/80">Cannot finish yet · missing:</span>
-            {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose px-2 py-0.5 font-semibold text-white hover:bg-rose/80" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
-          : <span className="px-1 text-xs text-paper/60">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
-        {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-paper/50 xl:inline">{view === 'review' ? 'Alt 1–4 how is it · Alt C continue all · ' : 'Alt ↑↓ section · '}/ search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
+      {/* the action bar, in the page at the end of the pad (not floating): saved or missing on the left; save the open section as a template, Preview and Finish on the right */}
+      <div className="card flex flex-wrap items-center gap-2 !px-4 !py-3 anim-fade-up">
+        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet · missing:</span>
+            {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
+          : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
+        {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-muted/80 xl:inline">{view === 'review' ? 'Alt 1–4 how is it · Alt C continue all · ' : 'Alt ↑↓ section · '}/ search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
         <span className="ml-auto" />
-        {!readOnly && !isDoctor && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
+        {!readOnly && !isDoctor && <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>
-          <button type="button" className={B} onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}>Preview</button>
-          {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
-          <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+          {tpl && <button type="button" className="btn btn-sm" onClick={() => saveSection(tpl[0])}><Icon name="plus" className="h-3.5 w-3.5" />Save {tpl[2]} as template</button>}
+          <button type="button" className="btn btn-sm" onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}>Preview</button>
+          {held && testsOpen && <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
-        {readOnly && <button type="button" className={BP} onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
+        {readOnly && <button type="button" className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
       </div>
       </>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}

@@ -206,7 +206,7 @@ function Reception() {
     <P>Only the doctor or owner can set a flag. You can see all flags. To change who answers a phone or add a guardian, tap the pencil on the record.</P>
 
     <H2 id="booking">Calendar and bookings</H2>
-    <P>The <b>Calendar</b> shows each doctor&rsquo;s booking windows. Tap <Btn>Book</Btn>, find or register the patient, and pick a window. A colour key at the top shows what each colour means. <b>Bookings</b> lists online requests waiting for you: approve or decline them. The bell shows when something is waiting.</P>
+    <P>The <b>Calendar</b> shows each doctor&rsquo;s booking windows. Tap <Btn>Book</Btn>, find or register the patient, and pick a window. A colour key at the top shows what each colour means. <b>Bookings</b> lists every booking: upcoming, not yet confirmed, past, no-shows and cancelled.</P>
 
     <H2 id="endofday">End of day</H2>
     <P>On <b>Reports</b>, switch to <Btn>End of day</Btn>. It is one page to read against the doctor&rsquo;s paper diary.</P>

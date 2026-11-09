@@ -30,12 +30,11 @@ test('test data fills the week, pharmacy and courses, and can be topped up', asy
   const s = r.json();
   assert.ok(s.base?.patients >= 20, 'base sample loaded first');
   assert.ok(s.booked + s.confirmed > 20, 'upcoming bookings'); assert.ok(s.arrived > 10 && s.no_show > 0, 'past visits and no-shows');
-  assert.ok(s.requested >= 3 && s.series >= 6 && s.messages > 0, JSON.stringify(s));
+  assert.ok(s.series >= 6 && s.messages > 0, JSON.stringify(s));
   assert.equal(s.sittings, 8); assert.equal(s.photos, 16);
 
   const counts = (await call(reception, 'GET', '/bookings/counts')).json();
-  assert.ok(counts.requests >= 3 && counts.unconfirmed > 0);
-  assert.equal((await call(owner, 'GET', '/public/clinic/sahitya')).json().enabled, true, 'online booking switched on');
+  assert.ok(counts.unconfirmed > 0 && counts.requests === undefined);
 
   // photo courses: timeline with sittings, files served as PNG
   const course = (await call(owner, 'GET', '/worklist?kind=procedure')).json().find((x: any) => x.procedure === 'Laser hair reduction');
@@ -76,7 +75,7 @@ test('test data fills the week, pharmacy and courses, and can be topped up', asy
   const again = await call(owner, 'POST', '/dev/sample-bookings');
   assert.equal(again.statusCode, 200, again.body);
   const a = again.json();
-  assert.equal(a.topUp, true); assert.equal(a.requested, 0); assert.equal(a.photos, 0); assert.equal(a.sittings, 0);
+  assert.equal(a.topUp, true); assert.equal(a.photos, 0); assert.equal(a.sittings, 0);
   assert.equal(a.counterSales + a.expenses, 0, 'counter sales and expenses are not added twice');
   assert.ok(a.booked + a.confirmed + a.arrived + a.no_show + a.cancelled <= 5, JSON.stringify(a));
 

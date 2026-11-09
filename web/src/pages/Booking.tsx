@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { get, post, today, uuid, ApiError, errText, useConfig } from '../api';
 import { Avatar, Chip, Empty, Icon, Modal, Skeleton, toast, NumInput } from '../ui';
@@ -10,10 +10,26 @@ const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en
  * "New booking" from anywhere (sidebar pages open it with ?book=1): pick doctor, day and window, then the patient.
  * It replaces the old Quick book page; clicking a window on the Calendar opens the same form directly.
  */
-export function NewBooking({ cfg, me, initialPatient, onClose, onDone }: { cfg: any; me: any; initialPatient?: { id: string; name: string }; onClose: () => void; onDone: () => void }) {
+export function NewBooking({ cfg, me, initialPatient, initialDay, initialDoc, onClose, onDone }: { cfg: any; me: any; initialPatient?: { id: string; name: string }; initialDay?: string; initialDoc?: string; onClose: () => void; onDone: () => void }) {
   const docs: any[] = cfg?.practitioners ?? [];
-  const [doc, setDoc] = useState<string>(me?.practitionerId ?? docs[0]?.id ?? '');
-  const [day, setDay] = useState(today());
+  const [doc, setDoc] = useState<string>(initialDoc && docs.some((p) => p.id === initialDoc) ? initialDoc : me?.practitionerId ?? docs[0]?.id ?? '');
+  const want = initialDay && /^\d{4}-\d{2}-\d{2}$/.test(initialDay) ? (initialDay < today() ? today() : initialDay) : null;
+  const [day, setDay] = useState(want ?? today());
+  // A review "around 23 Nov": open on that day; if the doctor has no free window then (holiday, leave, full), the first day after that has one.
+  const [moved, setMoved] = useState<null | { from: string; to: string | null }>(null);
+  useEffect(() => {
+    if (!want) return; let off = false;
+    (async () => {
+      const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+      for (let i = 0; i < 30 && !off; i++) {
+        const d = shift(want, i);
+        const ws: any[] = await get(`/sessions?day=${d}${doc ? `&practitionerId=${doc}` : ''}`).catch(() => []);
+        if (ws.some((w) => w.free > 0 && (d > today() || w.endTime > now))) { if (!off) { setDay(d); setMoved(i ? { from: want, to: d } : null); } return; }
+      }
+      if (!off) setMoved({ from: want, to: null });
+    })();
+    return () => { off = true; };
+  }, [doc]);
   const [win, setWin] = useState<any>(null);
   const ws = useQuery({ queryKey: ['sessions', day, doc], queryFn: () => get(`/sessions?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), enabled: !!day });
   const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
@@ -31,6 +47,7 @@ export function NewBooking({ cfg, me, initialPatient, onClose, onDone }: { cfg: 
           </div>
           <span className="text-sm text-muted">{dayLabel(day)}</span>
         </div>
+        {moved && <div className="rounded-xl bg-amber-soft px-3.5 py-2.5 text-sm text-amber" role="status">{moved.to ? <>No free window on <b>{dayLabel(moved.from)}</b> (holiday, leave or full), so this opens on <b>{dayLabel(moved.to)}</b>, the next day with room.</> : <>No free window for this doctor in the 30 days from <b>{dayLabel(moved.from)}</b>. Try another doctor.</>}</div>}
         {ws.isLoading ? <Skeleton rows={2} /> : windows.length === 0 ? <Empty icon="calendar" title="No windows left this day" hint="Try the next day, or another doctor." /> : (
           <div role="radiogroup" aria-label="Window" className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {windows.map((w) => {

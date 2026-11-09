@@ -10,9 +10,9 @@ import { PrivacyTab } from './Privacy';
 import { TemplatesTab } from './SettingsTemplates';
 import { PadTab } from './SettingsPad';
 import { PackagesCard, CalendarLookCard } from '../packages';
-import { AvailabilityTab, ServicesTab, BookingRulesTab, OnlineBookingTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
+import { AvailabilityTab, ServicesTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 
-type Tab = 'clinic' | 'day' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'online' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy' | 'testdata';
+type Tab = 'clinic' | 'day' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy' | 'testdata';
 /** key, name, icon, what it is for (one plain sentence) */
 type TabDef = [Tab, string, string, string];
 const GROUPS: [string, string, TabDef[]][] = [
@@ -28,7 +28,6 @@ const GROUPS: [string, string, TabDef[]][] = [
     ['availability', 'Doctors’ weekly hours', 'clock', 'When each doctor sits for OP. The calendar fills from this every week.'],
     ['services', 'Visit types', 'calendar', 'What a patient books: name, length, colour on the calendar, fee.'],
     ['rules', 'Booking rules', 'list', 'How early to arrive, how late one can cancel, how the calendar looks.'],
-    ['online', 'Online booking page', 'globe', 'Your public booking link and QR code, and what patients can book there.'],
     ['messages', 'WhatsApp reminders', 'message', 'Confirmations, reminders and follow-up messages sent to patients.'],
   ]],
   ['Consultations', 'What the doctor sees and prescribes.', [
@@ -98,7 +97,6 @@ export function Settings() {
         {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
         {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
         {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
-        {tab === 'online' && <OnlineBookingTab cfg={cfg} onSaved={refresh} />}
         {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
         {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
         {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
@@ -459,8 +457,8 @@ function TestDataCard() {
   return (
     <div className="card space-y-3">
       <div className="card-title">Test data</div>
-      <div className="text-sm text-ink-2">Clears everything this clinic has done and starts fresh with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, online requests, repeat visits, patient messages and two procedure courses with before/after photos. Staff, doctors, rooms, prices, forms and templates are kept. Use it on a test clinic, not one with real patients.</div>
-      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.requested} online requests, {result.series} repeat visits, {result.sittings} procedure sittings, {result.photos} photos.</div>}
+      <div className="text-sm text-ink-2">Clears everything this clinic has done and starts fresh with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, repeat visits, patient messages and two procedure courses with before/after photos. Staff, doctors, rooms, prices, forms and templates are kept. Use it on a test clinic, not one with real patients.</div>
+      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.series} repeat visits, {result.sittings} procedure sittings, {result.photos} photos.</div>}
       <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : 'Clear everything and load test data'}</button>
     </div>
   );

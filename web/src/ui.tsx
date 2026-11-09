@@ -206,10 +206,27 @@ export function useAddFromNew(open: (what: string) => void) {
   useEffect(() => { const w = sp.get('add'); if (!w) return; open(w); setSp((p) => { const n = new URLSearchParams(p); n.delete('add'); return n; }, { replace: true }); }, [sp]);
 }
 
+/** Light ↔ dark that spreads as a circle from the button pressed; plain switch where the browser cannot or motion is reduced. */
+export function revealTheme(e: React.MouseEvent, next: 'light' | 'dark', toggle: () => void) {
+  const d = document as any; const root = document.documentElement;
+  if (!d.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) { toggle(); return; }
+  root.style.setProperty('--vt-x', `${e.clientX}px`); root.style.setProperty('--vt-y', `${e.clientY}px`);
+  root.classList.add('theme-flip');
+  const t = d.startViewTransition(() => { root.dataset.theme = next; toggle(); });
+  t.finished.finally(() => root.classList.remove('theme-flip'));
+}
+
 /** Sub-sections of a page: text with a green underline. Pills are kept for the page's own sections. */
 export function Tabs<T extends string>({ value, onChange, options, className = '' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string; count?: number }[]; className?: string }) {
+  // one green line that travels to the chosen tab, the same motion as the pills and the front desk stages
+  const box = useRef<HTMLDivElement>(null); const [mark, setMark] = useState<{ left: number; width: number; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => { const el = box.current?.querySelector<HTMLElement>('button.on'); setMark(el ? { left: el.offsetLeft, width: el.offsetWidth, top: el.offsetTop + el.offsetHeight - 2.5 } : null); };
+    measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [value, options.length]);
   return (
-    <div role="tablist" className={`tabs ${className}`}>{options.map((o) => <button key={o.value} type="button" role="tab" aria-selected={value === o.value} className={value === o.value ? 'on' : ''} onClick={() => onChange(o.value)}>
+    <div role="tablist" ref={box} className={`tabs has-mark relative ${className}`}>{mark && <span aria-hidden="true" className="tabs-mark" style={{ left: mark.left, width: mark.width, top: mark.top }} />}{options.map((o) => <button key={o.value} type="button" role="tab" aria-selected={value === o.value} className={value === o.value ? 'on' : ''} onClick={() => onChange(o.value)}>
       {o.label}{o.count ? <span className="tab-count">{o.count}</span> : null}</button>)}</div>
   );
 }

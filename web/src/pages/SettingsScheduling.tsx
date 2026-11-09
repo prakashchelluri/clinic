@@ -1,26 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import QRCode from 'qrcode';
 import { openPrint } from '../printPreview';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, errText } from '../api';
 import { Chip, Empty, Icon, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, useAddFromNew } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 
-/* Scheduling settings: availability, visit types, booking rules, online booking, reminders. All data, no deploy. */
+/* Scheduling settings: availability, visit types, booking rules, reminders. All data, no deploy. */
 
 const COLORS = ['#D4421A', '#3A5A78', '#2F5D4B', '#8A6218', '#A3322A', '#6D5E86', '#17191A', '#B8340F'];
 const KINDS: [string, string, string][] = [
-  ['confirmation', 'Booking confirmation', 'Sent when a booking is made or a request approved'],
-  ['requested', 'Online request received', 'Sent when a patient asks online and reception must approve'],
+  ['confirmation', 'Booking confirmation', 'Sent when a booking is made'],
   ['reminder', 'Reminder', 'Sent the chosen hours before the window'],
   ['moved', 'Booking moved', 'Sent when reception moves a booking'],
   ['cancelled', 'Booking cancelled', 'Sent when reception cancels'],
-  ['declined', 'Request declined', 'Sent when reception declines an online request'],
   ['late', 'Doctor running late', 'Sent when the doctor taps Running late; {reason} is the delay, e.g. 30 minutes'],
   ['reschedule', 'Please pick another time', 'Sent when the doctor is not available and the patient is asked to choose a new time'],
 ];
-const VARS = ['patient', 'clinic', 'visitType', 'date', 'time', 'arriveBy', 'doctor', 'link', 'bookLink', 'reason'];
-const SAMPLE: Record<string, string> = { patient: 'Lakshmi Devi', clinic: 'Your clinic', visitType: 'New consultation', date: 'Thu, 22 Oct', time: '11:00–12:00', arriveBy: '10:25', doctor: 'Dr. Main', link: 'https://…/a/…', bookLink: 'https://…/book/…', reason: 'Doctor on leave.' };
+const VARS = ['patient', 'clinic', 'visitType', 'date', 'time', 'arriveBy', 'doctor', 'link', 'reason'];
+const SAMPLE: Record<string, string> = { patient: 'Lakshmi Devi', clinic: 'Your clinic', visitType: 'New consultation', date: 'Thu, 22 Oct', time: '11:00–12:00', arriveBy: '10:25', doctor: 'Dr. Main', link: 'https://…/a/…', reason: 'Doctor on leave.' };
 const fill = (t: string) => t.replace(/\{(\w+)\}/g, (m, k) => SAMPLE[k] ?? m);
 const save = (settings: any) => patch('/admin/clinic', { settings });
 
@@ -71,7 +68,7 @@ export function ServicesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
           <button key={s.id} className={`row w-full text-left ${s.active ? '' : 'opacity-50'} ${edit?.id === s.id ? 'bg-white' : ''}`} onClick={() => setEdit({ ...s, price: s.pricePaise == null ? '' : String(s.pricePaise / 100), feeCategoryId: s.feeCategoryId ?? '', description: s.description ?? '' })}>
             <i className="h-3.5 w-3.5 shrink-0 rounded" style={{ background: s.color }} />
             <div className="min-w-0 flex-1"><div className="font-medium">{s.name}</div><div className="truncate text-xs text-muted">{s.minutes} min{s.pricePaise != null ? ` · ${money(s.pricePaise)}` : ''}{s.places > 1 ? ` · uses ${s.places} places` : ''} · {s.practitionerIds.length ? s.practitionerIds.map((id: string) => cfg.practitioners.find((p: any) => p.id === id)?.name ?? '?').join(', ') : 'all doctors'}</div></div>
-            {!s.active ? <Chip tone="rose">archived</Chip> : s.onlineBookable ? <Chip tone="sage">online</Chip> : <Chip>staff only</Chip>}
+            {!s.active ? <Chip tone="rose">archived</Chip> : null}
           </button>
         ))}
       </Section>
@@ -109,7 +106,6 @@ function ServiceEditor({ value, cfg, onDone, onCancel }: { value: any; cfg: any;
       </div>
       <div><span className="label">Colour</span><div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Colour">{COLORS.map((c) => <button key={c} type="button" role="radio" aria-checked={f.color === c} aria-label={c} onClick={() => set('color', c)} className="h-7 w-7 rounded-full transition-shadow" style={{ background: c, boxShadow: f.color === c ? '0 0 0 2px #fff, 0 0 0 4px var(--color-ink)' : undefined }} />)}</div></div>
       <div><span className="label">Doctors</span><div className="flex flex-wrap gap-1.5"><button type="button" className={`toggle-opt ${f.practitionerIds.length === 0 ? 'on' : ''}`} onClick={() => set('practitionerIds', [])}>All doctors</button>{cfg.practitioners.map((p: any) => <button key={p.id} type="button" className={`toggle-opt ${f.practitionerIds.includes(p.id) ? 'on' : ''}`} onClick={() => toggleDoc(p.id)}>{p.name}</button>)}</div></div>
-      <Toggle id="sv-online" on={f.onlineBookable} onChange={(v) => set('onlineBookable', v)} label="Patients can book this online" hint="Shown on your booking page when online booking is on" />
       <div><label className="label" htmlFor="sv-desc">Shown to patients (optional)</label><textarea id="sv-desc" className="input min-h-[64px]" maxLength={300} value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="e.g. Follow-up within 15 days of your first visit" /></div>
       <div className="flex flex-wrap gap-2 pt-1">
         <button className="btn btn-primary" disabled={bad || m.isPending} onClick={() => m.mutate()}><Icon name="check" />Save</button>
@@ -157,42 +153,6 @@ export function BookingRulesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
   );
 }
 
-/* ---------------- Online booking ---------------- */
-export function OnlineBookingTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
-  const o = cfg.tenant.settings?.online ?? {};
-  const [f, setF] = useState({ enabled: o.enabled ?? false, requireApproval: o.requireApproval ?? true, minNoticeHours: o.minNoticeHours ?? 2, maxDaysAhead: o.maxDaysAhead ?? 30, dailyCap: o.dailyCap ?? 0, intro: o.intro ?? '' });
-  const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
-  const link = `${location.origin}/book/${cfg.tenant.slug}`;
-  const online = (cfg.services ?? []).filter((s: any) => s.onlineBookable);
-  const bad = { notice: !intIn(f.minNoticeHours, 0, 336), ahead: !intIn(f.maxDaysAhead, 1, 180), cap: !intIn(f.dailyCap, 0, 500) };
-  const m = useMutation({ mutationFn: () => save({ online: { enabled: f.enabled, requireApproval: f.requireApproval, minNoticeHours: Number(f.minNoticeHours), maxDaysAhead: Number(f.maxDaysAhead), dailyCap: Number(f.dailyCap), intro: f.intro.trim() } }),
-    onSuccess: () => { toast(f.enabled ? 'Online booking is on' : 'Online booking saved (off)'); onSaved(); }, onError: (e) => toast(errText(e), 'err') });
-  return (
-    <div className="space-y-4">
-      <div className="card space-y-3">
-        <Toggle id="ob-on" on={f.enabled} onChange={(v) => set('enabled', v)} label="Let patients book online" hint="Patients pick a visit type, a doctor and a free window from your booking page" />
-        <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-paper px-3 py-2.5 text-sm"><Icon name="globe" className="h-4 w-4 text-muted" /><span className="min-w-0 flex-1 truncate font-mono text-xs">{link}</span>
-          <button className="btn btn-sm" onClick={() => navigator.clipboard?.writeText(link).then(() => toast('Link copied'), () => toast(link, 'info'))}><Icon name="copy" className="h-3.5 w-3.5" />Copy</button>
-          <a className="btn btn-sm" href={link} target="_blank" rel="noreferrer">Open</a></div>
-        <QrBlock link={link} clinic={cfg.tenant.name} />
-        <div className="text-xs text-muted">Share it on WhatsApp, Google Maps and your clinic board. {online.length ? `${online.length} visit type${online.length === 1 ? ' is' : 's are'} offered online.` : <span className="text-amber">No visit type is marked “online” yet: set one under Visit types.</span>}</div>
-      </div>
-      <div className="card space-y-3">
-        <div className="card-title">Rules</div>
-        <Toggle id="ob-approve" on={f.requireApproval} onChange={(v) => set('requireApproval', v)} label="Reception approves each request" hint="Requests hold the place and wait in Bookings → Requests. Off: bookings are confirmed straight away" />
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div><label className="label" htmlFor="ob-notice">Minimum notice (hours)</label><NumInput id="ob-notice" max={336} className={`input ${bad.notice ? '!border-rose' : ''}`} value={f.minNoticeHours} onChange={(e) => set('minNoticeHours', e.target.value)} /></div>
-          <div><label className="label" htmlFor="ob-ahead">Book up to (days ahead)</label><NumInput id="ob-ahead" max={180} className={`input ${bad.ahead ? '!border-rose' : ''}`} value={f.maxDaysAhead} onChange={(e) => set('maxDaysAhead', e.target.value)} /></div>
-          <div><label className="label" htmlFor="ob-cap">Online bookings per day (0 = no limit)</label><NumInput id="ob-cap" max={500} className={`input ${bad.cap ? '!border-rose' : ''}`} value={f.dailyCap} onChange={(e) => set('dailyCap', e.target.value)} /></div>
-        </div>
-        {Object.values(bad).some(Boolean) && <div className="text-xs text-rose">Notice 0–336 hours, days ahead 1–180, daily limit 0–500.</div>}
-        <div><label className="label" htmlFor="ob-intro">Welcome note on the booking page (optional)</label><textarea id="ob-intro" className="input min-h-[64px]" maxLength={400} value={f.intro} onChange={(e) => set('intro', e.target.value)} placeholder="e.g. For emergencies please call 0883 244 1234." /></div>
-      </div>
-      <div className="flex justify-end"><button className="btn btn-primary" disabled={m.isPending || Object.values(bad).some(Boolean)} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
-    </div>
-  );
-}
-
 /* ---------------- Reminders and messages ---------------- */
 export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const ms = cfg.tenant.settings?.messages ?? {};
@@ -204,11 +164,9 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
   const outbox = useQuery({ queryKey: ['messages'], queryFn: () => get('/messages?limit=30') });
   const defaults = useMemo(() => ({
     confirmation: 'Hello {patient}, your {visitType} at {clinic} is booked for {date}, {time} with {doctor}. Please arrive by {arriveBy}. Confirm, cancel or change: {link}',
-    requested: 'Hello {patient}, we received your request for {date}, {time} at {clinic}. We will confirm shortly. Details: {link}',
     reminder: 'Reminder: {visitType} at {clinic} on {date}, {time}. Please arrive by {arriveBy}. Reply or tap to confirm or cancel: {link}',
     moved: 'Hello {patient}, your visit at {clinic} is now on {date}, {time} with {doctor}. Arrive by {arriveBy}. Details: {link}',
     cancelled: 'Hello {patient}, your visit at {clinic} on {date}, {time} has been cancelled. Call us to book again.',
-    declined: 'Hello {patient}, sorry, {clinic} could not take the {date}, {time} request. {reason} Please pick another time: {bookLink}',
   } as Record<string, string>), []);
   const cur = tpl[kind] ?? defaults[kind];
   const unknown = (cur.match(/\{(\w+)\}/g) ?? []).map((x) => x.slice(1, -1)).filter((v) => !VARS.includes(v));
@@ -299,25 +257,3 @@ export function PhotoAreasTab({ cfg, onSaved }: { cfg: any; onSaved: () => void 
   );
 }
 
-const escHtml = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-
-/** QR code for the booking page: patients scan it from the clinic board or a printout and land on the booking page. */
-function QrBlock({ link, clinic }: { link: string; clinic: string }) {
-  const [png, setPng] = useState('');
-  useEffect(() => { let on = true; QRCode.toDataURL(link, { width: 640, margin: 2, errorCorrectionLevel: 'M' }).then((u) => on && setPng(u), () => on && setPng('')); return () => { on = false; }; }, [link]);
-  const poster = () => openPrint({ title: 'Booking poster', html: `<!doctype html><title>Book online</title><style>@page{size:A4;margin:14mm}body{font-family:system-ui,sans-serif;text-align:center;color:#111;margin:0;padding:24px}h1{font-size:34px;margin:0 0 6px}p{margin:6px 0;color:#444}img{width:360px;height:360px;margin:22px auto;display:block}.u{font-family:monospace;font-size:14px;word-break:break-all}</style>
-<h1>${escHtml(clinic)}</h1><p style="font-size:20px"><b>Book your appointment online</b></p><p>Scan with your phone camera</p><img alt="QR code to book online" src="${png}"><p class="u">${escHtml(link)}</p>` });
-  return (
-    <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-paper px-4 py-3">
-      {png ? <img src={png} alt="QR code for the booking page" className="h-36 w-36 shrink-0 rounded-xl bg-white p-1.5" /> : <div className="h-36 w-36 shrink-0 rounded-xl bg-white/60" />}
-      <div className="min-w-0 flex-1 space-y-2">
-        <div className="font-semibold">Scan to book</div>
-        <div className="text-sm text-muted">Patients point their phone camera at this code and land on your booking page. Print it for the reception desk, the clinic door or a visiting card.</div>
-        <div className="flex flex-wrap gap-2">
-          <a className={`btn btn-sm ${png ? '' : 'pointer-events-none opacity-50'}`} href={png} download={`${clinic.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-booking-qr.png`}><Icon name="download" className="h-3.5 w-3.5" />Download</a>
-          <button className="btn btn-sm btn-primary" disabled={!png} onClick={poster}><Icon name="print" className="h-3.5 w-3.5" />Print poster</button>
-        </div>
-      </div>
-    </div>
-  );
-}

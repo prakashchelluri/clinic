@@ -162,6 +162,13 @@
       "when": 1794130000000,
       "tag": "0022_skinmap",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794230000000,
+      "tag": "0023_no_requests",
+      "breakpoints": true
     }
   ]
 }

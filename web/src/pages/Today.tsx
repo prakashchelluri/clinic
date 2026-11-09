@@ -19,7 +19,7 @@ const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const
 type Pill = { key: string; label: string; cls: string; sort: number; patientId?: string; title?: string };
 const PILL: Record<string, string> = {
   done: 'bg-sage-soft text-sage border-transparent', with: 'bg-ink text-white border-transparent', wait: 'bg-amber-soft text-amber border-transparent',
-  booked: 'bg-surface border-line-2', req: 'bg-surface border-dashed border-ink text-ink', gone: 'border-dashed border-rose/50 text-rose line-through', proc: 'bg-sky-soft text-sky border-transparent',
+  booked: 'bg-surface border-line-2', gone: 'border-dashed border-rose/50 text-rose line-through', proc: 'bg-sky-soft text-sky border-transparent',
 };
 
 /** The doctor's day: who is with me and who is next, the day as a calendar, what is left before I go, tomorrow in one line. No money. */
@@ -78,8 +78,8 @@ export function Today() {
       const v = byAppt.get(a.id);
       if (v) return visitPill(v, a.id);
       const notCome = w.endTime < now;
-      return { key: a.id, label: a.status === 'no_show' ? `${a.name} · no-show` : notCome ? `${a.name} · not arrived` : a.status === 'requested' ? `${a.name} · online request` : a.name,
-        cls: a.status === 'no_show' || notCome ? PILL.gone : a.status === 'requested' ? PILL.req : PILL.booked, sort: 2, patientId: a.patientId, title: [a.service, a.note].filter(Boolean).join(' · ') };
+      return { key: a.id, label: a.status === 'no_show' ? `${a.name} · no-show` : notCome ? `${a.name} · not arrived` : a.name,
+        cls: a.status === 'no_show' || notCome ? PILL.gone : PILL.booked, sort: 2, patientId: a.patientId, title: [a.service, a.note].filter(Boolean).join(' · ') };
     });
     const blk = (w.reductions ?? []).find((r: any) => r.kind === 'leave' || r.kind === 'other' || r.kind === 'stop');
     return { time: w.startTime, end: w.endTime, pills, free: Math.max(0, w.free), off: blk && w.effectiveCapacity === 0 && !pills.length ? blk.note ?? 'Closed' : undefined };
@@ -107,7 +107,7 @@ export function Today() {
   // --- counts for the header ---
   const allPills = rows.flatMap((r) => r.pills);
   const seen = visits.filter((v) => v.status === 'done').length;
-  const toCome = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => !byAppt.has(a.id) && ['booked', 'confirmed', 'requested'].includes(a.status) && w.endTime >= now).length, 0);
+  const toCome = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => !byAppt.has(a.id) && ['booked', 'confirmed'].includes(a.status) && w.endTime >= now).length, 0);
   const apptCount = windows.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => a.status !== 'no_show').length, 0) + visits.filter((v) => !v.appointmentId).length;
   const lastEnd = windows.length ? windows[windows.length - 1].endTime : null;
   const lwCount: number | null = lastWk.data ? (lastWk.data.windows ?? []).reduce((n: number, w: any) => n + (w.appointments ?? []).filter((a: any) => a.status !== 'no_show').length, 0) : null;

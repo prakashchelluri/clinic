@@ -3,12 +3,11 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'react-router';
 import { get, post, qc, errText } from '../api';
 import { Chip, Icon, Skeleton } from '../ui';
-import { PublicShell } from './PublicBook';
 
 const nice = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const STATUS: Record<string, [string, 'clay' | 'sage' | 'amber' | 'rose' | 'sky' | '']> = {
-  requested: ['waiting for the clinic to approve', 'amber'], booked: ['booked', ''], confirmed: ['confirmed', 'sage'], arrived: ['checked in', 'sky'], cancelled: ['cancelled', 'rose'], no_show: ['missed', 'rose'],
+  booked: ['booked', ''], confirmed: ['confirmed', 'sage'], arrived: ['checked in', 'sky'], cancelled: ['cancelled', 'rose'], no_show: ['missed', 'rose'],
 };
 
 /** The patient's own link from WhatsApp: see the visit, confirm, cancel or pick another time. */
@@ -30,7 +29,7 @@ export function PatientLink() {
   const [label, tone] = STATUS[v.status] ?? [v.status, ''];
   return (
     <PublicShell name={v.clinic.name}>
-      {params.get('new') && v.status !== 'cancelled' && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage anim-fade-up"><b>{v.status === 'requested' ? 'Request sent.' : 'You are booked.'}</b> Keep this page: you can come back to it any time.</div>}
+      {params.get('new') && v.status !== 'cancelled' && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage anim-fade-up"><b>You are booked.</b> Keep this page: you can come back to it any time.</div>}
       <div className="card">
         <div className="text-sm text-muted">Hello {v.patient}, your visit</div>
         <div className="mt-1 text-[26px] font-semibold leading-tight">{nice(v.day)} · {v.startTime}</div>
@@ -50,8 +49,7 @@ export function PatientLink() {
         <div className="flex gap-2"><button className="btn btn-primary !bg-rose !border-rose" disabled={cancel.isPending} onClick={() => cancel.mutate()}>Cancel visit</button><button className="btn btn-ghost" onClick={() => setMode(null)}>Keep it</button></div>
       </div>}
       {mode === 'move' && <MoveSlots base={base} day={v.day} busy={move.isPending} onPick={(id) => move.mutate(id)} onBack={() => setMode(null)} />}
-      {!v.canCancel && ['requested', 'booked', 'confirmed'].includes(v.status) && <div className="text-center text-sm text-muted">It is less than {v.cancelWindowHours} hours to your visit. To change it, please call {v.clinic.phone ? <a className="underline" href={`tel:${v.clinic.phone}`}>{v.clinic.phone}</a> : 'the clinic'}.</div>}
-      {v.status === 'cancelled' && <a className="btn btn-accent w-full justify-center !py-3.5" href={`/book/${v.clinic.slug}`}>Book another time</a>}
+      {!v.canCancel && ['booked', 'confirmed'].includes(v.status) && <div className="text-center text-sm text-muted">It is less than {v.cancelWindowHours} hours to your visit. To change it, please call {v.clinic.phone ? <a className="underline" href={`tel:${v.clinic.phone}`}>{v.clinic.phone}</a> : 'the clinic'}.</div>}
       {v.policy && <div className="text-center text-xs text-muted">{v.policy}</div>}
     </PublicShell>
   );
@@ -69,6 +67,19 @@ function MoveSlots({ base, day, busy, onPick, onBack }: { base: string; day: str
         <div key={d.day}><div className="mb-1 text-xs font-semibold text-muted">{nice(d.day)}</div><div className="grid grid-cols-3 gap-2">{d.slots.map((s: any) => <button key={s.id} disabled={busy} onClick={() => onPick(s.id)} className="rounded-xl bg-white py-2.5 text-sm font-semibold hover:ring-1 hover:ring-ink">{s.startTime}</button>)}</div></div>
       ))}
       <button className="btn btn-ghost btn-sm" onClick={onBack}>Back</button>
+    </div>
+  );
+}
+
+/** The frame of the patient's own page: the clinic's initial and name, the content, and a quiet footer. */
+export function PublicShell({ name, children }: { name?: string; children: React.ReactNode }) {
+  return (
+    <div className="min-h-dvh px-4 py-6 sm:py-10">
+      <div className="mx-auto max-w-[480px] space-y-4">
+        <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-xl bg-ink text-lg font-bold text-white">{(name ?? '·').slice(0, 1)}</span><div className="text-lg font-semibold leading-tight">{name ?? ' '}</div></div>
+        {children}
+        <div className="pt-4 text-center text-[11px] text-muted">Powered by CUBOTT Clinical</div>
+      </div>
     </div>
   );
 }

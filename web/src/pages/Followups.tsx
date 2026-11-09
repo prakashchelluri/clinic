@@ -32,7 +32,7 @@ export function Followups() {
                 {r.lastCall && <div className="text-xs text-muted">{r.lastCall.attempts} call{r.lastCall.attempts === 1 ? '' : 's'} · last: {OUT[r.lastCall.outcome]}{r.lastCall.note ? ` (${r.lastCall.note})` : ''} by {r.lastCall.by}, {fmtDate(r.lastCall.at)}</div>}
               </div>
               {r.lastCall?.callbackOn && <Chip tone={r.waiting ? '' : 'amber'}>call on {fmtDate(r.lastCall.callbackOn)}</Chip>}
-              {r.patient.phone && dialable(r.patient.phone) && <a className="btn btn-sm" href={`tel:${r.patient.phone}`}><Icon name="phone" className="h-3.5 w-3.5" />Call</a>}
+              {r.patient.phone && <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-semibold tabular-nums text-ink-2"><Icon name="phone" className="h-3.5 w-3.5 text-muted" />{r.patient.phone}</span>}
               {canWrite && <button className="btn btn-sm btn-primary" onClick={() => setCalling(r)}>Log the call</button>}
             </div>))}
       </Section>

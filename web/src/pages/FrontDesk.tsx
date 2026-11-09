@@ -11,16 +11,16 @@ import { CourseDialog } from '../courses';
 import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
+import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
-const toHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 const shiftDay = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
-type Tab = 'waiting' | 'scheduled' | 'doctor' | 'checkout' | 'reports' | 'completed' | 'all' | 'needs' | 'history';
+type Tab = 'now' | 'intake' | 'waiting' |'scheduled' | 'doctor' | 'checkout' | 'reports' | 'completed' | 'all' | 'needs' | 'history';
 
 /** Download rows as CSV (opens in Excel). Values are quoted; a BOM keeps Telugu/Hindi names intact. */
 function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
@@ -32,11 +32,11 @@ function downloadCsv(filename: string, rows: (string | number | null | undefined
 /** The receptionist's home as one board: every patient is a row, the stage is a tab, Waiting is the default. */
 export function FrontDesk() {
   const { perms, cfg, me } = useOutletContext<Ctx>();
-  const canList = !!(me as any)?.privacy?.canExport; // lists of patients: roles the owner allows
   const nav = useNavigate();
   const day = today(); const isToday = true;
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
-  const [tab, setTab] = useState<Tab>('waiting');
+  const [tab, setTab] = useState<Tab>(can(perms, 'visit.write') ? 'now' : 'waiting');
+  const [pickV, setPickV] = useState<string | null>(null); // the patient whose journey is open; null = the first that needs the desk, '' = closed
   const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not yet arrived; null when not selecting
   useEffect(() => setSel(null), [tab]);
   const [docFilter, setDocFilter] = useState<string | null>(null); // one doctor's queue, or everyone
@@ -72,7 +72,7 @@ export function FrontDesk() {
 
   const visitsAll: any[] = d?.visits ?? [];
   const visits: any[] = docFilter ? visitsAll.filter((v) => v.practitionerId === docFilter) : visitsAll;
-  const scheduled: any[] = (d?.appointments ?? []).filter((a: any) => ['booked', 'confirmed', 'requested'].includes(a.status) && match(a.patient));
+  const scheduled: any[] = (d?.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status) && match(a.patient));
   const noShows: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'no_show' && match(a.patient));
   const waiting = visits.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && match(v.patient, v.opNumber));
   const screening: 'off' | 'first' | 'required' = cfg?.tenant?.settings?.screening ?? 'off';
@@ -88,13 +88,22 @@ export function FrontDesk() {
   const inConsult = visits.filter((v) => v.status === 'in_consult' && match(v.patient, v.opNumber));
   const completed = visits.filter((v) => ['done', 'left'].includes(v.status) && match(v.patient, v.opNumber)).sort((a, b) => (b.completedAt ?? b.arrivedAt).localeCompare(a.completedAt ?? a.arrivedAt));
   const late = scheduled.filter((a) => isToday && toMin(a.window.endTime) < nowMin());
-  // finished with the doctor, but the plan still needs the desk: schedule the procedure, hand over the lab slip, book the review
-  const checkout = visits.filter((v) => v.status === 'done' && !visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status !== 'cancelled') && match(v.patient, v.opNumber));
+  // finished with the doctor, but the plan still needs the desk: schedule the procedure, hand over the lab slip, book the review. Leaves the moment nothing is open.
+  const checkout = visits.filter((v) => v.status === 'done' && !visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') && match(v.patient, v.opNumber));
   const withDue = visits.filter((v) => v.due.length);
   const needsCount = late.length + withDue.length;
   const dueTotal = withDue.reduce((s, v) => s + v.due.reduce((x: number, c: any) => x + c.amountPaise, 0), 0);
-  const collected = (d?.payments ?? []).reduce((s: number, p: any) => s + p.total, 0);
-  useEffect(() => { if (d && !landed.current) { landed.current = true; if (!waiting.length && scheduled.length && canDesk) setTab('scheduled'); } }, [d]);
+  useEffect(() => { if (d && !landed.current) { landed.current = true; if (!canDesk && !waiting.length && scheduled.length) setTab('scheduled'); } }, [d]);
+  // Next for you: only what needs the desk, in the order to do it
+  const roomFull = (v: any) => visitsAll.filter((x) => x.status === 'in_consult' && (!v.practitionerId || !x.practitionerId || x.practitionerId === v.practitionerId)).length >= ROOM_MAX;
+  const canSend = (v: any) => v.status === 'intake' ? { ok: false, why: 'With the junior doctor right now' } : screening === 'required' && v.status === 'waiting' ? { ok: false, why: 'Screening first: the junior doctor sees them before the doctor' } : roomFull(v) ? { ok: false, why: `Room full: it takes ${ROOM_MAX}. Send the next one in when someone comes out.` } : { ok: !upVisit.isPending, why: 'Send the patient in to the doctor' };
+  const intake = waiting.filter((v) => v.status === 'intake');
+  const sendable = waiting.filter((v) => v.status !== 'intake' && !(screening === 'required' && v.status === 'waiting'));
+  const reportsIn = reportsOpen.filter((o) => ['ready', 'partial', 'reviewed', 'doctor_call'].includes(o.state) && !visitsAll.some((v) => v.details?.reportsEncounterId === o.encounterId && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)));
+  const reportsLate = reportsOpen.filter((o) => o.state === 'pending' && o.late?.length);
+  const idle = [...intake.map((v) => ({ v, label: 'with junior' })), ...waiting.filter((v) => v.status === 'waiting' && screening === 'required').map((v) => ({ v, label: 'for vitals' })), ...inConsult.map((v) => ({ v, label: `with doctor${v.details?.calledAt ? ` ${minsSince(v.details.calledAt)} min` : ''}` }))];
+  const nowCount =sendable.length + checkout.length + reportsIn.length + reportsLate.length + late.length + withDue.length;
+  const selV = canDesk && tab !== 'history' ? visitsAll.find((v) => v.id === pickV) ?? null : null; // the journey drawer opens on a tap, never by itself
   const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
   const docName = (id: string | null) => cfg?.practitioners.find((p: any) => p.id === id)?.name ?? '—';
@@ -106,21 +115,11 @@ export function FrontDesk() {
   const D = { group: 'With the doctor', rows: inConsult.map((v): Row => ({ type: 'doctor', v })) };
   const C = { group: 'Completed · newest first', rows: [...completed.map((v): Row => ({ type: 'done', v })), ...noShows.map((a): Row => ({ type: 'noshow', a }))] };
   const N = { group: 'Needs you', rows: [...late.map((a): Row => ({ type: 'appt', a })), ...withDue.map((v): Row => ({ type: 'done', v }))] };
-  const groups = ({ waiting: [W], scheduled: [S], doctor: [D], completed: [C], needs: [N], checkout: [], reports: [], all: [W, D, S, C], history: [] } as Record<Tab, { group: string; rows: Row[] }[]>)[tab].filter((g) => g.rows.length);
-  const emptyText: Record<Tab, string> = { waiting: 'Nobody waiting', scheduled: 'Everyone booked has arrived', doctor: 'Consultation room is free', completed: 'Nothing completed yet', checkout: 'Nothing pending after the doctor', reports: 'No reports are being waited for', all: 'Nothing on this day', needs: 'All clear', history: '' };
+  const I = { group: 'With the junior doctor', rows: W.rows.filter((r) => r.v.status === 'intake') };
+  const groups = ({ now: [], intake: [I], waiting: [W], scheduled: [S], doctor: [D], completed: [C], needs: [N], checkout: [], reports: [], all: [W, D, S, C], history: [] } as Record<Tab, { group: string; rows: Row[] }[]>)[tab].filter((g) => g.rows.length);
+  const emptyText: Record<Tab, string> = { now: '', intake: 'Nobody with the junior doctor', waiting: 'Nobody waiting', scheduled: 'Everyone booked has arrived', doctor: 'Consultation room is free', completed: 'Nothing completed yet', checkout: 'Nothing pending after the doctor', reports: 'No reports are being waited for', all: 'Nothing on this day', needs: 'All clear', history: '' };
 
-  const exportRows = () => {
-    const out: (string | number | null | undefined)[][] = [['Date', 'Token / time', 'Patient', 'Age', 'Sex', 'Phone', 'Stage', 'Doctor', 'Note']];
-    for (const g of groups) for (const r of g.rows) {
-      const p = (r.v ?? r.a).patient;
-      const stage = r.type === 'waiting' ? 'waiting' : r.type === 'doctor' ? 'with doctor' : r.type === 'appt' ? 'not yet arrived' : r.type === 'noshow' ? 'no-show' : r.v.status === 'left' ? 'left' : 'completed';
-      const note = r.type === 'done' ? (r.v.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ') : (r.v?.details?.complaint ?? r.a?.note ?? '');
-      out.push([day, r.v ? r.v.opNumber : r.a.window.startTime, p.fullName, p.ageYears, p.sex, p.phone, stage, r.v ? r.v.doctor : docName(r.a.window.practitionerId), note]);
-    }
-    downloadCsv(`front-desk-${tab}-${day}.csv`, out);
-  };
-
-  const who = (p: any) => <><b className="text-[14px]">{p.fullName}</b><FlagChips flags={p.flags} /><span className="text-muted">{[p.ageYears, p.sex].filter(Boolean).join(' ')}</span></>;
+  const who = (p: any, vid?: string) => <>{vid && canDesk ? <button type="button" className="text-[14px] font-bold hover:underline" title="Show the journey" onClick={() => setPickV(vid)}>{p.fullName}</button> : <b className="text-[14px]">{p.fullName}</b>}<FlagChips flags={p.flags} /><span className="text-muted">{[p.ageYears, p.sex].filter(Boolean).join(' ')}</span></>;
   const meta = (xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ');
   const Row = ({ token, tokenCls = '', top, sub, actions, cls = '' }: { token: React.ReactNode; tokenCls?: string; top: React.ReactNode; sub: React.ReactNode; actions: React.ReactNode; cls?: string }) => (
     <div className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-line/70 px-5 py-3.5 first:border-t-0 hover:bg-surface-2 anim-fade-up ${cls}`}>
@@ -132,25 +131,24 @@ export function FrontDesk() {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting';
       const inside = visitsAll.filter((x) => x.status === 'in_consult' && (!v.practitionerId || !x.practitionerId || x.practitionerId === v.practitionerId)).length; const full = inside >= ROOM_MAX; return (
       <Row key={v.id} token={<span className="flex items-center gap-2">{pick(v.id)}{v.opNumber}</span>} tokenCls={`${i === 0 && !withJr ? 'text-clay' : ''} ${sel ? '!w-[108px]' : ''}`}
-        top={<>{who(v.patient)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
+        top={<>{who(v.patient, v.id)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
         sub={meta([v.patient.patientNo, v.patient.phone, `arrived ${hhmm(v.arrivedAt)} · waited ${minsSince(v.arrivedAt)} min`, v.category, v.details?.complaint, v.details?.weight_kg && `${v.details.weight_kg} kg`, v.details?.bp && `BP ${v.details.bp}`])}
         actions={<>
           {isJunior && v.status === 'waiting' && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>Intake</button>}
           {isDoctorUser && <button className="btn btn-sm" disabled={withJr} title={withJr ? 'With the junior doctor right now' : 'Open the consultation yourself; the desk is told'} onClick={() => openEncounter.mutate(v.id)}>Open</button>}
-          {canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}
           {canDesk && <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || full || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : full ? `${inside} already inside: the room takes ${ROOM_MAX}. Send the next one in when someone comes out.` : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>{full ? 'Room full' : 'Send in'}</button>}
-          {canDesk && <MoreMenu items={[{ label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Change doctor', hidden: !(d?.doctors ?? []).length, onClick: () => { const next = (d?.doctors ?? []).find((x: any) => x.id !== v.practitionerId); if (next) upVisit.mutate({ id: v.id, practitionerId: next.id }); } }, { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}
+          {canDesk && <MoreMenu items={[{ label: 'Profile', onClick: () => nav(`/patients/${v.patient.id}`) }, { label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Change doctor', hidden: !(d?.doctors ?? []).length, onClick: () => { const next = (d?.doctors ?? []).find((x: any) => x.id !== v.practitionerId); if (next) upVisit.mutate({ id: v.id, practitionerId: next.id }); } }, { label: 'Left without consultation', danger: true, onClick: () => upVisit.mutate({ id: v.id, status: 'left' }) }]} />}
         </>} />); }
     if (r.type === 'doctor') { const v = r.v; return (
       <Row key={v.id} token={v.opNumber}
-        top={<>{who(v.patient)}<Chip tone={v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'sage' : 'amber'}><span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'bg-sage breathe' : 'bg-amber'}`} />{v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'with the doctor' : 'inside · waiting'}</Chip>{v.doctor && <Chip>{v.doctor}</Chip>}</>}
+        top={<>{who(v.patient, v.id)}<Chip tone={v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'sage' : 'amber'}><span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'bg-sage breathe' : 'bg-amber'}`} />{v.details?.doctorOpenedAt || v.details?.calledBy !== 'desk' ? 'with the doctor' : 'inside · waiting'}</Chip>{v.doctor && <Chip>{v.doctor}</Chip>}</>}
         sub={meta([v.patient.patientNo, v.details?.calledAt && `${v.details.calledBy === 'desk' ? 'sent in' : 'called by doctor'} ${hhmm(v.details.calledAt)}`, v.details?.complaint])}
-        actions={<>{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}{canDesk && <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>}</>} />); }
+        actions={<>{isClinical && <button className="btn btn-sm" onClick={() => openEncounter.mutate(v.id)}>Open</button>}{canDesk && <MoreMenu items={[{ label: 'Profile', onClick: () => nav(`/patients/${v.patient.id}`) }]} />}</>} />); }
     if (r.type === 'appt') { const a = r.a; const isLate = isToday && toMin(a.window.endTime) < nowMin(); return (
       <Row key={a.id} token={<span className="flex items-center gap-2">{pick(a.id)}{a.window.startTime}</span>} tokenCls={`${isLate ? 'text-rose' : ''} ${sel ? '!w-[108px]' : ''}`} cls={isLate ? 'bg-rose-soft/30' : ''}
-        top={<>{who(a.patient)}{isLate ? <Chip tone="rose">not arrived</Chip> : a.status === 'confirmed' ? <Chip tone="sage">confirmed</Chip> : a.status === 'requested' ? <Chip tone="clay">online request</Chip> : <Chip>booked</Chip>}<Chip>{docName(a.window.practitionerId)}</Chip></>}
+        top={<>{who(a.patient)}{isLate ? <Chip tone="rose">not arrived</Chip> : a.status === 'confirmed' ? <Chip tone="sage">confirmed</Chip> : <Chip>booked</Chip>}<Chip>{docName(a.window.practitionerId)}</Chip></>}
         sub={meta([a.patient.patientNo, a.patient.phone, a.patient.locality, a.service, a.note])}
-        actions={<>{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>}{canDesk && <MoreMenu items={[{ label: 'Call patient', href: `tel:${a.patient.phone ?? ''}`, hidden: !dialable(a.patient.phone) }, { label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</>} />); }
+        actions={<>{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>}{canDesk && <MoreMenu items={[{ label: 'Mark no-show', danger: true, onClick: () => upAppt.mutate({ id: a.id, status: 'no_show' }) }]} />}</>} />); }
     if (r.type === 'noshow') { const a = r.a; return (
       <Row key={a.id} token={a.window.startTime} cls="opacity-70"
         top={<>{who(a.patient)}<Chip tone="rose">no-show</Chip><Chip>{docName(a.window.practitionerId)}</Chip></>}
@@ -159,9 +157,9 @@ export function FrontDesk() {
     const v = r.v; const due = v.due.reduce((x: number, c: any) => x + c.amountPaise, 0); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
     return (
       <Row key={v.id} token={v.opNumber} cls={due ? 'bg-rose-soft/30' : handled || left ? 'opacity-70' : ''}
-        top={<>{who(v.patient)}{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : v.encounterStatus === 'awaiting_reports' ? <Chip tone="amber">held for reports</Chip> : <Chip tone="sage">completed</Chip>}{v.doctor && <Chip>{v.doctor}</Chip>}
+        top={<>{who(v.patient, v.id)}{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : v.encounterStatus === 'awaiting_reports' ? <Chip tone="amber">held for reports</Chip> : <Chip tone="sage">completed</Chip>}{v.doctor && <Chip>{v.doctor}</Chip>}
           {!left && v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` × ${rc.sittings}` : ''}` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</>}
-        sub={meta([v.patient.patientNo, v.patient.phone, left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : null, left ? 'did not see the doctor' : v.rxCount ? `${v.rxCount} medicine${v.rxCount === 1 ? '' : 's'} · pharmacy has the Rx` : v.recommendations.length ? null : 'nothing to arrange'])}
+        sub={meta([v.patient.patientNo, v.patient.phone, left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : null, left ? 'did not see the doctor' : v.rxCount ? `${v.rxCount} medicine${v.rxCount === 1 ? '' : 's'} · pharmacy has the Rx` : v.recommendations.length ? null : 'no tests or procedures'])}
         actions={<>
           {canDesk && v.due[0] && <button className="btn btn-sm btn-primary" onClick={() => collect.mutate({ c: v.due[0], method: 'cash' })}>Collect {money(v.due[0].amountPaise)}</button>}
           {canDesk && !left && !handled && !v.due.length && v.recommendations.length > 0 && <button className="btn btn-sm btn-primary" onClick={() => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } })}><Icon name="check" className="h-3.5 w-3.5" />Explained</button>}
@@ -170,35 +168,35 @@ export function FrontDesk() {
             { label: 'Collect by UPI', hidden: !(canDesk && v.due[0]), onClick: () => collect.mutate({ c: v.due[0], method: 'upi' }) },
             { label: 'Open record', onClick: () => nav(`/patients/${v.patient.id}`) },
             { label: 'Mark as explained', hidden: !(canDesk && !left && !handled && v.recommendations.length > 0 && v.due.length > 0), onClick: () => upVisit.mutate({ id: v.id, details: { explainedAt: new Date().toISOString() } }) },
-            { label: 'Call patient', href: `tel:${v.patient.phone ?? ''}`, hidden: !dialable(v.patient.phone) },
+            
           ]} />
         </>} />);
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="fd flex min-h-0 flex-1 flex-col">
       <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
-        <div className="mr-auto"><h1 className="sr-only">Front desk</h1>
-          <div className="text-sm text-muted">{dayLabel}{d && <> · <b className="text-ink"><Num value={waiting.length} /> waiting</b>{waiting.length ? <> · longest <Num value={longest} /> min</> : ''} · <Num value={inConsult.length} /> with the doctor{(can(perms, 'report.daily') || can(perms, 'finance.read')) ? <> · <Num value={collected} format={money} /> collected</> : ''}</>}{isToday && (d?.doctors ?? []).filter((x: any) => x.from).map((x: any) => ` · ${x.name} ${x.from <= toHHMM(nowMin()) ? `until ${x.until}` : `from ${x.from}`}`).join('')}</div></div>
+        {/* the day, and the one number the stage tiles do not show: how long the longest wait is */}
+        <div className="mr-auto flex flex-wrap items-center gap-2"><h1 className="sr-only">Front desk</h1>
+          <span className="toppill !h-9 !cursor-default"><Icon name="calendar" className="h-4 w-4 text-muted" />{dayLabel}</span>
+          {d && waiting.length > 0 && <span className={`toppill !h-9 !cursor-default ${longest >= 30 ? '!text-amber' : ''}`} title="The patient who has waited longest since arriving"><Icon name="clock" className="h-4 w-4" />Longest wait <b className="tabular-nums"><Num value={longest} /> min</b></span>}</div>
         {tab === 'history'
-          ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab('waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
-          : <div className="flex items-center gap-1.5 no-print">{canDesk && <button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button>}{canList && <button className="btn btn-icon" title="Print" aria-label="Print" onClick={() => listOut(`Printed the front desk list (${tab})`, undefined, () => window.print())}><Icon name="print" /></button>}{canDesk && canList && <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" onClick={() => listOut(`Downloaded the front desk list (${tab})`, undefined, exportRows)}><Icon name="export" /></button>}</div>}
+          ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab(canDesk ? 'now' : 'waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
+          : canDesk && <div className="flex items-center gap-1.5 no-print"><button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button></div>}
       </div>
+      {canDesk && arrive && <ArrivalSheet key={`${arriveKey}:${arrive.patientId ?? ''}:${arrive.appointmentId ?? ''}:${arrive.reports?.encounterId ?? ''}`} init={arrive} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} />}
 
       {calling.length > 0 && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-[12px] border border-line-2 bg-paper-2 px-4 py-3 text-[14px] anim-fade-up"><Icon name="bell" className="h-5 w-5 text-clay" />{calling.map((v) => <span key={v.id}><b>{v.doctor ?? 'The doctor'}</b> is calling <b>{v.patient.fullName}</b> · token {v.opNumber}</span>)}<button className="btn btn-sm ml-auto" onClick={() => setCalling([])}>Sent</button></div>}
       {!d ? <Skeleton rows={3} /> : (
-        <div className={`grid items-start gap-4 ${canDesk && tab !== 'history' ? 'xl:grid-cols-[380px_minmax(0,1fr)]' : ''}`}>
-          {canDesk && tab !== 'history' && <div className="xl:sticky xl:top-[84px] xl:max-h-[calc(100dvh-100px)] xl:self-start xl:overflow-y-auto xl:rounded-2xl"><ArrivalSheet key={`${arriveKey}:${arrive?.patientId ?? ''}:${arrive?.appointmentId ?? ''}:${arrive?.reports?.encounterId ?? ''}`} inline init={arrive ?? {}} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} /></div>}
+        <div>
           <div className="min-w-0">
             {(d?.doctors ?? []).length > 1 && tab !== 'history' && <div className="mb-2 flex flex-wrap items-center gap-1.5">
               <Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={[{ value: 'all', label: 'All doctors', count: visitsAll.filter((v) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length }, ...(d?.doctors ?? []).map((x: any) => ({ value: x.id as string, label: x.name as string, count: visitsAll.filter((v) => v.practitionerId === x.id && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length }))]} />
               {visitsAll.some((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)) && <span className="text-xs text-rose">{visitsAll.filter((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)).length} with no doctor picked</span>}
             </div>}
-            <div className="mb-3 flex gap-0.5 overflow-x-auto no-scrollbar border-b border-line" role="tablist">
-              {([['waiting', 'Waiting', waiting.length, waiting.length > 0], ...(canDesk ? [['scheduled', 'Not yet arrived', scheduled.length, late.length > 0]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Checkout', checkout.length, checkout.length > 0], ['reports', 'Reports pending', reportsOpen.length, reportsOpen.some((o) => o.state === 'ready' || o.state === 'partial')], ['completed', 'Completed', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false], ...(canDesk ? [['needs', 'Needs you', needsCount, needsCount > 0]] : [])] as [Tab, string, number, boolean][]).map(([k, l, n, hot]) => (
-                <button key={k} role="tab" aria-selected={tab === k} className={`-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[13px] whitespace-nowrap ${tab === k ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-muted hover:text-ink'}`} onClick={() => setTab(k)}>{l}<span className={`tabular-nums ${hot && tab !== k ? 'text-clay font-semibold' : tab === k ? 'text-ink' : 'text-muted'}`}><Num value={n} /></span></button>))}
-              {canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="ml-auto shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>}
-            </div>
+            {tab !== 'history' && <StageStrip tab={tab} onTab={setTab}
+              items={[...(canDesk ? [['now', 'For you now', nowCount, nowCount > 0]] : []), ['waiting', 'Waiting', waiting.length, false], ...(screening !== 'off' || intake.length ? [['intake', 'Vitals', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ...(canDesk ? [['scheduled', 'Still to arrive', scheduled.length, false]] : []), ['all', 'All', visits.length + scheduled.length + noShows.length, false]] as [Tab, string, number, boolean][]}
+              extra={canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="ml-auto shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>} />}
             {sel && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-[13px] text-paper anim-fade-up" role="toolbar" aria-label="Selected rows">
               <b>{sel.size} selected</b>
               <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set((tab === 'waiting' ? waiting.map((v) => v.id) : scheduled.map((a) => a.id))))}>All</button>
@@ -207,12 +205,21 @@ export function FrontDesk() {
               <span className="ml-auto" />
               <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-paper px-3 font-semibold text-ink hover:bg-paper-2 disabled:opacity-50" disabled={!sel.size || bulk.isPending} onClick={bulkAsk}>{tab === 'scheduled' ? 'Mark no-show' : 'Mark as left'}{sel.size ? ` · ${sel.size}` : ''}</button>
             </div>}
-            {tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
-              <div className="card-flat overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
+            {tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
+                onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
+                onReportsArrive={(o) => { const daysSince = Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000); setArrive({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: daysSince <= (cfg?.tenant?.settings?.reports?.freeDays ?? 30), since: o.orderedAt } }); }}
+                onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => collect.mutate({ c: v.due[0], method: 'cash' })} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
+            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
+              <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
               </div>)}
+            {canDesk && tab !== 'history' && <Filmstrip visits={visitsAll} selectedId={selV?.id ?? null} onSelect={setPickV}
+              onEnter={(v) => { const s = canSend(v); if (['waiting', 'screened'].includes(v.status) && s.ok) upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} sent in`, 'info'), onError: (e) => toast(errText(e), 'err') }); else if (['waiting', 'screened'].includes(v.status)) toast(s.why, 'info'); }} />}
           </div>
+          {selV && <JourneyPanel key={selV.id} v={selV} order={reportsOpen.find((o) => o.encounterId === selV.encounterId)} screening={screening} inLine={waiting.findIndex((x) => x.id === selV.id) + 1} canDesk={canDesk}
+              canSend={canSend} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })} onClose={() => setPickV('')}
+              arrangeSlot={<CheckoutList bare visits={[selV]} canDesk={canDesk} canForce={can(perms, 'config.write')} />} />}
         </div>)}
     </div>
   );
@@ -289,7 +296,7 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
                 {adj && <div className="mt-1"><Chip tone="amber">{adj.status}{adj.reason ? ` · ${adj.reason}` : ''}</Chip></div>}</td>
               <td className="text-right pr-4 whitespace-nowrap no-print">
                 {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={() => onBook(r.patient)}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.refund') ? <button className="btn btn-sm btn-primary" onClick={() => refund.mutate(paid)}>Refund</button> : <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>}
-                {(r.kind === 'noshow' || r.outcome === 'left') && <> <MoreMenu items={[{ label: 'Open record', onClick: () => nav(`/patients/${r.patient.id}`) }, { label: 'Call patient', href: `tel:${r.patient.phone ?? ''}` }]} /></>}</td></tr>); })}
+                {(r.kind === 'noshow' || r.outcome === 'left') && <> <MoreMenu items={[{ label: 'Open record', onClick: () => nav(`/patients/${r.patient.id}`) }]} /></>}</td></tr>); })}
         </tbody></table></div>
         {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-ink/8">Showing the newest 500. Narrow the period or search to see older rows.</div>}
       </div>
@@ -459,7 +466,7 @@ const awaitingReports = (v: any) => { const t = testsOf(v); return v.status === 
 const plansRefresh = () => ['frontdesk', 'worklist', 'bookings', 'psessions', 'pcounts', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
 /** After the doctor: every open plan of a finished patient with the one action that settles it. A patient leaves this list when nothing is pending. */
-function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: boolean; canForce: boolean }) {
+function CheckoutList({ visits, canDesk, canForce, bare = false }: { visits: any[]; canDesk: boolean; canForce: boolean; bare?: boolean }) {
   const nav = useNavigate();
   const [sched, setSched] = useState<{ rec: any; patient: any } | null>(null); const [course, setCourse] = useState<{ rec: any; patient: any } | null>(null);
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: plansRefresh, onError: (e) => toast(errText(e), 'err') });
@@ -468,7 +475,7 @@ function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: b
   const later = (ids: string[]) => act(ids, 'contacted', 'Do later');
   const close = useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => patch(`/visits/${id}`, { details: { checkoutClosedAt: new Date().toISOString(), ...(reason ? { checkoutCloseReason: reason } : {}) } }), onSuccess: () => { plansRefresh(); toast('Visit closed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
   const closeWithReason = async (id: string) => { const a = await ask({ title: 'Close this visit with things still open?', body: 'The reason is written to the audit log.', confirmLabel: 'Close visit', cancelLabel: 'Keep open', field: { label: 'Reason (patient left, declined…)', required: true, maxLength: 200 } }); if (a?.value) close.mutate({ id, reason: a.value }); };
-  if (visits.length === 0) return <div className="card"><Empty icon="check" title="Nothing pending after the doctor" hint="When the doctor advises a procedure, tests or a review, the patient shows here until each is arranged." /></div>;
+  if (visits.length === 0) return <div className="card"><Empty icon="check" title="Nothing pending after the doctor" hint="When the doctor advises a procedure, tests or a review, the patient shows here until each is done or marked not needed." /></div>;
   return (
     <div className="space-y-3 anim-fade-up">
       {visits.map((v) => {
@@ -484,17 +491,17 @@ function CheckoutList({ visits, canDesk, canForce }: { visits: any[]; canDesk: b
                 <MoreMenu items={[{ label: 'Patient declined', danger: true, onClick: () => decline(ids, tag) }, { label: 'Do later', onClick: () => later(ids) }]} /></>}</div>;
         };
         return (
-          <div key={v.id} className="card !p-4">
-            <div className="flex flex-wrap items-center gap-2"><b className="text-[16px]">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /><span className="text-xs text-muted">{v.opNumber} · seen {v.completedAt ? hhmm(v.completedAt) : ''}{v.doctor ? ` by ${v.doctor}` : ''}{v.patient.phone ? ` · ${v.patient.phone}` : ''}</span><span className="ml-auto" />{open.length ? <Chip tone="amber">{open.length} open</Chip> : <Chip>ready to close</Chip>}</div>
+          <div key={v.id} className={bare ? '' : 'card !p-4'}>
+            <div className={`flex flex-wrap items-center gap-2 ${bare ? 'hidden' : ''}`}><b className="text-[16px]">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /><span className="text-xs text-muted">{v.opNumber} · seen {v.completedAt ? hhmm(v.completedAt) : ''}{v.doctor ? ` by ${v.doctor}` : ''}{v.patient.phone ? ` · ${v.patient.phone}` : ''}</span><span className="ml-auto" />{open.length ? <Chip tone="amber">{open.length} open</Chip> : <Chip>ready to close</Chip>}</div>
             <div className="mt-2.5 space-y-1.5">
               {procs.map((r) => <Item key={r.id} tag="procedure" tone="sky" title={r.procedure ?? 'Procedure'} sub={r.sittings ? `${r.sittings} sittings planned` : undefined} rs={[r]} action={r.procedureId ? 'Plan' : 'Schedule'} onAction={() => r.procedureId ? setCourse({ rec: { ...r, patient: v.patient }, patient: v.patient }) : setSched({ rec: { ...r, patient: v.patient }, patient: v.patient })} />)}
               {tests.length > 0 && <Item tag="tests" tone="clay" title={tests.map((r) => r.notes).filter(Boolean).join(', ') || 'Tests'} sub="lab slip" rs={tests} action="Slip given" onAction={() => act(tests.filter((r) => r.status === 'open').map((r) => r.id), 'contacted', 'Lab slip given').then(() => toast('Marked: lab slip given', 'info'))} />}
-              {fus.map((r) => <Item key={r.id} tag="follow-up" tone="amber" title={r.dueOn ? `Review around ${fmtDate(r.dueOn)}` : 'Review'} rs={[r]} action="Book visit" onAction={() => nav(`?book=1&patient=${v.patient.id}&pname=${encodeURIComponent(v.patient.fullName)}&rec=${r.id}`)} />)}
+              {fus.map((r) => <Item key={r.id} tag="follow-up" tone="amber" title={r.dueOn ? `Review around ${fmtDate(r.dueOn)}` : 'Review'} rs={[r]} action="Book visit" onAction={() => nav(`?book=1&patient=${v.patient.id}&pname=${encodeURIComponent(v.patient.fullName)}&rec=${r.id}${r.dueOn ? `&day=${r.dueOn}` : ''}${v.practitionerId ? `&doc=${v.practitionerId}` : ''}`)} />)}
               {waitingRep && <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-3 py-2.5 text-sm"><Chip tone="amber">reports</Chip><span className="min-w-0 flex-1"><b>{got} of {tst.length} received</b><span className="text-muted"> · carries on in Awaiting reports, it does not hold up closing</span></span></div>}
               <div className="flex items-start gap-2 px-3 py-1 text-xs text-muted"><Chip>hand-off</Chip><span>Consultation was paid at check-in.{v.rxCount > 0 ? ` Medicines (${v.rxCount}) are waiting at the pharmacy counter; the pharmacist collects.` : ''}{procs.length > 0 ? ' Procedures are paid on the procedure day.' : ''}</span></div>
             </div>
-            {canDesk && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-3"><span className="text-xs text-muted">{open.length ? 'Close visit unlocks when the plans above are arranged or marked not needed.' : 'Everything is arranged.'}</span><span className="ml-auto" />
-              {v.encounterId && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Print Rx</button>}
+            {canDesk && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-3"><span className="text-xs text-muted">{open.length ? 'Close visit unlocks when nothing above is pending.' : 'Nothing pending.'}</span><span className="ml-auto" />
+              {v.encounterId && !bare && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Print Rx</button>}
               {canForce && open.length > 0 && <button className="btn btn-sm" disabled={close.isPending} onClick={() => closeWithReason(v.id)}>Close with a reason</button>}
               <button className="btn btn-sm btn-primary" disabled={close.isPending || open.length > 0} onClick={() => close.mutate({ id: v.id })}><Icon name="check" className="h-3.5 w-3.5" />Close visit</button></div>}
           </div>);

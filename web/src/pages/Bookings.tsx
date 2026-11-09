@@ -6,12 +6,12 @@ import { can } from '../App';
 import { Chip, Empty, Icon, PageHeader, Segmented, Skeleton, toast, usePageSearch } from '../ui';
 import { AppointmentDrawer, StatusChip, refreshBookings } from '../apptDrawer';
 
-type Tab = 'requests' | 'upcoming' | 'unconfirmed' | 'past' | 'no_show' | 'cancelled';
+type Tab = 'upcoming' | 'unconfirmed' | 'past' | 'no_show' | 'cancelled';
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
-const MSG: Record<string, string> = { confirmation: 'Confirmation', requested: 'Request ack', reminder: 'Reminder', moved: 'Move notice', cancelled: 'Cancel notice', declined: 'Decline notice' };
+const MSG: Record<string, string> = { confirmation: 'Confirmation', reminder: 'Reminder', moved: 'Move notice', cancelled: 'Cancel notice' };
 const msgText = (m: any) => !m ? '—' : `${MSG[m.kind] ?? m.kind} ${m.status === 'pending' ? 'due' : m.status === 'logged' ? 'ready' : m.status} · ${new Date(m.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
 
-/** Every booking in one place: online requests first, then filters by status, doctor, visit type, dates and name. */
+/** Every booking in one place: filters by status, doctor, visit type, dates and name. */
 export function Bookings() {
   const { cfg, perms } = useOutletContext<any>();
   const [params, setParams] = useSearchParams();
@@ -22,28 +22,17 @@ export function Bookings() {
   const canWrite = can(perms, 'appointment.write');
   const qs = new URLSearchParams({ tab, ...(doc && { practitionerId: doc }), ...(svc && { serviceId: svc }), ...(from && { from }), ...(to && { to }), ...(q.trim().length >= 2 && { q: q.trim() }) });
   const list = useQuery({ queryKey: ['bookings', qs.toString()], queryFn: () => get(`/bookings?${qs}`), refetchInterval: 30000 });
-  const requests = useQuery({ queryKey: ['bookings', 'tab=requests'], queryFn: () => get('/bookings?tab=requests'), refetchInterval: 30000, enabled: tab !== 'requests' });
   const counts = useQuery({ queryKey: ['bookings', 'counts'], queryFn: () => get('/bookings/counts') });
-  const approve = useMutation({ mutationFn: (id: string) => post(`/appointments/${id}/approve`), onSuccess: () => { refreshBookings(); toast('Approved · confirmation queued'); }, onError: (e) => toast(errText(e), 'err') });
-  const reqs: any[] = tab === 'requests' ? list.data ?? [] : requests.data ?? [];
   const rows: any[] = list.data ?? [];
   const badDates = from && to && from > to;
 
   return (
     <div>
-      <PageHeader title="Bookings" subtitle="Online requests, upcoming visits and history. Click any booking for details and actions.">
+      <PageHeader title="Bookings" subtitle="Upcoming visits and history. Click any booking for details and actions.">
       </PageHeader>
 
-      {tab !== 'requests' && reqs.length > 0 && (
-        <section className="glass mb-5 overflow-hidden anim-fade-up">
-          <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2"><b className="text-[16px]">Online requests</b><Chip tone="clay">{reqs.length} waiting</Chip><span className="ml-auto text-xs text-muted">Approve to confirm the place and message the patient</span></div>
-          {reqs.slice(0, 5).map((r) => <RequestRow key={r.id} r={r} canWrite={canWrite} onOpen={() => setOpen(r.id)} onApprove={() => approve.mutate(r.id)} busy={approve.isPending} />)}
-          {reqs.length > 5 && <button className="w-full border-t border-line/60 py-3 text-sm font-medium text-muted hover:text-ink" onClick={() => setTab('requests')}>See all {reqs.length} requests</button>}
-        </section>
-      )}
-
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Segmented<Tab> value={tab} onChange={setTab} options={[{ value: 'requests', label: 'Requests', count: counts.data?.requests }, { value: 'upcoming', label: 'Upcoming' }, { value: 'unconfirmed', label: 'Unconfirmed', count: counts.data?.unconfirmed }, { value: 'past', label: 'Past' }, { value: 'no_show', label: 'No-shows' }, { value: 'cancelled', label: 'Cancelled' }]} />
+        <Segmented<Tab> value={tab} onChange={setTab} options={[{ value: 'upcoming', label: 'Upcoming' }, { value: 'unconfirmed', label: 'Unconfirmed', count: counts.data?.unconfirmed }, { value: 'past', label: 'Past' }, { value: 'no_show', label: 'No-shows' }, { value: 'cancelled', label: 'Cancelled' }]} />
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {(cfg?.practitioners ?? []).length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">All doctors</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
@@ -56,8 +45,7 @@ export function Bookings() {
 
       <section className="card-flat overflow-hidden anim-fade-up">
         {list.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : list.isError ? <div className="p-4 text-sm text-rose">{errText(list.error)}</div>
-          : rows.length === 0 ? <Empty icon="inbox" title={tab === 'requests' ? 'No online requests' : 'No bookings here'} hint={tab === 'requests' ? 'Requests from the online booking page appear here.' : 'Try another tab or clear the filters.'} />
-          : tab === 'requests' ? rows.map((r) => <RequestRow key={r.id} r={r} canWrite={canWrite} onOpen={() => setOpen(r.id)} onApprove={() => approve.mutate(r.id)} busy={approve.isPending} />)
+          : rows.length === 0 ? <Empty icon="inbox" title="No bookings here" hint="Try another tab or clear the filters." />
           : (<>
             <div className="hidden overflow-x-auto md:block">
               <table className="table w-full">
@@ -88,15 +76,3 @@ export function Bookings() {
   );
 }
 
-function RequestRow({ r, canWrite, onOpen, onApprove, busy }: { r: any; canWrite: boolean; onOpen: () => void; onApprove: () => void; busy: boolean }) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 border-t border-line/60 px-5 py-3.5 first:border-t-0">
-      <Chip tone="sky">online</Chip>
-      <button className="min-w-0 flex-1 text-left" onClick={onOpen}>
-        <div><b>{r.patient.fullName}</b> <span className="text-sm text-muted">· {r.patient.phone}</span>{r.noShows > 0 && <Chip tone="rose" className="ml-2">{r.noShows} no-show{r.noShows === 1 ? '' : 's'}</Chip>}</div>
-        <div className="truncate text-sm text-muted">{r.service?.name ?? 'Visit'} · {r.window.doctor ?? 'Any doctor'} · {dayLabel(r.window.day)}, {r.window.startTime}–{r.window.endTime}{r.note ? ` · “${r.note}”` : ''}</div>
-      </button>
-      {canWrite && <div className="flex gap-2"><button className="btn btn-sm" onClick={onOpen}>Decline</button><button className="btn btn-sm btn-primary" disabled={busy} onClick={onApprove}><Icon name="check" />Approve</button></div>}
-    </div>
-  );
-}

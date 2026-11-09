@@ -50,7 +50,7 @@ export async function windowsForDay(tx: Tx, t: string, day: string, practitioner
   const rows = await tx.select({
     s: session,
     // explicit "session"."id": an embedded column renders unqualified here and would match a.id instead
-    allocated: sql<number>`(select coalesce(sum(coalesce(sv.places, 1)), 0)::int from appointment a left join service sv on sv.id = a.service_id where a.session_id = "session"."id" and a.status in ('requested','booked','confirmed','arrived'))`,
+    allocated: sql<number>`(select coalesce(sum(coalesce(sv.places, 1)), 0)::int from appointment a left join service sv on sv.id = a.service_id where a.session_id = "session"."id" and a.status in ('booked','confirmed','arrived'))`,
   }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day), ...(practitionerId ? [eq(session.practitionerId, practitionerId)] : []))).orderBy(asc(session.startTime));
   const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day)));
   return rows.map((r) => {
@@ -76,7 +76,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     if (!row) throw new HttpError(404, 'NOT_FOUND'); return row;
   });
   route(app, 'delete', '/sessions/:id', 'appointment.write', async (req, tx) => {
-    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).where(and(eq(appointment.sessionId, (req.params as any).id), sql`${appointment.status} in ('requested','booked','confirmed','arrived')`));
+    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).where(and(eq(appointment.sessionId, (req.params as any).id), sql`${appointment.status} in ('booked','confirmed','arrived')`));
     if (n > 0) throw new HttpError(409, 'HAS_BOOKINGS', { bookings: n });
     await tx.delete(session).where(and(eq(session.id, (req.params as any).id), eq(session.tenantId, req.ctx.tenantId))); return { ok: true };
   });
@@ -91,7 +91,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     if (body.replace) {
       const existing = await tx.select({ id: session.id }).from(session).where(and(eq(session.tenantId, t), eq(session.day, body.day), eq(session.practitionerId, body.practitionerId)));
       for (const s of existing) {
-        const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).where(and(eq(appointment.sessionId, s.id), sql`${appointment.status} in ('requested','booked','confirmed','arrived')`));
+        const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).where(and(eq(appointment.sessionId, s.id), sql`${appointment.status} in ('booked','confirmed','arrived')`));
         if (n === 0) await tx.delete(session).where(eq(session.id, s.id));
       }
       await tx.delete(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, body.day), eq(calendarBlock.practitionerId, body.practitionerId), eq(calendarBlock.kind, 'break')));
@@ -128,7 +128,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     // Future routine-generated windows without bookings are dropped so they regenerate from the new routine.
     const today = todayIn(req.ctx.timezone);
     await tx.execute(sql`delete from session s where s.tenant_id = ${t} and s.practitioner_id = ${pid} and s.source = 'routine' and s.day >= ${today}
-      and not exists (select 1 from appointment a where a.session_id = s.id and a.status in ('requested','booked','confirmed','arrived'))`);
+      and not exists (select 1 from appointment a where a.session_id = s.id and a.status in ('booked','confirmed','arrived'))`);
     await emit(tx, req.ctx, 'routine.updated', 'practitioner', pid, routine);
     return row;
   });
@@ -139,7 +139,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     const windows = await windowsForDay(tx, t, day, pid);
     const appts = windows.length ? await tx.select({ id: appointment.id, sessionId: appointment.sessionId, status: appointment.status, note: appointment.note, source: appointment.source, seriesId: appointment.seriesId, patientId: patient.id, name: patient.fullName, phone: patient.phone, serviceId: appointment.serviceId, service: service.name, color: service.color })
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(service, eq(service.id, appointment.serviceId))
-      .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('requested','booked','confirmed','arrived','no_show')`)).orderBy(asc(appointment.createdAt)) : [];
+      .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('booked','confirmed','arrived','no_show')`)).orderBy(asc(appointment.createdAt)) : [];
     const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : [])));
     const procs = await tx.select({ ps: procedureSession, patient: patient.fullName, phone: patient.phone, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, review: procedureCatalog.requiresReview })
       .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
@@ -274,12 +274,9 @@ export function schedulingRoutes(app: FastifyInstance) {
     return { block: blockRow, sessions: sessionRows, affected, moved };
   });
 
-  /** What the front desk must handle: online requests, patients left in hours a doctor gave up, places that opened for the waiting list. */
+  /** What the front desk must handle: patients left in hours a doctor gave up, places that opened for the waiting list. */
   route(app, 'get', '/calendar/attention', 'appointment.read', async (req, tx) => {
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone); const until = addDays(today, 14);
-    const requests = await tx.select({ id: appointment.id, name: patient.fullName, day: session.day, startTime: session.startTime, practitionerId: session.practitionerId })
-      .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).innerJoin(patient, eq(patient.id, appointment.patientId))
-      .where(and(eq(appointment.tenantId, t), eq(appointment.status, 'requested'), gte(session.day, today))).orderBy(asc(session.day), asc(session.startTime));
     const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), gte(calendarBlock.day, today), lte(calendarBlock.day, until), inArray(calendarBlock.kind, ['leave', 'other'])));
     const toCall: any[] = [];
     for (const bl of blocks.filter((x) => x.practitionerId)) {
@@ -292,7 +289,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     const waiting = await tx.select({ n: sql<number>`count(*)::int` }).from(waitlist).where(and(eq(waitlist.tenantId, t), inArray(waitlist.status, ['waiting', 'offered']))).then((r) => r[0].n);
     const open = waiting ? (await freePlaces(tx, t, today, 1, null, nowHHMM(req.ctx.timezone))).length : 0;
     toCall.sort((x, y) => `${x.day}${x.startTime}`.localeCompare(`${y.day}${y.startTime}`));
-    return { requests, toCall, waiting, openToday: open };
+    return { toCall, waiting, openToday: open };
   });
 
   // --- waiting list: patients who want an earlier place ---
@@ -449,24 +446,6 @@ export function schedulingRoutes(app: FastifyInstance) {
     return { ...row, alsoCancelled };
   });
 
-  /** Online requests: reception approves (books the place for good and tells the patient) or declines with a reason. */
-  route(app, 'post', '/appointments/:id/approve', 'appointment.write', async (req, tx) => {
-    const t = req.ctx.tenantId; const id = (req.params as any).id;
-    const [row] = await tx.update(appointment).set({ status: 'booked' }).where(and(eq(appointment.id, id), eq(appointment.tenantId, t), eq(appointment.status, 'requested'))).returning();
-    if (!row) throw new HttpError(409, 'NOT_A_REQUEST');
-    await emit(tx, req.ctx, 'appointment.approved', 'appointment', row.id, {});
-    await queueMessage(tx, t, row.id, 'confirmation', originOf(req));
-    await planReminders(tx, t, row.id, originOf(req));
-    return row;
-  });
-  route(app, 'post', '/appointments/:id/decline', 'appointment.write', async (req, tx) => {
-    const { reason } = z.object({ reason: z.string().trim().max(300).default('') }).parse(req.body ?? {}); const t = req.ctx.tenantId; const id = (req.params as any).id;
-    const [row] = await tx.update(appointment).set({ status: 'cancelled', cancelReason: reason || 'declined' }).where(and(eq(appointment.id, id), eq(appointment.tenantId, t), eq(appointment.status, 'requested'))).returning();
-    if (!row) throw new HttpError(409, 'NOT_A_REQUEST');
-    await emit(tx, req.ctx, 'appointment.declined', 'appointment', row.id, { reason });
-    await queueMessage(tx, t, row.id, 'declined', originOf(req), { extra: { reason } });
-    return row;
-  });
   /** Send a reminder now (reception's "nudge"). */
   route(app, 'post', '/appointments/:id/remind', 'appointment.write', async (req, tx) => {
     const t = req.ctx.tenantId; const id = (req.params as any).id;
@@ -499,13 +478,12 @@ export function schedulingRoutes(app: FastifyInstance) {
       service: r.svc, series, messages: msgs, link: r.a.publicToken && ten ? `${originOf(req)}/a/${ten.slug}/${r.a.publicToken}` : null };
   });
 
-  /** The Bookings list: requests, upcoming, unconfirmed, past, no-shows, cancelled; filterable. */
+  /** The Bookings list: upcoming, unconfirmed, past, no-shows, cancelled; filterable. */
   route(app, 'get', '/bookings', 'appointment.read', async (req, tx) => {
-    const q = z.object({ tab: z.enum(['requests', 'upcoming', 'unconfirmed', 'past', 'no_show', 'cancelled']).default('upcoming'), practitionerId: z.string().uuid().optional(), serviceId: z.string().uuid().optional(),
+    const q = z.object({ tab: z.enum(['upcoming', 'unconfirmed', 'past', 'no_show', 'cancelled']).default('upcoming'), practitionerId: z.string().uuid().optional(), serviceId: z.string().uuid().optional(),
       from: DAY.optional(), to: DAY.optional(), q: z.string().trim().max(60).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) }).parse(req.query);
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
     const conds: any[] = [eq(appointment.tenantId, t)];
-    if (q.tab === 'requests') conds.push(eq(appointment.status, 'requested'));
     if (q.tab === 'upcoming') conds.push(inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today));
     if (q.tab === 'unconfirmed') conds.push(eq(appointment.status, 'booked'), gte(session.day, today));
     if (q.tab === 'past') conds.push(sql`${session.day} < ${today}`);
@@ -528,7 +506,7 @@ export function schedulingRoutes(app: FastifyInstance) {
   });
   route(app, 'get', '/bookings/counts', 'appointment.read', async (req, tx) => {
     const today = todayIn(req.ctx.timezone);
-    const [c] = await tx.select({ requests: sql<number>`count(*) filter (where ${appointment.status} = 'requested')::int`, unconfirmed: sql<number>`count(*) filter (where ${appointment.status} = 'booked' and ${session.day} >= ${today})::int` })
+    const [c] = await tx.select({ unconfirmed: sql<number>`count(*) filter (where ${appointment.status} = 'booked' and ${session.day} >= ${today})::int` })
       .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(eq(appointment.tenantId, req.ctx.tenantId));
     // plans the doctor made today that nobody has acted on yet (the coordinator's "new")
     const [p] = await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.tenantId, req.ctx.tenantId), eq(recommendation.status, 'open'), sql`(${recommendation.createdAt} at time zone ${req.ctx.timezone})::date = ${today}`));

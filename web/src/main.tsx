@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router';
 import './index.css';
+import './glass.css';
 import { qc } from './api';
 import { App, Home } from './App';
 import { Overview } from './pages/Overview';
@@ -26,7 +27,6 @@ import { Platform } from './pages/Platform';
 import { AuditLog } from './pages/Privacy';
 import { Expenses } from './pages/Expenses';
 import { Bookings } from './pages/Bookings';
-import { PublicBook } from './pages/PublicBook';
 import { PatientLink } from './pages/PatientLink';
 import { Display } from './pages/Display';
 import { NotFound } from './ui';
@@ -38,7 +38,6 @@ createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/print/:id" element={<PrintRx />} />
-          <Route path="/book/:slug" element={<PublicBook />} />
           <Route path="/a/:slug/:token" element={<PatientLink />} />
           <Route path="/display/:slug/:token" element={<Display />} />
           <Route element={<App />}>
