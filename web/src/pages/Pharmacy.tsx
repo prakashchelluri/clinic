@@ -321,7 +321,7 @@ function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string |
                 <tr key={r.id} onClick={() => pick(r.id)} className={`cursor-pointer ${sel === r.id ? 'bg-paper-2' : 'hover:bg-surface-2'}`}>
                   <td><button className="font-semibold hover:underline" onClick={(e) => { e.stopPropagation(); pick(r.id); }}>{r.invoiceNo}</button></td><td className="text-muted whitespace-nowrap">{range === 'today' ? fmtTime(r.at) : `${fmtDate(r.at)} ${fmtTime(r.at)}`}</td>
                   <td><div className="font-medium">{r.patient.fullName}</div><div className="text-xs text-muted">{r.encounterId ? `Rx ${r.doctor ?? ''}` : 'Walk-in · no prescription'}</div></td>
-                  <td className="text-sm">{r.items}{r.balance.length > 0 && <span className="ml-1.5 text-xs text-muted">{r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)} left on Rx</span>}{r.notIssued > 0 && <span className="ml-1.5 text-xs text-muted">{r.notIssued} not from us</span>}</td>
+                  <td className="text-sm">{r.items} item{r.items === 1 ? '' : 's'}{r.balance.length > 0 && <span className="ml-1.5 text-xs text-muted">· {r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)} left on Rx</span>}{r.notIssued > 0 && <span className="ml-1.5 text-xs text-muted">· {r.notIssued} not from us</span>}</td>
                   <td className="text-right font-semibold">{money(r.totalPaise)}{r.refundPaise > 0 && <div className="text-xs text-rose">− {money(r.refundPaise)}</div>}</td>
                   <td className="text-sm uppercase text-muted">{r.method === 'split' ? r.payments.map((p: any) => p.method).join(' + ') : r.method}</td>
                 </tr>))}</tbody></table>)}
