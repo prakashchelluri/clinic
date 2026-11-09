@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
@@ -52,7 +53,6 @@ const isReviewVisit = (v: any, cfg: any) => { const code = v?.category; if (!cod
 const withQty = (i: RxItem): RxItem => (i._qtyTouched || i.qty ? i : { ...i, qty: qtyFor(i) ?? undefined });
 const ICON: Record<string, [string, string]> = { vitals: ['♡', '#5B8DB8'], symptoms: ['S', '#C53B14'], diagnosis: ['Dx', '#8A2E10'], exam: ['Ex', '#6F8F78'], medicines: ['℞', '#15181B'], advice: ['A', '#B98B6E'], tests: ['T', '#5B8DB8'], results: ['R', '#B8860B'], next: ['→', '#6F8F78'], notes: ['N', '#8B929C'], referral: ['Rf', '#5B8DB8'], history: ['H', '#8A2E10'], photos: ['P', '#6F8F78'] };
 
-/** One section card of the pad: a header with the same plain-word actions everywhere, the section inside. */
 /** One section of the pad as its own card: icon tile, title, the header actions on the right, rows inside, the search line last. */
 function Card({ id, title, meta, actions, children, required, invalid }: { id: string; title: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; required?: boolean; invalid?: boolean }) {
   const [ch, color] = ICON[id] ?? ['•', '#8B929C'];
@@ -71,12 +71,13 @@ function Card({ id, title, meta, actions, children, required, invalid }: { id: s
 const Act = ({ children, onClick, disabled, aria }: { children: ReactNode; onClick: () => void; disabled?: boolean; aria?: string }) => <button type="button" className="btn btn-ghost !min-h-7 !px-2 text-[12px] text-muted hover:text-ink" disabled={disabled} aria-label={aria} onClick={onClick}>{children}</button>;
 
 /** T·Sx, T·Dx …: the section's templates in one place, as in Eka. Load one, save what is on the card now, or clear the card. */
-function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear }: { kind: TmplKind; sub: string; what: string; sets: Tmpl[]; onPick: (t: Tmpl) => void; onSave: () => void; onClear: (() => void) | null }) {
+function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, compact, id }: { kind: TmplKind; sub: string; what: string; sets: Tmpl[]; onPick: (t: Tmpl) => void; onSave: () => void; onClear: (() => void) | null; compact?: boolean; id?: string }) {
   const [open, setOpen] = useState(false); const [q, setQ] = useState(''); const btn = useRef<HTMLButtonElement>(null);
   const mine = sets.filter((t) => t.kind === kind); const list = mine.filter((t) => !q || t.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
-      <button ref={btn} type="button" className="btn btn-ghost !min-h-7 !px-2 text-[12.5px] text-muted hover:text-ink" aria-label={`Templates for ${what}`} title={`Templates for ${what}`} aria-expanded={open} onClick={() => setOpen(!open)}><span className="font-bold">T</span><sub className="-ml-0.5 text-[10px] font-semibold">{sub}</sub></button>
+      {compact ? <button ref={btn} type="button" className="btn btn-ghost !min-h-7 !px-2 text-[12.5px] text-muted hover:text-ink" aria-label={`Templates for ${what}`} title={`Templates for ${what}`} aria-expanded={open} onClick={() => setOpen(!open)}><span className="font-bold">T</span><sub className="-ml-0.5 text-[10px] font-semibold">{sub}</sub></button>
+        : <button ref={btn} id={id} type="button" className="btn btn-sm" aria-label={`Templates for ${what}`} title={`Templates for ${what} (Alt+T)`} aria-expanded={open} onClick={() => setOpen(!open)}><span className="font-bold">T<sub className="text-[10px] font-semibold">{sub}</sub></span>Templates</button>}
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)} width={320}>
         <div className="p-1.5">
           <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{what} templates</div>
@@ -109,6 +110,40 @@ function SearchLine({ placeholder, options = [], onAdd, invalid, autoFocus }: { 
   );
 }
 
+type Hit = { name: string; detail?: string; right?: string; tone?: string };
+/** The pad's one search: it searches the open section's whole list (hundreds of items, no pills), arrows move, Enter adds the picked
+ *  item; with nothing picked Enter files the typed line as it is ("itra 100 1-0-1 7d"). */
+function ScopedSearch({ scope, placeholder, options, preferLine, onPick, onLine, onChange }: { scope: ReactNode; placeholder: string; options: Hit[]; preferLine?: boolean; onPick: (name: string) => void; onLine: (t: string) => void; onChange?: () => void }) {
+  const [v, setV] = useState(''); const [sel, setSel] = useState(-1); const [focus, setFocus] = useState(false);
+  const q = v.trim().toLowerCase();
+  const hits = q ? options.filter((o) => o.name.toLowerCase().includes(q)).sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q))).slice(0, 8) : [];
+  const done = () => { setV(''); setSel(-1); };
+  const enter = () => {
+    if (!q) return;
+    if (sel >= 0 && hits[sel]) onPick(hits[sel].name);
+    else if (!preferLine && hits[0] && hits[0].name.toLowerCase().startsWith(q)) onPick(hits[0].name);
+    else onLine(v.trim());
+    done();
+  };
+  return (
+    <div className="relative min-w-0 flex-1">
+      <div className="flex h-12 items-center gap-2 rounded-full bg-surface pl-1.5 pr-4 ring-2 ring-clay">
+        {scope}
+        <input id="pad-search" autoFocus aria-label={placeholder} role="combobox" aria-expanded={focus && hits.length > 0} className="h-full min-w-0 flex-1 bg-transparent text-[14.5px] font-semibold outline-none placeholder:font-medium placeholder:text-muted" placeholder={placeholder} value={v}
+          onFocus={() => setFocus(true)} onBlur={() => setTimeout(() => setFocus(false), 120)}
+          onChange={(e) => { setV(e.target.value); setSel(-1); onChange?.(); }}
+          onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; /* the pad's shortcuts */ if (e.key === 'Enter') { e.preventDefault(); enter(); } else if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(hits.length - 1, s + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(-1, s - 1)); } else if (e.key === 'Escape') done(); }} />
+        <span className="kbd hidden sm:inline">/</span>
+      </div>
+      {focus && hits.length > 0 && <div className="menu left-0 right-0 z-30 !mt-2 !min-w-0 !p-1.5" role="listbox">
+        {hits.map((o, k) => <button key={o.name} type="button" role="option" aria-selected={k === sel} className={`!flex w-full items-center gap-3 !py-2.5 !text-[13.5px] ${k === sel ? 'bg-paper-2' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => { onPick(o.name); done(); }}>
+          <span className="min-w-0 flex-1 truncate font-semibold">{o.name}</span>{o.detail && <span className="hidden truncate text-xs text-muted md:inline">{o.detail}</span>}{o.right && <span className={`w-24 shrink-0 text-right text-xs font-semibold ${o.tone ?? 'text-muted'}`}>{o.right}</span>}</button>)}
+        <div className="px-3 pb-1 pt-1.5 text-[11.5px] text-muted">↑↓ to pick · Enter adds · not in the list? Enter adds it as typed</div>
+      </div>}
+    </div>
+  );
+}
+
 /** One row inside a card: the item, its details, and the remove button at the right edge. */
 const Row = ({ children, onRemove, label }: { children: ReactNode; onRemove?: (() => void) | null; label: string }) => (
   <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line/70 py-2 first:border-t-0 first:pt-0">
@@ -118,14 +153,16 @@ const Row = ({ children, onRemove, label }: { children: ReactNode; onRemove?: ((
 );
 
 /** Load previous: every past visit, a preview of the one picked, and only the ticked parts come over. */
-function LoadPrevious({ previous, onLoad }: { previous: any[]; onLoad: (e: any, parts: Record<string, boolean>) => void }) {
+function LoadPrevious({ previous, onLoad, part, compact, id }: { previous: any[]; onLoad: (e: any, parts: Record<string, boolean>) => void; part?: string; compact?: boolean; id?: string }) {
   const [open, setOpen] = useState(false); const [sel, setSel] = useState<any>(null); const btn = useRef<HTMLButtonElement>(null);
-  const [parts, setParts] = useState<Record<string, boolean>>({ dx: true, rx: true, advice: false, tests: false });
+  // the open section decides what comes over; with no section picked, diagnosis and medicines as before
+  const [parts, setParts] = useState<Record<string, boolean>>(part ? { dx: part === 'dx', rx: part === 'rx', advice: part === 'advice', tests: part === 'tests' } : { dx: true, rx: true, advice: false, tests: false });
   const done = previous.filter((x) => x.status === 'completed'); const e = sel ?? done[0];
-  if (!done.length) return null;
+  if (!done.length) return compact ? null : <button type="button" className="btn btn-sm" disabled title="No earlier visit to load from">Load previous</button>;
   return (
     <>
-      <button ref={btn} type="button" className="btn btn-ghost !min-h-7 !px-2 text-[12px] text-muted hover:text-ink" aria-expanded={open} onClick={() => setOpen(!open)}>Load previous ▾</button>
+      {compact ? <button ref={btn} type="button" className="btn btn-ghost !min-h-7 !px-2 text-[12px] text-muted hover:text-ink" aria-expanded={open} onClick={() => setOpen(!open)}>Load previous ▾</button>
+        : <button ref={btn} id={id} type="button" className="btn btn-sm" title="Load previous (Alt+L)" aria-expanded={open} onClick={() => setOpen(!open)}>Load previous</button>}
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)} width={460}>
         <div className="p-2">
           <div className="mb-2 flex flex-wrap gap-3 text-[12.5px]">{([['dx', 'Diagnosis'], ['rx', 'Medicines'], ['advice', 'Advice'], ['tests', 'Tests']] as const).map(([k, l]) => <label key={k} className="inline-flex items-center gap-1.5 font-medium"><input type="checkbox" className="accent-ink" checked={!!parts[k]} onChange={(ev) => setParts({ ...parts, [k]: ev.target.checked })} />{l}</label>)}</div>
@@ -171,13 +208,25 @@ export function Encounter() {
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
   const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
-  const [split, setSplit] = useState(() => { try { return localStorage.getItem('pad-layout') === 'split'; } catch { return false; } }); // the doctor's choice: cards stacked (Eka) or rows left, one card right
-  useEffect(() => { try { localStorage.setItem('pad-layout', split ? 'split' : 'stacked'); } catch { /* private mode */ } }, [split]);
-  const [active, setActive] = useState<string | null>(null);
-  const goTo = (k: string) => { if (split && isDoctor) { setActive(k); if (window.innerWidth < 1024) setTimeout(() => document.getElementById('pad-editor')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30); } else document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+  // the doctor's choice: Stacked (every card, Eka) is the default; Focused (one section open, the rest folded) and Review (review visits only) are the others
+  const [layout, setLayout] = useState<'stacked' | 'focused' | 'review'>(() => { try { const v = localStorage.getItem('pad-layout'); return v === 'focused' || v === 'review' ? v : 'stacked'; } catch { return 'stacked'; } });
+  useEffect(() => { try { localStorage.setItem('pad-layout', layout); } catch { /* private mode */ } }, [layout]);
+  const [peek, setPeek] = useState(false); // Review → one section of the full pad, without changing the doctor's choice
+  const keys = useRef<(ev: KeyboardEvent) => void>(() => {}); // Focused and Review are run from the keyboard; the handler is set each render below
+  useEffect(() => { const f = (ev: KeyboardEvent) => keys.current(ev); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f); }, []);
+  const [slot, setSlot] = useState<HTMLElement | null>(null); // the app's top bar keeps a place for the patient on the pad
+  useEffect(() => { setSlot(document.getElementById('topbar-slot')); }, []);
+  const [active, setActive] = useState<string | null>(null); // the open section; the toolbar's search, Load previous and Templates act on it
+  const [anywhere, setAnywhere] = useState(false); // the doctor picked "Anywhere" in the search
+  const viewRef = useRef<'stacked' | 'focused' | 'review'>('stacked');
+  const goTo = (k: string) => {
+    setActive(k); setAnywhere(false);
+    if (viewRef.current === 'review') setPeek(true);
+    if (viewRef.current === 'stacked') document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    else setTimeout(() => document.getElementById('pad-open')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
+  };
   const [capture, setCapture] = useState(false); const [compare, setCompare] = useState<[any, any] | null>(null);
-  const [, tick] = useState(0); useEffect(() => { const t = setInterval(() => tick((x) => x + 1), 30000); return () => clearInterval(t); }, []);
-  const loaded = useRef(false); const dirty = useRef(false);
+  const loaded = useRef(false); const dirty = useRef(false); const justLoaded = useRef(false);
   const previous = (timeline.data?.encounters ?? []).filter((x: any) => x.id !== id);
   const lastDone = previous.find((x: any) => x.status === 'completed');
   useEffect(() => {
@@ -187,7 +236,7 @@ export function Encounter() {
       let d = { ...(enc.data.data ?? {}) };
       if (!asSym(d.complaint?.chief_complaint).length && arrival.length) d = { ...d, complaint: { ...(d.complaint ?? {}), chief_complaint: arrival } };
       if (isDoctor && enc.data.status === 'draft' && isReviewVisit(enc.data.visit, cfg) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
-      loaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
+      loaded.current = true; justLoaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
       setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
@@ -206,7 +255,8 @@ export function Encounter() {
     },
     onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else toast(errText(e), 'err'); },
   });
-  useEffect(() => { if (loaded.current) dirty.current = true; }, [data, rx, recs]);
+  // opening the pad is not an edit: the first render after loading does not mark it dirty, so nothing is saved until something changes
+  useEffect(() => { if (justLoaded.current) { justLoaded.current = false; return; } if (loaded.current) dirty.current = true; }, [data, rx, recs]);
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate({ complete: false }); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
   useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('app:save-now', f); return () => window.removeEventListener('app:save-now', f); }, [enc.data?.status]);
 
@@ -267,7 +317,7 @@ export function Encounter() {
     if (!r?.value || r.value.trim().length < 2) return;
     try { const row: any = await post('/templates', { kind, name: r.value.trim(), linked: { complaints: cNames, diagnoses: dNames }, payload }); qc.invalidateQueries({ queryKey: ['templates'] }); toast(row.draft ? 'Saved. The owner approves it before it is suggested.' : 'Saved as a template'); } catch (e) { toast(errText(e), 'err'); }
   };
-  const saveTpl = useMutation({ mutationFn: (name: string) => post('/rx-templates', { name, data, prescription: cleanRx(), recommendations: recs }), onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['rx-templates'] }); toast(`Saved as template “${r.name}”`); }, onError: (e) => toast(errText(e), 'err') });
+  const saveTpl = useMutation({ mutationFn: (name: string) => post('/rx-templates', { name, data, prescription: cleanRx(), recommendations: recs }), onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['rx-templates'] }); toast(`Saved as protocol “${r.name}”`); }, onError: (e) => toast(errText(e), 'err') });
 
   if (!enc.data || !timeline.data) return <div className="card"><Skeleton rows={5} /></div>;
   const e = enc.data; const p = e.patient; const held = e.status === 'awaiting_reports'; const readOnly = e.status === 'completed' || (held && !isDoctor);
@@ -280,7 +330,10 @@ export function Encounter() {
   const lastRaw: any[] = lastDone?.prescription ?? [];
   const isReview = isDoctor && !!lastDone && lastRx.length > 0;
   const visitNo = previous.length + 1;
-  const mins = Math.max(0, Math.round((Date.now() - new Date(e.createdAt).getTime()) / 60000));
+  const view: 'stacked' | 'focused' | 'review' = !isDoctor ? 'stacked' : layout === 'review' ? (!isReview ? 'stacked' : peek ? 'focused' : 'review') : layout;
+  viewRef.current = view;
+  const inline = view === 'stacked'; // every card on screen: each keeps its own search line; otherwise the toolbar's search serves the open section
+  const QUICK = inline ? 8 : 3; // quick picks per card; the whole list is in the search
   const onHand = (i: RxItem) => (i.medicineId && stock.data ? stock.data[i.medicineId] ?? 0 : null);
   const addRx = (item: RxItem) => setRx((cur) => [...cur.filter((r) => r.name), withQty(item)]);
   const addRxByName = (name: string) => { const m = meds.find((x: any) => x.name === name); addRx({ name, medicineId: m?.id ?? null, dose: m?.defaults?.dose, route: m?.defaults?.route, frequency: m?.defaults?.frequency, durationDays: m?.defaults?.durationDays, instructions: m?.defaults?.instructions }); };
@@ -293,7 +346,7 @@ export function Encounter() {
   };
   const clearLoaded = () => { if (undo.current) { setData(undo.current.data); setRx(undo.current.rx); setRecs(undo.current.recs); undo.current = null; } setApplied(null); };
   const askTpl = async () => {
-    const r = await ask({ title: 'Save as template', body: 'Saves symptoms, findings, diagnosis, medicines, advice and plan. Using the same name again updates it.', confirmLabel: 'Save', field: { label: 'Template name', required: true, initial: asDx(data.assessment?.diagnosis).map((d) => `${d.name}${d.severity ? ` · ${d.severity.toLowerCase()}` : ''}`).join(' + ') || '', maxLength: 80 } });
+    const r = await ask({ title: 'Save as a protocol', body: 'Saves symptoms, findings, diagnosis, medicines, advice and plan. Using the same name again updates it.', confirmLabel: 'Save', field: { label: 'Protocol name', required: true, initial: asDx(data.assessment?.diagnosis).map((d) => `${d.name}${d.severity ? ` · ${d.severity.toLowerCase()}` : ''}`).join(' + ') || '', maxLength: 80 } });
     if (r?.value && r.value.trim().length >= 2) saveTpl.mutate(r.value.trim());
   };
   const loadPrevious = (x: any, parts: Record<string, boolean>) => {
@@ -366,7 +419,7 @@ export function Encounter() {
   };
   const finish = () => {
     const missing = missingNow();
-    if (missing.length) { setShowMissing(true); goTo(secOf(missing[0].path)); toast(`Cannot finish yet: ${missing.map((m) => m.message.replace(/ is required$/, '')).join(', ')}`, 'err'); return; }
+    if (missing.length) { setShowMissing(true); goTo(secOf(missing[0].path)); if (viewRef.current === 'stacked') toast(`Cannot finish yet: ${missing.map((m) => m.message.replace(/ is required$/, '')).join(', ')}`, 'err'); return; } // Focused and Review: the bar lists it, no toast on top
     save.mutate({ complete: true });
   };
   // what the footer lists: the live check once Finish was tried, plus anything the server still rejected
@@ -377,13 +430,30 @@ export function Encounter() {
   // --- the cards, in the clinic's order: Eka's shape, one card per section, rows first and the search line last ---
   const secOf = (path: string) => ({ complaint: 'symptoms', assessment: 'diagnosis', exam: 'exam', plan: 'advice' } as Record<string, string>)[path.split('.')[0]] ?? path.split('.')[0];
   const bad = (k: string) => missingList.some((x) => secOf(x.path) === k);
-  const tplOf = (kind: TmplKind, sub: string, what: string, clear: (() => void) | null) => (!readOnly && isDoctor ? <SectionTemplates kind={kind} sub={sub} what={what} sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} onSave={() => saveSection(kind)} onClear={clear} /> : null);
+  // each section's templates (T·Sx, T·Dx …) and how to clear it: used by the one Templates and Clear in the toolbar, for the open section
+  const SECTION_TPL: Record<string, [TmplKind, string, string, (() => void) | null]> = {
+    symptoms: ['symptom', 'Sx', 'symptoms', syms.length ? () => clearSection('the symptoms', () => setSyms([])) : null],
+    diagnosis: ['diagnosis', 'Dx', 'diagnosis', dxs.length ? () => clearSection('the diagnosis', () => setDxs([])) : null],
+    exam: ['finding', 'O/E', 'findings', Object.keys(data.exam ?? {}).length ? () => clearSection('the examination', () => setData((d) => ({ ...d, exam: {} }))) : null],
+    medicines: ['medicine', 'Mx', 'medicines', rx.some((i) => i.name && !i._issued) ? () => clearSection('the medicines', () => setRx(rx.filter((i) => i._issued))) : null],
+    advice: ['advice', 'Adv', 'advice', adviceLines.length ? () => clearSection('the advice', () => set('plan', 'advice', '')) : null],
+    tests: ['tests', 'Lab', 'tests', tests.some((r) => r.status !== 'done') ? () => clearSection('the tests', () => setRecs(recs.filter((r) => r.kind !== 'investigation' || r.status === 'done'))) : null],
+  };
   const labNames = uniq([...TESTS, ...(cfg?.labParams ?? []).map((o: any) => o.name)]);
   const procName = (id?: string | null) => cfg?.procedures?.find((x: any) => x.id === id)?.name ?? 'Procedure';
+  const reviewIn = (
+    <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Review in"><span className="mr-1 min-w-[72px] text-xs text-muted">Review in</span>
+      {REVIEW_IN.map(([d, l]) => <button key={l} type="button" role="radio" aria-checked={(followup?.intervalDays ?? null) === d && (d !== null || !followup)} disabled={readOnly} className={`toggle-opt ${(d === null ? !followup : followup?.intervalDays === d) ? 'on' : ''}`} onClick={() => setFollowup(d)}>{l}</button>)}
+      {followup && !REVIEW_IN.some(([d]) => d === followup.intervalDays) && <span className="flex items-center gap-1 text-xs">· <NumInput aria-label="Review in days" max={365} className="input !w-16 !py-1" value={followup.intervalDays ?? ''} disabled={readOnly} onChange={(ev) => setFollowup(Number(ev.target.value) || null)} /> days</span>}
+      {followup && <input aria-label="Note for the follow-up" className="input !w-56 !py-1" maxLength={120} placeholder="Note for the follow-up" value={data.plan?.followupNote ?? ''} disabled={readOnly} onChange={(ev) => set('plan', 'followupNote', ev.target.value)} />}
+      {followup && !readOnly && can(perms, 'appointment.write') && <button type="button" className="btn btn-sm" onClick={() => setSp({ book: '1', patient: p.id, pname: p.fullName })}>Book slot</button>}
+    </div>);
+  const cardActs = (k: string): ReactNode => { if (!inline || readOnly || !isDoctor) return undefined; const t = SECTION_TPL[k];
+    return <>{(k === 'diagnosis' || k === 'medicines') && <LoadPrevious compact previous={previous} onLoad={loadPrevious} />}{t && <SectionTemplates compact kind={t[0]} sub={t[1]} what={t[2]} sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onSave={() => saveSection(t[0])} onClear={t[3]} />}</>; };
   const cards: Record<string, ReactNode> = {
     vitals: <Card key="vitals" id="vitals" title="Vitals" meta="from check-in · tap a value to change it"><VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} /></Card>,
     history: <Card key="history" id="history" title="Medical history"><HistoryChips patientId={p.id} history={p.history ?? {}} categories={cfg?.historyCategories ?? []} readOnly={readOnly} /></Card>,
-    symptoms: <Card key="symptoms" id="symptoms" title="Symptoms" required={isDoctor && padOf('symptoms').required} invalid={bad('symptoms')} actions={tplOf('symptom', 'Sx', 'symptoms', syms.length ? () => clearSection('the symptoms', () => setSyms([])) : null)}>
+    symptoms: <Card key="symptoms" id="symptoms" title="Symptoms" required={isDoctor && padOf('symptoms').required} invalid={bad('symptoms')} actions={cardActs('symptoms')}>
       <div data-invalid={!!err('complaint', 'chief_complaint')}>
         {syms.map((s, i) => <Row key={s.name + i} label={s.name} onRemove={readOnly ? null : () => setSyms(syms.filter((_, j) => j !== i))}>
           <b className="min-w-[160px] text-[13.5px]">{s.name}</b>
@@ -392,13 +462,14 @@ export function Encounter() {
           <input aria-label={`${s.name}: note`} className="input min-w-36 flex-1 !py-1 text-[12.5px]" placeholder="Note" maxLength={120} value={s.note ?? ''} disabled={readOnly} onChange={(ev) => setSyms(syms.map((x, j) => (j === i ? { ...x, note: ev.target.value } : x)))} />
         </Row>)}
         {!readOnly && <>
-          <div className="mt-2 flex flex-wrap items-center gap-1">{(symField?.options ?? []).filter((o: string) => !syms.some((s) => norm(s.name) === norm(o))).slice(0, 8).map((o: string) => <button key={o} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addSyms([{ name: o }])}>{o}</button>)}</div>
-          <SearchLine placeholder="Start typing a symptom · “itching 2 weeks”" options={symField?.options ?? []} invalid={!!err('complaint', 'chief_complaint')} onAdd={(t) => smartAdd(t, 'symptom')} />
+          <div className="mt-2 flex flex-wrap items-center gap-1">{(symField?.options ?? []).filter((o: string) => !syms.some((s) => norm(s.name) === norm(o))).slice(0, QUICK).map((o: string) => <button key={o} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addSyms([{ name: o }])}>{o}</button>)}</div>
+          {inline && <SearchLine placeholder="Start typing a symptom · “itching 2 weeks”" options={symField?.options ?? []} invalid={!!err('complaint', 'chief_complaint')} onAdd={(t) => smartAdd(t, 'symptom')} />}
         </>}
-        {err('complaint', 'chief_complaint') && <div className="mt-1 text-xs text-rose">At least one symptom is required</div>}
-        {otherFields('complaint', ['chief_complaint', 'duration']).map((f: Field) => <div key={f.key} className="mt-2" data-invalid={!!err('complaint', f.key)}><CompactField f={f} value={data.complaint?.[f.key]} onChange={(v) => set('complaint', f.key, v)} disabled={readOnly} invalid={!!err('complaint', f.key)} /></div>)}
+        {inline && err('complaint', 'chief_complaint') && <div className="mt-1 text-xs text-rose">At least one symptom is required</div>}
+        {/* Focused and Review: the site is set on the skin map in Examination, not asked twice */}
+        {otherFields('complaint', inline ? ['chief_complaint', 'duration'] : ['chief_complaint', 'duration', 'site']).map((f: Field) => <div key={f.key} className="mt-2" data-invalid={!!err('complaint', f.key)}><CompactField f={f} value={data.complaint?.[f.key]} onChange={(v) => set('complaint', f.key, v)} disabled={readOnly} invalid={!!err('complaint', f.key)} /></div>)}
       </div></Card>,
-    diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required={isDoctor} invalid={bad('diagnosis')} meta={isDoctor ? undefined : 'the doctor decides; leave it if unsure'} actions={!readOnly && isDoctor && <><LoadPrevious previous={previous} onLoad={loadPrevious} />{tplOf('diagnosis', 'Dx', 'diagnosis', dxs.length ? () => clearSection('the diagnosis', () => setDxs([])) : null)}</>}>
+    diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required={isDoctor} invalid={bad('diagnosis')} meta={isDoctor ? undefined : 'the doctor decides; leave it if unsure'} actions={cardActs('diagnosis')}>
       <div data-invalid={!!err('assessment', 'diagnosis')}>
         {dxs.map((d, i) => <Row key={d.name} label={d.name} onRemove={readOnly ? null : () => setDxs(dxs.filter((_, j) => j !== i))}>
           <b className="min-w-[160px] text-[13.5px]">{d.name}</b>
@@ -406,17 +477,17 @@ export function Encounter() {
           <Segmented size="sm" disabled={readOnly} value={d.status ?? ''} onChange={(st) => setDxs(dxs.map((x, j) => (j === i ? { ...x, status: st || undefined } : x)))} options={DX_STATUS.map((st) => ({ value: st, label: st }))} />
         </Row>)}
         {!readOnly && <>
-          <div className="mt-2 flex flex-wrap items-center gap-1">{(dxField?.options ?? DX_OPTIONS).filter((o: string) => !dxs.some((d) => d.name === o)).slice(0, 8).map((o: string) => <button key={o} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addDxs([{ name: o }])}>{o}</button>)}</div>
-          <SearchLine placeholder="Start typing a diagnosis" options={dxField?.options ?? DX_OPTIONS} invalid={!!err('assessment', 'diagnosis')} onAdd={(t) => smartAdd(t, 'diagnosis')} />
+          <div className="mt-2 flex flex-wrap items-center gap-1">{(dxField?.options ?? DX_OPTIONS).filter((o: string) => !dxs.some((d) => d.name === o)).slice(0, QUICK).map((o: string) => <button key={o} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addDxs([{ name: o }])}>{o}</button>)}</div>
+          {inline && <SearchLine placeholder="Start typing a diagnosis" options={dxField?.options ?? DX_OPTIONS} invalid={!!err('assessment', 'diagnosis')} onAdd={(t) => smartAdd(t, 'diagnosis')} />}
         </>}
-        {err('assessment', 'diagnosis') && <div className="mt-1 text-xs text-rose">Diagnosis is required</div>}
+        {inline && err('assessment', 'diagnosis') && <div className="mt-1 text-xs text-rose">Diagnosis is required</div>}
         {otherFields('assessment', []).map((f: Field) => <div key={f.key} className="mt-2"><CompactField f={f} value={data.assessment?.[f.key]} onChange={(v) => set('assessment', f.key, v)} disabled={readOnly} /></div>)}
-        {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{p.allergies ? (allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ` ${p.allergies} allergy checked: no clash found.`) : ''} <button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
+        {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{inline && p.allergies ? (allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ` ${p.allergies} allergy checked: no clash found.`) : ''} <button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
       </div></Card>,
-    exam: <Card key="exam" id="exam" title="Examination findings" required={isDoctor && padOf('exam').required} invalid={bad('exam')} actions={tplOf('finding', 'O/E', 'findings', Object.keys(data.exam ?? {}).length ? () => clearSection('the examination', () => setData((d) => ({ ...d, exam: {} }))) : null)}>
+    exam: <Card key="exam" id="exam" title="Examination findings" required={isDoctor && padOf('exam').required} invalid={bad('exam')} actions={cardActs('exam')}>
       <div className="mb-3 border-b border-line pb-3"><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), a]))} compact /></div>
       <div className="space-y-2">{(formSections.find((s) => s.key === 'exam')?.fields ?? []).map((f: Field) => <div key={f.key} data-invalid={!!err('exam', f.key)}><CompactField f={f} value={data.exam?.[f.key]} onChange={(v) => set('exam', f.key, v)} disabled={readOnly} invalid={!!err('exam', f.key)} />{err('exam', f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div></Card>,
-    medicines: isDoctor ? <Card key="medicines" id="medicines" title="Medications" required={padOf('medicines').required} invalid={bad('medicines')} meta={rx.filter((i) => i.name).length ? `${rx.filter((i) => i.name).length} on the Rx` : undefined} actions={!readOnly && <><LoadPrevious previous={previous} onLoad={loadPrevious} />{tplOf('medicine', 'Mx', 'medicines', rx.length ? () => clearSection('the medicines', () => setRx([])) : null)}</>}>
+    medicines: isDoctor ? <Card key="medicines" id="medicines" title="Medications" required={padOf('medicines').required} invalid={bad('medicines')} meta={rx.filter((i) => i.name).length ? `${rx.filter((i) => i.name).length} on the Rx` : undefined} actions={cardActs('medicines')}>
       <datalist id="meds">{meds.map((m: any) => <option key={m.id} value={m.name} />)}</datalist>
       <datalist id="freq">{FREQ.map((x) => <option key={x} value={x} />)}</datalist>
       <datalist id="timing">{TIMING.map((x) => <option key={x} value={x} />)}</datalist>
@@ -437,17 +508,17 @@ export function Encounter() {
           </div>); })}
       </div></div>}
       {!readOnly && <>
-        {(frequent.data ?? []).filter((f: any) => !rx.some((r) => r.name === f.name)).length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1"><span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Frequently prescribed</span>{(frequent.data ?? []).filter((f: any) => !rx.some((r) => r.name === f.name)).slice(0, 8).map((f: any) => <button key={f.name} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addRxByName(f.name)}>{f.name}</button>)}{lastRx.length > 0 && !isReview && <button type="button" className="opt !min-h-7 !py-0.5" onClick={() => addRxMany(lastRx)}>Repeat last Rx</button>}</div>}
-        <SearchLine placeholder='Start typing a medicine · “itra 100 1-0-1 7d after food”' options={meds.map((m: any) => m.name)} invalid={bad('medicines')} onAdd={(t) => smartAdd(t, 'medicine')} />
+        {(frequent.data ?? []).filter((f: any) => !rx.some((r) => r.name === f.name)).length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1"><span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Frequently prescribed</span>{(frequent.data ?? []).filter((f: any) => !rx.some((r) => r.name === f.name)).slice(0, QUICK).map((f: any) => <button key={f.name} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addRxByName(f.name)}>{f.name}</button>)}{inline && lastRx.length > 0 && !isReview && <button type="button" className="opt !min-h-7 !py-0.5" onClick={() => addRxMany(lastRx)}>Repeat last Rx</button>}</div>}
+        {inline && <SearchLine placeholder='Start typing a medicine · “itra 100 1-0-1 7d after food”' options={meds.map((m: any) => m.name)} invalid={bad('medicines')} onAdd={(t) => smartAdd(t, 'medicine')} />}
       </>}
       {leaflets.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted"><span>Sent with the Rx on WhatsApp:</span>{leaflets.map((m: any) => <Chip key={m.id} tone="sage">{m.name}: how to use</Chip>)}</div>}
-      {allergyWarnings.length > 0 && <div className="mt-2 rounded-lg bg-rose-soft px-3 py-2 text-xs text-rose">Allergy: {p.allergies}. Check {allergyWarnings.map(([n]) => n).join(', ')}.</div>}
+      {inline && allergyWarnings.length > 0 && <div className="mt-2 rounded-lg bg-rose-soft px-3 py-2 text-xs text-rose">Allergy: {p.allergies}. Check {allergyWarnings.map(([n]) => n).join(', ')}.</div>}
     </Card> : null,
-    advice: isDoctor ? <Card key="advice" id="advice" title="Advice" meta="standard lines print in Telugu too" actions={tplOf('advice', 'Adv', 'advice', adviceLines.length ? () => clearSection('the advice', () => set('plan', 'advice', '')) : null)}>
-      <div className="flex flex-wrap gap-1.5">{[...new Set([...adviceLines, ...ADVICE.slice(0, 8)])].map((a) => <button key={a} type="button" disabled={readOnly} className={adviceLines.includes(a) ? 'toggle-opt on' : 'opt'} onClick={() => toggleAdvice(a)}>{adviceLines.includes(a) && <Icon name="check" className="mr-1 inline h-3 w-3" />}{a}</button>)}</div>
-      {!readOnly && <SearchLine placeholder="Start typing advice" options={ADVICE} onAdd={(a) => !adviceLines.includes(a) && set('plan', 'advice', [...adviceLines, a].join('\n'))} />}
+    advice: isDoctor ? <Card key="advice" id="advice" title="Advice" meta="standard lines print in Telugu too" actions={cardActs('advice')}>
+      <div className="flex flex-wrap gap-1.5">{[...new Set([...adviceLines, ...ADVICE.slice(0, QUICK)])].map((a) => <button key={a} type="button" disabled={readOnly} className={adviceLines.includes(a) ? 'toggle-opt on' : 'opt'} onClick={() => toggleAdvice(a)}>{adviceLines.includes(a) && <Icon name="check" className="mr-1 inline h-3 w-3" />}{a}</button>)}</div>
+      {!readOnly && inline && <SearchLine placeholder="Start typing advice" options={ADVICE} onAdd={(a) => !adviceLines.includes(a) && set('plan', 'advice', [...adviceLines, a].join('\n'))} />}
     </Card> : null,
-    tests: isDoctor ? <Card key="tests" id="tests" title="Lab investigations" actions={tplOf('tests', 'Lab', 'tests', tests.some((r) => r.status !== 'done') ? () => clearSection('the tests', () => setRecs(recs.filter((r) => r.kind !== 'investigation' || r.status === 'done'))) : null)}>
+    tests: isDoctor ? <Card key="tests" id="tests" title="Lab investigations" actions={cardActs('tests')}>
       {tests.map((r) => <Row key={r.notes} label={r.notes ?? 'test'} onRemove={readOnly || r.status === 'done' ? null : () => setRecs(recs.filter((x) => x !== r))}>
         <b className="min-w-[160px] text-[13.5px]">{r.notes}</b>
         {r.status === 'done' ? <Chip tone="sage">received</Chip> : orderNos.length > 1 ? <span className="text-xs text-muted">order {r.orderNo ?? 1}</span> : null}
@@ -455,19 +526,14 @@ export function Encounter() {
       </Row>)}
       {orderNos.length > 1 && <div className="mt-1 text-xs text-muted">{orderNos.map((o) => `Order ${o}: ${tests.filter((r) => (r.orderNo ?? 1) === o).map((r) => r.notes).join(', ')}`).join(' · ')} · each is reviewed when all its tests are in</div>}
       {!readOnly && <>
-        <div className="mt-2 flex flex-wrap items-center gap-1">{TESTS.filter((x) => !tests.some((r) => r.notes?.toLowerCase() === x.toLowerCase())).slice(0, 8).map((x) => <button key={x} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addTest(x)}>{x}</button>)}</div>
-        <SearchLine placeholder="Start typing a lab test" options={labNames} onAdd={addTest} />
+        <div className="mt-2 flex flex-wrap items-center gap-1">{TESTS.filter((x) => !tests.some((r) => r.notes?.toLowerCase() === x.toLowerCase())).slice(0, QUICK).map((x) => <button key={x} type="button" className="opt !min-h-7 !py-0.5" onClick={() => addTest(x)}>{x}</button>)}</div>
+        {inline && <SearchLine placeholder="Start typing a lab test" options={labNames} onAdd={addTest} />}
       </>}
     </Card> : null,
     results: isDoctor ? <Card key="results" id="results" title="Lab results" meta="typed when reports arrive"><LabResultsCard patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} /></Card> : null,
     next: isDoctor ? <Card key="next" id="next" title="Follow-up and procedures">
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Review in"><span className="mr-1 min-w-[72px] text-xs text-muted">Review in</span>
-          {REVIEW_IN.map(([d, l]) => <button key={l} type="button" role="radio" aria-checked={(followup?.intervalDays ?? null) === d && (d !== null || !followup)} disabled={readOnly} className={`toggle-opt ${(d === null ? !followup : followup?.intervalDays === d) ? 'on' : ''}`} onClick={() => setFollowup(d)}>{l}</button>)}
-          {followup && !REVIEW_IN.some(([d]) => d === followup.intervalDays) && <span className="flex items-center gap-1 text-xs">· <NumInput aria-label="Review in days" max={365} className="input !w-16 !py-1" value={followup.intervalDays ?? ''} disabled={readOnly} onChange={(ev) => setFollowup(Number(ev.target.value) || null)} /> days</span>}
-          {followup && <input aria-label="Note for the follow-up" className="input !w-56 !py-1" maxLength={120} placeholder="Note for the follow-up" value={data.plan?.followupNote ?? ''} disabled={readOnly} onChange={(ev) => set('plan', 'followupNote', ev.target.value)} />}
-          {followup && !readOnly && can(perms, 'appointment.write') && <button type="button" className="btn btn-sm" onClick={() => setSp({ book: '1', patient: p.id, pname: p.fullName })}>Book slot</button>}
-        </div>
+        {reviewIn}
         <div className="flex flex-wrap items-start gap-1.5"><span className="mr-1 mt-1.5 min-w-[72px] text-xs text-muted">Procedure</span>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {recs.map((r, k) => r.kind !== 'procedure' ? null : (
@@ -514,7 +580,7 @@ export function Encounter() {
                 {seOpen && !readOnly && <div className="flex basis-full flex-wrap gap-1 anim-fade-in">{SIDE_EFFECTS.filter((x) => x !== 'None').map((x) => { const on = se.includes(x); return <button key={x} type="button" className={`!min-h-7 !py-0.5 ${on ? 'toggle-opt on' : 'opt'}`} onClick={() => set('review', 'sideEffects', on ? se.filter((y) => y !== x) : [...se.filter((y) => y !== 'None'), x])}>{x}</button>; })}</div>}
               </div>); })()}
             {lastRx.length > 0 && <div>
-              <div className="flex items-center gap-2"><span className="text-xs text-muted">Last prescription · continue, change or stop each line</span>{!readOnly && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
+              <div className="flex items-center gap-2"><span className="text-xs text-muted">Last prescription · continue, change or stop each line</span>{!readOnly && <button id="pad-continue-all" className="btn btn-ghost btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
               {lastRx.map((l, k) => {
                 const cur = rx.find((r) => r.name === l.name); const st = !cur ? (rx.length ? 'stop' : '') : sameLine(cur, l) ? 'continue' : 'change';
                 const raw = lastRaw[k];
@@ -567,45 +633,128 @@ export function Encounter() {
   const act: string = active && rowKeys.includes(active) ? active : (rowKeys.find((k) => ['review', 'symptoms', 'diagnosis', 'medicines'].includes(k) && !brief[k]) ?? (rowKeys.includes('medicines') ? 'medicines' : rowKeys[0]));
   const isRequired = (k: string) => k === 'diagnosis' || (['symptoms', 'exam', 'medicines'].includes(k) && padOf(k).required);
 
+  // --- the one toolbar: search, Load previous, Templates and Clear, all acting on the open section ---
+  const examOpts = examFields.flatMap((f) => (f.options ?? []).map((o) => ({ o, f })));
+  const addFinding = (t: string) => {
+    const hit = examOpts.find((x) => x.o.toLowerCase() === t.toLowerCase());
+    if (hit) { const cur = data.exam?.[hit.f.key]; set('exam', hit.f.key, hit.f.type === 'select' ? hit.o : uniq([...(Array.isArray(cur) ? cur : []), hit.o])); return; }
+    const note = examFields.find((f) => f.type === 'textarea'); // not in the lists: it goes into the findings note, in her words
+    if (note) set('exam', note.key, [data.exam?.[note.key], t].filter(Boolean).join('\n')); else toast(`“${t}” is not in the findings list.`, 'info');
+  };
+  const stockHit = (m: any): Pick<Hit, 'right' | 'tone'> => { const n = stock.data ? stock.data[m.id] ?? 0 : null; return n === null ? {} : { right: n ? `${n} in stock` : 'out of stock', tone: n ? 'text-sage' : 'text-amber' }; };
+  const SEARCH: Record<string, { what: string; opts: Hit[]; line: (t: string) => void; pick?: (n: string) => void; preferLine?: boolean }> = {
+    symptoms: { what: 'symptoms', opts: (symField?.options ?? []).map((name) => ({ name })), line: (t) => smartAdd(t, 'symptom') },
+    diagnosis: { what: 'diagnoses', opts: uniq([...(dxField?.options ?? []), ...DX_OPTIONS]).map((name) => ({ name })), line: (t) => smartAdd(t, 'diagnosis') },
+    exam: { what: 'findings', opts: examOpts.map(({ o, f }) => ({ name: o, detail: f.label })), line: addFinding, pick: addFinding },
+    medicines: { what: 'medicines', opts: meds.map((m: any) => ({ name: m.name, detail: txt([m.defaults?.dose, m.defaults?.frequency, m.defaults?.durationDays ? `${m.defaults.durationDays} d` : null]), ...stockHit(m) })), line: (t) => smartAdd(t, 'medicine'), pick: addRxByName, preferLine: true },
+    advice: { what: 'advice lines', opts: ADVICE.map((name) => ({ name })), line: (t) => smartAdd(t, 'advice') },
+    tests: { what: 'tests', opts: labNames.map((name) => ({ name })), line: addTest },
+  };
+  const scopeKey = view === 'review' ? 'medicines' : view === 'focused' ? act : active;
+  const scope = !anywhere && scopeKey && SEARCH[scopeKey] && rowKeys.includes(scopeKey) ? scopeKey : null;
+  const S = scope ? SEARCH[scope] : null;
+  const anyOpts: Hit[] = Object.entries(SEARCH).filter(([k]) => rowKeys.includes(k)).flatMap(([k, s]) => s.opts.map((o) => ({ ...o, detail: TITLE[k] })));
+  const PART: Record<string, string> = { diagnosis: 'dx', medicines: 'rx', advice: 'advice', tests: 'tests' };
+  const tpl = scope ? SECTION_TPL[scope] : null;
+  const pin = () => { if (scope && active !== scope) setActive(scope); }; // once she adds to a section it stays open; it does not jump to the next empty one
+  keys.current = (ev) => {
+    if (view === 'stacked' || readOnly || !isDoctor || tab !== 'pad' || ev.defaultPrevented) return;
+    const t = ev.target as HTMLElement | null; const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    const go = (fn: () => void) => { ev.preventDefault(); fn(); };
+    if (ev.key === '/' && !typing) return go(() => document.getElementById('pad-search')?.focus());
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') return go(finish);
+    if (ev.key === 'Escape' && !typing && layout === 'review' && peek) return go(() => setPeek(false));
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const i = rowKeys.indexOf(act);
+    if (view === 'focused' && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) return go(() => goTo(rowKeys[Math.max(0, Math.min(rowKeys.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)))]));
+    if (ev.code === 'KeyL') return go(() => document.getElementById('pad-loadprev')?.click());
+    if (ev.code === 'KeyT') return go(() => document.getElementById('pad-templates')?.click());
+    if (ev.code === 'KeyA') return go(() => { setAnywhere(!!scope); setTimeout(() => document.getElementById('pad-search')?.focus(), 30); });
+    if (ev.code === 'KeyP') return go(() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); });
+    if (view === 'review' && /^Digit[1-4]$/.test(ev.code)) return go(() => set('review', 'response', RESPONSES[Number(ev.code.slice(5)) - 1]));
+    if (view === 'review' && ev.code === 'KeyC') return go(() => document.getElementById('pad-continue-all')?.click());
+  };
+  const toolbar = isDoctor && !readOnly ? (
+    <div className="sticky top-[76px] z-20 -mx-1 rounded-[30px] bg-paper/85 p-1 backdrop-blur anim-fade-up">
+      <div className="flex flex-wrap items-center gap-2">
+        <ScopedSearch key={scope ?? 'any'} preferLine={S?.preferLine}
+          scope={<button type="button" className="ml-1.5 h-8 shrink-0 rounded-full bg-clay-soft px-3 text-[12.5px] font-bold text-clay-ink transition-colors hover:bg-clay-line/40" aria-label={scope ? `Searching ${TITLE[scope]}. Switch to all sections (Alt+A)` : 'Searching all sections. Switch to the open section (Alt+A)'} title="Alt+A switches between this section and all sections" onClick={() => setAnywhere(!!scope)}>{scope ? TITLE[scope] : 'All sections'}</button>}
+          placeholder={S ? `Search ${S.opts.length} ${S.what}${scope === 'medicines' ? ' · or type the line “itra 100 1-0-1 7d”' : ''}` : 'Type anything · “itra 100 1-0-1 7d”, “itching 2 weeks”, “KOH mount”'}
+          options={S ? S.opts : anyOpts}
+          onPick={(n) => { pin(); (S ? (S.pick ?? S.line) : smartAdd)(n); }} onLine={(t) => { pin(); (S ? S.line : smartAdd)(t); }} onChange={() => setPendingLine(null)} />
+        <LoadPrevious key={`lp-${scope ?? ''}`} id="pad-loadprev" previous={previous} onLoad={loadPrevious} part={scope ? PART[scope] : undefined} />
+        {tpl ? <SectionTemplates key={`t-${scope}`} id="pad-templates" kind={tpl[0]} sub={tpl[1]} what={tpl[2]} sets={sets.data ?? []} onPick={(t) => setSetNote(applySet(t))} onSave={() => saveSection(tpl[0])} onClear={null} />
+          : <button type="button" className="btn btn-sm" disabled title="Open Symptoms, Diagnosis, Examination, Medicines, Advice or Tests to use its templates">Templates</button>}
+        {tpl?.[3] && <button type="button" className="btn btn-sm text-rose" onClick={tpl[3]}>Clear</button>}
+      </div>
+      {pendingLine && <div className="mt-1.5 flex flex-wrap items-center gap-1.5 px-2 text-xs anim-fade-in"><span className="text-muted">“{pendingLine}” is not in the lists. Add as</span>{([['symptom', 'Symptom'], ['diagnosis', 'Diagnosis'], ['medicine', 'Medicine'], ['test', 'Test'], ['advice', 'Advice']] as const).map(([k, l]) => <button key={k} type="button" className="toggle-opt !min-h-7 !py-0.5" onClick={() => smartAdd(pendingLine, k)}>{l}</button>)}<button type="button" className="btn btn-ghost !min-h-7 !px-2 text-xs" onClick={() => setPendingLine(null)}>Cancel</button></div>}
+    </div>) : null;
+  const forWhat = dxs[0]?.name ?? syms[0]?.name;
+  const suggestions = isDoctor && !readOnly && (protoSugg.length > 0 || sugg.length > 0) ? (
+    <div className="flex flex-wrap items-center gap-1 px-2 text-xs">
+      {protoSugg.length > 0 && <><span className="mr-1 text-muted">Protocols{forWhat ? ` for ${forWhat}` : ''}</span>{protoSugg.slice(0, 3).map((t: any) => <button key={t.id} type="button" title="Adds what is missing; anything already on the pad is kept once" className={`!min-h-7 !py-0.5 ${appliedIds.includes(t.id) ? 'toggle-opt on' : 'opt'}`} onClick={() => setSetNote(stackProtocol(t))}>{t.name}</button>)}</>}
+      {sugg.length > 0 && <><span className={`mr-1 text-muted ${protoSugg.length ? 'ml-3' : ''}`}>Templates</span>{sugg.slice(0, 3).map((t) => <button key={t.id} type="button" className={`!min-h-7 !py-0.5 ${appliedIds.includes(t.id) ? 'toggle-opt on' : 'opt'}`} onClick={() => setSetNote(applySet(t))}>{t.name}<span className="ml-1.5 text-[11px] font-medium opacity-60">{size(t)}</span></button>)}</>}
+    </div>) : null;
+
+  // Focused: one section open, filled ones folded to a line, empty optional ones as "+ add"
+  const openNode = (k: string): ReactNode => (k === 'review' ? reviewCard : customSections.some((x: any) => x.key === k) ? custom(customSections.find((x: any) => x.key === k)) : cards[k] ?? null);
+  const segs: { open: boolean; keys: string[] }[] = []; const later: string[] = [];
+  for (const k of rowKeys) {
+    if (k === act) segs.push({ open: true, keys: [k] });
+    else if (sheet[k] != null || isRequired(k) || bad(k)) { const last = segs[segs.length - 1]; if (last && !last.open) last.keys.push(k); else segs.push({ open: false, keys: [k] }); }
+    else later.push(k);
+  }
+  const foldRow = (k: string) => { const v = sheet[k]; return (
+    <button key={k} type="button" className="grid w-full grid-cols-[150px_minmax(0,1fr)_auto] items-start gap-4 border-t border-line/60 px-5 py-3 text-left transition-colors first:border-t-0 hover:bg-surface-2" onClick={() => goTo(k)}>
+      <span className={`pt-0.5 text-[12.5px] font-semibold ${bad(k) ? 'text-rose' : 'text-muted'}`}>{TITLE[k] ?? k}{isRequired(k) && <span className="text-rose"> *</span>}</span>
+      <span className={`min-w-0 text-[14px] leading-relaxed ${v ? 'text-ink' : bad(k) ? 'font-medium text-rose' : 'text-muted'}`}>{v ?? (bad(k) ? `${TITLE[k] ?? k} is required` : EMPTY[k] ?? 'Tap to add')}</span>
+      <span className="pt-0.5 text-xs font-semibold text-muted">{v ? 'Edit' : 'Add'}</span>
+    </button>); };
+  const layoutValue = layout === 'review' && !isReview ? 'stacked' : layout;
+  const patientLine = [p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
+
   return (
     <div className="space-y-3 pb-4">
-      {/* who: the patient, the templates, the way to the pad's settings; History, Photos and Reports as tabs beside the pad */}
-      <div className="card !p-0 anim-fade-up">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 pb-3 pt-4">
-          <Avatar name={p.fullName} size="h-10 w-10 text-sm" />
-          <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5 text-[16px] font-semibold leading-tight">{p.fullName}<FlagChips flags={p.flags} /></div><CarefulBanner flags={p.flags} />
-            <div className="text-xs text-muted">{[p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ')}</div></div>
-          {p.allergies && <span className="chip chip-rose !py-1">Allergy: {p.allergies}</span>}
-          <span className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{!readOnly && isDoctor && <span title="Minutes since the consultation opened"><Icon name="clock" className="mr-1 inline h-3.5 w-3.5" />{mins} min</span>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}{held && <Chip tone="amber">Rx issued {fmtDate(e.completedAt)} · {testsIn} of {testRecs.length} reports in</Chip>}
-            {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><Icon name="list" className="h-3.5 w-3.5" />Templates</button>
+      {/* who: the patient in the app's top bar (more room for the pad), with the layout, the protocols and the pad's settings; History, Photos and Reports as tabs under it */}
+      {(() => { const who = (
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <Avatar name={p.fullName} size="h-9 w-9 text-xs" />
+          <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-[16px] font-semibold leading-tight">{p.fullName}<FlagChips flags={p.flags} /></div>
+            <div className="truncate text-xs text-muted" title={patientLine}>{patientLine}</div></div>
+          {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
+          <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}
+            {isDoctor && !readOnly && <Segmented<'stacked' | 'focused' | 'review'> size="sm" value={layoutValue} onChange={(v) => { setLayout(v); setPeek(false); }} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'focused', label: 'Focused' }, ...(isReview ? [{ value: 'review' as const, label: 'Review' }] : [])]} />}
+            {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><Icon name="list" className="h-3.5 w-3.5" />Protocols</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={540}>
                 <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-2 p-1.5">
-                  <div><input autoFocus aria-label="Search templates" className="input mb-1.5 !py-1.5" placeholder="Search" value={tplQ} onChange={(ev) => setTplQ(ev.target.value)} />
-                    <div className="max-h-64 space-y-0.5 overflow-y-auto">{tplList.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{tplQ ? 'No template by that name.' : 'No templates yet. Fill the pad, then save it as a template here.'}</div> : tplList.map((t: any) => <button key={t.id} type="button" className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${(tplSel ?? tplList[0])?.id === t.id ? 'bg-paper-2 font-semibold' : 'hover:bg-paper-2'}`} onClick={() => setTplSel(t)}><span className="min-w-0 flex-1 truncate">{t.name}</span>{t.uses > 0 && <span className="text-[11px] text-muted">{t.uses}×</span>}</button>)}</div></div>
+                  <div><input autoFocus aria-label="Search protocols" className="input mb-1.5 !py-1.5" placeholder="Search" value={tplQ} onChange={(ev) => setTplQ(ev.target.value)} />
+                    <div className="max-h-64 space-y-0.5 overflow-y-auto">{tplList.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{tplQ ? 'No protocol by that name.' : 'No protocols yet. Fill the pad, then save it as a protocol here.'}</div> : tplList.map((t: any) => <button key={t.id} type="button" className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${(tplSel ?? tplList[0])?.id === t.id ? 'bg-paper-2 font-semibold' : 'hover:bg-paper-2'}`} onClick={() => setTplSel(t)}><span className="min-w-0 flex-1 truncate">{t.name}</span>{t.uses > 0 && <span className="text-[11px] text-muted">{t.uses}×</span>}</button>)}</div></div>
                   {(tplSel ?? tplList[0]) ? (() => { const t = tplSel ?? tplList[0]; return <div className="rounded-md border border-line bg-surface-2 p-2.5 text-[12.5px] leading-relaxed">
                     <div className="mb-1 flex items-center gap-2"><b className="text-[13px]">{t.name}</b><button type="button" className="btn btn-sm btn-primary ml-auto" onClick={() => applyTpl(t)}>Load</button></div>
                     {joinList(t.data?.assessment?.diagnosis) && <div><b>Dx</b> {joinList(t.data.assessment.diagnosis)}</div>}
                     <div><b>℞</b> {(t.prescription ?? []).length ? (t.prescription ?? []).map((i: any) => `${i.name}${i.frequency ? ` · ${i.frequency}` : ''}${i.durationDays ? ` · ${i.durationDays} d` : ''}`).join('; ') : '—'}</div>
                     {t.data?.plan?.advice && <div><b>Advice</b> {String(t.data.plan.advice).split('\n').filter(Boolean).join(' · ')}</div>}
                     {(t.recommendations ?? []).length > 0 && <div><b>Plan</b> {(t.recommendations ?? []).map((r: any) => r.kind === 'followup' ? `review in ${r.intervalDays} d` : r.kind === 'investigation' ? r.notes : 'procedure').join(', ')}</div>}
-                    <div className="mt-1 text-[11.5px] text-muted">Loading replaces the pad; your symptoms and review answers are kept. Clear loaded undoes it.</div></div>; })() : <div className="rounded-md border border-dashed border-line p-2.5 text-[12.5px] text-muted">A template is the whole pad: diagnosis, medicines, advice, tests and plan, loaded in one tap.</div>}
+                    <div className="mt-1 text-[11.5px] text-muted">Loading replaces the pad; your symptoms and review answers are kept. Clear loaded undoes it.</div></div>; })() : <div className="rounded-md border border-dashed border-line p-2.5 text-[12.5px] text-muted">A protocol is the whole pad: diagnosis, medicines, advice, tests and plan, loaded in one tap.</div>}
                 </div>
                 <div className="flex items-center gap-1 border-t border-line p-1.5">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setTplOpen(false); askTpl(); }}><Icon name="plus" className="h-3.5 w-3.5" />Save this pad as a template</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setTplOpen(false); askTpl(); }}><Icon name="plus" className="h-3.5 w-3.5" />Save this pad as a protocol</button>
                   {applied && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => { clearLoaded(); setTplOpen(false); }}>Clear loaded ({applied})</button>}
                 </div>
               </Floating></>}
-            {isDoctor && <Segmented<'stacked' | 'split'> size="sm" value={split ? 'split' : 'stacked'} onChange={(v) => setSplit(v === 'split')} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'split', label: 'Side by side' }]} />}
-            {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm" title="Which sections show, which are required, what prints" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" />Configure pad</button>}
+            {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm btn-icon" aria-label="Configure pad: sections, required, printing" title="Configure pad: sections, required, printing" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" /></button>}
           </span>
-        </div>
-        {isDoctor && <div className="flex flex-wrap items-center gap-0.5 border-t border-line/70 px-3 py-1.5" role="tablist">
-          {([['pad', 'Pad', 0], ['visits', 'Past visits', previous.length], ['photos', 'Photos', ph.length], ['docs', 'Reports', myDocs.length]] as const).map(([k, l, n]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={`dtab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}{n > 0 && <span className="ml-1.5 text-[11px] text-muted">{n}</span>}</button>)}
-          {pinCount > 0 && <span className="ml-auto text-xs text-muted">Skin map · {pinCount} active {pinCount === 1 ? 'site' : 'sites'} · in Examination</span>}
-        </div>}
-      </div>
+        </div>);
+        return slot ? createPortal(who, slot) : <div className="card !px-5 !py-3 anim-fade-up">{who}</div>; })()}
+      <CarefulBanner flags={p.flags} />
+      {isDoctor && <div className="flex flex-wrap items-center gap-0.5 px-1" role="tablist">
+        {([['pad', 'Pad', 0], ['visits', 'Past visits', previous.length], ['photos', 'Photos', ph.length], ['docs', 'Reports', myDocs.length]] as const).map(([k, l, n]) => <button key={k} type="button" role="tab" aria-selected={tab === k} className={`dtab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}{n > 0 && <span className="ml-1.5 text-[11px] text-muted">{n}</span>}</button>)}
+        {pinCount > 0 && <span className="ml-auto text-xs text-muted">Skin map · {pinCount} active {pinCount === 1 ? 'site' : 'sites'} · in Examination</span>}
+      </div>}
 
       {tab === 'pad' && <>
+        {/* Stacked keeps its own type-anything bar; Focused and Review get the toolbar that follows the open section */}
+        {inline ? <>
         {isDoctor && !readOnly && <div className="anim-fade-up">
           <div className="relative"><Icon name="search" className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-clay" />
             <input aria-label="Type anything" className="typebar" placeholder='Type anything · medicines, symptoms, diagnosis, tests · “itra 100 1-0-1 7d”, “itching 2 weeks”, “KOH mount”' value={line} onChange={(ev) => { setLine(ev.target.value); setPendingLine(null); }} onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); smartAdd(line); } }} />
@@ -613,29 +762,53 @@ export function Encounter() {
           {pendingLine && <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs anim-fade-in"><span className="text-muted">“{pendingLine}” is not in the lists. Add as</span>{([['symptom', 'Symptom'], ['diagnosis', 'Diagnosis'], ['medicine', 'Medicine'], ['test', 'Test'], ['advice', 'Advice']] as const).map(([k, l]) => <button key={k} type="button" className="toggle-opt !min-h-7 !py-0.5" onClick={() => smartAdd(pendingLine, k)}>{l}</button>)}<button type="button" className="btn btn-ghost !min-h-7 !px-2 text-xs" onClick={() => setPendingLine(null)}>Cancel</button></div>}
           {suggested.length > 0 && <div className="mt-1.5 flex flex-wrap items-center gap-1 px-1 text-xs"><span className="mr-1 text-muted">Goes with this</span>{suggested.slice(0, 4).map((t) => <button key={t.id} type="button" title="One tap adds it; anything already on the pad is kept once" className={`!min-h-7 !py-0.5 ${appliedIds.includes(t.id) ? 'toggle-opt on' : 'opt'}`} onClick={t.go}>{t.name}<span className="ml-1.5 text-[11px] font-medium opacity-60">{t.meta}</span></button>)}</div>}
         </div>}
+        </> : <>{toolbar}{suggestions}</>}
         {held && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status"><b>Held for reports.</b><span>Prescription issued {fmtDate(e.completedAt)}. {testsIn} of {testRecs.length} reports in{testsOpen ? `; pending: ${testRecs.filter((r: any) => r.status !== 'done').map((r: any) => `${r.notes}${r.expectedOn ? ` (expected ${fmtDate(r.expectedOn)})` : ''}`).join(', ')}` : ''}.</span>{isDoctor && <span className="text-muted">Add or change what the results call for, then Complete. Issued medicines stay as written.</span>}</div>}
         {setNote && !readOnly && <div className="rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status">{setNote}</div>}
 
         {!isDoctor && (!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <div className="card !p-0"><ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open /></div>}
         {!isDoctor && !padOf('history').show && cards.history}
 
-        {split && isDoctor ? <div className={`grid items-start gap-4 lg:grid-cols-2 ${act === 'medicines' ? 'xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]' : 'xl:grid-cols-[minmax(0,6fr)_minmax(0,5fr)]'}`}>
-          <section className="card !p-0 overflow-hidden anim-fade-up" aria-label="This visit">
-            <div className="flex items-baseline gap-2 px-5 pb-2 pt-4"><b className="text-[15px]">This visit</b><span className="text-xs text-muted">tap a line to change it</span></div>
-            {rowKeys.map((k) => { const on = act === k; const v = sheet[k]; return (
-              <button key={k} type="button" aria-current={on || undefined} className={`grid w-full grid-cols-[120px_minmax(0,1fr)] items-start gap-4 border-t border-line/60 px-5 py-3 text-left transition-colors ${on ? 'bg-paper-2 shadow-[inset_3px_0_0_var(--color-ink)]' : 'hover:bg-surface-2'}`} onClick={() => goTo(k)}>
-                <span className="pt-0.5 text-[12.5px] font-semibold text-muted">{TITLE[k] ?? k}{isRequired(k) && <span className="text-rose" title="Required to finish"> *</span>}</span>
-                <span className={`min-w-0 text-[14px] leading-relaxed ${v ? 'text-ink' : bad(k) ? 'font-medium text-rose' : 'text-muted/60'}`}>{v ?? (bad(k) ? `${TITLE[k] ?? k} is required` : EMPTY[k] ?? 'Tap to add')}</span>
-              </button>); })}
-          </section>
-          <div id="pad-editor" className="min-w-0 scroll-mt-20 lg:sticky lg:top-[84px] lg:max-h-[calc(100dvh-170px)] lg:overflow-y-auto lg:rounded-2xl" key={act}>
-            {act === 'review' ? reviewCard : customSections.some((x: any) => x.key === act) ? custom(customSections.find((x: any) => x.key === act)) : cards[act] ?? null}
-            {(() => { const i = rowKeys.indexOf(act); const pv = rowKeys[i - 1], nx = rowKeys[i + 1]; return <div className="mt-2 flex items-center gap-2">
-              {pv && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setActive(pv)}><Icon name="chevL" className="h-3.5 w-3.5" />{TITLE[pv] ?? pv}</button>}<span className="ml-auto" />
-              {nx && <button type="button" className="btn btn-sm" onClick={() => setActive(nx)}>Next · {TITLE[nx] ?? nx}<Icon name="chevR" className="h-3.5 w-3.5" /></button>}
-            </div>; })()}
+        {view === 'review' ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0 space-y-3">
+            {reviewCard}
+            {cards.photos}
+            <Card id="next" title="Review again">{reviewIn}</Card>
+            <div className="flex flex-wrap items-center gap-1.5 px-1"><span className="mr-1 text-xs text-muted">Also</span>{rowKeys.filter((k) => k !== 'review').map((k) => <button key={k} type="button" className={`btn btn-sm ${bad(k) ? 'text-rose' : ''}`} onClick={() => goTo(k)}>{TITLE[k] ?? k}{isRequired(k) && <span className="text-rose"> *</span>}</button>)}</div>
           </div>
-        </div> : <>
+          <aside className="card space-y-3 text-[13.5px] leading-relaxed xl:sticky xl:top-[150px]" aria-label="What the patient leaves with">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">Leaves with</div>
+            <div>{sheet.diagnosis ?? <span className="font-medium text-rose">Diagnosis is required</span>}</div>
+            <div>{sheet.medicines ?? <span className="text-muted">No medicines</span>}</div>
+            {sheet.next && <div className="text-muted">{sheet.next}</div>}
+            {leaflets.length > 0 && <div className="text-xs text-sage">WhatsApp with {leaflets.length} how-to-use {leaflets.length === 1 ? 'leaflet' : 'leaflets'}</div>}
+          </aside>
+        </div>
+        : view === 'focused' ? <div className="space-y-3">
+          {layout === 'review' && peek && <button type="button" className="btn btn-sm" onClick={() => setPeek(false)}><Icon name="chevL" className="h-3.5 w-3.5" />Back to the review</button>}
+          <div className="grid items-start gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+            <nav className="card hidden !p-2 lg:sticky lg:top-[150px] lg:block" aria-label="Sections">
+              {rowKeys.map((k) => { const on = act === k; const done = sheet[k] != null; return (
+                <button key={k} type="button" aria-current={on || undefined} className={`flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2 text-left text-[13px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : bad(k) ? 'text-rose hover:bg-surface-2' : 'text-ink-2 hover:bg-surface-2'}`} onClick={() => goTo(k)}>
+                  <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${done ? 'bg-clay' : bad(k) ? 'bg-rose' : 'bg-line-2'}`} />
+                  <span className="min-w-0 flex-1 truncate">{TITLE[k] ?? k}{isRequired(k) && <span className={on ? '' : 'text-rose'}> *</span>}</span>
+                  {k === 'medicines' && rx.filter((i) => i.name).length > 0 && <span className="text-[11px] opacity-70">{rx.filter((i) => i.name).length}</span>}
+                </button>); })}
+            </nav>
+            <div className="min-w-0 space-y-3">
+              {segs.map((s) => s.open ? <div key={`open-${s.keys[0]}`}>
+                  <div id="pad-open" className="scroll-mt-40 rounded-[24px] ring-2 ring-ink/70">{openNode(s.keys[0])}</div>
+                  {(() => { const i = rowKeys.indexOf(s.keys[0]); const pv = rowKeys[i - 1], nx = rowKeys[i + 1]; return <div className="mt-2 flex items-center gap-2">
+                    {pv && <button type="button" className="btn btn-ghost btn-sm" onClick={() => goTo(pv)}><Icon name="chevL" className="h-3.5 w-3.5" />{TITLE[pv] ?? pv}</button>}<span className="ml-auto" />
+                    {nx && <button type="button" className="btn btn-sm" onClick={() => goTo(nx)}>Next · {TITLE[nx] ?? nx}<Icon name="chevR" className="h-3.5 w-3.5" /></button>}
+                  </div>; })()}
+                </div>
+                : <section key={`fold-${s.keys[0]}`} className="card !p-0 overflow-hidden">{s.keys.map(foldRow)}</section>)}
+              {later.length > 0 && <div className="flex flex-wrap gap-1.5 px-1">{later.map((k) => <button key={k} type="button" className="btn btn-sm text-muted" onClick={() => goTo(k)}><Icon name="plus" className="h-3.5 w-3.5" />{TITLE[k] ?? k}</button>)}</div>}
+            </div>
+          </div>
+        </div>
+        : <>
           {reviewCard}
           {order.map((k) => cards[k] ?? null)}
           {customSections.map(custom)}
@@ -649,7 +822,7 @@ export function Encounter() {
             <button type="button" className="w-16 shrink-0 text-left text-xs font-semibold text-muted hover:text-ink hover:underline" title={x.doctor?.name ?? ''} onClick={() => setViewing(x.id)}>{fmtDate(x.createdAt)}</button>
             <span className="min-w-0 flex-1 truncate">{x.data?.review?.response ? `${x.data.review.response} · ` : ''}{joinList(x.data?.assessment?.diagnosis) || joinList(x.data?.complaint?.chief_complaint) || 'Consultation'}{x.prescription?.length > 0 && <span className="text-muted"> · {x.prescription.map((i: any) => i.name).join(', ')}</span>}</span>
             <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => setViewing(x.id)}>Open</button>
-            {!readOnly && x.status === 'completed' && <button type="button" className="btn btn-sm shrink-0" onClick={() => { loadPrevious(x, { dx: true, rx: true }); setTab('pad'); }}>Load Dx + Rx</button>}
+            {inline && !readOnly && x.status === 'completed' && <button type="button" className="btn btn-sm shrink-0" onClick={() => { loadPrevious(x, { dx: true, rx: true }); setTab('pad'); }}>Load Dx + Rx</button>}
           </div>))}
         {previous.length > 12 && <div className="pt-2 text-xs text-muted">Earlier · {previous.length - 12} more in the patient's file</div>}
         <div className="mt-3 border-t border-line pt-3"><ScreeningCard complaintText={arrivalText} lists={lists} answers={answers} history={hist} /></div>
@@ -665,6 +838,7 @@ export function Encounter() {
         {can(perms, 'document.write') && !readOnly && <button className="btn btn-sm" onClick={() => setCapture(true)}><Icon name="spark" className="h-3.5 w-3.5" />Take photo</button>}
       </div>}
 
+      {inline ? <>
       {/* the action bar, as in Eka: one dark strip that stays at the foot of the screen */}
       <div className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-[14px] bg-ink px-3 py-2 text-paper shadow-lg anim-fade-up">
         {!readOnly && isDoctor && <button type="button" className={B} onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
@@ -682,6 +856,23 @@ export function Encounter() {
         </>}
         {readOnly && <button type="button" className={BP} onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
       </div>
+      </> : <>
+      {/* the action bar: what is saved or missing on the left, Preview and Finish on the right */}
+      <div className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-[14px] bg-ink px-3 py-2 text-paper shadow-lg anim-fade-up">
+        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-paper/80">Cannot finish yet · missing:</span>
+            {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose px-2 py-0.5 font-semibold text-white hover:bg-rose/80" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
+          : <span className="px-1 text-xs text-paper/60">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
+        {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-paper/50 xl:inline">{view === 'review' ? 'Alt 1–4 how is it · Alt C continue all · ' : 'Alt ↑↓ section · '}/ search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
+        <span className="ml-auto" />
+        {!readOnly && !isDoctor && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
+        {!readOnly && isDoctor && <>
+          <button type="button" className={B} onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}>Preview</button>
+          {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+          <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+        </>}
+        {readOnly && <button type="button" className={BP} onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
+      </div>
+      </>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {capture && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} onClose={() => setCapture(false)} />}
       {compare && <PhotoCompare name={p.fullName} a={compare[0]} b={compare[1]} onClose={() => setCompare(null)} />}

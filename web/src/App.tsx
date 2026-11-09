@@ -157,6 +157,7 @@ export function App() {
   const requests = counts.data?.requests ?? 0;
   const plansNew = c('worklist.read') ? counts.data?.plans ?? 0 : 0; // plans the doctor made today that nobody has acted on yet
   const [bell, setBell] = useState(false);
+  const [padNav, setPadNav] = useState(false); // on a consultation the sidebar starts as icons, to give the pad the room; this opens it for now
   const [pageSearch, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
   const [theme, toggleTheme] = useTheme();
   const [navOpen, toggleNav] = useNav();
@@ -169,6 +170,9 @@ export function App() {
   // Sign out when idle (owner's setting) on shared computers. A doctor in a consultation is left alone; anything unsaved is saved first.
   const idleMin: number = me.data?.privacy?.idleMinutes ?? 0;
   const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
+  const onPad = loc.pathname.startsWith('/encounter'); // the pad: the patient sits in the top bar; clock, search, help, bell and New step aside
+  const wide = onPad ? padNav : navOpen;
+  const toggleWide = onPad ? () => setPadNav((o) => !o) : toggleNav;
   useEffect(() => {
     if (!idleMin || inConsult) return;
     let last = Date.now();
@@ -198,8 +202,8 @@ export function App() {
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
-      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${navOpen ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
-        {navOpen ? <Sidebar {...side} onCollapse={toggleNav} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} onExpand={toggleNav} />}
+      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
+        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} requests={requests} onSignOut={signOut} onExpand={toggleWide} />}
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
@@ -207,26 +211,26 @@ export function App() {
         </div>
       )}
 
-      <div className={`${navOpen ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
+      <div className={`${wide ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
         <header className="no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
           {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
-          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[22px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-5 w-5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>
-          <span className="ml-auto" />
-          {pageSearch && <PageSearchBox key={pageSearch} placeholder={pageSearch} className="mr-1 hidden w-[300px] md:inline-flex" />}
-          {!platform && !pageSearch && <button onClick={() => setPalette(true)} className="toppill mr-1 hidden w-[280px] !font-medium !text-muted lg:inline-flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-4 w-4" /><span className="flex-1 truncate text-left">Patients, phone or ID…</span><span className="kbd">Ctrl K</span></button>}
-          {!platform && !pageSearch && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-icon lg:hidden"><Icon name="search" /></button>}
-          <Clock />
+          {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[22px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-5 w-5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
+          {!onPad && <span className="ml-auto" />}
+          {!onPad && pageSearch && <PageSearchBox key={pageSearch} placeholder={pageSearch} className="mr-1 hidden w-[300px] md:inline-flex" />}
+          {!platform && !onPad && !pageSearch && <button onClick={() => setPalette(true)} className="toppill mr-1 hidden w-[280px] !font-medium !text-muted lg:inline-flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-4 w-4" /><span className="flex-1 truncate text-left">Patients, phone or ID…</span><span className="kbd">Ctrl K</span></button>}
+          {!platform && !onPad && !pageSearch && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-icon lg:hidden"><Icon name="search" /></button>}
+          {!onPad && <Clock />}
           <button type="button" onClick={toggleTheme} className="btn btn-icon hidden sm:inline-flex" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
-          <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-icon hidden sm:inline-flex"><Icon name="help" className="h-4 w-4" /></Link>
-            {!platform && c('appointment.read') && <div className="relative">
+          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-icon hidden sm:inline-flex"><Icon name="help" className="h-4 w-4" /></Link>}
+            {!platform && !onPad && c('appointment.read') && <div className="relative">
               <button onClick={() => setBell((o) => !o)} aria-label={requests + plansNew ? `${requests + plansNew} things need attention` : 'Notifications'} aria-expanded={bell} title="Notifications" className="relative btn btn-icon"><Icon name="bell" className="h-4 w-4" />{requests + plansNew > 0 && <span className="absolute -right-1 -top-1 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-ink px-1 text-[10.5px] font-bold text-paper anim-scale-in" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }}>{requests + plansNew}</span>}</button>
               {bell && <><div className="fixed inset-0 z-30" onClick={() => setBell(false)} /><div className="menu anim-menu z-40 !w-[270px]" role="menu">
                 {requests + plansNew === 0 && <div className="px-3 py-2.5 text-sm text-muted">Nothing new.</div>}
                 {requests > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/bookings?tab=requests'); }}><Icon name="inbox" className="h-4 w-4" />{requests} online booking request{requests === 1 ? '' : 's'}</button>}
                 {plansNew > 0 && <button role="menuitem" onClick={() => { setBell(false); nav('/worklist?tab=plans'); }}><Icon name="stetho" className="h-4 w-4" />{plansNew} new plan{plansNew === 1 ? '' : 's'} from the doctor</button>}
               </div></>}</div>}
-            {!platform && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
+            {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
               <div className="relative shrink-0">
                 <button onClick={() => setPlus((o) => !o)} aria-label="Create" aria-expanded={plus} className="btn btn-primary !min-h-10 !rounded-[11px] !px-3 sm:!px-4"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
                 {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
