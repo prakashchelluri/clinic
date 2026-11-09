@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, money, toast, NumInput } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Section, Segmented, Skeleton, fmtDate, money, toast, NumInput, Filter } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
 import { PhotoTimeline } from '../photos';
@@ -101,7 +101,7 @@ function Timeline({ id }: { id: string }) {
         )}
       </div>
 
-      <div className="no-print"><Segmented<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'> value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'visits', label: 'Visits' }, { value: 'procedures', label: 'Procedures' }, { value: 'payments', label: 'Payments' }, { value: 'reports', label: 'Reports' }, { value: 'missed', label: 'Missed', count: (t.data.missed ?? []).length || undefined }]} /></div>
+      <div className="no-print"><Filter<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'> label="Show" value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'visits', label: 'Visits' }, { value: 'procedures', label: 'Procedures' }, { value: 'payments', label: 'Payments' }, { value: 'reports', label: 'Reports' }, { value: 'missed', label: 'Missed', count: (t.data.missed ?? []).length || undefined }]} /></div>
 
       {/* the story on the left, what is open on the right */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] xl:items-start">

@@ -153,15 +153,15 @@ export function Num({ value, format = (n: number) => String(n) }: { value: numbe
 }
 
 /** A panel that floats above everything, anchored under a button. Used by the ⋯ menu and filters, so rows never cover it. */
-export function Floating({ anchor, open, onClose, children, width }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; width?: number }) {
+export function Floating({ anchor, open, onClose, children, width, align = 'right' }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; children: ReactNode; width?: number; align?: 'left' | 'right' }) {
   const panel = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; maxH: number } | null>(null);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number; left: number; maxH: number } | null>(null);
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
     const r = anchor.current?.getBoundingClientRect(); if (!r) return;
     // below the button when there is room, above it when the button sits near the foot of the screen; never taller than the room it has
     const below = window.innerHeight - r.bottom - 16, above = r.top - 16; const flip = below < 300 && above > below;
-    setPos({ ...(flip ? { bottom: window.innerHeight - r.top + 8 } : { top: r.bottom + 8 }), right: Math.max(8, window.innerWidth - r.right), maxH: Math.max(160, flip ? above : below) });
+    setPos({ ...(flip ? { bottom: window.innerHeight - r.top + 8 } : { top: r.bottom + 8 }), right: Math.max(8, window.innerWidth - r.right), left: Math.max(8, Math.min(r.left, window.innerWidth - 240)), maxH: Math.max(160, flip ? above : below) });
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -172,7 +172,7 @@ export function Floating({ anchor, open, onClose, children, width }: { anchor: R
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); window.removeEventListener('resize', onClose); window.removeEventListener('scroll', away, true); };
   }, [open]);
   if (!open || !pos) return null;
-  return createPortal(<div ref={panel} className="pop anim-menu" style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, right: pos.right, left: 'auto', zIndex: 70, width: width ? Math.min(width, window.innerWidth - 16) : undefined, maxHeight: pos.maxH, overflowY: 'auto' }}>{children}</div>, document.body);
+  return createPortal(<div ref={panel} className="pop anim-menu" style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, ...(align === 'left' ? { left: pos.left, right: 'auto' } : { right: pos.right, left: 'auto' }), zIndex: 70, width: width ? Math.min(width, window.innerWidth - 16) : undefined, maxHeight: pos.maxH, overflowY: 'auto' }}>{children}</div>, document.body);
 }
 
 /** The ⋯ menu: secondary actions live here so a row shows one clear button. */
@@ -186,7 +186,7 @@ export function Tabs<T extends string>({ value, onChange, options, className = '
 }
 
 /** A choice that narrows a list (dates, a kind, a status): one quiet button naming the current choice; the others drop down. */
-export function Filter<T extends string>({ value, onChange, options, label, icon = 'filter' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string; count?: number }[]; label?: string; icon?: string }) {
+export function Filter<T extends string>({ value, onChange, options, label, icon = 'filter' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string; count?: number | string }[]; label?: string; icon?: string }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   const cur = options.find((o) => o.value === value) ?? options[0];
@@ -195,7 +195,7 @@ export function Filter<T extends string>({ value, onChange, options, label, icon
       <button ref={btn} type="button" className={`filter-btn ${value !== options[0].value ? 'on' : ''}`} aria-haspopup="menu" aria-expanded={open} aria-label={`${label ?? 'Show'}: ${cur.label}`} onClick={() => setOpen(!open)}>
         <Icon name={icon} className="h-3.5 w-3.5 opacity-70" />{label && <span className="font-medium opacity-70">{label}</span>}<span>{cur.label}</span><Icon name="chevR" className={`h-3.5 w-3.5 opacity-60 transition-transform ${open ? '-rotate-90' : 'rotate-90'}`} />
       </button>
-      <Floating anchor={btn} open={open} onClose={() => setOpen(false)}>
+      <Floating anchor={btn} open={open} onClose={() => setOpen(false)} align="left">
         <div role="menu" className="menu-list">{options.map((o) => <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === value} onClick={() => { setOpen(false); onChange(o.value); }}>
           <span className="flex-1">{o.label}</span>{o.count != null && <span className="text-[12px] font-medium text-muted">{o.count}</span>}<Icon name="check" className={`h-4 w-4 text-clay ${o.value === value ? '' : 'invisible'}`} /></button>)}</div>
       </Floating>

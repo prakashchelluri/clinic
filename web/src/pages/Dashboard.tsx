@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { get, today } from '../api';
-import { Chip, PageHeader, Segmented, Skeleton, fmtDate, money } from '../ui';
+import { Chip, PageHeader, Skeleton, fmtDate, money, Filter } from '../ui';
 
 type Range = 'today' | 'week' | 'month';
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -24,7 +24,7 @@ export function Dashboard() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle={`${fmtDate(d.from)} to ${fmtDate(d.to)} · compared with the same length of time before`}>
-        <Segmented<Range> value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]} />
+        <Filter<Range> icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'This week' }, { value: 'month', label: 'This month' }]} />
       </PageHeader>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {d.tiles.map((t: any) => (

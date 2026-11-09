@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast } from '../ui';
+import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter } from '../ui';
 import { RoutineModal } from '../routine';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -97,11 +97,8 @@ export function Calendar() {
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5 anim-fade-up" role="radiogroup" aria-label="Show">
-        {docs.length > 0 && <span className="mr-1 text-[11px] font-bold uppercase tracking-wider text-muted">Doctor</span>}
-        {docs.map((d) => <button key={d.id} role="radio" aria-checked={pick.k === 'doc' && pick.id === d.id} className={`toggle-opt ${pick.k === 'doc' && pick.id === d.id ? 'on' : ''}`} onClick={() => setPick({ k: 'doc', id: d.id })}>{d.name.replace(/^Dr\.?\s*/i, 'Dr. ').replace(/\s+Doctor$/, '')} <span className="ml-1 text-[11px] opacity-60">{countFor(d.id)}</span></button>)}
-        {rooms.length > 0 && <span className="ml-3 mr-1 text-[11px] font-bold uppercase tracking-wider text-muted">Room</span>}
-        {rooms.map((r) => <button key={r.id} role="radio" aria-checked={pick.k === 'room' && pick.id === r.id} className={`toggle-opt ${pick.k === 'room' && pick.id === r.id ? 'on' : ''}`} onClick={() => setPick({ k: 'room', id: r.id })}>{r.name} <span className="ml-1 text-[11px] opacity-60">{roomCount(r.id)}</span></button>)}
-        <button role="radio" aria-checked={pick.k === 'all'} className={`toggle-opt ml-2 ${pick.k === 'all' ? 'on' : ''}`} onClick={() => setPick({ k: 'all' })}>All</button>
+        <Filter label="Show" value={pick.k === 'all' ? 'all' : `${pick.k}:${(pick as any).id}`} onChange={(v) => { if (v === 'all') setPick({ k: 'all' } as any); else { const [k, id] = v.split(':'); setPick({ k, id } as any); } }}
+          options={[{ value: 'all', label: 'Every doctor and room' }, ...docs.map((d: any) => ({ value: `doc:${d.id}`, label: d.name.replace(/^Dr\.?\s*/i, 'Dr. ').replace(/\s+Doctor$/, ''), count: countFor(d.id) })), ...rooms.map((r: any) => ({ value: `room:${r.id}`, label: r.name, count: roomCount(r.id) }))]} />
       </div>
 
       {canBook && <AttentionStrip onOpen={setOpenId} onBook={(patient) => setPanel({ patient })} />}

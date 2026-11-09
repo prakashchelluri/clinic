@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { can } from '../App';
-import { Chip, Icon, PageHeader, Segmented } from '../ui';
+import { Chip, Icon, PageHeader, Filter } from '../ui';
 
 type Guide = 'reception' | 'doctor' | 'junior' | 'pharmacy' | 'owner';
 const GUIDES: [Guide, string][] = [['reception', 'Reception'], ['doctor', 'Doctor'], ['junior', 'Junior doctor'], ['pharmacy', 'Pharmacy'], ['owner', 'Owner']];
@@ -308,7 +308,7 @@ export function Help() {
         <button className="btn no-print" onClick={() => history.length > 1 ? nav(-1) : nav('/')}><Icon name="chevL" className="h-4 w-4" />Back</button>
         <button className="btn no-print" onClick={() => window.print()}><Icon name="print" className="h-4 w-4" />Print</button>
       </PageHeader>
-      <div className="no-print mb-4 flex flex-wrap items-center gap-2"><span className="text-sm text-muted">Show the guide for</span><Segmented<Guide> value={guide} onChange={setGuide} options={GUIDES.map(([v, l]) => ({ value: v, label: l }))} /></div>
+      <div className="no-print mb-4 flex flex-wrap items-center gap-2"><Filter<Guide> icon="user" label="Guide for" value={guide} onChange={setGuide} options={GUIDES.map(([v, l]) => ({ value: v, label: l }))} /></div>
       <div className="no-print mb-6 flex flex-wrap items-center gap-1.5"><span className="mr-1 text-xs font-semibold uppercase tracking-wider text-muted">Jump to</span>
         {[['journey', 'The day in one picture'], ['money', 'Where money is taken'], ...TOC[guide], ['words', 'Words'], ['faq', 'If something looks wrong']].map(([id, l]) => <button key={id} className="toggle-opt !py-1 text-[13px]" onClick={() => go(id)}>{l}</button>)}</div>
       <article>

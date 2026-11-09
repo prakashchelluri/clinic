@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, MoneyInput, PageHeader, Section, Segmented, Skeleton, Stat, money, toPaise, toast } from '../ui';
+import { Chip, Empty, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter } from '../ui';
 
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 type Range = 'today' | '7' | '30' | 'month';
@@ -36,7 +36,7 @@ export function Expenses() {
   return (
     <div>
       <PageHeader title="Expenses" subtitle={d ? `${short(d.from)} to ${short(d.to)}` : ' '}>
-        <Segmented value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: '7', label: '7 days' }, { value: '30', label: '30 days' }, { value: 'month', label: 'This month' }]} />
+        <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: 'month', label: 'This month' }]} />
       </PageHeader>
 
       {canWrite && (

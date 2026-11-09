@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get } from '../api';
-import { Avatar, Chip, Empty, Icon, Num, PageHeader, Section, Segmented, Skeleton, Stat, money, fmtDate } from '../ui';
+import { Avatar, Chip, Empty, Icon, Num, PageHeader, Section, Skeleton, Stat, money, fmtDate, Filter } from '../ui';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
 const ago = (iso: string) => { const m = minsSince(iso); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : fmtDate(iso); };
@@ -42,7 +42,7 @@ export function Overview() {
         <Stat label="Procedures today" value={<><Num value={d.rooms.filter((r: any) => r.state === 'completed').length} /><span className="text-[15px] text-muted"> / {d.rooms.length}</span></>} sub={d.rooms.length ? 'done so far' : 'nothing scheduled'} delay={120} />
       </div>
 
-      <Section title="Collections" className="mt-4" delay={160} aside={<><Segmented value={range} onChange={setRange} options={[{ value: '7', label: '7 days' }, { value: '30', label: '30 days' }]} /><button className="btn btn-sm" onClick={() => nav('/reports')}>Daily report</button></>}>
+      <Section title="Collections" className="mt-4" delay={160} aside={<><Filter icon="calendar" value={range} onChange={setRange} options={[{ value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }]} /><button className="btn btn-sm" onClick={() => nav('/reports')}>Daily report</button></>}>
         <div className="px-4 pt-3">
           <div className="flex items-baseline gap-3"><span className="text-[24px] font-semibold tracking-tight"><Num value={total} format={money} /></span><span className="text-xs text-muted">in {range} days · {money(Math.round(total / Math.max(1, series.length)))} a day</span></div>
           <div className="relative mt-1" onMouseLeave={() => setHover(null)}>

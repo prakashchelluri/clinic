@@ -8,7 +8,7 @@ import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { FlagChips } from '../flags';
 import { CourseDialog } from '../courses';
-import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Segmented, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty } from '../ui';
+import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 
@@ -191,8 +191,7 @@ export function FrontDesk() {
           {canDesk && tab !== 'history' && <div className="xl:sticky xl:top-[84px] xl:max-h-[calc(100dvh-100px)] xl:self-start xl:overflow-y-auto xl:rounded-2xl"><ArrivalSheet key={`${arriveKey}:${arrive?.patientId ?? ''}:${arrive?.appointmentId ?? ''}:${arrive?.reports?.encounterId ?? ''}`} inline init={arrive ?? {}} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} /></div>}
           <div className="min-w-0">
             {(d?.doctors ?? []).length > 1 && tab !== 'history' && <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <button type="button" className={`toggle-opt ${!docFilter ? 'on' : ''}`} onClick={() => setDocFilter(null)}>All doctors<span className="ml-1.5 text-muted">{visitsAll.filter((v) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length}</span></button>
-              {(d?.doctors ?? []).map((x: any) => <button key={x.id} type="button" className={`toggle-opt ${docFilter === x.id ? 'on' : ''}`} onClick={() => setDocFilter(docFilter === x.id ? null : x.id)}>{x.name}<span className="ml-1.5 text-muted">{visitsAll.filter((v) => v.practitionerId === x.id && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length}</span></button>)}
+              <Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={[{ value: 'all', label: 'All doctors', count: visitsAll.filter((v) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length }, ...(d?.doctors ?? []).map((x: any) => ({ value: x.id as string, label: x.name as string, count: visitsAll.filter((v) => v.practitionerId === x.id && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length }))]} />
               {visitsAll.some((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)) && <span className="text-xs text-rose">{visitsAll.filter((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)).length} with no doctor picked</span>}
             </div>}
             <div className="mb-3 flex gap-0.5 overflow-x-auto no-scrollbar border-b border-line" role="tablist">

@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, today, errText, ApiError, dialable } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, Segmented, Skeleton, ask, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, Skeleton, ask, toast, Filter } from '../ui';
 import { ScheduleModal } from './Worklist';
 
 const add = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -56,14 +56,14 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Segmented<string> value={day} onChange={setDay} options={stripDays.map((d) => ({ value: d, label: lab(d), count: counts.data?.[d] ?? (d === day ? all.length : undefined) }))} />
+        <Filter icon="calendar" value={day} onChange={setDay} options={stripDays.map((d) => ({ value: d, label: lab(d), count: counts.data?.[d] ?? (d === day ? all.length : undefined) }))} />
         <input type="date" aria-label="Pick a date" className="input !w-auto !py-2" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold mr-2">{long(day)}</h2>
         <select aria-label="Doctor" className="input !w-auto !py-2" value={docF} onChange={(e) => setDocF(e.target.value)}><option value="">All doctors</option><option value="none">Not assigned</option>{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
         <select aria-label="Room" className="input !w-auto !py-2" value={roomF} onChange={(e) => setRoomF(e.target.value)}><option value="">All rooms</option>{rooms.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
-        {isDoctor && <Segmented<'all' | 'mine'> value={mine ? 'mine' : 'all'} onChange={(v) => setMine(v === 'mine')} options={[{ value: 'all', label: 'All' }, { value: 'mine', label: 'Mine' }]} />}
+        {isDoctor && <Filter<'all' | 'mine'> icon="user" value={mine ? 'mine' : 'all'} onChange={(v) => setMine(v === 'mine')} options={[{ value: 'all', label: 'Every doctor' }, { value: 'mine', label: 'Mine only' }]} />}
       </div>
 
       {(nNoDoc > 0 || nUnconf > 0) && (

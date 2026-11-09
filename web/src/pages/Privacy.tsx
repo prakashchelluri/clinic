@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, api, qc, errText, post } from '../api';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast } from '../ui';
+import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast, Filter } from '../ui';
 
 const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Junior doctor', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -131,7 +131,7 @@ export function AuditLog() {
       <div className="flex flex-wrap items-end gap-3 anim-fade-up"><div className="mr-auto"><h1 className="sr-only">Audit log</h1><div className="text-[14px] text-muted">Every action by every user, kept a year. Nobody can edit or delete it.</div></div>
         {canDownload && <button className="btn" disabled={!rows.length} onClick={download}><Icon name="download" className="h-4 w-4" />Download</button>}</div>
       <div className="flex flex-wrap items-center gap-2">
-        <Segmented<string> value={days} onChange={setDays} options={[{ value: '1', label: 'Today' }, { value: '7', label: '7 days' }, { value: '30', label: '30 days' }, { value: '365', label: 'Year' }]} />
+        <Filter icon="calendar" value={days} onChange={setDays} options={[{ value: '1', label: 'Today' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: '365', label: 'Last year' }]} />
         <select aria-label="Staff" className="input !w-auto !py-2" value={userId} onChange={(e) => setUserId(e.target.value)}><option value="">All staff</option>{(users.data ?? []).map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
         <div className="relative">
           {patient ? <span className="toggle-opt on">{patient.fullName}<button aria-label="Clear patient" className="ml-1" onClick={() => { setPatient(null); setPq(''); }}><Icon name="x" className="inline h-3 w-3" /></button></span>
@@ -140,7 +140,7 @@ export function AuditLog() {
         </div>
         <label className="ml-1 flex items-center gap-1.5 text-sm"><input type="checkbox" checked={unusual} onChange={(e) => setUnusual(e.target.checked)} />Only unusual</label>
       </div>
-      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Kind of action">{KINDS.map(([k, l]) => <button key={k} role="radio" aria-checked={kind === k} className={`toggle-opt !py-1 ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{l}</button>)}</div>
+      <Filter value={kind} onChange={setKind} options={KINDS.map(([value, label]) => ({ value, label }))} />
       <section className="card-flat overflow-hidden">
         {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : rows.length === 0 ? <Empty icon="lock" title="Nothing in this period" hint="Try a longer period or clear the filters." /> : (
           <div className="overflow-x-auto"><table className="table min-w-[760px]">

@@ -7,7 +7,7 @@ import { PhotoCapture } from '../photos';
 import { ProcSchedule } from './ProcSchedule';
 import { ProcedureBoard } from '../procBoard';
 import { openViewer } from '../viewer';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast, ask } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast, ask, Tabs } from '../ui';
 
 const OUTCOMES = ['Will come', 'Wants another date', 'No answer', 'Wrong number', 'Declined', 'Done elsewhere'];
 type Kind = 'procedure' | 'followup' | 'investigation';
@@ -41,7 +41,7 @@ export function Worklist() {
     <div>
       <PageHeader title="Procedures" subtitle={view === 'schedule' ? 'What is planned, any date' : overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Everything the doctor recommended, nothing re-typed'}>
         <Segmented<'schedule' | 'plans' | 'board'> value={view} onChange={setView} options={[{ value: 'schedule', label: 'Schedule' }, { value: 'board', label: 'Board' }, { value: 'plans', label: newPlans ? `Plans to schedule · ${newPlans} new` : 'Plans to schedule', count: (proc.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length || undefined }]} />
-        {view === 'plans' && <Segmented value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }]} />}
+        {view === 'plans' && <Tabs className="w-full" value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }]} />}
       </PageHeader>
       {view === 'schedule' ? <ProcSchedule onPlans={() => setView('plans')} /> : view === 'board' ? <ProcedureBoard /> : (<>
       {kind === 'procedure' && (sessions.data ?? []).length > 0 && (

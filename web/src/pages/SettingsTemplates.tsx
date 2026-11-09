@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, get, patch, post, qc, errText } from '../api';
-import { Chip, Empty, Icon, Modal, MoreMenu, NumInput, MoneyInput, Segmented, Skeleton, ask, money, toPaise, toast } from '../ui';
+import { Chip, Empty, Icon, Modal, MoreMenu, NumInput, MoneyInput, Skeleton, ask, money, toPaise, toast, Tabs } from '../ui';
 import { KINDS, norm, type Linked, type Tmpl, type TmplKind } from '../templates';
 
 const FREQ = ['1-0-0', '0-0-1', '1-0-1', '1-1-1', 'at night', 'once daily', 'twice daily', 'alternate days', 'weekly', 'SOS'];
@@ -142,7 +142,7 @@ export function TemplatesTab({ cfg }: { cfg: any }) {
       <div className="text-sm text-muted">Small sets the doctors use, suggested by the complaint or diagnosis they are linked to. One tap adds a set and nothing is added twice. Sets a doctor saves from a visit wait here for your approval.</div>
       {waiting.length > 0 && <div className="card !p-4 !bg-[#FFF6DD]" role="status"><b className="text-sm">{waiting.length} saved by doctors, waiting for you</b>
         {waiting.map((t) => <div key={t.id} className="mt-2 flex flex-wrap items-center gap-2 text-sm"><Chip tone="amber">{KINDS.find((k) => k.kind === t.kind)?.one}</Chip><b>{t.name}</b><span className="text-xs text-muted">{summary(t)}</span><span className="ml-auto flex gap-1.5"><button className="btn btn-sm" onClick={() => { setKind(t.kind); setEdit({ t }); }}>Review</button><button className="btn btn-sm btn-primary" onClick={() => upd.mutate({ id: t.id, draft: false })}>Approve</button></span></div>)}</div>}
-      <div className="overflow-x-auto"><Segmented<string> value={kind} onChange={(k) => { setKind(k as any); setQ(''); }} options={[{ value: 'protocol', label: 'Full protocols', count: count('protocol') }, ...KINDS.map((k) => ({ value: k.kind as string, label: k.label, count: count(k.kind) }))]} /></div>
+      <div className="overflow-x-auto"><Tabs<string> value={kind} onChange={(k) => { setKind(k as any); setQ(''); }} options={[{ value: 'protocol', label: 'Full protocols', count: count('protocol') }, ...KINDS.map((k) => ({ value: k.kind as string, label: k.label, count: count(k.kind) }))]} /></div>
       {kind === 'protocol' ? (
         <div className="card !p-0">
           <div className="border-b border-line/70 px-4 py-3 text-xs text-muted">A protocol is a whole saved note: complaint, findings, diagnosis, medicines, advice and review. Doctors make them with “Save as template” in a consultation. Link each to its diagnoses so it is suggested.</div>
