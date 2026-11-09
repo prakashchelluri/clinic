@@ -8,7 +8,7 @@ export type Action = { key: string; label: string; icon: string; hint: string; t
 
 /** The things you start from anywhere. One list for the + menu and for ⌘K. */
 export const createActions = (can: (p: string) => boolean, path = ''): Action[] => {
-  const first = path.startsWith('/patients') ? 'R' : path.startsWith('/calendar') || path.startsWith('/bookings') ? 'B' : path.startsWith('/pharmacy') ? 'SOD' : path.startsWith('/worklist') ? 'P' : path.startsWith('/expenses') ? 'E' : path.startsWith('/queue') ? 'A' : '';
+  const first = path.startsWith('/patients') ? 'R' : path.startsWith('/calendar') || path.startsWith('/bookings') ? 'B' : path.startsWith('/pharmacy') ? 'SOD' : path.startsWith('/inventory') ? 'OD' : path.startsWith('/worklist') ? 'P' : path.startsWith('/expenses') ? 'E' : path.startsWith('/queue') ? 'A' : '';
   const list = [
   can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/queue?arrive=1' },
   can('appointment.write') && { key: 'B', label: 'New booking', icon: 'calendar', hint: 'Pick a window', to: '/calendar?book=1' },
@@ -16,8 +16,8 @@ export const createActions = (can: (p: string) => boolean, path = ''): Action[] 
   can('worklist.write') && { key: 'P', label: 'Schedule a procedure', icon: 'stetho', hint: 'Open procedures', to: '/worklist' },
   can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: 'Expenses', to: '/expenses' },
   can('pharmacy.bill') && { key: 'S', label: 'New pharmacy sale', icon: 'pill', hint: 'Without a prescription', to: '/pharmacy?sale=1' },
-  can('stock.write') && { key: 'O', label: 'New purchase order', icon: 'list', hint: 'Order from a vendor', to: '/pharmacy?tab=orders&order=new' },
-  can('stock.write') && { key: 'D', label: 'Receive a delivery', icon: 'inbox', hint: 'Stock in, with or without an order', to: '/pharmacy?tab=orders&receive=new' },
+  can('stock.write') && { key: 'O', label: 'New purchase order', icon: 'list', hint: 'Order from a vendor', to: '/inventory?tab=orders&order=new' },
+  can('stock.write') && { key: 'D', label: 'Receive a delivery', icon: 'inbox', hint: 'Stock in, with or without an order', to: '/inventory?tab=orders&receive=new' },
   ].filter(Boolean) as Action[];
   return [...list.filter((a) => first.includes(a.key)), ...list.filter((a) => !first.includes(a.key))];
 };

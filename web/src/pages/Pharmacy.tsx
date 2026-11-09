@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useOutletContext, useSearchParams } from 'react-router';
+import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
@@ -8,7 +8,7 @@ import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, Mo
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 
-type Tab = 'counter' | 'bills' | 'register' | InvTab;
+type Tab = 'counter' | 'bills' | 'register';
 const INV: string[] = ['stock', 'batches', 'orders', 'vendors'];
 const REASONS = ['Has at home', 'Will buy later', 'Bought outside', 'Out of stock', 'Too costly', 'Doctor said not needed'];
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
@@ -18,6 +18,12 @@ const packLabel = (m: { form?: string | null; packSize?: number } | null | undef
 const pref = (k: string, d: boolean) => { try { const v = localStorage.getItem(k); return v === null ? d : v === '1'; } catch { return d; } };
 const setPref = (k: string, v: boolean) => { try { localStorage.setItem(k, v ? '1' : '0'); } catch { /* private mode */ } };
 
+/** Inventory, its own page: stock, batches and expiry, orders and vendors. */
+export function InventoryPage() {
+  const [sp, setSp] = useSearchParams();
+  return <Inventory tab={(sp.get('tab') as InvTab) || 'stock'} sp={sp} go={(next) => setSp(next)} />;
+}
+
 /** Pharmacy: the counter (prescriptions to pick from, issue what the patient buys), bills and returns, and stock. */
 export function Pharmacy() {
   const { perms, cfg } = useOutletContext<any>();
@@ -26,18 +32,17 @@ export function Pharmacy() {
   const go = (next: Record<string, string>) => setSp(next);
   useEffect(() => { if (sp.get('sale')) go({ tab: 'counter', rx: 'walkin' }); }, [sp]);
   const stock = can(perms, 'stock.read');
-  const tabs: { value: string; label: string }[] = [{ value: 'counter', label: 'Counter' }, { value: 'bills', label: 'Bills' }, { value: 'register', label: 'Register' }, ...(stock ? [{ value: 'inventory', label: 'Inventory' }] : [])];
-  const inv = INV.includes(tab) && stock;
+  const tabs: { value: Tab; label: string }[] = [{ value: 'counter', label: 'Counter' }, { value: 'bills', label: 'Bills' }, { value: 'register', label: 'Register' }];
+  if (INV.includes(tab)) return <Navigate to={`/inventory?${sp}`} replace />; // links from before Inventory had its own page
   return (
     <div>
       {/* the page name is in the top bar; here only the sections and the counter's main action */}
       <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-3">
-        <Segmented value={inv ? 'inventory' : tab} onChange={(v) => go({ tab: v === 'inventory' ? 'stock' : v })} options={tabs} />
+        <Segmented<Tab> value={tab} onChange={(v) => go({ tab: v })} options={tabs} />
       </div>
       {tab === 'counter' && <Counter sel={sp.get('rx')} pick={(rx) => go(rx ? { tab: 'counter', rx } : { tab: 'counter' })} />}
       {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => go(bill ? { tab: 'bills', bill } : { tab: 'bills' })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
       {tab === 'register' && <RegisterTab clinic={cfg?.tenant?.name ?? ''} licence={cfg?.tenant?.settings?.print?.drugLicence ?? cfg?.tenant?.settings?.drugLicence} />}
-      {inv && <Inventory tab={tab as InvTab} sp={sp} go={go} />}
     </div>
   );
 }
@@ -254,7 +259,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
                   <div className="flex items-center gap-2.5">
                     <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${tileOf(l.med?.form)}`}><Icon name="pill" className="h-3.5 w-3.5 text-ink" /></span>
                     <span className="min-w-0 flex-1"><b className="block text-[13.5px] leading-snug">{l.name}{l.rxItemId && <span className="ml-1.5 rounded-full bg-clay-soft px-1.5 py-px align-middle text-[10.5px] font-bold text-clay-ink">Rx</span>}</b>
-                      <small className={`block truncate text-[11.5px] ${l.medicineId && l.onHand === 0 ? 'text-rose' : 'text-muted'}`}>{!l.medicineId ? 'not in the medicine list' : l.onHand === 0 ? 'out of stock' : l.rxItemId ? [`${l.prescribed} ${packLabel(l.med, l.prescribed ?? 1)} prescribed`, (l.issued ?? 0) > 0 ? `${l.issued} issued before` : null, l.how].filter(Boolean).join(' · ') : [money(b?.mrpPaise ?? l.mrpPaise) + ' each', b ? `${b.batchNo} · exp ${exp(b.expiry)}` : null].filter(Boolean).join(' · ')}</small></span>
+                      <small className={`block truncate text-[11.5px] ${l.medicineId && l.onHand === 0 ? 'text-rose' : 'text-muted'}`}>{!l.medicineId ? 'not in the medicine list' : l.onHand === 0 ? (can(perms, 'stock.read') ? <Link className="underline" to={`/inventory?tab=stock&item=${l.medicineId}`}>out of stock · see in Inventory</Link> : 'out of stock') : l.rxItemId ? [`${l.prescribed} ${packLabel(l.med, l.prescribed ?? 1)} prescribed`, (l.issued ?? 0) > 0 ? `${l.issued} issued before` : null, l.how].filter(Boolean).join(' · ') : [money(b?.mrpPaise ?? l.mrpPaise) + ' each', b ? `${b.batchNo} · exp ${exp(b.expiry)}` : null].filter(Boolean).join(' · ')}</small></span>
                     {done ? <Chip tone="sage">issued</Chip> : <span className="flex shrink-0 items-center rounded-full bg-surface-2 p-0.5 shadow-[var(--ring)]">
                       <button type="button" className="grid h-7 w-7 place-items-center rounded-full text-[16px] font-bold text-ink-2 hover:bg-paper-2 disabled:opacity-40" aria-label={`One less ${l.name}`} disabled={!l.medicineId || !canBill || n === 0} onClick={() => step(l, -1)}>−</button>
                       <NumInput aria-label={`Issue ${l.name}`} className={`w-8 bg-transparent text-center text-[13.5px] font-semibold outline-none ${n > l.onHand ? 'text-rose' : ''}`} max={999} disabled={!l.medicineId || !canBill} value={l.qty} onChange={(e) => set(l.key, { qty: e.target.value })} />
@@ -478,7 +483,7 @@ function BillDetail({ id, onClose, onIssue }: { id: string; onClose: () => void;
           <label><span className="label">Refund by</span><select className="input" value={m} onChange={(e) => setMethod(e.target.value)}><option value="cash">Cash</option><option value="upi">UPI back to the patient</option><option value="card">Card reversal</option></select></label>
           {m !== 'cash' && <label className="sm:col-span-2"><span className="label">Refund reference</span><input className="input" value={ref} onChange={(e) => setRef(e.target.value)} /></label>}
         </div>
-        <div className="text-xs text-muted">Items go back to the same batch. Opened or cold-chain items cannot go back on the shelf: take them back with an adjustment on the Stock tab.</div>
+        <div className="text-xs text-muted">Items go back to the same batch. Opened or cold-chain items cannot go back on the shelf: take them back with an adjustment in Inventory.</div>
         {lines.length > 0 && problem && <div className="text-xs text-rose">{problem}</div>}
         <div className="flex flex-wrap gap-2 justify-end">
           {can(perms, 'stock.approve') && <button className="btn btn-ghost text-rose" disabled={cancel.isPending} onClick={async () => { const a = await ask({ title: `Cancel ${s.invoiceNo}?`, body: `Everything not yet returned comes back to stock and is refunded by ${m.toUpperCase()}.`, tone: 'danger', confirmLabel: 'Cancel bill', cancelLabel: 'Keep', field: { label: 'Reason', required: true, maxLength: 200 } }); if (a) cancel.mutate(a.value); }}>Cancel whole bill</button>}

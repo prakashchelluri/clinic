@@ -68,7 +68,7 @@ export const PERMISSIONS: { key: string; group: string; label: string; hint: str
   { key: 'pharmacy.read', group: 'Pharmacy', label: 'See the pharmacy counter and bills', hint: 'Pharmacy page' },
   { key: 'pharmacy.bill', group: 'Pharmacy', label: 'Issue medicines and bill them', hint: 'Counter' },
   { key: 'pharmacy.return', group: 'Pharmacy', label: 'Take back items and refund', hint: 'Bills' },
-  { key: 'stock.read', group: 'Pharmacy', label: 'See stock, orders and vendors', hint: 'Stock tab' },
+  { key: 'stock.read', group: 'Pharmacy', label: 'See stock, orders and vendors', hint: 'The Inventory page' },
   { key: 'stock.write', group: 'Pharmacy', label: 'Order, receive, return and count stock', hint: '' },
   { key: 'stock.approve', group: 'Pharmacy', label: 'Decide delivery differences, write off stock, big discounts', hint: 'Owner by default' },
   { key: 'user.read', group: 'Administration', label: 'See staff list', hint: '' },

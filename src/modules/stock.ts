@@ -154,7 +154,7 @@ export async function receiveStock(tx: Tx, a: Actor, body: z.infer<typeof Receip
 export function stockRoutes(app: FastifyInstance) {
   const today = (req: any) => todayIn(req.ctx.timezone);
 
-  /** The Stock tab: what needs attention, deliveries waiting for a decision, and every medicine with its stock. */
+  /** Inventory's Stock tab: what needs attention, deliveries waiting for a decision, and every medicine with its stock. */
   route(app, 'get', '/stock', 'stock.read', async (req, tx) => {
     const t = req.ctx.tenantId; const d = today(req); const soon = addDays(d, 90);
     const meds = await tx.select().from(medicine).where(eq(medicine.tenantId, t)).orderBy(asc(medicine.name));

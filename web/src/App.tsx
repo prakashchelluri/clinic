@@ -28,6 +28,7 @@ export const NAV: NavItem[] = [
   { to: '/followups', label: 'Follow-ups', icon: 'phone', show: (c) => c('worklist.read') },
   { to: '/tests', label: 'Test reports', icon: 'inbox', show: (c) => c('worklist.read') || c('encounter.complete') },
   { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', group: 'clinic', show: (c) => c('pharmacy.read') },
+  { to: '/inventory', label: 'Inventory', icon: 'inbox', group: 'clinic', show: (c) => c('stock.read') },
   { to: '/reports', label: 'Reports', icon: 'chart', group: 'clinic', show: (c) => c('report.daily') || c('finance.read') },
   { to: '/expenses', label: 'Expenses', icon: 'wallet', group: 'clinic', show: (c) => c('expense.read') },
   { to: '/settings', label: 'Settings', icon: 'gear', group: 'clinic', show: (c) => c('config.write') },

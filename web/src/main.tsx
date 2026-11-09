@@ -19,7 +19,7 @@ import { Followups } from './pages/Followups';
 import { Help } from './pages/Help';
 import { Dashboard } from './pages/Dashboard';
 import { PrintRx } from './pages/PrintRx';
-import { Pharmacy } from './pages/Pharmacy';
+import { Pharmacy, InventoryPage } from './pages/Pharmacy';
 import { Settings } from './pages/Settings';
 import { Calendar } from './pages/Calendar';
 import { Platform } from './pages/Platform';
@@ -57,6 +57,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/help" element={<Help />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/pharmacy" element={<Pharmacy />} />
+            <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/bookings" element={<Bookings />} />
