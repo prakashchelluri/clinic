@@ -4,7 +4,7 @@ import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
+import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 
@@ -33,7 +33,6 @@ export function Pharmacy() {
       {/* the page name is in the top bar; here only the sections and the counter's main action */}
       <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-3">
         <Segmented value={inv ? 'inventory' : tab} onChange={(v) => go({ tab: v === 'inventory' ? 'stock' : v })} options={tabs} />
-        {can(perms, 'pharmacy.bill') && !inv && <button className="btn btn-primary ml-auto" onClick={() => go({ tab: 'counter', rx: 'walkin' })}><Icon name="plus" />Walk-in sale</button>}
       </div>
       {tab === 'counter' && <Counter sel={sp.get('rx')} pick={(rx) => go(rx ? { tab: 'counter', rx } : { tab: 'counter' })} />}
       {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => go(bill ? { tab: 'bills', bill } : { tab: 'bills' })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
@@ -201,9 +200,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
                   onKeyDown={(e) => { if (e.key === 'Enter' && shown[0]) { e.preventDefault(); addMed(shown[0], document.querySelector(`[data-tile="${shown[0].id}"]`)); setFind(''); } }} /></div>
               <button type="button" className="btn btn-ink !min-h-[46px] px-5" disabled={!shown[0] || !canBill} onClick={() => { addMed(shown[0], document.querySelector(`[data-tile="${shown[0].id}"]`)); setFind(''); }}>Add</button>
             </div>
-            {forms.length > 1 && <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Form">
-              {['all', ...forms].map((f) => <button key={f} type="button" role="radio" aria-checked={form === f} className={`toggle-opt ${form === f ? 'on' : ''}`} onClick={() => setForm(f)}>{f === 'all' ? 'All' : FORMS[f]?.[2] ?? f}</button>)}
-            </div>}
+            {forms.length > 1 && <div className="mt-3"><Filter label="Form" value={form} onChange={setForm} options={['all', ...forms].map((f) => ({ value: f, label: f === 'all' ? 'All' : FORMS[f]?.[2] ?? f }))} /></div>}
             {meds.isLoading ? <div className="mt-3"><Skeleton rows={3} /></div> : shown.length === 0 ? <div className="mt-3 py-4 text-sm text-muted">{find ? 'Nothing by that name. Add it under Settings → Medicines.' : 'No medicines yet.'}</div> : (
               <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 2xl:grid-cols-4">
                 {shown.map((m: any) => {
@@ -415,7 +412,7 @@ function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string |
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Segmented value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'week', label: '7 days' }, { value: 'custom', label: 'Range' }]} />
+        <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'week', label: 'Last 7 days' }, { value: 'custom', label: 'Pick dates' }]} />
         {range === 'custom' && <><input type="date" aria-label="From" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} /><span className="text-sm text-muted">to</span><input type="date" aria-label="To" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />{bad && <span className="text-xs text-rose">“From” is after “to”.</span>}</>}
         <div className="relative ml-auto"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-64" aria-label="Search bills" placeholder="Bill no., patient or phone" value={q} onChange={(e) => setQ(e.target.value)} /></div>
       </div>

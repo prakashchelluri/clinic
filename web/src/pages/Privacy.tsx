@@ -128,7 +128,7 @@ export function AuditLog() {
   };
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3 anim-fade-up"><div className="mr-auto"><h1 className="text-[34px] font-semibold">Audit log</h1><div className="mt-1.5 text-[14px] text-muted">Every action by every user, kept a year. Nobody can edit or delete it.</div></div>
+      <div className="flex flex-wrap items-end gap-3 anim-fade-up"><div className="mr-auto"><h1 className="sr-only">Audit log</h1><div className="text-[14px] text-muted">Every action by every user, kept a year. Nobody can edit or delete it.</div></div>
         {canDownload && <button className="btn" disabled={!rows.length} onClick={download}><Icon name="download" className="h-4 w-4" />Download</button>}</div>
       <div className="flex flex-wrap items-center gap-2">
         <Segmented<string> value={days} onChange={setDays} options={[{ value: '1', label: 'Today' }, { value: '7', label: '7 days' }, { value: '30', label: '30 days' }, { value: '365', label: 'Year' }]} />

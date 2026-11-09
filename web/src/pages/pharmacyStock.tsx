@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
+import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate } from '../ui';
 
 type Go = (next: Record<string, string>) => void;
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
@@ -37,10 +37,7 @@ const Stat = ({ icon, value, label, extra, lead, onClick }: { icon: string; valu
 const soonDate = () => { const d = new Date(today()); d.setDate(d.getDate() + 90); return d.toISOString().slice(0, 10); };
 
 export function Inventory({ tab, sp, go }: { tab: InvTab; sp: URLSearchParams; go: Go }) {
-  const { perms } = useOutletContext<any>();
   const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 30000 });
-  const startCount = useMutation({ mutationFn: () => post('/stock/counts'), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
-    onError: (e: any) => { if (e?.body?.code === 'COUNT_OPEN') go({ tab: 'stock', count: e.body.id }); else toast(errText(e), 'err'); } });
   const deep = ['item', 'count', 'order', 'receive'].some((k) => sp.get(k));
   const d = q.data; const t = d?.tiles; const soon = soonDate();
   const flagged = (d?.batches ?? []).filter((b: any) => b.expiry <= soon).length;
@@ -54,11 +51,7 @@ export function Inventory({ tab, sp, go }: { tab: InvTab; sp: URLSearchParams; g
           {d.reviews.length > 0 && <Stat icon="bell" value={d.reviews.length} label="Deliveries waiting for a decision" onClick={() => go({ tab: 'stock' })} />}
         </div>}
         <div className="anim-fade-up flex flex-wrap items-center gap-2" style={{ animationDelay: '60ms' }}>
-          <Segmented<InvTab> value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Stock' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
-          <span className="ml-auto flex flex-wrap gap-2">
-            <button className="btn" disabled={startCount.isPending} onClick={() => startCount.mutate()}>{t?.count && t.count.status !== 'closed' ? 'Continue stock count' : 'Count the shelf'}</button>
-            {can(perms, 'stock.write') && <><button className="btn" onClick={() => go({ tab: 'orders', receive: 'new' })}>Receive without order</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}><Icon name="plus" />New purchase order</button></>}
-          </span>
+          <Tabs<InvTab> className="w-full" value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Stock' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
         </div>
       </>}
       {tab === 'stock' && <StockTab sp={sp} go={go} />}
@@ -98,7 +91,7 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input className="input !pl-10 !w-64" aria-label="Find a medicine" placeholder="Find a medicine" value={find} onChange={(e) => setFind(e.target.value)} /></div>
-        {chips.map(([k, label, c]) => <button key={k} type="button" className={`toggle-opt ${filter === k ? 'on' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)}>{label}{k !== 'all' && c > 0 ? <span className="ml-1 opacity-70">{c}</span> : null}</button>)}
+        <Filter value={filter} onChange={setFilter} options={chips.map(([value, label, count]) => ({ value, label, count }))} />
         {t.count && <button type="button" className="ml-auto text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>}
       </div>
 
@@ -125,6 +118,7 @@ function BatchesTab({ go }: { go: Go }) {
   const { perms } = useOutletContext<any>();
   const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock') });
   const [range, setRange] = useState<'soon' | 'all'>('soon');
+  const [returning, setReturning] = useState<any>(null);
   const adjust = useMutation({ mutationFn: (b: any) => post(`/stock/batches/${b.id}/adjust`, { change: -b.qty, reason: 'Expired: taken off the shelf' }), onSuccess: () => { toast('Taken off the shelf'); refresh(); }, onError: (e) => toast(errText(e), 'err') });
   if (q.isLoading || !q.data) return <Skeleton rows={6} />;
   const now = today(); const soon = soonDate();
@@ -146,7 +140,7 @@ function BatchesTab({ go }: { go: Go }) {
       <section className="card anim-fade-up overflow-hidden">
         <div className="flex flex-wrap items-start gap-3">
           <div className="mr-auto"><div className="card-title">Expiry runway</div><div className="text-[12.5px] text-muted">Each bar is a batch, from delivery to expiry. The number is the order it leaves the shelf.</div></div>
-          <Segmented value={range} onChange={setRange} size="sm" options={[{ value: 'soon', label: 'Within 90 days' }, { value: 'all', label: 'Everything' }]} />
+          <Filter value={range} onChange={setRange} options={[{ value: 'soon', label: 'Expiring within 90 days' }, { value: 'all', label: 'Every batch' }]} />
         </div>
         <div className="mt-3 flex flex-wrap gap-4 text-[12px] text-muted">{[['bg-clay', 'More than 90 days'], ['bg-[#E39A1D]', 'Within 90 days'], ['bg-rose', 'Expired · not sold']].map(([c, l]) => <span key={l} className="flex items-center gap-1.5"><i className={`h-2 w-4 rounded-full ${c}`} />{l}</span>)}</div>
         {meds.length === 0 ? <Empty icon="check" title="Nothing expires in the next 90 days" hint="Switch to Everything to see every batch." /> : <div className="mt-3 overflow-x-auto overflow-y-hidden"><div className="min-w-[620px] pr-6">
@@ -170,8 +164,10 @@ function BatchesTab({ go }: { go: Go }) {
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[12px] bg-rose-soft text-center text-[10.5px] font-bold leading-tight text-rose">{b.qty}<br />out</span>
             <button type="button" className="min-w-0 flex-1 text-left" onClick={() => go({ tab: 'stock', item: b.medicineId })}><b className="block truncate text-[13px] hover:underline">{b.name}</b><small className="block truncate text-[11.5px] text-muted">{b.batchNo} · expired {fmtDate(b.expiry)} · {money(b.qty * b.costPaise)} at cost</small></button>
             {can(perms, 'stock.approve') && <button type="button" className="btn btn-sm" disabled={adjust.isPending} onClick={async () => { if (await ask({ title: `Take ${b.qty} of ${b.name} off the shelf?`, body: `Batch ${b.batchNo}, expired ${fmtDate(b.expiry)}. Stock goes down by ${b.qty} with the reason "Expired".`, confirmLabel: 'Take off the shelf' })) adjust.mutate(b); }}>Take off</button>}
+            {can(perms, 'stock.write') && <button type="button" className="btn btn-sm btn-primary" title="Send it back to the vendor for credit" onClick={() => setReturning(b)}>Return</button>}
           </div>)}</div>}
       </section>
+      {returning && <ReturnDialog medicine={{ id: returning.medicineId, name: returning.name }} batches={[returning]} vendorId={returning.vendorId ?? undefined} onClose={() => setReturning(null)} />}
     </div>
   );
 }
@@ -249,7 +245,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
             <td className="text-right whitespace-nowrap">{b.sellingNow && <Chip tone="sky">selling now</Chip>}{can(perms, 'stock.approve') && (b.qty > 0 || !b.expired) && <button className="btn btn-sm btn-ghost ml-1" onClick={() => doAdjust(b)}>Adjust</button>}</td></tr>)}</tbody></table>
       </div>
       <div className="card !p-0 overflow-x-auto">
-        <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2"><b className="mr-2">Every movement</b><Segmented value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'in', label: 'In' }, { value: 'out', label: 'Out' }, { value: 'adj', label: 'Adjustments' }]} /><span className="ml-auto text-xs text-muted">Nothing can be deleted; a mistake is corrected by a new entry.</span></div>
+        <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2"><b className="mr-2">Every movement</b><Filter value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'in', label: 'In' }, { value: 'out', label: 'Out' }, { value: 'adj', label: 'Adjustments' }]} /><span className="ml-auto text-xs text-muted">Nothing can be deleted; a mistake is corrected by a new entry.</span></div>
         <table className="table min-w-[760px]"><thead><tr><th>When</th><th>What</th><th>Batch</th><th className="!text-right">Change</th><th className="!text-right">Balance</th><th>By</th><th>Document</th></tr></thead>
           <tbody>{moves.length === 0 ? <tr><td colSpan={7} className="text-center text-muted">Nothing yet.</td></tr> : moves.map((x: any) => <tr key={x.id}><td className="whitespace-nowrap">{fmtDate(x.createdAt)} {fmtTime(x.createdAt)}</td><td>{what[x.kind] ?? x.kind}{x.note ? <div className="text-xs text-muted">{x.note}</div> : null}</td><td>{x.batchNo}</td>
             <td className={`text-right font-semibold ${x.change > 0 ? 'text-sage' : 'text-rose'}`}>{x.change > 0 ? '+' : ''}{x.change}</td><td className="text-right">{x.balance}</td><td>{x.byName}</td><td className="font-medium">{x.docNo ?? '—'}</td></tr>)}</tbody></table>
@@ -365,7 +361,7 @@ function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Segmented value={kind} onChange={setKind} options={[{ value: 'order', label: 'Purchase orders' }, { value: 'receipt', label: 'Deliveries' }, { value: 'return', label: 'Returns' }]} />
+        <Filter value={kind} onChange={setKind} options={[{ value: 'order', label: 'Purchase orders' }, { value: 'receipt', label: 'Deliveries' }, { value: 'return', label: 'Returns to vendors' }]} />
       </div>
       {kind === 'order' && rows.length > 0 ? <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">{rows.map((r, ri) => { const n = at(r.status); const off = r.status === 'cancelled'; const total = r.lines.reduce((a: number, l: any) => a + (l.amountPaise ?? 0), 0);
         return <div key={r.id} className={`card card-hover flex cursor-pointer flex-col anim-fade-up ${off ? 'opacity-60' : ''}`} style={{ animationDelay: `${Math.min(ri, 9) * 50}ms` }} onClick={() => setOpen(r.id)}>
@@ -645,7 +641,7 @@ function VendorAccount({ id, go, onEdit }: { id: string; go: Go; onEdit: (v: any
             <td className="text-right">{o.status === 'owed' && can(perms, 'stock.approve') && <button className="btn btn-sm" onClick={async () => { const a = await ask({ title: `Write off ${o.qty} ${o.name}?`, confirmLabel: 'Write off', tone: 'danger', field: { label: 'Reason', required: true, maxLength: 200 } }); if (a) writeOff.mutate({ id: o.id, reason: a.value }); }}>Write off</button>}</td></tr>)}</tbody></table>}
       </div>
       <div className="card !p-0 overflow-x-auto">
-        <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2"><b className="mr-2">Deliveries and returns</b><Segmented value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'diff', label: 'With differences' }, { value: 'return', label: 'Returns' }]} /></div>
+        <div className="flex flex-wrap items-center gap-2 px-5 pt-4 pb-2"><b className="mr-2">Deliveries and returns</b><Filter value={kind} onChange={setKind} options={[{ value: 'all', label: 'All' }, { value: 'diff', label: 'With differences' }, { value: 'return', label: 'Returns' }]} /></div>
         {shown.length === 0 ? <div className="px-5 pb-4 text-sm text-muted">Nothing yet.</div> : <table className="table min-w-[700px]"><thead><tr><th>Date</th><th>Document</th><th>By</th><th className="!text-right">Bill</th><th>Against the promise</th><th>Decision</th></tr></thead>
           <tbody>{shown.map((d: any) => { const extra = d.lines.reduce((n: number, l: any) => n + (l.extraPaise ?? 0), 0); const short = d.lines.reduce((n: number, l: any) => n + (l.freeShort ?? 0), 0); return (
             <tr key={d.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpen(d)}><td className="whitespace-nowrap">{fmtDate(d.createdAt)}</td><td className="font-semibold">{d.kind === 'return' ? `Return ${d.docNo}` : `${d.billNo ?? d.docNo}`}</td><td>{d.createdByName}</td>

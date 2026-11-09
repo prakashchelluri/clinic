@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { get, post, today, errText } from '../api';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Segmented, Skeleton, toast } from '../ui';
+import { Chip, Empty, Icon, Filter, Skeleton, toast } from '../ui';
 
 const minusDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() - n); return x.toISOString().slice(0, 10); };
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
@@ -37,9 +37,9 @@ export function RegisterTab({ clinic, licence }: { clinic: string; licence?: str
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Segmented value={range} onChange={setRange} options={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: 'Year' }, { value: 'custom', label: 'Dates' }]} />
+        <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }, { value: '365', label: 'Last year' }, { value: 'custom', label: 'Pick dates' }]} />
         {range === 'custom' && <><input type="date" aria-label="From" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} /><input type="date" aria-label="To" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} /></>}
-        <div className="flex gap-1.5" role="radiogroup" aria-label="Class">{(['all', 'H', 'H1', 'X'] as const).map((c) => <button key={c} role="radio" aria-checked={cls === c} className={`toggle-opt !py-1 ${cls === c ? 'on' : ''}`} onClick={() => setCls(c)}>{c === 'all' ? 'All classes' : `Schedule ${c}`}</button>)}</div>
+        <Filter value={cls} onChange={setCls} options={(['all', 'H', 'H1', 'X'] as const).map((c) => ({ value: c, label: c === 'all' ? 'All schedules' : `Schedule ${c}` }))} />
         <span className="ml-auto flex gap-2"><button className="btn btn-sm" disabled={!rows.length || bad} onClick={print}><Icon name="print" className="h-3.5 w-3.5" />Print</button><button className="btn btn-sm" disabled={!rows.length || bad} onClick={csv}><Icon name="download" className="h-3.5 w-3.5" />Download</button></span>
       </div>
       {bad && <div className="text-sm text-rose">“From” is after “to”.</div>}

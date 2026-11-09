@@ -1,9 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { LayoutList, Calendar, Users, List, BarChart3, LogOut, Plus, Printer, Phone, Check, CircleHelp, X, Undo2, ChevronUp, Search, Pill, Sparkles, User, Clock, DoorOpen, IndianRupee, Pencil, ChevronLeft, ChevronRight, MoreHorizontal, Filter, FileDown, Moon, Home, Lock, Wallet, Bell, Settings, Menu, Repeat, Link as LinkIcon, Download, Copy, MessageCircle, Inbox, Globe, Stethoscope, type LucideIcon } from 'lucide-react';
+import { LayoutList, Calendar, Users, List, BarChart3, LogOut, Plus, Printer, Phone, Check, CircleHelp, X, Undo2, ChevronUp, Search, Pill, Sparkles, User, Clock, DoorOpen, IndianRupee, Pencil, ChevronLeft, ChevronRight, MoreHorizontal, Filter as FilterIcon, FileDown, Moon, Home, Lock, Wallet, Bell, Settings, Menu, Repeat, Link as LinkIcon, Download, Copy, MessageCircle, Inbox, Globe, Stethoscope, type LucideIcon } from 'lucide-react';
 
 /** The icon set: Lucide, one stroke weight everywhere. The names stay the app's own so pages did not change. */
-const LUCIDE: Record<string, LucideIcon> = { queue: LayoutList, calendar: Calendar, users: Users, list: List, chart: BarChart3, logout: LogOut, plus: Plus, print: Printer, phone: Phone, check: Check, help: CircleHelp, x: X, undo: Undo2, up: ChevronUp, search: Search, pill: Pill, spark: Sparkles, user: User, clock: Clock, door: DoorOpen, rupee: IndianRupee, edit: Pencil, chevL: ChevronLeft, chevR: ChevronRight, dots: MoreHorizontal, filter: Filter, export: FileDown, moon: Moon, home: Home, lock: Lock, wallet: Wallet, bell: Bell, gear: Settings, menu: Menu, repeat: Repeat, link: LinkIcon, download: Download, copy: Copy, message: MessageCircle, inbox: Inbox, globe: Globe, stetho: Stethoscope };
+const LUCIDE: Record<string, LucideIcon> = { queue: LayoutList, calendar: Calendar, users: Users, list: List, chart: BarChart3, logout: LogOut, plus: Plus, print: Printer, phone: Phone, check: Check, help: CircleHelp, x: X, undo: Undo2, up: ChevronUp, search: Search, pill: Pill, spark: Sparkles, user: User, clock: Clock, door: DoorOpen, rupee: IndianRupee, edit: Pencil, chevL: ChevronLeft, chevR: ChevronRight, dots: MoreHorizontal, filter: FilterIcon, export: FileDown, moon: Moon, home: Home, lock: Lock, wallet: Wallet, bell: Bell, gear: Settings, menu: Menu, repeat: Repeat, link: LinkIcon, download: Download, copy: Copy, message: MessageCircle, inbox: Inbox, globe: Globe, stetho: Stethoscope };
 
 /* ---------- Icons (inline, stroke) ---------- */
 const PATHS: Record<string, string> = {
@@ -71,7 +71,8 @@ export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?
 export function PageHeader({ title, subtitle, children }: { title: ReactNode; subtitle?: ReactNode; children?: ReactNode }) {
   return (
     <div className="anim-fade-up flex flex-wrap items-end gap-3 mb-6">
-      <div className="mr-auto"><h1 className="text-[34px] font-semibold text-ink">{title}</h1>{subtitle && <div className="text-[14px] text-muted mt-1.5">{subtitle}</div>}</div>
+      {/* the page's name is in the top bar; here only what it says about today */}
+      <div className="mr-auto"><h1 className="sr-only">{title}</h1>{subtitle && <div className="text-[14px] text-muted">{subtitle}</div>}</div>
       {children}
     </div>
   );
@@ -176,6 +177,32 @@ export function Floating({ anchor, open, onClose, children, width }: { anchor: R
 
 /** The ⋯ menu: secondary actions live here so a row shows one clear button. */
 export type MenuItem = { label: string; onClick?: () => void; href?: string; danger?: boolean; hidden?: boolean };
+/** Sub-sections of a page: text with a green underline. Pills are kept for the page's own sections. */
+export function Tabs<T extends string>({ value, onChange, options, className = '' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string; count?: number }[]; className?: string }) {
+  return (
+    <div role="tablist" className={`tabs ${className}`}>{options.map((o) => <button key={o.value} type="button" role="tab" aria-selected={value === o.value} className={value === o.value ? 'on' : ''} onClick={() => onChange(o.value)}>
+      {o.label}{o.count ? <span className="tab-count">{o.count}</span> : null}</button>)}</div>
+  );
+}
+
+/** A choice that narrows a list (dates, a kind, a status): one quiet button naming the current choice; the others drop down. */
+export function Filter<T extends string>({ value, onChange, options, label, icon = 'filter' }: { value: T; onChange: (v: T) => void; options: { value: T; label: string; count?: number }[]; label?: string; icon?: string }) {
+  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const cur = options.find((o) => o.value === value) ?? options[0];
+  return (
+    <>
+      <button ref={btn} type="button" className={`filter-btn ${value !== options[0].value ? 'on' : ''}`} aria-haspopup="menu" aria-expanded={open} aria-label={`${label ?? 'Show'}: ${cur.label}`} onClick={() => setOpen(!open)}>
+        <Icon name={icon} className="h-3.5 w-3.5 opacity-70" />{label && <span className="font-medium opacity-70">{label}</span>}<span>{cur.label}</span><Icon name="chevR" className={`h-3.5 w-3.5 opacity-60 transition-transform ${open ? '-rotate-90' : 'rotate-90'}`} />
+      </button>
+      <Floating anchor={btn} open={open} onClose={() => setOpen(false)}>
+        <div role="menu" className="menu-list">{options.map((o) => <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === value} onClick={() => { setOpen(false); onChange(o.value); }}>
+          <span className="flex-1">{o.label}</span>{o.count != null && <span className="text-[12px] font-medium text-muted">{o.count}</span>}<Icon name="check" className={`h-4 w-4 text-clay ${o.value === value ? '' : 'invisible'}`} /></button>)}</div>
+      </Floating>
+    </>
+  );
+}
+
 export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?: string }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);

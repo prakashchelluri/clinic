@@ -176,7 +176,7 @@ export function stockRoutes(app: FastifyInstance) {
     const name = (id: string) => meds.find((m) => m.id === id)?.name ?? '';
     return {
       items,
-      batches: batches.map((b) => ({ id: b.id, medicineId: b.medicineId, name: name(b.medicineId), batchNo: b.batchNo, expiry: b.expiry, qty: b.qty, costPaise: b.costPaise, at: b.createdAt })).sort((a, b) => a.expiry.localeCompare(b.expiry)),
+      batches: batches.map((b) => ({ id: b.id, medicineId: b.medicineId, name: name(b.medicineId), batchNo: b.batchNo, expiry: b.expiry, qty: b.qty, costPaise: b.costPaise, vendorId: b.vendorId, at: b.createdAt })).sort((a, b) => a.expiry.localeCompare(b.expiry)),
       reviews: reviews.map((r) => ({ id: r.d.id, docNo: r.d.docNo, billNo: r.d.billNo, vendor: r.vendor, at: r.d.createdAt, by: r.d.createdByName, lines: r.d.lines.filter((l: any) => l.extraPaise > 0 || l.freeShort > 0),
         extraPaise: r.d.lines.reduce((n: number, l: any) => n + l.extraPaise, 0), freeShort: r.d.lines.reduce((n: number, l: any) => n + l.freeShort, 0) })),
       tiles: { ordersOpen: onTheWay.length, low: items.filter((i) => i.status === 'low' || i.status === 'out').length, expiringBatches: expiring.length, expiringValuePaise: expiring.reduce((n, b) => n + b.qty * b.costPaise, 0),
