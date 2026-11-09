@@ -22,7 +22,16 @@ if (url) {
   const { drizzle } = await import('drizzle-orm/pglite');
   const { migrate: m } = await import('drizzle-orm/pglite/migrator');
   const dir = process.env.PGLITE_DIR ?? './data/pglite';
-  (await import('node:fs')).mkdirSync(dir, { recursive: true });
+  const fs = await import('node:fs');
+  fs.mkdirSync(dir, { recursive: true });
+  // One process per data folder. Two servers on the same folder (a dev restart racing a second start) corrupt the WAL;
+  // this happened on 22 Oct and 9 Nov 2026. A live pid in the lock file stops the second one before it touches the data.
+  const lock = `${dir}.lock`;
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const held = fs.existsSync(lock) ? Number(fs.readFileSync(lock, 'utf8')) : 0;
+  if (held && held !== process.pid && alive(held)) { console.error(`Another server (pid ${held}) already has ${dir} open. Stop it first, or set PGLITE_DIR to another folder.`); process.exit(3); }
+  fs.writeFileSync(lock, String(process.pid));
+  for (const ev of ['exit', 'SIGINT', 'SIGTERM'] as const) process.on(ev, () => { try { if (Number(fs.readFileSync(lock, 'utf8')) === process.pid) fs.unlinkSync(lock); } catch { /* already gone */ } if (ev !== 'exit') process.exit(0); });
   const client = new PGlite(dir);
   db = drizzle(client, { schema });
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });

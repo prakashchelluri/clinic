@@ -342,11 +342,11 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   const step = !patientId && !newP ? 1 : 2;
   const blocker = !chosen ? 'Pick a visit type' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : fee > 0 && !waive && toPaise(amount === '' ? String(fee / 100) : amount) <= 0 ? 'Enter the amount collected' : '';
   const facts = sug.data?.facts;
-  const Frame = ({ children }: { children: React.ReactNode }) => inline
+  // a plain function, not a component: a component declared here is a new type on every render and remounts the whole sheet (focus lost, stale buttons)
+  const frame = (children: React.ReactNode) => inline
     ? <section className="card-flat p-4 anim-fade-up" aria-label="Check in"><div className="mb-3 flex items-center gap-2"><b className="text-[14px]">{step === 1 ? 'Check in' : 'Arrival'}</b><span className="text-xs text-muted">{step === 1 ? 'phone, name or patient ID' : p?.fullName ?? newP?.fullName ?? ''}</span>{step === 2 && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={onClose}>Clear</button>}</div>{children}</section>
     : <Modal title={step === 1 ? 'Who has arrived?' : 'Arrival'} subtitle={step === 1 ? 'Phone, name or patient ID' : undefined} onClose={onClose} width="max-w-2xl">{children}</Modal>;
-  return (
-    <Frame>
+  return frame(<>
       {step === 1 && (
         <div className="anim-fade-up">
           <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10 !py-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder="98765…" /></div>
@@ -423,8 +423,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
             <button className="btn btn-primary" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{fee > 0 && !waive && !blocker ? ` · collect ${money(toPaise(amount === '' ? String(fee / 100) : amount))}` : ''}</button></div>
         </div>
       )}
-    </Frame>
-  );
+  </>);
 }
 
 /** How many patients may be inside the consultation room at once (the server enforces the same number). */

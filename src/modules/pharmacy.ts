@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc, desc, ilike, gte, lte, lt, or, inArray, gt } from 'drizzle-orm';
+import { and, eq, sql, asc, desc, ilike, gte, lte, lt, or, inArray, gt, isNull } from 'drizzle-orm';
 import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, tenant, practitioner, stockBatch, message, type SaleLine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -25,6 +25,8 @@ export function prescribedQty(it: { frequency: string | null; dose: string | nul
   return Math.max(1, Math.ceil((perDay * dose * (it.durationDays ?? 1)) / Math.max(1, med.packSize)));
 }
 
+/** A line is settled when it was issued in full or the rest was marked as bought outside / not wanted. Part-issued is a note for the counter, never a debt. */
+const settled = (i: { prescribed: number; issuedQty: number; notIssuedReason: string | null }) => i.issuedQty >= i.prescribed || !!i.notIssuedReason;
 const rxStatus = (items: { prescribed: number; issuedQty: number; notIssuedReason: string | null }[]) =>
   items.every((i) => i.issuedQty >= i.prescribed) ? 'issued' : items.some((i) => i.issuedQty > 0) ? 'part' : items.every((i) => i.notIssuedReason) ? 'nothing' : 'none';
 
@@ -48,7 +50,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
       .where(and(eq(prescriptionItem.tenantId, t), inArray(prescriptionItem.encounterId, encs.map((x) => x.e.id))));
     const rows = encs.map((x) => {
       const its = items.filter((i) => i.i.encounterId === x.e.id).map((i) => ({ ...i.i, prescribed: prescribedQty(i.i, i.form ? { form: i.form, packSize: i.packSize ?? 1 } : null) }));
-      const balance = its.filter((i) => i.issuedQty > 0 && i.issuedQty < i.prescribed).map((i) => ({ name: i.name, left: i.prescribed - i.issuedQty }));
+      const balance = its.filter((i) => i.issuedQty > 0 && !settled(i)).map((i) => ({ name: i.name, left: i.prescribed - i.issuedQty }));
       return { encounterId: x.e.id, completedAt: x.e.completedAt, day: x.day, opNumber: x.opNumber, doctor: x.doctor, patient: x.p, items: its.length, status: rxStatus(its), balance };
     }).filter((r) => r.items > 0);
     if (q) return { today: [], balances: [], found: rows };
@@ -91,6 +93,13 @@ export function pharmacyRoutes(app: FastifyInstance) {
   route(app, 'post', '/pharmacy/rx/:encounterId/nothing', 'pharmacy.bill', async (req, tx) => {
     const reason = z.object({ reason: z.string().trim().max(80).optional() }).parse(req.body ?? {}).reason || 'Bought nothing';
     const r = await tx.update(prescriptionItem).set({ notIssuedReason: reason }).where(and(eq(prescriptionItem.tenantId, req.ctx.tenantId), eq(prescriptionItem.encounterId, (req.params as any).encounterId), eq(prescriptionItem.issuedQty, 0))).returning({ id: prescriptionItem.id });
+    return { ok: true, lines: r.length };
+  });
+
+  /** The rest was bought outside (or is not wanted): every open line gets the reason and the prescription leaves the earlier list. */
+  route(app, 'post', '/pharmacy/rx/:encounterId/outside', 'pharmacy.bill', async (req, tx) => {
+    const reason = z.object({ reason: z.string().trim().max(80).optional() }).parse(req.body ?? {}).reason || 'Rest bought outside';
+    const r = await tx.update(prescriptionItem).set({ notIssuedReason: reason }).where(and(eq(prescriptionItem.tenantId, req.ctx.tenantId), eq(prescriptionItem.encounterId, (req.params as any).encounterId), isNull(prescriptionItem.notIssuedReason))).returning({ id: prescriptionItem.id });
     return { ok: true, lines: r.length };
   });
 
@@ -200,7 +209,7 @@ const returnedQty = (s: { returns: { lines: { line: number; qty: number }[] }[] 
 const Pay = z.object({ method: z.enum(['cash', 'upi', 'card']), amountPaise: z.number().int().min(1).max(100000000), reference: z.string().trim().max(40).optional().nullable() });
 export const SaleIn = z.object({
   patientId: z.string().uuid().optional(),
-  newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^[0-9]{10}$/), ageYears: z.number().int().min(0).max(120).optional(), sex: z.enum(['M', 'F', 'O']).optional() }).optional(),
+  newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^[0-9]{10}$/).optional().nullable(), ageYears: z.number().int().min(0).max(120).optional(), sex: z.enum(['M', 'F', 'O']).optional() }).optional(),
   encounterId: z.string().uuid().optional(),
   items: z.array(z.object({ medicineId: z.string().uuid(), qty: z.number().int().min(1).max(999), batchId: z.string().uuid().optional().nullable(), prescriptionItemId: z.string().uuid().optional().nullable() })).min(1).max(40),
   notIssued: z.array(z.object({ prescriptionItemId: z.string().uuid(), reason: z.string().trim().max(80).optional().nullable() })).max(40).default([]),
@@ -225,8 +234,8 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
   if (pid) { if (!(await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.id, pid), eq(patient.tenantId, t))))[0]) throw new HttpError(404, 'NOT_FOUND'); }
   else if (body.newPatient) {
     const np = body.newPatient;
-    pid = (await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, np.phone), ilike(patient.fullName, np.fullName))).limit(1))[0]?.id;
-    if (!pid) { const n = await nextNumber(tx, t, 'patient_no', 'tenant'); pid = (await tx.insert(patient).values({ tenantId: t, patientNo: `P${String(n).padStart(5, '0')}`, fullName: np.fullName, phone: np.phone, ageYears: np.ageYears ?? null, sex: np.sex ?? null }).returning({ id: patient.id }))[0].id; }
+    pid = np.phone ? (await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, np.phone), ilike(patient.fullName, np.fullName))).limit(1))[0]?.id : undefined;
+    if (!pid) { const n = await nextNumber(tx, t, 'patient_no', 'tenant'); pid = (await tx.insert(patient).values({ tenantId: t, patientNo: `P${String(n).padStart(5, '0')}`, fullName: np.fullName, phone: np.phone ?? null, ageYears: np.ageYears ?? null, sex: np.sex ?? null }).returning({ id: patient.id }))[0].id; }
   } else throw new HttpError(400, 'PATIENT_REQUIRED');
 
   const rxItems = body.encounterId ? await tx.select().from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), eq(prescriptionItem.encounterId, body.encounterId))) : [];

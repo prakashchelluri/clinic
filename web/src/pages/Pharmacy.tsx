@@ -46,7 +46,7 @@ export function Pharmacy() {
 
 function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) => void }) {
   const { perms } = useOutletContext<any>();
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(''); const [earlier, setEarlier] = useState(false);
   const term = q.trim().length >= 2 ? q.trim() : '';
   const list = useQuery({ queryKey: ['pharmacy', 'counter', term], queryFn: () => get(`/pharmacy/counter${term ? `?q=${encodeURIComponent(term)}` : ''}`), refetchInterval: 15000 });
   const d = list.data;
@@ -54,7 +54,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
     <button onClick={() => pick(r.encounterId)} aria-pressed={sel === r.encounterId} className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors ${sel === r.encounterId ? "bg-[#E9EBEF]" : "hover:bg-surface-2"}`}>
       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{r.patient.fullName}</span>
         <span className={`block truncate text-xs text-muted`}>{sub ?? [r.opNumber, r.doctor, fmtTime(r.completedAt), `${r.items} medicine${r.items === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</span></span>
-      {r.status === 'issued' && <Chip tone="sage">issued</Chip>}{r.status === 'part' && <Chip tone="amber">part issued</Chip>}{r.status === 'nothing' && <Chip>not bought</Chip>}
+      {r.status === 'issued' && <Chip tone="sage">issued</Chip>}{r.status === 'part' && <span className="shrink-0 text-xs text-muted">partly here</span>}{r.status === 'nothing' && <span className="shrink-0 text-xs text-muted">not from us</span>}
     </button>
   );
   return (
@@ -69,10 +69,14 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
             <div className="flex items-baseline gap-2 px-1 pb-1"><b className="text-sm">Today's prescriptions</b><span className="text-xs text-muted">{d?.today.length ?? 0}</span></div>
             <div className="px-1 pb-2 text-xs text-muted">Click a patient to open the doctor's prescription. Nothing here is a task.</div>
             {(d?.today ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No prescriptions yet today.</div> : d.today.map((r: any) => <Row key={r.encounterId} r={r} />)}
-            {(d?.balances ?? []).length > 0 && <>
-              <div className="px-1 pb-1 pt-4 text-[11.5px] font-semibold text-muted">Balance to collect · last 30 days</div>
-              {d.balances.map((r: any) => <Row key={r.encounterId} r={r} sub={`Rx ${fmtDate(r.day)} · ${r.balance.map((b: any) => `${b.name} ${b.left} left`).join(', ')}`} />)}
-            </>}
+            {(d?.balances ?? []).length > 0 && <div className="mt-4 border-t border-line pt-3">
+              <button type="button" className="flex w-full items-center gap-2 px-1 pb-1 text-left" aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
+                <b className="text-sm">Earlier prescriptions</b><span className="text-xs text-muted">{d.balances.length} partly bought here</span><Icon name={earlier ? 'up' : 'chevR'} className="ml-auto h-4 w-4 text-muted" /></button>
+              {earlier && <>
+                <div className="px-1 pb-2 text-xs text-muted">For reference when the patient comes back. Nothing is owed: the rest may have been bought outside.</div>
+                {d.balances.map((r: any) => <Row key={r.encounterId} r={r} sub={`Rx ${fmtDate(r.day)} · ${r.balance.map((b: any) => `${b.name} ${b.left} left`).join(', ')}`} />)}
+              </>}
+            </div>}
           </>
         )}
       </div>
@@ -120,8 +124,10 @@ function BillEditor({ rx, onDone, onClose, canBill }: { rx?: any; onDone: () => 
   const over = lines.find((l) => Number(l.qty) > l.onHand);
   const rxLines = lines.filter((l) => l.rxItemId);
   const nothing = useMutation({ mutationFn: (reason: string) => post(`/pharmacy/rx/${rx.encounterId}/nothing`, { reason: reason || undefined }),
-    onSuccess: () => { toast('Marked as not bought'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); onDone(); }, onError: (e) => toast(errText(e), 'err') });
-  const problem = !who ? 'Pick or register the patient.' : issuing.length === 0 ? 'Nothing to issue: set a quantity, or use "Patient bought nothing".' : over ? `${over.name}: only ${over.onHand} in stock.` : total <= 0 ? 'The discount cannot be the whole bill.' : '';
+    onSuccess: () => { toast('Noted: not buying here'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); onDone(); }, onError: (e) => toast(errText(e), 'err') });
+  const outside = useMutation({ mutationFn: (reason: string) => post(`/pharmacy/rx/${rx.encounterId}/outside`, { reason: reason || undefined }),
+    onSuccess: () => { toast('Noted: the rest was bought outside'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); onDone(); }, onError: (e) => toast(errText(e), 'err') });
+  const problem = !who ? 'Pick or register the patient.' : issuing.length === 0 ? 'Nothing to issue: set a quantity, or use "Not buying here".' : over ? `${over.name}: only ${over.onHand} in stock.` : total <= 0 ? 'The discount cannot be the whole bill.' : '';
 
   return (
     <div className="space-y-4">
@@ -156,7 +162,7 @@ function BillEditor({ rx, onDone, onClose, canBill }: { rx?: any; onDone: () => 
                     <td className="text-right">{l.medicineId ? money(b?.mrpPaise ?? l.mrpPaise) : '—'}</td>
                     <td className="text-right font-semibold text-ink">{n > 0 ? money(lineAmount(l)) : '—'}</td>
                     <td>{l.rxItemId && !done && short > 0 ? <div className="flex items-center gap-2">
-                      <Chip tone={n === 0 ? '' : 'amber'}>{n === 0 ? 'not issued' : `${short} short`}</Chip>
+                      <span className="text-xs text-muted">{n === 0 ? 'not from us' : `${short} not taken`}</span>
                       <select aria-label={`Reason for ${l.name}`} className="input !w-auto !py-1.5 !text-xs" value={l.reason} onChange={(e) => set(l.key, { reason: e.target.value })}><option value="">Reason (optional)</option>{REASONS.map((r) => <option key={r}>{r}</option>)}</select>
                     </div> : !l.rxItemId ? <button className="btn btn-ghost btn-icon" aria-label={`Remove ${l.name}`} onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}><Icon name="x" /></button> : null}</td>
                   </tr>);
@@ -165,7 +171,7 @@ function BillEditor({ rx, onDone, onClose, canBill }: { rx?: any; onDone: () => 
           </table>
         </div>
         {canBill && <div className="mt-3 flex flex-wrap items-center gap-3"><AddItem meds={meds.data ?? []} onAdd={add} />
-          {rx && <span className="text-xs text-muted">Issue is pre-filled with what the doctor prescribed. Lower it to issue less, 0 to skip. The reason is optional.</span>}</div>}
+          {rx && <span className="text-xs text-muted">Pre-filled with what the doctor prescribed. Lower it if the patient takes less, 0 if they buy it elsewhere. The reason is optional.</span>}</div>}
       </div>
 
       {canBill && <div className="card grid gap-5 md:grid-cols-[minmax(0,1fr)_300px] md:items-end">
@@ -174,13 +180,14 @@ function BillEditor({ rx, onDone, onClose, canBill }: { rx?: any; onDone: () => 
           <div className="flex justify-between"><span>{rx ? `${rxLines.filter((l) => Number(l.qty) > 0).length} of ${rxLines.length} prescribed · ` : ''}{issuing.length} item{issuing.length === 1 ? '' : 's'}</span><b>₹{rupees2(gross)}</b></div>
           <div className="flex justify-between text-muted"><span>GST included</span><span>₹{rupees2(gst)}</span></div>
           <div className="flex items-center justify-between gap-3"><span className="text-muted">Discount <span className="text-xs">(above 10% needs the owner)</span></span><MoneyInput label="Discount" className="!w-32" value={discount} onChange={setDiscount} /></div>
-          {rxLines.some((l) => (l.left ?? 0) - (Number(l.qty) || 0) > 0 && Number(l.qty) > 0) && <div className="text-xs text-muted pt-1">Short-issued lines keep a balance on this prescription for 30 days.</div>}
+          {rxLines.some((l) => (l.left ?? 0) - (Number(l.qty) || 0) > 0 && Number(l.qty) > 0) && <div className="text-xs text-muted pt-1">The patient can come back for the rest within 30 days, or buy it outside.</div>}
         </div>
         <div className="space-y-2">
           <div className="flex items-baseline justify-between"><span className="text-sm text-muted">To pay</span><span className="text-3xl font-semibold">{money(total)}</span></div>
           {problem && issuing.length > 0 && <div className="text-xs text-rose">{problem}</div>}
           <button className="btn btn-primary w-full justify-center !py-3" disabled={!!problem} onClick={() => setPaying(true)}><Icon name="rupee" />Take payment</button>
-          {rx && rx.status !== 'issued' && rx.status !== 'part' && <button className="btn w-full justify-center" disabled={nothing.isPending} onClick={async () => { const a = await ask({ title: 'Patient bought nothing?', body: 'The prescription stays on the patient record as not bought.', confirmLabel: 'Bought nothing', field: { label: 'Reason', maxLength: 80 } }); if (a) nothing.mutate(a.value); }}>Patient bought nothing</button>}
+          {rx && rx.status !== 'issued' && rx.status !== 'part' && <button className="btn w-full justify-center" disabled={nothing.isPending} onClick={async () => { const a = await ask({ title: 'Buying elsewhere?', body: 'The prescription stays on the patient record; it just leaves the counter list.', confirmLabel: 'Not from us', field: { label: 'Reason (optional)', maxLength: 80 } }); if (a) nothing.mutate(a.value); }}>Not buying here</button>}
+          {rx && rx.status === 'part' && <button className="btn w-full justify-center" disabled={outside.isPending} onClick={async () => { const a = await ask({ title: 'Rest bought outside?', body: 'What was issued here stays on the bills. The prescription leaves the earlier list.', confirmLabel: 'Rest bought outside', field: { label: 'Reason (optional)', maxLength: 80 } }); if (a) outside.mutate(a.value); }}>Rest bought outside</button>}
         </div>
       </div>}
       {paying && <PayDialog total={total} patient={who} onClose={() => setPaying(false)} build={() => ({
@@ -217,17 +224,17 @@ function WalkInPatient({ who, setWho }: { who: any; setWho: (p: any) => void }) 
   const [mode, setMode] = useState<'existing' | 'new'>('existing'); const [find, setFind] = useState('');
   const [np, setNp] = useState({ fullName: '', phone: '', ageYears: '' });
   const pts = useQuery({ queryKey: ['palette', find], queryFn: () => get(`/patients?q=${encodeURIComponent(find)}`), enabled: mode === 'existing' && !who && find.trim().length >= 2 });
-  useEffect(() => { if (mode === 'new') setWho(np.fullName.trim().length >= 2 && /^[0-9]{10}$/.test(np.phone) ? { ...np } : null); }, [np, mode]);
+  useEffect(() => { if (mode === 'new') setWho(np.fullName.trim().length >= 2 && (!np.phone || /^[0-9]{10}$/.test(np.phone)) ? { ...np, phone: np.phone || null } : null); }, [np, mode]);
   if (who?.id) return <div className="flex flex-1 items-center gap-3"><b className="text-xl">{who.fullName}</b><span className="text-sm text-muted">{who.patientNo} · {who.phone ?? 'no phone'}</span><span className="text-sm text-muted">Walk-in sale</span><button className="btn btn-sm ml-auto" onClick={() => setWho(null)}>Change</button></div>;
   return (
     <div className="w-full space-y-2">
-      <div className="flex items-center gap-2"><b className="text-xl mr-auto">Walk-in sale</b>{([['existing', 'Existing patient'], ['new', 'New customer']] as const).map(([k, l]) => <button key={k} className={`toggle-opt ${mode === k ? 'on' : ''}`} onClick={() => { setMode(k); setWho(null); }}>{l}</button>)}</div>
+      <div className="flex items-center gap-2"><b className="text-xl mr-auto">Walk-in sale</b>{([['existing', 'Our patient'], ['new', 'New customer']] as const).map(([k, l]) => <button key={k} className={`toggle-opt ${mode === k ? 'on' : ''}`} onClick={() => { setMode(k); setWho(null); }}>{l}</button>)}</div>
       {mode === 'existing' ? <div className="relative max-w-md">
         <input className="input" aria-label="Find patient" placeholder="Name, phone or patient ID" value={find} onChange={(e) => setFind(e.target.value)} />
         {(pts.data ?? []).slice(0, 5).map((p: any) => <button key={p.id} className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm hover:bg-ink/5" onClick={() => setWho(p)}><span className="flex-1">{p.fullName}</span><span className="text-xs text-muted">{p.patientNo} · {p.phone ?? ''}</span></button>)}
       </div> : <div className="grid max-w-xl grid-cols-6 gap-2">
         <input className="input col-span-3" aria-label="Customer name" placeholder="Full name" value={np.fullName} onChange={(e) => setNp({ ...np, fullName: e.target.value })} />
-        <input className={`input col-span-2 ${np.phone && !/^[0-9]{10}$/.test(np.phone) ? '!border-rose' : ''}`} aria-label="Phone" inputMode="numeric" maxLength={10} placeholder="Phone (10 digits)" value={np.phone} onChange={(e) => setNp({ ...np, phone: e.target.value.replace(/\D/g, '') })} />
+        <input className={`input col-span-2 ${np.phone && !/^[0-9]{10}$/.test(np.phone) ? '!border-rose' : ''}`} aria-label="Phone" inputMode="numeric" maxLength={10} placeholder="Phone (optional)" value={np.phone} onChange={(e) => setNp({ ...np, phone: e.target.value.replace(/\D/g, '') })} />
         <input className="input col-span-1" aria-label="Age" inputMode="numeric" maxLength={3} placeholder="Age" value={np.ageYears} onChange={(e) => setNp({ ...np, ageYears: e.target.value.replace(/\D/g, '') })} />
       </div>}
     </div>
@@ -314,12 +321,12 @@ function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string |
                 <tr key={r.id} onClick={() => pick(r.id)} className={`cursor-pointer ${sel === r.id ? 'bg-paper-2' : 'hover:bg-surface-2'}`}>
                   <td><button className="font-semibold hover:underline" onClick={(e) => { e.stopPropagation(); pick(r.id); }}>{r.invoiceNo}</button></td><td className="text-muted whitespace-nowrap">{range === 'today' ? fmtTime(r.at) : `${fmtDate(r.at)} ${fmtTime(r.at)}`}</td>
                   <td><div className="font-medium">{r.patient.fullName}</div><div className="text-xs text-muted">{r.encounterId ? `Rx ${r.doctor ?? ''}` : 'Walk-in · no prescription'}</div></td>
-                  <td className="text-sm">{r.items}{r.balance.length > 0 && <Chip tone="amber" className="ml-1.5">balance {r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)}</Chip>}{r.notIssued > 0 && <Chip className="ml-1.5">{r.notIssued} not issued</Chip>}</td>
+                  <td className="text-sm">{r.items}{r.balance.length > 0 && <span className="ml-1.5 text-xs text-muted">{r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)} left on Rx</span>}{r.notIssued > 0 && <span className="ml-1.5 text-xs text-muted">{r.notIssued} not from us</span>}</td>
                   <td className="text-right font-semibold">{money(r.totalPaise)}{r.refundPaise > 0 && <div className="text-xs text-rose">− {money(r.refundPaise)}</div>}</td>
                   <td className="text-sm uppercase text-muted">{r.method === 'split' ? r.payments.map((p: any) => p.method).join(' + ') : r.method}</td>
                 </tr>))}</tbody></table>)}
         </div>
-        <div className={sel ? '' : 'hidden lg:block'}>{sel ? <BillDetail key={sel} id={sel} onClose={() => pick(null)} onIssue={onIssue} /> : <div className="card text-sm text-muted text-center py-10">Pick a bill to reprint it, issue the balance, or take items back.</div>}</div>
+        <div className={sel ? '' : 'hidden lg:block'}>{sel ? <BillDetail key={sel} id={sel} onClose={() => pick(null)} onIssue={onIssue} /> : <div className="card text-sm text-muted text-center py-10">Pick a bill to reprint it, issue the rest of a prescription, or take items back.</div>}</div>
       </div>
     </div>
   );
@@ -348,7 +355,7 @@ function BillDetail({ id, onClose, onIssue }: { id: string; onClose: () => void;
         <button className="btn btn-ghost btn-icon lg:hidden" aria-label="Back to bills" onClick={onClose}><Icon name="x" /></button>
         <b className="text-lg mr-auto">{s.invoiceNo} · {s.patient.fullName}</b>
         <button className="btn btn-sm" onClick={() => printSale(s.id)}><Icon name="print" />Reprint</button>
-        {s.encounterId && s.notIssued?.length > 0 && can(perms, 'pharmacy.bill') && <button className="btn btn-sm" onClick={() => onIssue(s.encounterId)}>Issue balance</button>}
+        {s.encounterId && s.notIssued?.length > 0 && can(perms, 'pharmacy.bill') && <button className="btn btn-sm" onClick={() => onIssue(s.encounterId)}>Issue the rest</button>}
       </div>
       <div className="text-xs text-muted">{new Date(s.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })} · {s.doctor ? `Rx ${s.doctor}` : 'Walk-in'} · {s.payments.map((p: any) => `${p.method.toUpperCase()} ${money(p.amountPaise)}${p.reference ? ` (${p.reference})` : ''}`).join(' + ')}</div>
       {s.returns.length > 0 && <div className="space-y-1">{s.returns.map((r: any) => <div key={r.creditNoteNo} className="text-xs rounded-xl bg-rose-soft/60 px-3 py-2"><b>{r.creditNoteNo}</b> · refund {money(r.refundPaise)} by {r.method.toUpperCase()} · {r.reason} · {r.by}</div>)}</div>}
@@ -388,7 +395,7 @@ export async function printSale(id: string) {
 <table class="t"><tr><td>Items total</td><td>${rupees2(x.grossPaise)}</td></tr>${x.discountPaise ? `<tr><td>Discount</td><td>-${rupees2(x.discountPaise)}</td></tr>` : ''}<tr><td>Taxable value</td><td>${rupees2(taxable)}</td></tr><tr><td>CGST</td><td>${rupees2(half)}</td></tr><tr><td>SGST</td><td>${rupees2(x.gstPaise - half)}</td></tr><tr class="b"><td>TOTAL</td><td>₹${rupees2(x.totalPaise)}</td></tr>
 ${x.payments.map((p: any) => `<tr><td>${esc(p.method.toUpperCase())}${p.reference ? ' ' + esc(p.reference) : ''}${p.method === 'cash' && x.receivedPaise > p.amountPaise ? ` · received ${rupees2(x.receivedPaise)}, change ${rupees2(x.receivedPaise - p.amountPaise)}` : ''}</td><td>${rupees2(p.amountPaise)}</td></tr>`).join('')}
 ${x.returns.map((r: any) => `<tr><td>${esc(r.creditNoteNo)} refund (${esc(r.method.toUpperCase())})</td><td>-${rupees2(r.refundPaise)}</td></tr>`).join('')}</table>
-${x.notIssued?.length ? `<hr><div class="m">Not issued today: ${x.notIssued.map((n: any) => `${esc(n.name)} (${n.left})`).join(', ')}. Balances can be collected within 30 days.</div>` : ''}
+${x.notIssued?.length ? `<hr><div class="m">Not taken today: ${x.notIssued.map((n: any) => `${esc(n.name)} (${n.left})`).join(', ')}. Available here for 30 days if needed.</div>` : ''}
 <div class="m" style="margin-top:8px">Prices include GST. Thank you.</div>`;
     openPrint({ title: `Receipt ${x.invoiceNo}`, html });
   } catch (e: any) { toast(errText(e), 'err'); }
