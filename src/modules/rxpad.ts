@@ -12,6 +12,9 @@ import { padConfig, printSettings, PAD_SECTIONS, TE, teluguTable } from '../lib/
 
 /** What the pad reads and writes besides the note itself: history chips, vitals, lab values, often-prescribed medicines, and the clinic's pad configuration. */
 export const VITAL_KEYS = ['weight_kg', 'height_cm', 'bp', 'pulse', 'temp_f', 'spo2'] as const;
+/** Vitals the clinic added in Settings (key v_…): a number, or a short reading such as "2+". */
+export const customVitals = (settings: any): { key: string; type: 'number' | 'text' }[] => (Array.isArray(settings?.vitalFields) ? settings.vitalFields : []).filter((v: any) => typeof v?.key === 'string' && /^v_[a-z0-9_]{1,24}$/.test(v.key));
+const vitalKeys = (settings: any) => [...VITAL_KEYS, ...customVitals(settings).map((v) => v.key)];
 const Vitals = z.object({ weight_kg: z.number().min(1).max(400).nullable().optional(), height_cm: z.number().min(30).max(250).nullable().optional(), bp: z.string().trim().max(12).nullable().optional(),
   pulse: z.number().int().min(20).max(250).nullable().optional(), temp_f: z.number().min(90).max(110).nullable().optional(), spo2: z.number().int().min(50).max(100).nullable().optional() });
 
@@ -35,10 +38,16 @@ export function rxpadRoutes(app: FastifyInstance) {
   route(app, 'get', '/patients/:id/vitals', 'patient.read', async (req, tx) => {
     const rows = await tx.select({ day: visit.day, details: visit.details }).from(visit)
       .where(and(eq(visit.tenantId, req.ctx.tenantId), eq(visit.patientId, (req.params as any).id))).orderBy(desc(visit.day), desc(visit.createdAt)).limit(12);
-    return rows.map((r) => ({ day: r.day, ...Object.fromEntries(VITAL_KEYS.map((k) => [k, (r.details as any)?.[k] ?? null])) })).filter((r) => VITAL_KEYS.some((k) => (r as any)[k] !== null && (r as any)[k] !== ''));
+    const ten = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]); const keys = vitalKeys(ten?.settings);
+    return rows.map((r) => ({ day: r.day, ...Object.fromEntries(keys.map((k) => [k, (r.details as any)?.[k] ?? null])) })).filter((r) => keys.some((k) => (r as any)[k] !== null && (r as any)[k] !== ''));
   });
   route(app, 'patch', '/encounters/:id/vitals', 'encounter.intake', async (req, tx) => {
-    const b = Vitals.parse(req.body); const t = req.ctx.tenantId;
+    const t = req.ctx.tenantId;
+    // the six known vitals are checked here; the clinic's own (Settings) are a number or a short reading; any other key is dropped
+    const ten = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
+    const own = customVitals(ten?.settings);
+    const Own = z.object(Object.fromEntries(own.map((v) => [v.key, (v.type === 'number' ? z.number().min(-100000).max(100000) : z.string().trim().max(20)).nullable().optional()])));
+    const b = Vitals.merge(Own).parse(req.body);
     const enc = await tx.select({ visitId: encounter.visitId, patientId: encounter.patientId }).from(encounter).where(and(eq(encounter.id, (req.params as any).id), eq(encounter.tenantId, t))).then((r) => r[0]);
     if (!enc) throw new HttpError(404, 'NOT_FOUND');
     const v = await tx.select({ details: visit.details }).from(visit).where(eq(visit.id, enc.visitId)).then((r) => r[0]);

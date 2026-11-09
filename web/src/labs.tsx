@@ -1,7 +1,14 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, qc, today, errText } from './api';
+import { FileText } from 'lucide-react';
 import { Chip, Floating, Icon, Modal, fmtDate, toast } from './ui';
+
+/** The report file behind a result or an ordered test: the one the value was typed from, else one uploaded against that test. */
+export const reportFor = (docs: any[], documentId: string | null | undefined, recommendationId: string | null | undefined) =>
+  (documentId ? docs.find((d) => d.id === documentId) : null) ?? (recommendationId ? docs.find((d) => d.kind !== 'photo' && (d.recommendationId === recommendationId || (d.recommendationIds ?? []).includes(recommendationId))) : null) ?? null;
+/** Opens the report (PDF or image) in a new tab. */
+export const ReportLink = ({ doc, label = 'View PDF' }: { doc: any; label?: string }) => <a className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px]" href={`/api/documents/${doc.id}/file`} target="_blank" rel="noreferrer" title={doc.title ?? 'Report'}><FileText className="h-3.5 w-3.5" aria-hidden />{/pdf/i.test(doc.mime ?? '') ? label : 'View report'}</a>;
 
 /** Lab values typed from a report: the editor the receptionist uses, the card the doctor sees, and the per-test history. */
 export type LabParam = { name: string; unit?: string; low?: number; high?: number; expect?: string; aliases?: string[] };
@@ -59,7 +66,7 @@ function History({ test, rows }: { test: string; rows: LabRow[] }) {
 }
 
 /** The pad's Lab results card body: this consultation's values first, else the latest of each test; earlier values beside; history on tap; the doctor can correct a value or add more. */
-export function LabResultsCard({ patientId, encounterId, recIds, params, readOnly, printOut, onPrintOut }: { patientId: string; encounterId: string; recIds: string[]; params: LabParam[]; readOnly: boolean; printOut: boolean; onPrintOut: (v: boolean) => void }) {
+export function LabResultsCard({ patientId, encounterId, recIds, params, readOnly, printOut, onPrintOut, docs = [] }: { patientId: string; encounterId: string; recIds: string[]; params: LabParam[]; readOnly: boolean; printOut: boolean; onPrintOut: (v: boolean) => void; docs?: any[] }) {
   const q = useLabResults(patientId);
   const [hist, setHist] = useState<string | null>(null); const anchor = useRef<HTMLButtonElement>(null);
   const [adding, setAdding] = useState(false); const [draft, setDraft] = useState<LabDraft[]>([]);
@@ -78,8 +85,8 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
         {!readOnly && <button type="button" className="btn btn-sm" onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add values</button>}
       </div>
       {q.isLoading ? <div className="text-xs text-muted">Loading…</div> : shown.length === 0 ? <div className="text-xs text-muted">No values yet. They are typed when a report arrives, or add them here.</div> : (
-        <div className="grid grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_28px] items-center gap-x-2 text-[13px]">
-          <span className="text-[11.5px] font-semibold text-muted">Investigation</span><span className="text-[11.5px] font-semibold text-muted">Value</span><span className="text-[11.5px] font-semibold text-muted">Unit</span><span className="text-[11.5px] font-semibold text-muted">Range</span><span className="text-[11.5px] font-semibold text-muted">Earlier</span><span />
+        <div className="grid grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_96px_28px] items-center gap-x-2 text-[13px]">
+          <span className="text-[11.5px] font-semibold text-muted">Investigation</span><span className="text-[11.5px] font-semibold text-muted">Value</span><span className="text-[11.5px] font-semibold text-muted">Unit</span><span className="text-[11.5px] font-semibold text-muted">Range</span><span className="text-[11.5px] font-semibold text-muted">Earlier</span><span className="text-[11.5px] font-semibold text-muted">Report</span><span />
           {shown.map((r) => { const e = earlier(r); return (
             <div key={r.id} className={`contents ${out(r.flag) ? '' : 'text-ink-2'}`}>
               <span className={`truncate border-t border-line py-2 ${out(r.flag) ? 'font-semibold' : ''}`} title={r.note ?? ''}>{r.test}</span>
@@ -88,6 +95,7 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
               <span className="truncate border-t border-line py-2 text-xs text-muted">{r.unit ?? ''}</span>
               <span className="truncate border-t border-line py-2 text-xs text-muted">{rangeText(r)}</span>
               <span className="truncate border-t border-line py-2 text-xs text-muted">{e.length ? e.map((x) => `${x.value} (${fmtDate(x.takenOn)})`).join(' → ') + ' → ' : 'first time'}{e.length ? <b className={out(r.flag) ? 'text-rose' : 'text-ink'}>{r.value}</b> : ''}</span>
+              <span className="border-t border-line py-1">{(() => { const d = reportFor(docs, r.documentId, r.recommendationId); return d ? <ReportLink doc={d} /> : <span className="text-xs text-muted">—</span>; })()}</span>
               <span className="border-t border-line py-2"><button ref={hist === r.test ? anchor : undefined} type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`History of ${r.test}`} title="All results of this test" onClick={(ev) => { (anchor as any).current = ev.currentTarget; setHist(hist === r.test ? null : r.test); }}><Icon name="chart" className="h-3.5 w-3.5" /></button></span>
             </div>); })}
         </div>)}

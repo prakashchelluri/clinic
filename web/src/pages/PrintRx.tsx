@@ -27,7 +27,8 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
   const syms: any[] = Array.isArray(d.complaint?.chief_complaint) ? d.complaint.chief_complaint.map((x: any) => (typeof x === 'string' ? { name: x } : x)) : d.complaint?.chief_complaint ? [{ name: String(d.complaint.chief_complaint) }] : [];
   const dxs: any[] = Array.isArray(d.assessment?.diagnosis) ? d.assessment.diagnosis.map((x: any) => (typeof x === 'string' ? { name: x } : x)) : d.assessment?.diagnosis ? [{ name: String(d.assessment.diagnosis) }] : [];
   const vit = e.visit?.details ?? {}; const vitals: [string, any][] = (pr.vitals ?? []).map((k: string) => [k, vit[k]] as [string, any]).filter(([, v]: [string, any]) => v !== undefined && v !== null && v !== '');
-  const vLabel: Record<string, [string, string]> = { weight_kg: ['Wt', ' kg'], height_cm: ['Ht', ' cm'], bp: ['BP', ''], pulse: ['Pulse', ''], temp_f: ['Temp', '°F'], spo2: ['SpO₂', '%'] };
+  const vLabel: Record<string, [string, string]> = { weight_kg: ['Wt', ' kg'], height_cm: ['Ht', ' cm'], bp: ['BP', ''], pulse: ['Pulse', ''], temp_f: ['Temp', '°F'], spo2: ['SpO₂', '%'],
+    ...Object.fromEntries((e.vitalFields ?? []).map((v: any) => [v.key, [v.label, v.unit ? ` ${v.unit}` : '']])) }; // the clinic's own vitals (Settings) print by their name
   const outOnly = results ? false : d.labs?.printOutOfRangeOnly ?? pr.outOfRangeOnly;
   const labs: any[] = (e.labs ?? []).filter((r: any) => !outOnly || ['low', 'high', 'abnormal'].includes(r.flag));
   const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
@@ -63,7 +64,7 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
       {on('tests') && investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => r.notes).join(', ')}</div>}
       {on('results') && labs.length > 0 && <div className="mt-2"><b>Results{outOnly ? ' (out of range)' : ''}:</b> {labs.map((r: any) => `${r.test} ${r.value}${r.unit ? ` ${r.unit}` : ''}${r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''}`).join(' · ')}</div>}
       {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {en && advice.join(' · ')}{pr.lang !== 'en' && advice.some((a) => tel(a)) && <div className="text-gray-800">{advice.map((a) => tel(a) ?? (en ? null : a)).filter(Boolean).join(' · ')}</div>}</div>}
-      {on('next') && plans.length > 0 && <div className="mt-2">{plans.map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `Procedure advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
+      {plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).length > 0 && <div className="mt-2">{plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `Procedure advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
       {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
       <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div><div className="border-t border-black pt-1 w-48 text-center">Signature</div></div>
       {!embed && <button className="no-print btn mt-6" onClick={() => window.print()}>Print</button>}

@@ -72,7 +72,7 @@ const refresh = (patientId: string) => { qc.invalidateQueries({ queryKey: ['pins
 export const usePins = (patientId: string) => useQuery<Pin[]>({ queryKey: ['pins', patientId], queryFn: () => get(`/patients/${patientId}/pins`), enabled: !!patientId });
 
 /** The panel: the body on the left, the proposed or chosen pin on the right. Lives in the pad's Examination and on the patient record. */
-export function SkinMapPanel({ patientId, patientName, encounterId, readOnly, defaultDx, onAreaAdded, compact }: { patientId: string; patientName: string; encounterId?: string | null; readOnly?: boolean; defaultDx?: string; onAreaAdded?: (area: string) => void; compact?: boolean }) {
+export function SkinMapPanel({ patientId, patientName, encounterId, readOnly, defaultDx, onAreaAdded, onFinding, compact }: { patientId: string; patientName: string; encounterId?: string | null; readOnly?: boolean; defaultDx?: string; onAreaAdded?: (area: string) => void; onFinding?: (finding: string, on: boolean, others: Pin[]) => void; compact?: boolean }) {
   const pins = usePins(patientId); const photosQ = usePhotos(patientId);
   const [side, setSide] = useState<'front' | 'back'>('front');
   const [sel, setSel] = useState<string | null>(null);
@@ -85,7 +85,8 @@ export function SkinMapPanel({ patientId, patientName, encounterId, readOnly, de
     onSuccess: (row: Pin, b) => { refresh(patientId); setPending(null); setSel(row.id); onAreaAdded?.(b.area); toast(`Pinned ${b.area}`, 'ok', { label: 'Undo', run: () => del.mutate(row.id) }); }, onError: (e) => toast(errText(e), 'err') });
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => api('PATCH', `/pins/${id}`, b), onSuccess: () => refresh(patientId), onError: (e) => toast(errText(e), 'err') });
   const findings = (pin?.finding ?? '').split(',').map((x) => x.trim()).filter(Boolean);
-  const toggleFinding = (f: string) => pin && upd.mutate({ id: pin.id, finding: (findings.includes(f) ? findings.filter((x) => x !== f) : [...findings, f]).join(', ') || null });
+  // a finding seen at a site is also this visit's finding: the pad hears of it (others = the other pins, to keep a finding another site still has)
+  const toggleFinding = (f: string) => { if (!pin) return; const on = !findings.includes(f); upd.mutate({ id: pin.id, finding: (on ? [...findings, f] : findings.filter((x) => x !== f)).join(', ') || null }); onFinding?.(f, on, list.filter((p) => p.id !== pin.id)); };
   const height = compact ? 230 : 310;
   const counts = { front: list.filter((p) => p.side === 'front').length, back: list.filter((p) => p.side === 'back').length };
   const numberOf = (p: Pin) => list.filter((q) => q.side === p.side).indexOf(p) + 1;

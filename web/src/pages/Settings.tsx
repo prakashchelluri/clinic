@@ -5,7 +5,7 @@ import { get, post, patch, api, qc, errText } from '../api';
 import { Chip, Icon, Modal, PageHeader, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, DiscountCap, useRoles } from './Roles';
-import { VITAL_FIELDS, DEFAULT_VITALS } from './FrontDesk';
+import { vitalFields, DEFAULT_VITALS, BUILTIN_VITALS, type VitalField } from '../vitals';
 import { PrivacyTab } from './Privacy';
 import { TemplatesTab } from './SettingsTemplates';
 import { PadTab } from './SettingsPad';
@@ -19,7 +19,7 @@ type TabDef = [Tab, string, string, string];
 const GROUPS: [string, string, TabDef[]][] = [
   ['Your clinic', 'Who works here, where, and how the day runs.', [
     ['clinic', 'Clinic details', 'home', 'Name, address and phone as printed on prescriptions, and how token numbers run.'],
-    ['day', 'The day at the desk', 'queue', 'Vitals taken at arrival, junior screening, free return with reports, the waiting-room screen.'],
+    ['day', 'The day at the desk', 'queue', 'Junior screening, free return with reports, the waiting-room screen.'],
     ['people', 'Staff and doctors', 'users', 'Who can sign in, and the doctors whose names go on prescriptions.'],
     ['roles', 'What each role can do', 'lock', 'Which screens and actions reception, doctors, pharmacy and others have.'],
     ['rooms', 'Rooms', 'door', 'Procedure rooms and what each is equipped for.'],
@@ -33,7 +33,7 @@ const GROUPS: [string, string, TabDef[]][] = [
   ]],
   ['Consultations', 'What the doctor sees and prescribes.', [
     ['pad', 'Prescription pad', 'stetho', 'What the doctor fills in, which parts are required, and what prints.'],
-    ['forms', 'Consultation form fields', 'edit', 'The complaints, examination findings and diagnoses the doctor picks from.'],
+    ['forms', 'Consultation form fields', 'edit', 'The vitals taken, and the complaints, examination findings and diagnoses the doctor picks from.'],
     ['templates', 'Templates', 'list', 'Ready sets of medicines, complaints, advice and tests, filled in one click.'],
     ['medicines', 'Medicines', 'pill', 'The medicines the doctor prescribes, with usual dosing and price.'],
     ['procedures', 'Procedures and packages', 'spark', 'Each procedure’s duration, price and room needs; multi-sitting packages.'],
@@ -154,16 +154,10 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- The day at the desk: arrival, screening, reports, the waiting-room screen ---------------- */
 function DayTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
-  const [vitals, setVitals] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
   const [f, setF] = useState({ screening: s.screening ?? 'off', freeDays: String(s.reports?.freeDays ?? 30) });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { vitals, screening: f.screening, reports: { freeDays: Math.max(0, Math.min(365, Number(f.freeDays) || 0)) } } }), onSuccess: () => { toast('Saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { screening: f.screening, reports: { freeDays: Math.max(0, Math.min(365, Number(f.freeDays) || 0)) } } }), onSuccess: () => { toast('Saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
     <div className="space-y-4">
-      <div className="card space-y-3">
-        <div className="card-title">Vitals taken at arrival</div>
-        <div className="flex flex-wrap gap-1.5">{VITAL_FIELDS.map((v) => <button key={v.key} type="button" className={`toggle-opt ${vitals.includes(v.key) ? 'on' : ''}`} onClick={() => setVitals(vitals.includes(v.key) ? vitals.filter((x) => x !== v.key) : VITAL_FIELDS.map((x) => x.key).filter((k) => k === v.key || vitals.includes(k)))}>{v.label} ({v.unit})</button>)}</div>
-        <div className="text-xs text-muted">The dark ones are asked for on the arrival sheet and shown to the doctor. Switch off what your clinic does not measure.</div>
-      </div>
       <div className="card space-y-3">
         <div className="card-title">Junior doctor screening</div>
         <div className="flex flex-wrap gap-1">{([['off', 'Off', 'Reception sends patients straight to the doctor'], ['first', 'When a junior is on', 'The junior screens whoever is waiting; the doctor takes screened patients first, others when nobody is screened'], ['required', 'Every patient', 'The doctor sees only patients the junior has screened']] as const).map(([v, l, h]) => <button key={v} type="button" title={h} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF({ ...f, screening: v })}>{l}</button>)}</div>
@@ -249,6 +243,37 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   );
 }
 
+/* ---------------- Vitals: which are taken at arrival and shown on the Rxpad, and the clinic's own ---------------- */
+function VitalsSettings({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const s = cfg.tenant.settings ?? {};
+  const [taken, setTaken] = useState<string[]>(s.vitals ?? DEFAULT_VITALS);
+  const [own, setOwn] = useState<VitalField[]>(s.vitalFields ?? []);
+  const all = vitalFields({ vitalFields: own });
+  const dirty = JSON.stringify(taken) !== JSON.stringify(s.vitals ?? DEFAULT_VITALS) || JSON.stringify(own) !== JSON.stringify(s.vitalFields ?? []);
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { vitals: all.map((v) => v.key).filter((k) => taken.includes(k)), vitalFields: own.map(({ key, label, unit, type }) => ({ key, label, unit, type })) } }), onSuccess: () => { toast('Vitals saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const add = async () => {
+    const r = await ask({ title: 'Add a vital', body: 'It is asked for at check-in and shown on the Rxpad, with past values. Write the unit after a comma: “Waist, cm”. Leave out the unit for a word or a reading like 2+.', confirmLabel: 'Add', field: { label: 'Name, unit', placeholder: 'e.g. Waist, cm', required: true, maxLength: 40 } });
+    const v = r?.value?.trim(); if (!v) return;
+    const [label, unit = ''] = v.split(',').map((x: string) => x.trim());
+    const key = 'v_' + label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '').slice(0, 24);
+    if (!label || key === 'v_') return toast('Give the vital a name.', 'err');
+    if (all.some((x) => x.key === key || x.label.toLowerCase() === label.toLowerCase())) return toast(`${label} is already in the list.`, 'err');
+    setOwn([...own, { key, label: label.slice(0, 30), unit: unit.slice(0, 12), type: unit ? 'number' : 'text' }]); setTaken([...taken, key]);
+  };
+  return (
+    <div className="card space-y-3">
+      <div className="card-title">Vitals</div>
+      <div className="flex flex-wrap gap-1.5">{all.map((v) => <span key={v.key} className="inline-flex items-center gap-1">
+        <button type="button" aria-pressed={taken.includes(v.key)} className={`toggle-opt ${taken.includes(v.key) ? 'on' : ''}`} onClick={() => setTaken(taken.includes(v.key) ? taken.filter((x) => x !== v.key) : [...taken, v.key])}>{v.label}{v.unit ? ` (${v.unit})` : ''}</button>
+        {v.custom && <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove ${v.label}`} title="Remove this vital (values already taken stay on those visits)" onClick={() => { setOwn(own.filter((x) => x.key !== v.key)); setTaken(taken.filter((x) => x !== v.key)); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+      </span>)}
+        <button type="button" className="toggle-opt border-dashed" onClick={add}><Icon name="plus" className="mr-1 inline h-3 w-3" />Add a vital</button></div>
+      <div className="text-xs text-muted">The dark ones are asked for at check-in and shown on the Rxpad. Switch off what your clinic does not measure; add any other you take. {BUILTIN_VITALS.length} come with the app.</div>
+      <div className="flex justify-end gap-2"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => { setTaken(s.vitals ?? DEFAULT_VITALS); setOwn(s.vitalFields ?? []); }}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save vitals</button></div>
+    </div>
+  );
+}
+
 /* ---------------- Forms editor: sections → fields → options ---------------- */
 function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const current = cfg.forms.find((f: any) => f.key === 'encounter');
@@ -260,6 +285,7 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const field = sel ? schema.sections[sel.s]?.fields[sel.f] : null;
   return (
     <div className="space-y-3">
+      <VitalsSettings cfg={cfg} onSaved={onSaved} />
       <div className="text-sm text-muted">Version {current?.version}. Saving publishes a new version; past consultations keep the version they were written with.</div>
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
         <div className="space-y-3">

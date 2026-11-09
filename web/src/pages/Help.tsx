@@ -227,7 +227,7 @@ function Doctor() {
       <>Open <b>Today</b>. Patients waiting are listed. Open the next one.</>,
       <>The <b>screening card</b> (top left) lists only what was found: the Yes answers and the history. Everything answered No is one grey line.</>,
       <>Under <b>Suggested</b>, tap the sets for the complaint, one tap each: medicines, advice, findings, tests. Nothing is added twice. A set marked &ldquo;auto&rdquo; is added for you.</>,
-      <>Choose the <b>diagnosis</b>. Its protocol adds only what is missing and leaves your choices alone.</>,
+      <>Choose the <b>diagnosis</b>. Each section has its own <b>Templates</b> and <b>Load previous</b>; a template adds only what is missing and leaves your choices alone.</>,
       <>Add tests as chips. A slow test (like a biopsy) goes into its own order, or tap the order icon to split one.</>,
       <>Plan the procedure or the review date, then <b>Complete</b>. The patient goes to reception for Checkout.</>,
     ]}</Steps>

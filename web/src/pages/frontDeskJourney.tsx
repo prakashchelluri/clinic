@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router';
+import { useNavigate, useOutletContext } from 'react-router';
 import { dialable } from '../api';
 import { openPrint } from '../printPreview';
 import { FlagChips } from '../flags';
 import { Chip, Icon, Num, money } from '../ui';
+import { vitalFields, vitalsText } from '../vitals';
 import '../frontdesk.css';
 
 /** The front desk as each patient's journey: Check-in → Vitals → Doctor → Tests & procedures → Reports → Done. */
@@ -204,12 +205,12 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
   v: any; order?: any; screening: 'off' | 'first' | 'required'; inLine: number; arrangeSlot: React.ReactNode; canDesk: boolean;
   onSendIn: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onClose: () => void;
 }) {
-  const nav = useNavigate();
+  const nav = useNavigate(); const { cfg } = useOutletContext<any>() ?? {};
   const d = v.details ?? {}; const left = v.status === 'left';
   const waiting = ['waiting', 'screened'].includes(v.status);
   const recs = (v.recommendations ?? []).filter(live); const open = openRecs(v);
   const tests = recs.filter((r: any) => r.kind === 'investigation');
-  const vitals = [d.weight_kg && `${d.weight_kg} kg`, d.bp && `BP ${d.bp}`, d.temp_f && `${d.temp_f} °F`, d.spo2 && `SpO₂ ${d.spo2}%`, d.pulse && `pulse ${d.pulse}`].filter(Boolean).join(' · ');
+  const vitals = vitalsText(d, vitalFields(cfg?.tenant?.settings)); // every vital taken, the clinic's own too
   const seen = v.status === 'done' || !!v.completedAt;
   const held = v.encounterStatus === 'awaiting_reports';
   const closed = !!d.checkoutClosedAt || (seen && open.length === 0);

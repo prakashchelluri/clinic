@@ -10,7 +10,8 @@ export const PAD_SECTIONS: { key: string; label: string; canRequire?: boolean; c
   { key: 'advice', label: 'Advice', canPrint: true },
   { key: 'tests', label: 'Tests', canPrint: true },
   { key: 'results', label: 'Lab results', canPrint: true },
-  { key: 'next', label: 'Follow-up and procedures', canPrint: true },
+  { key: 'followup', label: 'Follow-up', canPrint: true },
+  { key: 'procedures', label: 'Procedures', canPrint: true },
   { key: 'notes', label: 'Private note' },
   { key: 'referral', label: 'Refer to', canPrint: true },
   { key: 'photos', label: 'Photos on the pad' },
@@ -20,7 +21,8 @@ const DEFAULT_NOPRINT = new Set(['history', 'exam', 'notes', 'photos']);
 
 /** The clinic's pad: every known section in its saved order, unknown or missing ones filled with defaults. */
 export function padConfig(settings: any): PadSection[] {
-  const saved: PadSection[] = Array.isArray(settings?.pad?.sections) ? settings.pad.sections : [];
+  // "next" (follow-up and procedures in one) was split in two: a clinic's saved choice for it carries to both, in its place
+  const saved: PadSection[] = (Array.isArray(settings?.pad?.sections) ? settings.pad.sections : []).flatMap((s: PadSection) => (s.key === 'next' ? [{ ...s, key: 'followup' }, { ...s, key: 'procedures' }] : [s]));
   const known = new Set(PAD_SECTIONS.map((s) => s.key));
   const out: PadSection[] = saved.filter((s) => known.has(s.key)).map((s) => ({ key: s.key, show: s.key === 'diagnosis' ? true : !!s.show, required: s.key === 'diagnosis' ? true : !!s.required, print: s.key === 'notes' ? false : !!s.print }));
   for (const s of PAD_SECTIONS) if (!out.some((o) => o.key === s.key)) out.push({ key: s.key, show: !DEFAULT_OFF.has(s.key), required: s.key === 'diagnosis', print: !DEFAULT_NOPRINT.has(s.key) });

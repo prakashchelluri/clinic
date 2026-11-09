@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, get, qc, errText } from '../api';
+import { useOutletContext } from 'react-router';
 import { Icon, Section, Skeleton, toast } from '../ui';
+import { vitalFields } from '../vitals';
 
 type Sec = { key: string; show: boolean; required: boolean; print: boolean };
 type Known = { key: string; label: string; canRequire?: boolean; canPrint?: boolean };
 type Print = { lang: 'te+en' | 'en' | 'te'; outOfRangeOnly: boolean; vitals: string[] };
 type Cat = { key: string; label: string; short: string; options: string[] };
 type PadData = { sections: Sec[]; print: Print; known: Known[]; telugu: Record<string, string>; teluguDefaults: Record<string, string>; history: Cat[]; historyDefaults: Cat[] };
-const VITAL_CHOICES: [string, string][] = [['weight_kg', 'Weight'], ['height_cm', 'Height'], ['bp', 'BP'], ['pulse', 'Pulse'], ['temp_f', 'Temperature'], ['spo2', 'SpO₂']];
 
 /** Settings → Rx pad: which sections show on the pad, which are required, the order, what the printed prescription carries, the Telugu phrase table and the history chip options. */
 export function PadTab({ onSaved }: { onSaved: () => void }) {
+  const { cfg } = useOutletContext<any>();
+  const VITAL_CHOICES: [string, string][] = vitalFields(cfg?.tenant?.settings).map((v) => [v.key, v.label]); // the six, and the clinic's own
   const q = useQuery<PadData>({ queryKey: ['admin-pad'], queryFn: () => get('/admin/pad') });
   const [secs, setSecs] = useState<Sec[]>([]); const [print, setPrint] = useState<Print | null>(null);
   const [telugu, setTelugu] = useState<Record<string, string>>({}); const [hist, setHist] = useState<Record<string, string[]>>({});

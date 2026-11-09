@@ -12,6 +12,7 @@ import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleto
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
+import { enabledVitals } from '../vitals';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -304,13 +305,6 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
   );
 }
 
-/** Vitals every clinic checks by default; the owner switches fields on or off in Settings → Clinic. */
-export const VITAL_FIELDS: { key: string; label: string; unit: string; ph: string; type: 'number' | 'text' }[] = [
-  { key: 'weight_kg', label: 'Weight', unit: 'kg', ph: '', type: 'number' }, { key: 'height_cm', label: 'Height', unit: 'cm', ph: '', type: 'number' },
-  { key: 'temp_f', label: 'Temp', unit: '°F', ph: '98.4', type: 'number' }, { key: 'bp', label: 'BP', unit: 'mmHg', ph: '120/80', type: 'text' },
-  { key: 'spo2', label: 'SpO₂', unit: '%', ph: '98', type: 'number' }, { key: 'pulse', label: 'Pulse', unit: 'bpm', ph: '', type: 'number' },
-];
-export const DEFAULT_VITALS = ['weight_kg', 'height_cm', 'temp_f', 'bp', 'spo2'];
 
 type Complaint = { text: string; duration: string };
 
@@ -320,7 +314,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   const [patientId, setPatientId] = useState(init.patientId);
   const [newP, setNewP] = useState<null | { fullName: string; phone: string; ageYears: string; sex: string }>(null);
   const [cat, setCat] = useState('');
-  const enabled: string[] = cfg?.tenant.settings?.vitals ?? DEFAULT_VITALS;
+  const vitalList = enabledVitals(cfg?.tenant.settings); // the clinic's vitals (Settings → Consultation form fields)
   const [vit, setVit] = useState<Record<string, string>>({});
   const [locality, setLocality] = useState('');
   const [list, setList] = useState<Complaint[]>([]);
@@ -353,7 +347,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
       if (!pid) throw new Error('Pick or register a patient');
       const complaints = [...list, ...(draft.text.trim() ? [{ text: draft.text.trim(), duration: draft.duration.trim() }] : [])];
       const vitals: Record<string, any> = {};
-      for (const f of VITAL_FIELDS) if (enabled.includes(f.key) && vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
+      for (const f of vitalList) if (vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
       return post('/visits', { patientId: pid, appointmentId: appt?.id ?? init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
         details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: init.reports ? `Back with reports: ${init.reports.tests}` : complaints.map((c) => c.text).join(', '), ...(init.reports ? { reportsEncounterId: init.reports.encounterId } : {}) },
         payment: !waive && fee > 0 ? { method, amountPaise: toPaise(amount || String(fee / 100)) } : undefined, waive: waive ? { reason: waive } : undefined, allowReview: allowReview.current ? { reason: allowReview.current } : undefined, idempotencyKey: uuid() });
@@ -409,10 +403,10 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
 
           <div>
             <div className="flex items-baseline gap-2 mb-1.5"><span className="label !mb-0">Vitals</span><span className="text-xs text-muted">all optional{bmi ? ` · BMI ${bmi}` : ' · BMI is calculated from weight and height'}</span></div>
-            <div className="grid gap-2.5" style={{ gridTemplateColumns: inline ? 'repeat(auto-fill, minmax(100px, 1fr))' : `repeat(${Math.min(enabled.length, 5)}, minmax(0, 1fr))` }}>
-              {VITAL_FIELDS.filter((f) => enabled.includes(f.key)).map((f) => (
+            <div className="grid gap-2.5" style={{ gridTemplateColumns: inline ? 'repeat(auto-fill, minmax(100px, 1fr))' : `repeat(${Math.max(1, Math.min(vitalList.length, 5))}, minmax(0, 1fr))` }}>
+              {vitalList.map((f) => (
                 <div key={f.key}><label htmlFor={`v-${f.key}`} className="text-[10px] font-semibold uppercase tracking-wider text-muted block mb-1">{f.label}</label>
-                  <div className="relative"><input id={`v-${f.key}`} className="input !px-3 !pr-11" inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph} value={vit[f.key] ?? ''} maxLength={7} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : e.target.value.replace(/[^\d/]/g, '') })} /><span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
+                  <div className="relative"><input id={`v-${f.key}`} className="input !px-3 !pr-11" inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph ?? ''} value={vit[f.key] ?? ''} maxLength={f.type === 'number' || f.key === 'bp' ? 7 : 20} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : f.key === 'bp' ? e.target.value.replace(/[^\d/]/g, '') : e.target.value })} /><span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
               ))}
             </div>
           </div>

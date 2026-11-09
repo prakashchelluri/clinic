@@ -24,6 +24,10 @@ export function adminRoutes(app: FastifyInstance) {
     if (body.settings?.calendarTextSize !== undefined) body.settings.calendarTextSize = z.enum(['small', 'normal', 'large']).parse(body.settings.calendarTextSize);
     // off: no junior step. first: the junior screens whoever is waiting, the doctor takes screened patients first. required: the doctor sees only screened patients.
     if (body.settings?.screening !== undefined) body.settings.screening = z.enum(['off', 'first', 'required']).parse(body.settings.screening);
+    // vitals: the clinic's own (key v_…) and which vitals are taken, in order
+    if (body.settings?.vitalFields !== undefined) body.settings.vitalFields = z.array(z.object({ key: z.string().regex(/^v_[a-z0-9_]{1,24}$/), label: z.string().trim().min(1).max(30), unit: z.string().trim().max(12), type: z.enum(['number', 'text']) })).max(12)
+      .refine((xs) => new Set(xs.map((x) => x.key)).size === xs.length, 'DUPLICATE_VITAL').parse(body.settings.vitalFields);
+    if (body.settings?.vitals !== undefined) body.settings.vitals = z.array(z.string().regex(/^[a-z][a-z0-9_]{1,30}$/)).max(24).parse(body.settings.vitals);
     if (body.settings?.reports !== undefined) body.settings.reports = z.object({ freeDays: z.number().int().min(0).max(365) }).parse(body.settings.reports);
     if (body.settings && 'display' in body.settings) throw new HttpError(400, 'DISPLAY_TOKEN_IS_GENERATED');
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
