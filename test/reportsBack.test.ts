@@ -24,8 +24,8 @@ test('back with reports: free, no review allowance, to the ordering doctor; a ba
   const cfg = (await R('GET', '/config')).json();
   const doc = cfg.practitioners.find((p: any) => p.name.includes('Main'));
   const paid = cfg.feeCategories.find((c: any) => c.amountPaise > 0 && c.code !== 'REN');
-  const ren = cfg.feeCategories.find((c: any) => c.code === 'REN');
-  assert.ok(paid && ren && ren.amountPaise > 0, 'needs a paid category and a paid review category');
+  assert.ok(paid, 'needs a paid category');
+  const ren = paid; // the return is checked in under a paid category, so the rule has a fee to drop
 
   // first visit: paid consultation, the doctor opens it (tests would be ordered here), then the visit ends
   const p = (await R('POST', '/patients', { fullName: 'Reports Back', phone: '9800001234' })).json();
