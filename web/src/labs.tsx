@@ -3,12 +3,13 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, qc, today, errText } from './api';
 import { FileText } from 'lucide-react';
 import { Chip, Floating, Icon, Modal, fmtDate, toast } from './ui';
+import { openViewer } from './viewer';
 
 /** The report file behind a result or an ordered test: the one the value was typed from, else one uploaded against that test. */
 export const reportFor = (docs: any[], documentId: string | null | undefined, recommendationId: string | null | undefined) =>
   (documentId ? docs.find((d) => d.id === documentId) : null) ?? (recommendationId ? docs.find((d) => d.kind !== 'photo' && (d.recommendationId === recommendationId || (d.recommendationIds ?? []).includes(recommendationId))) : null) ?? null;
-/** Opens the report (PDF or image) in a new tab. */
-export const ReportLink = ({ doc, label = 'View PDF' }: { doc: any; label?: string }) => <a className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px]" href={`/api/documents/${doc.id}/file`} target="_blank" rel="noreferrer" title={doc.title ?? 'Report'}><FileText className="h-3.5 w-3.5" aria-hidden />{/pdf/i.test(doc.mime ?? '') ? label : 'View report'}</a>;
+/** Opens the report (PDF or image) over the page, in the app's own viewer: the Rxpad stays where it was. */
+export const ReportLink = ({ doc, label = 'View PDF' }: { doc: any; label?: string }) => <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px]" title={doc.title ?? 'Report'} onClick={() => openViewer({ docs: [doc] })}><FileText className="h-3.5 w-3.5" aria-hidden />{/pdf/i.test(doc.mime ?? '') ? label : 'View report'}</button>;
 
 /** Lab values typed from a report: the editor the receptionist uses, the card the doctor sees, and the per-test history. */
 export type LabParam = { name: string; unit?: string; low?: number; high?: number; expect?: string; aliases?: string[] };

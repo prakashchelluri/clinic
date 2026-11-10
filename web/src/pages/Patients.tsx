@@ -84,13 +84,13 @@ function Timeline({ id }: { id: string }) {
           </div>
           <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-muted">Visits</div><div className="serif text-2xl">{visits.length}</div>{outstandingPaise > 0 && <div className="text-sm text-rose font-medium mt-1">Due {money(outstandingPaise)}</div>}{outstandingPaise > 0 && can(perms, 'payment.record') && <button className="btn btn-sm btn-primary mt-1.5" onClick={() => setPaying(true)}>Take payment</button>}</div>
           {can(perms, 'encounter.complete') && <button className="btn btn-sm" onClick={() => setFlagging(true)}>Flags</button>}
-          {can(perms, 'patient.write') && <button className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian })}><Icon name="edit" /></button>}
+          {can(perms, 'patient.write') && <button aria-label="Edit" className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian })}><Icon name="edit" /></button>}
         </div>
         {edit && (
           <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-line anim-fade-up">
             {[['fullName', 'Full name'], ['phone', 'Phone'], ['locality', 'Location'], ['allergies', 'Allergies'], ['notes', 'Notes']].map(([k, l]) => <div key={k} className={k === 'notes' ? 'col-span-3' : ''}><label className="label">{l}</label><input className="input" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></div>)}
-            <div><label className="label">Age</label><NumInput max={120} className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
-            <div><label className="label">Sex</label><div className="flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
+            <div><label className="label" htmlFor="np-age">Age</label><NumInput id="np-age" max={120} className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
+            <div><span className="label">Sex</span><div className="flex gap-1" role="group" aria-label="Sex">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
             <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={edit.referralCard} onChange={(e) => setEdit({ ...edit, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
             <div><label className="label">Who answers this phone</label><input className="input" placeholder="mother, father…" maxLength={40} value={edit.contactLabel} onChange={(e) => setEdit({ ...edit, contactLabel: e.target.value })} /></div>
             <div className="col-span-2"><label className="label">Guardian (for a minor)</label><GuardianPick selfId={id} value={edit.guardian} onChange={(g) => setEdit({ ...edit, guardian: g })} /></div>
@@ -151,23 +151,24 @@ function Timeline({ id }: { id: string }) {
 function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
   const [f, setF] = useState({ fullName: '', phone: '', ageYears: '', sex: '', locality: '', referralCard: false });
   const [dup, setDup] = useState<any>(null);
+  const nameBad = f.fullName !== '' && f.fullName.trim().length < 2;
   const create = useMutation({
     mutationFn: (force: boolean) => post(`/patients${force ? '?force=1' : ''}`, { ...f, phone: f.phone || null, ageYears: f.ageYears ? Number(f.ageYears) : null, sex: f.sex || null, locality: f.locality || null }),
-    onSuccess: (p) => { toast(`Registered ${p.patientNo}`); onClose(p); }, onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.existing); else toast('Could not register', 'err'); },
+    onSuccess: (p) => { toast(`Registered ${p.patientNo}`); onClose(p); }, onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.existing); else toast(errText(e), 'err'); },
   });
   return (
     <Modal title="Register patient" subtitle="Only the name is required now; the rest can be completed at arrival" onClose={() => onClose()} width="max-w-lg">
       <div className="space-y-3">
-        <div><label className="label">Full name</label><input autoFocus maxLength={100} className="input !py-3" value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></div>
+        <div><label className="label" htmlFor="np-name">Full name</label><input id="np-name" autoFocus maxLength={100} aria-invalid={nameBad} className={`input !py-3 ${nameBad ? '!border-rose' : ''}`} value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} />{nameBad && <div className="mt-1 text-xs text-rose">Enter the name (at least 2 letters).</div>}</div>
         <div className="grid grid-cols-3 gap-2">
-          <div><label className="label">Phone</label><input className="input" inputMode="numeric" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} /></div>
+          <div><label className="label" htmlFor="np-phone">Phone</label><input id="np-phone" className="input" inputMode="numeric" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} /></div>
           <div><label className="label">Age</label><NumInput max={120} className="input" placeholder="years" value={f.ageYears} onChange={(e) => setF({ ...f, ageYears: e.target.value })} /></div>
           <div><label className="label">Sex</label><div className="flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${f.sex === s ? 'on' : ''}`} onClick={() => setF({ ...f, sex: s })}>{s}</button>)}</div></div>
         </div>
-        <div><label className="label">Location</label><input className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>
+        <div><label className="label" htmlFor="np-loc">Location</label><input id="np-loc" className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={f.referralCard} onChange={(e) => setF({ ...f, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
         {dup && <div className="text-sm text-amber bg-amber-soft rounded-xl p-3 anim-fade-up">A patient with this name and phone exists ({dup.patientNo}). <button className="underline font-medium" onClick={() => create.mutate(true)}>Register anyway</button> (family member) or <button className="underline font-medium" onClick={() => onClose({ id: dup.id })}>open the existing record</button>.</div>}
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn btn-primary" disabled={!f.fullName || create.isPending} onClick={() => create.mutate(false)}><Icon name="check" />Register</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn btn-primary" disabled={f.fullName.trim().length < 2 || create.isPending} onClick={() => create.mutate(false)}><Icon name="check" />Register</button></div>
       </div>
     </Modal>
   );

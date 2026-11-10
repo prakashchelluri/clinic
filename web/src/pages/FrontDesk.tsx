@@ -12,7 +12,7 @@ import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleto
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
-import { enabledVitals } from '../vitals';
+import { enabledVitals, vitalProblem } from '../vitals';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -63,6 +63,19 @@ export function FrontDesk() {
     const r = await ask({ title: kind === 'noshow' ? `Mark ${n} as no-show?` : `Mark ${n} as left?`, body: kind === 'noshow' ? 'They did not arrive for the booking today. Each one can be undone from the booking, and rebooked from Completed.' : 'They left before seeing the doctor. Any fee paid shows under Completed for a refund.', confirmLabel: kind === 'noshow' ? 'Mark no-show' : 'Mark as left', tone: 'danger' });
     if (r) bulk.mutate({ ids: [...sel], kind });
   };
+  // Back with reports within the clinic's free days: no form, no fee. Check in and send straight in; the doctor sees "back with reports" and opens the same consultation.
+  // Past the free days the usual check-in (with the fee) opens instead.
+  const freeDays = Number(cfg?.tenant?.settings?.reports?.freeDays ?? 30);
+  const backIn = useMutation({
+    mutationFn: async (x: any) => {
+      const code = (cfg?.feeCategories ?? []).find((c: any) => c.code === 'REN')?.code ?? cfg?.feeCategories?.[0]?.code;
+      const v: any = await post('/visits', { patientId: x.patientId, feeCategoryCode: code, details: { reportsEncounterId: x.reports.encounterId, complaint: `Back with reports: ${x.reports.tests}` }, idempotencyKey: uuid() });
+      try { await patch(`/visits/${v.id}`, { status: 'in_consult' }); return { v, sent: true, e: null as any }; } catch (e) { return { v, sent: false, e: e as any }; }
+    },
+    onSuccess: (r, x: any) => { refresh(); toast(r.sent ? `${x.name} sent in for the report review · token ${r.v.opNumber}` : `${x.name} checked in · token ${r.v.opNumber}. ${r.e?.body?.code === 'ROOM_FULL' ? 'The room is full: send in when someone comes out.' : errText(r.e)}`, r.sent ? 'ok' : 'info'); },
+    onError: (e: any) => toast(e?.body?.code === 'ALREADY_CHECKED_IN' ? `Already checked in today as token ${e.body.opNumber}` : errText(e), 'err'),
+  });
+  const reportsBack = (x: any) => { if (x.reports?.free) backIn.mutate(x); else setArrive(x); };
   const collect = useMutation({ mutationFn: ({ c, method }: any) => post('/payments', { patientId: c.patientId, chargeId: c.id, amountPaise: c.amountPaise, method, idempotencyKey: uuid() }), onSuccess: () => { refresh(); toast('Collected'); } });
   const openEncounter = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }) });
   const d = q.data;
@@ -208,9 +221,9 @@ export function FrontDesk() {
             </div>}
             {tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
-                onReportsArrive={(o) => { const daysSince = Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000); setArrive({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: daysSince <= (cfg?.tenant?.settings?.reports?.freeDays ?? 30), since: o.orderedAt } }); }}
+                onReportsArrive={(o) => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })} freeDays={freeDays}
                 onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => collect.mutate({ c: v.due[0], method: 'cash' })} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
-            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={(x) => setArrive(x)} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
+            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
@@ -364,7 +377,8 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   });
   useEffect(() => { if (forceNew) { submit.mutate(); setForceNew(false); } }, [forceNew]);
   const step = !patientId && !newP ? 1 : 2;
-  const blocker = !chosen ? 'Pick a visit type' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : fee > 0 && !waive && toPaise(amount === '' ? String(fee / 100) : amount) <= 0 ? 'Enter the amount collected' : '';
+  const badVital = vitalList.map((f) => vitalProblem(f, vit[f.key] ?? '')).find(Boolean);
+  const blocker = !chosen ? 'Pick a visit type' : badVital ? badVital : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : fee > 0 && !waive && toPaise(amount === '' ? String(fee / 100) : amount) <= 0 ? 'Enter the amount collected' : '';
   const facts = sug.data?.facts;
   // a plain function, not a component: a component declared here is a new type on every render and remounts the whole sheet (focus lost, stale buttons)
   const frame = (children: React.ReactNode) => inline
@@ -406,7 +420,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
             <div className="grid gap-2.5" style={{ gridTemplateColumns: inline ? 'repeat(auto-fill, minmax(100px, 1fr))' : `repeat(${Math.max(1, Math.min(vitalList.length, 5))}, minmax(0, 1fr))` }}>
               {vitalList.map((f) => (
                 <div key={f.key}><label htmlFor={`v-${f.key}`} className="text-[10px] font-semibold uppercase tracking-wider text-muted block mb-1">{f.label}</label>
-                  <div className="relative"><input id={`v-${f.key}`} className="input !px-3 !pr-11" inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph ?? ''} value={vit[f.key] ?? ''} maxLength={f.type === 'number' || f.key === 'bp' ? 7 : 20} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : f.key === 'bp' ? e.target.value.replace(/[^\d/]/g, '') : e.target.value })} /><span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
+                  <div className="relative"><input id={`v-${f.key}`} aria-invalid={!!vitalProblem(f, vit[f.key] ?? '')} className={`input !px-3 !pr-11 ${vitalProblem(f, vit[f.key] ?? '') ? '!border-rose' : ''}`} inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph ?? ''} value={vit[f.key] ?? ''} maxLength={f.type === 'number' || f.key === 'bp' ? 7 : 20} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : f.key === 'bp' ? e.target.value.replace(/[^\d/]/g, '') : e.target.value })} /><span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
               ))}
             </div>
           </div>
@@ -525,7 +539,7 @@ function ReportsQueue({ orders, visits, canDesk, freeDays, onArrive, onSendIn }:
               <div className="mt-0.5 text-xs text-muted">{o.tests.map((t: any) => `${t.name} (${t.receivedAt ? 'in' : t.expectedOn ? `expected ${fmtDate(t.expectedOn)}` : 'pending'})`).join(' · ')}</div>
             </div>
             {canDesk && (today ? (today.status === 'in_consult' ? <Chip tone="clay">with the doctor</Chip> : <button className="btn btn-sm btn-primary" onClick={() => onSendIn(today.id)}>Send in</button>)
-              : <button className="btn btn-sm btn-primary" title={free ? `Within ${freeDays} days: no fee` : `More than ${freeDays} days: the usual fee applies`} onClick={() => onArrive({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free, since: o.orderedAt } })}>Patient is here{pending.length ? ' · partial' : ''}</button>)}
+              : <button className="btn btn-sm btn-primary" title={free ? `Within ${freeDays} days: no form and no fee, straight to the doctor for the report review` : `More than ${freeDays} days: check in with the usual fee`} onClick={() => onArrive({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free, since: o.orderedAt } })}>{free ? 'Send in' : 'Patient is here'}{pending.length ? ' · partial' : ''}</button>)}
             <button className="btn btn-sm" onClick={() => nav('/tests')}>Reports</button>
           </div>);
       })}

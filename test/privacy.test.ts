@@ -93,6 +93,7 @@ test('audit log: every change, views with unusual, sign-ins, lists owner-only, n
   const a = (await R('POST', '/appointments', { sessionId: free[0].sessionId, patientId: p.id })).json();
   await R('PATCH', `/appointments/${a.id}`, { status: 'cancelled', cancelReason: 'patient called' });
   await D2('GET', `/patients/${p.id}/timeline`);
+  await R('GET', `/patients/${p.id}/timeline`); // the person who registered them: not unusual
   const meds = (await O('GET', '/config')).json().medicines; const m = meds[0];
   await O('PATCH', `/admin/medicines/${m.id}`, { mrpPaise: m.mrpPaise + 1000 });
 
@@ -104,8 +105,10 @@ test('audit log: every change, views with unusual, sign-ins, lists owner-only, n
   assert.ok(log.some((x: any) => s(x) === 'Cancelled a booking · patient called' && x.kind === 'change'));
   const price = log.find((x: any) => s(x) === 'Changed a medicine');
   assert.equal(price.before.mrpPaise, m.mrpPaise); assert.equal(price.after.mrpPaise, m.mrpPaise + 1000);
-  const view = log.find((x: any) => x.kind === 'view' && x.patientId === p.id);
+  const view = log.find((x: any) => x.kind === 'view' && x.patientId === p.id && !x.userName.includes('Lakshmi'));
   assert.ok(view && view.unusual, 'opened with no visit today: unusual');
+  const own = log.find((x: any) => x.kind === 'view' && x.patientId === p.id && x.userName.includes('Lakshmi'));
+  assert.ok(own && !own.unusual, 'the person who registered them today: not unusual');
   assert.equal(view.patient, 'Audit Patient');
   assert.ok(log.some((x: any) => x.kind === 'signin' && x.summary === 'Signed in'));
   assert.ok(!JSON.stringify(log).includes('demo1234'), 'no passwords in the log');

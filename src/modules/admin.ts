@@ -139,7 +139,7 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/rooms/:id', 'config.write', async (req, tx) => upd(tx, room, req, sent(RoomIn.partial().parse(req.body), req.body)));
 
   // --- fee categories ---
-  const FeeIn = z.object({ code: z.string().min(1).max(8).toUpperCase(), name: Name, amountPaise: z.number().int().min(0).max(100000000), taxRateBp: z.number().int().min(0).optional(), priority: z.number().int().optional(), affectsCapacity: z.boolean().optional(), eligibility: z.any().optional().nullable(), eligibilityNote: z.string().optional().nullable(), active: z.boolean().optional() });
+  const FeeIn = z.object({ code: z.string().min(1).max(8).toUpperCase(), name: Name, amountPaise: z.number().int().min(0).max(100000000), taxRateBp: z.number().int().min(0).optional(), priority: z.number().int().min(0).max(99).optional(), affectsCapacity: z.boolean().optional(), eligibility: z.any().optional().nullable(), eligibilityNote: z.string().optional().nullable(), active: z.boolean().optional() });
   route(app, 'post', '/admin/fee-categories', 'config.write', async (req, tx) => { const b = FeeIn.parse(req.body); checkRule(b.eligibility); return (await tx.insert(feeCategory).values({ ...b, tenantId: req.ctx.tenantId }).returning())[0]; });
   route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => { const b = sent(FeeIn.partial().parse(req.body), req.body); checkRule(b.eligibility); return upd(tx, feeCategory, req, b); });
 

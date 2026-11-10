@@ -15,7 +15,10 @@ export const VITAL_KEYS = ['weight_kg', 'height_cm', 'bp', 'pulse', 'temp_f', 's
 /** Vitals the clinic added in Settings (key v_…): a number, or a short reading such as "2+". */
 export const customVitals = (settings: any): { key: string; type: 'number' | 'text' }[] => (Array.isArray(settings?.vitalFields) ? settings.vitalFields : []).filter((v: any) => typeof v?.key === 'string' && /^v_[a-z0-9_]{1,24}$/.test(v.key));
 const vitalKeys = (settings: any) => [...VITAL_KEYS, ...customVitals(settings).map((v) => v.key)];
-const Vitals = z.object({ weight_kg: z.number().min(1).max(400).nullable().optional(), height_cm: z.number().min(30).max(250).nullable().optional(), bp: z.string().trim().max(12).nullable().optional(),
+/** "120/80": systolic 50–300 over diastolic 20–200, the top number higher. */
+const bpOk = (s: string) => { const m = /^(\d{2,3})\/(\d{2,3})$/.exec(s); return !!m && +m[1] >= 50 && +m[1] <= 300 && +m[2] >= 20 && +m[2] <= 200 && +m[1] > +m[2]; };
+/** The same ranges at check-in (POST/PATCH /visits) and on the pad. */
+export const Vitals = z.object({ weight_kg: z.number().min(1).max(400).nullable().optional(), height_cm: z.number().min(30).max(250).nullable().optional(), bp: z.string().trim().refine(bpOk, 'BP_FORMAT').nullable().optional(),
   pulse: z.number().int().min(20).max(250).nullable().optional(), temp_f: z.number().min(90).max(110).nullable().optional(), spo2: z.number().int().min(50).max(100).nullable().optional() });
 
 export function rxpadRoutes(app: FastifyInstance) {

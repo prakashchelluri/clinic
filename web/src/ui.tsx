@@ -402,7 +402,8 @@ export function ToastHost() {
   );
 }
 
-export const money = (paise: number) => '₹' + (paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+/** ₹1,250, or ₹1,250.50 when there are paise: never rounded away. */
+export const money = (paise: number) => { const d = paise % 100 ? 2 : 0; return '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }); };
 export const fmtDate = (d: string) => new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
 /** Rupee amount input: only digits and one decimal point, at most 2 decimals and 7 whole digits. Letters and symbols never get in, even when pasted. */

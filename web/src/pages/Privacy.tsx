@@ -159,7 +159,7 @@ export function AuditLog() {
       {open && <Modal title={open.summary} subtitle={`${when(open.at)} · ${open.userName ?? ''}${open.ip ? ` · ${open.ip}` : ''}`} onClose={() => setOpen(null)} width="max-w-2xl">
         <div className="space-y-3 text-sm">
           {open.patient && <div>Patient: <b>{open.patient}</b> {open.patientNo}</div>}
-          {open.unusual && <div className="rounded-xl bg-amber-soft px-3 py-2 text-[#6E4D10]">Unusual: {open.kind === 'view' ? 'opened with no visit, booking, sale or procedure for this patient that day, or outside clinic hours' : open.kind === 'print' ? 'a list of patients left the app' : 'outside the usual pattern'}.</div>}
+          {open.unusual && <div className="rounded-xl bg-amber-soft px-3 py-2 text-[#6E4D10]">Unusual: {open.kind === 'view' ? 'opened by someone who did not register them, with no visit, booking, sale or procedure for this patient that day, or outside clinic hours' : open.kind === 'print' ? 'a list of patients left the app' : 'outside the usual pattern'}.</div>}
           <Changes before={open.before} after={open.after} />
           <div className="text-xs text-muted">{open.action}</div>
         </div>

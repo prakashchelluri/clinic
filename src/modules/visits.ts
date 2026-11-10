@@ -7,6 +7,7 @@ import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, daysBetween, addDays } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
+import { Vitals } from './rxpad.js';
 
 /** How many patients may be inside the consultation room at once. ponytail: fixed for every clinic; a tenant setting if one asks. */
 export const ROOM_MAX = 3;
@@ -39,10 +40,13 @@ export async function suggestCategory(tx: Tx, ctx: Ctx, patientId: string) {
   return { suggested: pick, facts, categories: cats, patient: p };
 }
 
+/** Visit details: anything, but vitals in it must be in range (the pad's own check). */
+const Details = z.record(z.string(), z.any()).superRefine((d, c) => { const r = Vitals.safeParse(d); if (!r.success) r.error.issues.forEach((i) => c.addIssue(i as any)); });
+
 const CheckIn = z.object({
   patientId: z.string().uuid(), appointmentId: z.string().uuid().optional(), branchId: z.string().uuid().optional(),
   feeCategoryCode: z.string(), practitionerId: z.string().uuid().nullable().optional(),
-  details: z.record(z.string(), z.any()).default({}),
+  details: Details.default({}),
   payment: z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0).max(100000000), reference: z.string().optional() }).optional(),
   waive: z.object({ reason: z.string().min(1) }).optional(),
   allowReview: z.object({ reason: z.string().trim().min(3) }).optional(), // one more free review than the limit allows
@@ -63,8 +67,16 @@ export function visitRoutes(app: FastifyInstance) {
     if (open.length) throw new HttpError(409, 'ALREADY_CHECKED_IN', { opNumber: open[0].opNumber });
     const cat = await tx.select().from(feeCategory).where(and(eq(feeCategory.tenantId, t), eq(feeCategory.code, body.feeCategoryCode))).then((r) => r[0]);
     if (!cat) throw new HttpError(400, 'BAD_CATEGORY');
+    // Back with reports for a consultation held open: within the clinic's free days it is free by the clinic's own rule
+    // (Settings › The day at the desk), so it needs no waive permission and no review allowance, and it goes to the doctor who ordered the tests.
+    const heldId = (body.details as any)?.reportsEncounterId as string | undefined;
+    const held = heldId ? await tx.select({ id: encounter.id, practitionerId: encounter.practitionerId, at: encounter.createdAt }).from(encounter).where(and(eq(encounter.tenantId, t), eq(encounter.id, heldId), eq(encounter.patientId, body.patientId))).then((r) => r[0]) : undefined;
+    if (heldId && !held) throw new HttpError(400, 'BAD_REPORTS_ENCOUNTER');
+    const freeDays = Number((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings?.reports?.freeDays ?? 30);
+    const freeReturn = !!held && daysBetween(new Date(held.at as any).toISOString().slice(0, 10), day) <= freeDays;
+    if (held && !body.practitionerId) body.practitionerId = held.practitionerId ?? undefined;
     // Review limit: reviews since the last paid consultation are capped (default 1). A second one is for the head receptionist to allow, with a reason.
-    if (cat.code === 'REN') {
+    if (cat.code === 'REN' && !freeReturn) {
       const limit = Number((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings?.reviewLimit ?? 1);
       const lastPaid = await tx.select({ at: payment.receivedAt }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId))
         .where(and(eq(payment.tenantId, t), eq(payment.patientId, body.patientId), sql`${charge.description} like 'Consultation%'`, sql`${charge.amountPaise} > 0`)).orderBy(desc(payment.receivedAt)).limit(1).then((r) => r[0]);
@@ -95,7 +107,8 @@ export function visitRoutes(app: FastifyInstance) {
     // Fee: a charge row even when ₹0, so reports reconcile by category
     const amount = cat.amountPaise;
     let status = amount === 0 ? 'paid' : 'due';
-    if (body.waive) {
+    if (freeReturn && amount > 0) { status = 'waived'; body.waive = { reason: `Back with reports within ${freeDays} days` }; body.payment = undefined; }
+    else if (body.waive) {
       if (!can(req.perms, 'payment.waive')) throw new HttpError(403, 'FORBIDDEN:payment.waive');
       status = 'waived';
     }
@@ -186,7 +199,7 @@ export function visitRoutes(app: FastifyInstance) {
   /** Reorder/skip/call/done. Position is fractional: moving between 3 and 4 gives 3.5, nothing else is rewritten. */
   route(app, 'patch', '/visits/:id', 'visit.queue', async (req, tx) => {
     const body = z.object({ status: z.enum(['waiting', 'intake', 'screened', 'in_consult', 'done', 'left']).optional(), afterVisitId: z.string().uuid().nullable().optional(),
-      practitionerId: z.string().uuid().nullable().optional(), details: z.record(z.string(), z.any()).optional(), priority: z.number().int().optional(), reason: z.string().optional() }).parse(req.body);
+      practitionerId: z.string().uuid().nullable().optional(), details: Details.optional(), priority: z.number().int().min(0).max(99).optional(), reason: z.string().optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const cur = await tx.select().from(visit).where(and(eq(visit.id, id), eq(visit.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');

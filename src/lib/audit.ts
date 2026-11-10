@@ -70,13 +70,14 @@ const once = (key: string, ms: number) => { const now = Date.now(); const last =
 const localHour = (tz: string) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date()));
 const outsideHours = (tz: string) => { const h = localHour(tz); return h < 7 || h >= 22; };
 
-/** Opening a patient's record. Unusual when nothing brought this patient to the clinic today, or out of hours. Repeat opens within 10 minutes count once. */
+/** Opening a patient's record. Unusual when nothing brought this patient to the clinic today (registered by this person, a visit, booking, sale or procedure), or out of hours. Repeat opens within 10 minutes count once. */
 export async function auditView(tx: Tx, req: FastifyRequest, patientId: string, what: string) {
   const c = req.ctx; if (!c?.userId || !once(`v|${c.userId}|${patientId}|${what}`, 10 * 60_000)) return;
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: c.timezone }).format(new Date());
   const t = c.tenantId;
   const any = async (q: Promise<any[]>) => (await q).length > 0;
-  const reason = await any(tx.select({ id: visit.id }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, patientId), eq(visit.day, day))).limit(1))
+  const reason = await any(tx.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.tenantId, t), eq(auditLog.userId, c.userId), eq(auditLog.action, 'POST /patients'), eq(auditLog.entityId, patientId), gte(auditLog.at, sql`now() - interval '1 day'`))).limit(1)) // this person registered them today
+    || await any(tx.select({ id: visit.id }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, patientId), eq(visit.day, day))).limit(1))
     || await any(tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), eq(session.day, day), notInArray(appointment.status, ['cancelled', 'no_show']))).limit(1)) // a cancelled booking is no reason to open the record
     || await any(tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), eq(pharmacySale.patientId, patientId), gte(pharmacySale.createdAt, sql`now() - interval '1 day'`))).limit(1))
     || await any(tx.select({ id: procedureSession.id }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, patientId), eq(procedureSession.day, day))).limit(1));

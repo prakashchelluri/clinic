@@ -116,10 +116,10 @@ export function Filmstrip({ visits, selectedId, onSelect, onEnter }: { visits: a
 }
 
 /** Only what needs the desk, in the order to do it, as one table. Everyone else is a chip at the bottom. */
-export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, withDue, idle, selectedId, onSelect, canSend, onSendIn, onReportsArrive, onCheckIn, onCollect, docName, catName }: {
+export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, withDue, idle, selectedId, onSelect, canSend, onSendIn, onReportsArrive, onCheckIn, onCollect, docName, catName, freeDays }: {
   sendable: any[]; arrange: any[]; reportsIn: any[]; reportsLate: any[]; late: any[]; withDue: any[]; idle: { v: any; label: string }[];
   selectedId: string | null; onSelect: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onSendIn: (id: string) => void;
-  onReportsArrive: (o: any) => void; onCheckIn: (a: any) => void; onCollect: (v: any) => void; docName: (id: string | null) => string; catName: (code: string) => string;
+  onReportsArrive: (o: any) => void; onCheckIn: (a: any) => void; onCollect: (v: any) => void; docName: (id: string | null) => string; catName: (code: string) => string; freeDays: number;
 }) {
   const nav = useNavigate();
   // Send in: the row lifts and leaves first, then the request goes; if it fails the row comes back
@@ -158,10 +158,10 @@ export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, wi
               status={{ label: `${open.length} pending`, tone: 'amber' }} time={v.completedAt ? `seen ${minsSince(v.completedAt)} min ago` : undefined}
               action={<button className="btn btn-sm btn-ink" onClick={() => onSelect(v.id)}>Open</button>} />; })}
         </Group>
-        <Group title="Reports came in" n={reportsIn.length} tone="sky" hint="patient not here yet">
+        <Group title="Reports came in" n={reportsIn.length} tone="sky" hint="send in when the patient arrives">
           {reportsIn.map((o) => <Item key={o.key} token="—" p={o.patient} visit={o.tests.map((t: any) => t.name).join(', ')} doctor={o.doctor}
             status={{ label: `Reports in · ${o.got} of ${o.tests.length}`, tone: 'sky' }} time={`ordered ${day(o.orderedAt)}`}
-            action={<button className="btn btn-sm btn-primary" onClick={() => onReportsArrive(o)}>Patient is here</button>} />)}
+            action={(() => { const free = Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays; return <button className="btn btn-sm btn-primary" title={free ? 'No form and no fee: straight to the doctor for the report review' : `Past the ${freeDays} free days: check in with the usual fee`} onClick={() => onReportsArrive(o)}>{free ? 'Send in' : 'Patient is here'}</button>; })()} />)}
         </Group>
         <Group title="Reports running late" n={reportsLate.length} tone="rose">
           {reportsLate.map((o) => <Item key={o.key} token="—" p={o.patient} visit={o.late.join(', ')} doctor={o.doctor}

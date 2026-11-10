@@ -5,15 +5,22 @@ import { Floating, NumInput, fmtDate, toast } from './ui';
 
 /** The clinic's vitals, one list for check-in, the pad, past values and the printed prescription:
  *  the six every clinic knows, plus any the owner adds in Settings → Consultation form fields. settings.vitals says which are taken. */
-export type VitalField = { key: string; label: string; unit: string; type: 'number' | 'text'; ph?: string; decimal?: boolean; max?: number; custom?: boolean };
+export type VitalField = { key: string; label: string; unit: string; type: 'number' | 'text'; ph?: string; decimal?: boolean; min?: number; max?: number; custom?: boolean };
 export const BUILTIN_VITALS: VitalField[] = [
-  { key: 'weight_kg', label: 'Weight', unit: 'kg', type: 'number', decimal: true, max: 400 },
-  { key: 'height_cm', label: 'Height', unit: 'cm', type: 'number', max: 250 },
-  { key: 'temp_f', label: 'Temp', unit: '°F', type: 'number', ph: '98.4', decimal: true, max: 110 },
+  { key: 'weight_kg', label: 'Weight', unit: 'kg', type: 'number', decimal: true, min: 1, max: 400 },
+  { key: 'height_cm', label: 'Height', unit: 'cm', type: 'number', min: 30, max: 250 },
+  { key: 'temp_f', label: 'Temp', unit: '°F', type: 'number', ph: '98.4', decimal: true, min: 90, max: 110 },
   { key: 'bp', label: 'BP', unit: 'mmHg', type: 'text', ph: '120/80' },
-  { key: 'spo2', label: 'SpO₂', unit: '%', type: 'number', ph: '98', max: 100 },
-  { key: 'pulse', label: 'Pulse', unit: 'bpm', type: 'number', max: 250 },
+  { key: 'spo2', label: 'SpO₂', unit: '%', type: 'number', ph: '98', min: 50, max: 100 },
+  { key: 'pulse', label: 'Pulse', unit: 'bpm', type: 'number', min: 20, max: 250 },
 ];
+/** Why a typed vital cannot be saved, or ''. The server checks the same ranges (src/modules/rxpad.ts Vitals). */
+export function vitalProblem(v: VitalField, raw: string): string {
+  const t = raw.trim(); if (!t) return '';
+  if (v.key === 'bp') { const m = /^(\d{2,3})\/(\d{2,3})$/.exec(t); return m && +m[1] >= 50 && +m[1] <= 300 && +m[2] >= 20 && +m[2] <= 200 && +m[1] > +m[2] ? '' : 'BP should read like 120/80'; }
+  if (v.type !== 'number') return '';
+  const n = Number(t); return Number.isFinite(n) && (v.min === undefined || n >= v.min) && (v.max === undefined || n <= v.max) ? '' : `${v.label} should be ${v.min ?? 0}–${v.max} ${v.unit}`;
+}
 export const DEFAULT_VITALS = ['weight_kg', 'height_cm', 'temp_f', 'bp', 'spo2'];
 export const vitalFields = (settings: any): VitalField[] => [...BUILTIN_VITALS, ...((settings?.vitalFields ?? []) as VitalField[]).map((v) => ({ ...v, decimal: v.type === 'number', max: v.type === 'number' ? 100000 : undefined, custom: true }))];
 /** The vitals this clinic takes, in its order. */
@@ -34,7 +41,7 @@ export function VitalsCard({ encounterId, patientId, details, heightCm, readOnly
   const d: Record<string, any> = { ...details, height_cm: details.height_cm ?? heightCm ?? undefined };
   const taken = enabledVitals(settings).map((v) => v.key);
   const VITALS = vitalFields(settings).filter((v) => taken.includes(v.key) || (d[v.key] !== undefined && d[v.key] !== null && d[v.key] !== ''));
-  const commit = (k: string) => { const v = VITALS.find((x) => x.key === k)!; const raw = val.trim(); const out = raw === '' ? null : v.type === 'number' ? Number(raw) : raw; if (out === (d[k] ?? null)) return setEdit(null); save.mutate({ [k]: out }); };
+  const commit = (k: string) => { const v = VITALS.find((x) => x.key === k)!; const raw = val.trim(); const bad = vitalProblem(v, raw); if (bad) { toast(bad, 'err'); return; } const out = raw === '' ? null : v.type === 'number' ? Number(raw) : raw; if (out === (d[k] ?? null)) return setEdit(null); save.mutate({ [k]: out }); };
   const bmi = bmiOf(d.weight_kg, d.height_cm);
   const rows: any[] = hist.data ?? [];
   return (

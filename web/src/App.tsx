@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Component, useEffect, useState, type ReactNode } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, patch, qc, ApiError } from './api';
@@ -16,8 +16,6 @@ export function can(perms: string[] | undefined, needed: string) {
 
 export type NavItem = { to: string; label: string; icon: string; group?: 'clinic'; show: (c: (p: string) => boolean) => boolean };
 export const NAV: NavItem[] = [
-  // ponytail: Dashboard hidden for now (PM review, Oct 2026); bring back by restoring c('finance.read')
-  { to: '/overview', label: 'Dashboard', icon: 'home', show: () => false },
   { to: '/dashboard', label: 'Dashboard', icon: 'chart', group: 'clinic', show: (c) => c('report.read') || c('finance.read') },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
@@ -123,6 +121,17 @@ function Sidebar({ items, active, clinic, me, roles, onSignOut, onNavigate, onCo
       </div>
     </div>
   );
+}
+
+/** One broken page shows a message and keeps the menu, instead of blanking the whole app. Moving to another page clears it. */
+class PageError extends Component<{ children: ReactNode }, { err: boolean }> {
+  state = { err: false };
+  static getDerivedStateFromError() { return { err: true }; }
+  componentDidCatch(e: unknown) { console.error(e); }
+  render() {
+    if (!this.state.err) return this.props.children;
+    return <div className="card mx-auto mt-10 max-w-md space-y-3 text-center" role="alert"><div className="font-semibold">Something went wrong on this page.</div><div className="text-sm text-muted">Nothing you saved is lost. Reload, or open another page from the menu.</div><button className="btn btn-primary" onClick={() => location.reload()}>Reload</button></div>;
+  }
 }
 
 export function App() {
@@ -232,7 +241,7 @@ export function App() {
         </header>
 
         <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
-          <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}>{pageSearch && <PageSearchBox placeholder={pageSearch} className="mb-3 flex w-full md:hidden" />}<Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageSearchCtx.Provider>}</main>
+          <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}>{pageSearch && <PageSearchBox placeholder={pageSearch} className="mb-3 flex w-full md:hidden" />}<PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>
         </div>
       </div>
       <PrintHost />

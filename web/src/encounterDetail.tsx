@@ -68,7 +68,7 @@ export function DocList({ docs, onDelete, who }: { docs: any[]; onDelete?: (id: 
         <div key={d.id} role="button" tabIndex={0} aria-label={`Open ${d.title}`} onClick={() => openViewer({ docs, index: i, who, canDelete: !!onDelete })} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openViewer({ docs, index: i, who, canDelete: !!onDelete }); } }} className="card card-hover !p-2 flex cursor-pointer gap-2 items-center group">
           {d.mime.startsWith('image/') ? <img src={`/api/documents/${d.id}/file`} alt="" className="h-12 w-12 rounded-lg object-cover bg-paper-2" loading="lazy" /> : <div className="h-12 w-12 rounded-lg bg-clay-soft text-clay grid place-items-center text-[10px] font-bold">PDF</div>}
           <div className="min-w-0 flex-1"><div className="text-xs font-medium truncate">{d.title}</div><div className="text-[10px] text-muted">{d.kind} · {fmtDate(d.createdAt)}</div></div>
-          {onDelete && <button className="btn btn-ghost btn-icon opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); onDelete(d.id); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+          {onDelete && <button aria-label="Remove" className="btn btn-ghost btn-icon opacity-0 group-hover:opacity-100" onClick={(e) => { e.stopPropagation(); onDelete(d.id); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
         </div>
       ))}
     </div>

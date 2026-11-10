@@ -62,7 +62,7 @@ const MESSAGES: Record<string, string> = {
   BAD_REQUEST: 'That request was not understood.',
   UNAUTHENTICATED: 'Please sign in again.',
 };
-const FIELD_NAMES: Record<string, string> = { reason: 'Reason', note: 'Note', cancelReason: 'Reason', minutes: 'Length', color: 'Colour', pricePaise: 'Price', places: 'Places', fullName: 'Name', phone: 'Phone', ageYears: 'Age', amountPaise: 'Amount', description: 'Description', name: 'Name', email: 'Email', password: 'Password' };
+const FIELD_NAMES: Record<string, string> = { reason: 'Reason', note: 'Note', cancelReason: 'Reason', minutes: 'Length', color: 'Colour', pricePaise: 'Price', places: 'Places', fullName: 'Name', phone: 'Phone', ageYears: 'Age', amountPaise: 'Amount', description: 'Description', name: 'Name', email: 'Email', password: 'Password', weight_kg: 'Weight', height_cm: 'Height', temp_f: 'Temperature', spo2: 'SpO₂', pulse: 'Pulse', priority: 'Queue priority' };
 /** Turn any API failure into one plain sentence a receptionist can act on. */
 export function errText(e: any): string {
   const b = e?.body; if (!b) return e?.message && !/^HTTP \d+$/.test(e.message) ? e.message : 'Could not reach the server. Check the connection and try again.';
@@ -82,8 +82,9 @@ export function errText(e: any): string {
   if (code === 'COUNT_INCOMPLETE') return `${b.left} batch${b.left === 1 ? '' : 'es'} still to count.`;
   if (code === 'VALIDATION' && Array.isArray(b.errors) && b.errors[0]) {
     const x = b.errors[0]; const key = [...(x.path ?? [])].reverse().find((p: any) => typeof p === 'string'); const f = (key && FIELD_NAMES[key]) ?? (key ? key.replace(/([A-Z])/g, ' $1').replace(/^./, (c: string) => c.toUpperCase()) : 'A field');
+    if (x.message === 'BP_FORMAT') return 'BP should read like 120/80.';
     if (x.message === 'PHONE_10_DIGITS' || (key === 'phone' && x.code === 'invalid_string')) return 'Phone must be 10 digits.';
-    if (x.code === 'too_big') return `${f} is too ${typeof x.maximum === 'number' && x.type === 'string' ? 'long' : 'large'} (most ${x.maximum}).`;
+    if (x.code === 'too_big') return `${f} is too ${typeof x.maximum === 'number' && x.type === 'string' ? 'long' : 'large'} (most ${/Paise$/.test(key ?? '') && typeof x.maximum === 'number' ? '₹' + (x.maximum / 100).toLocaleString('en-IN') : x.maximum}).`;
     if (x.code === 'too_small') return x.type === 'string' ? (x.minimum <= 1 ? `${f} is required.` : `${f} is too short (at least ${x.minimum} letters).`) : `${f} is too small.`;
     return `${f} is not valid.`;
   }

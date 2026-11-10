@@ -137,6 +137,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
   const issuing = lines.filter((l) => l.medicineId && Number(l.qty) > 0);
   const gross = issuing.reduce((n, l) => n + lineAmount(l), 0);
   const disc = Math.min(toPaise(discount || '0'), gross); const total = gross - disc;
+  const capBp: number = can(perms, 'stock.approve') ? 10000 : cfg?.tenant?.settings?.pharmacy?.maxDiscountBp ?? 1000; // the server's own cap, shown before Take payment
   const gstIn = issuing.reduce((n, l) => { const a = lineAmount(l); return n + a - Math.round((a * 10000) / (10000 + l.gstBp)); }, 0);
   const gst = gross ? Math.round((gstIn * total) / gross) : 0;
   const overStock = lines.find((l) => Number(l.qty) > l.onHand);
@@ -146,7 +147,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
     onSuccess: () => { toast('Noted: not buying here'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); reset(); }, onError: (e) => toast(errText(e), 'err') });
   const outside = useMutation({ mutationFn: (reason: string) => post(`/pharmacy/rx/${rx.encounterId}/outside`, { reason: reason || undefined }),
     onSuccess: () => { toast('Noted: the rest was bought outside'); qc.invalidateQueries({ queryKey: ['pharmacy'] }); reset(); }, onError: (e) => toast(errText(e), 'err') });
-  const problem = !who ? 'Pick or register the customer.' : issuing.length === 0 ? 'Nothing to sell yet.' : overStock ? `${overStock.name}: only ${overStock.onHand} in stock.` : total <= 0 ? 'The discount cannot be the whole bill.' : '';
+  const problem = !who ? 'Pick or register the customer.' : issuing.length === 0 ? 'Nothing to sell yet.' : overStock ? `${overStock.name}: only ${overStock.onHand} in stock.` : total <= 0 ? 'The discount cannot be the whole bill.' : disc * 10000 > gross * capBp ? `Discounts above ${capBp / 100}% need the owner.` : '';
 
   const medList: any[] = meds.data ?? [];
   const forms = [...new Set(medList.map((m) => m.form).filter(Boolean))] as string[];
@@ -280,7 +281,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
             <div className="mt-3 space-y-1.5 border-t border-line pt-3 text-[13.5px]">
               <div className="flex justify-between"><span className="text-muted">{rx ? `${rxLines.filter((l) => Number(l.qty) > 0).length} of ${rxLines.length} prescribed · ` : ''}{units} {units === 1 ? 'item' : 'items'}</span><span>₹{rupees2(gross)}</span></div>
               <div className="flex justify-between text-muted"><span>GST included</span><span>₹{rupees2(gst)}</span></div>
-              <div className="flex items-center justify-between gap-3"><span className="text-muted">Discount <span className="text-[11.5px]">(above 10% needs the owner)</span></span><MoneyInput label="Discount" className="!min-h-[34px] !w-28 !py-1" value={discount} onChange={setDiscount} /></div>
+              <div className="flex items-center justify-between gap-3"><span className="text-muted">Discount {capBp < 10000 && <span className="text-[11.5px]">(above {capBp / 100}% needs the owner)</span>}</span><MoneyInput label="Discount" className={`!min-h-[34px] !w-28 !py-1 ${disc * 10000 > gross * capBp ? '!border-rose' : ''}`} value={discount} onChange={setDiscount} /></div>
               <div className="flex items-baseline justify-between pt-1.5"><span className="text-[15px] font-semibold">To pay</span><span key={total} className="bump text-[26px] font-semibold tracking-tight">{money(total)}</span></div>
               {rxLines.some((l) => (l.left ?? 0) - (Number(l.qty) || 0) > 0 && Number(l.qty) > 0) && <div className="text-[11.5px] text-muted">The patient can come back for the rest within 30 days, or buy it outside.</div>}
             </div>
@@ -361,7 +362,7 @@ function PayDialog({ total, patient, build, onClose, onDone }: { total: number; 
   const upiAmt = mode === 'upi' ? total : mode === 'split' ? toPaise(upi) : 0; const cardAmt = mode === 'card' ? total : mode === 'split' ? toPaise(card) : 0;
   const cash = mode === 'cash' ? total : mode === 'split' ? total - upiAmt - cardAmt : 0;
   const got = toPaise(received); const change = received ? got - cash : 0;
-  const problem = cash < 0 ? 'UPI and card add up to more than the bill.' : upiAmt > 0 && upiRef.trim().length < 4 ? 'Enter the UPI reference (UTR).' : cardAmt > 0 && cardRef.trim().length < 4 ? 'Enter the card approval code.'
+  const problem = cash < 0 ? 'UPI and card add up to more than the bill.' : upiAmt > 0 && upiRef.length !== 12 ? 'Enter the 12-digit UPI reference (UTR).' : cardAmt > 0 && cardRef.trim().length < 4 ? 'Enter the card approval code.'
     : mode === 'split' && upiAmt + cardAmt === 0 ? 'Enter the UPI or card part of the split.' : received && got < cash ? 'Cash received is less than the cash part.' : '';
   const save = useMutation({
     mutationFn: () => post('/pharmacy/sale', { ...build(), whatsapp: wa,
@@ -382,7 +383,7 @@ function PayDialog({ total, patient, build, onClose, onDone }: { total: number; 
         <div className="flex gap-1.5">{(['cash', 'upi', 'card', 'split'] as const).map((m) => <button key={m} className={`toggle-opt flex-1 justify-center ${mode === m ? 'on' : ''}`} onClick={() => setMode(m)}>{m === 'upi' ? 'UPI' : m[0].toUpperCase() + m.slice(1)}</button>)}</div>
         {(mode === 'upi' || mode === 'split') && <div className="grid gap-2 sm:grid-cols-2">
           {mode === 'split' && <label><span className="label">UPI amount</span><MoneyInput label="UPI amount" value={upi} onChange={setUpi} /></label>}
-          <label className={mode === 'upi' ? 'sm:col-span-2' : ''}><span className="label">UPI reference (UTR)</span><input className={`input ${tried && upiAmt > 0 && upiRef.trim().length < 4 ? '!border-rose' : ''}`} value={upiRef} onChange={(e) => setUpiRef(e.target.value)} placeholder="12-digit UTR" /></label></div>}
+          <label className={mode === 'upi' ? 'sm:col-span-2' : ''}><span className="label">UPI reference (UTR)</span><input className={`input ${tried && upiAmt > 0 && upiRef.length !== 12 ? '!border-rose' : ''}`} inputMode="numeric" value={upiRef} onChange={(e) => setUpiRef(e.target.value.replace(/\D/g, '').slice(0, 12))} placeholder="12-digit UTR" /></label></div>}
         {(mode === 'card' || mode === 'split') && <div className="grid gap-2 sm:grid-cols-2">
           {mode === 'split' && <label><span className="label">Card amount</span><MoneyInput label="Card amount" value={card} onChange={setCard} /></label>}
           <label className={mode === 'card' ? 'sm:col-span-2' : ''}><span className="label">Card approval code</span><input className={`input ${tried && cardAmt > 0 && cardRef.trim().length < 4 ? '!border-rose' : ''}`} value={cardRef} onChange={(e) => setCardRef(e.target.value)} /></label></div>}

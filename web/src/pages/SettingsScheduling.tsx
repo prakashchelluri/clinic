@@ -167,8 +167,10 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
     reminder: 'Reminder: {visitType} at {clinic} on {date}, {time}. Please arrive by {arriveBy}. Reply or tap to confirm or cancel: {link}',
     moved: 'Hello {patient}, your visit at {clinic} is now on {date}, {time} with {doctor}. Arrive by {arriveBy}. Details: {link}',
     cancelled: 'Hello {patient}, your visit at {clinic} on {date}, {time} has been cancelled. Call us to book again.',
+    late: 'Hello {patient}, {doctor} at {clinic} is running about {reason} late today. Your {time} visit will start a little later. Sorry for the wait.',
+    reschedule: 'Hello {patient}, {doctor} is not available for your visit on {date}, {time} at {clinic}. {reason} Please pick another time: {link}',
   } as Record<string, string>), []);
-  const cur = tpl[kind] ?? defaults[kind];
+  const cur = tpl[kind] ?? defaults[kind] ?? '';
   const unknown = (cur.match(/\{(\w+)\}/g) ?? []).map((x) => x.slice(1, -1)).filter((v) => !VARS.includes(v));
   const hBad = newH !== '' && !intIn(newH, 1, 168);
   const addH = () => { if (!intIn(newH, 1, 168)) return; const n = Number(newH); if (!f.reminderHours.includes(n) && f.reminderHours.length < 3) setF({ ...f, reminderHours: [...f.reminderHours, n].sort((a, b) => b - a) }); setNewH(''); };

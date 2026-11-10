@@ -6,7 +6,6 @@ import './index.css';
 import './glass.css';
 import { qc } from './api';
 import { App, Home } from './App';
-import { Overview } from './pages/Overview';
 import { Today } from './pages/Today';
 import { Login } from './pages/Login';
 import { FrontDesk } from './pages/FrontDesk';
@@ -42,7 +41,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/display/:slug/:token" element={<Display />} />
           <Route element={<App />}>
             <Route index element={<Home />} />
-            <Route path="/overview" element={<Overview />} />
+            {/* ponytail: the old Overview (pages/Overview.tsx) is parked; its address goes to the Dashboard */}
+            <Route path="/overview" element={<Navigate to="/dashboard" replace />} />
             <Route path="/today" element={<Today />} />
             <Route path="/queue" element={<FrontDesk />} />
             <Route path="/booking" element={<Navigate to="/calendar?book=1" replace />} />
