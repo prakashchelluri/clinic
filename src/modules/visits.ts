@@ -216,7 +216,9 @@ export function visitRoutes(app: FastifyInstance) {
       const inside = await tx.select({ n: sql<number>`count(*)` }).from(visit)
         .where(and(eq(visit.tenantId, t), eq(visit.day, cur.day), eq(visit.status, 'in_consult'), docId ? eq(visit.practitionerId, docId) : sql`true`)).then((r) => Number(r[0]?.n ?? 0));
       if (inside >= ROOM_MAX) throw new HttpError(409, 'ROOM_FULL', { max: ROOM_MAX, inside });
-      set.details = { ...(set.details ?? cur.details), calledBy: can(req.perms, 'encounter.complete') ? 'doctor' : 'desk', calledAt: new Date().toISOString() };
+      // This is the desk's Send in, whoever presses it (an owner who is also a doctor included). The doctor pulling a patient in is
+      // POST /visits/:id/encounter (Open), which marks calledBy 'doctor' itself; only that one rings the desk with "the doctor is calling".
+      set.details = { ...(set.details ?? cur.details), calledBy: 'desk', calledAt: new Date().toISOString() };
     }
     if (body.afterVisitId !== undefined) {
       const others = await tx.select({ id: visit.id, pos: visit.queuePosition }).from(visit)

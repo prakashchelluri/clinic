@@ -8,10 +8,13 @@ import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { FlagChips } from '../flags';
 import { CourseDialog } from '../courses';
-import { Avatar, Chip, Floating, Icon, Modal, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
+import { Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
+import { DaySchedule } from './frontDeskSchedule';
+import { BookForm } from './Booking';
+import { AppointmentDrawer } from '../apptDrawer';
 import { enabledVitals, vitalProblem } from '../vitals';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
@@ -41,13 +44,18 @@ export function FrontDesk() {
   const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not yet arrived; null when not selecting
   useEffect(() => setSel(null), [tab]);
   const [docFilter, setDocFilter] = useState<string | null>(null); // one doctor's queue, or everyone
+  // Table or Schedule: the same day two ways; the desk's last choice is kept on this computer
+  const [view, setViewS] = useState<'table' | 'schedule'>(() => { try { return localStorage.getItem('fd.view') === 'schedule' ? 'schedule' : 'table'; } catch { return 'table'; } });
+  const setView = (v: 'table' | 'schedule') => { setViewS(v); try { localStorage.setItem('fd.view', v); } catch { /* storage blocked */ } };
+  const [booking, setBooking] = useState<any>(null); // a free window clicked on the schedule
+  const [apptId, setApptId] = useState<string | null>(null); // a no-show opened from the schedule
   const [arriveKey, setArriveKey] = useState(0);
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }>(null);
   const find = '';
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [sp, setSp] = useSearchParams();
   useEffect(() => { if (sp.get('arrive')) { setArrive({}); setSp({}, { replace: true }); } }, [sp]);
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['frontdesk'] }); qc.invalidateQueries({ queryKey: ['queue'] }); };
+  const refresh = () => { ['frontdesk', 'queue', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); };
   const upVisit = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/visits/${id}`, b), onSuccess: refresh });
   const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: () => { refresh(); toast('Updated', 'info'); } });
   // end of the day: everyone who did not turn up, or walked out, in one go; each one can still be undone on its own
@@ -85,14 +93,15 @@ export function FrontDesk() {
   const match = (p: any, extra = '') => !f || p.fullName.toLowerCase().includes(f) || (p.phone ?? '').includes(f) || p.patientNo.toLowerCase().includes(f) || extra.toLowerCase().includes(f);
 
   const visitsAll: any[] = d?.visits ?? [];
-  const visits: any[] = docFilter ? visitsAll.filter((v) => v.practitionerId === docFilter) : visitsAll;
-  const scheduled: any[] = (d?.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status) && match(a.patient));
-  const noShows: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'no_show' && match(a.patient));
+  const forDoc = (id: string | null | undefined) => !docFilter || (docFilter === '__none' ? !id : id === docFilter); // the Doctor column's filter, on every list
+  const visits: any[] = visitsAll.filter((v) => forDoc(v.practitionerId));
+  const scheduled: any[] = (d?.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status) && forDoc(a.window?.practitionerId) && match(a.patient));
+  const noShows: any[] = (d?.appointments ?? []).filter((a: any) => a.status === 'no_show' && forDoc(a.window?.practitionerId) && match(a.patient));
   const waiting = visits.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && match(v.patient, v.opNumber));
   const screening: 'off' | 'first' | 'required' = cfg?.tenant?.settings?.screening ?? 'off';
   const isDoctorUser = can(perms, 'encounter.complete'); const isJunior = isClinical && !isDoctorUser;
   const reportsQ = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), refetchInterval: 30000, enabled: can(perms, 'document.read') });
-  const reportsOpen: any[] = ((reportsQ.data?.orders ?? []) as any[]).filter((o) => o.state !== 'closed');
+  const reportsOpen: any[] = ((reportsQ.data?.orders ?? []) as any[]).filter((o) => o.state !== 'closed' && (!docFilter || o.doctor === (d?.doctors ?? []).find((x: any) => x.id === docFilter)?.name));
   // the doctor pulled someone in: the desk hears it once
   const called = useRef(makeOnceWatcher<string>()); const [calling, setCalling] = useState<any[]>([]);
   useEffect(() => {
@@ -115,11 +124,18 @@ export function FrontDesk() {
   const sendable = waiting.filter((v) => v.status !== 'intake' && !(screening === 'required' && v.status === 'waiting'));
   const reportsIn = reportsOpen.filter((o) => ['ready', 'partial', 'reviewed', 'doctor_call'].includes(o.state) && !visitsAll.some((v) => v.details?.reportsEncounterId === o.encounterId && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)));
   const reportsLate = reportsOpen.filter((o) => o.state === 'pending' && o.late?.length);
-  const idle = [...intake.map((v) => ({ v, label: 'with junior' })), ...waiting.filter((v) => v.status === 'waiting' && screening === 'required').map((v) => ({ v, label: 'for vitals' })), ...inConsult.map((v) => ({ v, label: `with doctor${v.details?.calledAt ? ` ${minsSince(v.details.calledAt)} min` : ''}` }))];
+  const idle = [...intake.map((v) => ({ v, label: 'with junior' })), ...waiting.filter((v) => v.status === 'waiting' && screening === 'required').map((v) => ({ v, label: 'for screening' })), ...inConsult.map((v) => ({ v, label: `with doctor${v.details?.calledAt ? ` ${minsSince(v.details.calledAt)} min` : ''}` }))];
   const nowCount =sendable.length + checkout.length + reportsIn.length + reportsLate.length + late.length + withDue.length;
   const selV = canDesk && tab !== 'history' ? visitsAll.find((v) => v.id === pickV) ?? null : null; // the journey drawer opens on a tap, never by itself
   const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
-  const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+  const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  const active = (v: any) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status);
+  const unpicked = visitsAll.filter((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)).length;
+  // the count is who is still to be seen: here and not done, or booked and not yet arrived
+  const toSee = (id: string) => visitsAll.filter((v) => v.practitionerId === id && active(v)).length + (d?.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status) && a.window?.practitionerId === id).length;
+  const docOptions: { value: string; label: string; count?: number }[] = (d?.doctors ?? []).length > 1 ? [{ value: 'all', label: 'Doctor' },
+    ...(d?.doctors ?? []).map((x: any) => ({ value: x.id as string, label: x.name as string, count: toSee(x.id) })),
+    ...(unpicked || docFilter === '__none' ? [{ value: '__none', label: 'No doctor picked', count: unpicked }] : [])] : [];
   const docName = (id: string | null) => cfg?.practitioners.find((p: any) => p.id === id)?.name ?? '—';
   const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not yet arrived', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['checkout', 'Checkout', checkout.length], ['reports', 'Reports pending', reportsOpen.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount], ['history', 'History', -1]];
 
@@ -189,28 +205,20 @@ export function FrontDesk() {
 
   return (
     <div className="fd flex min-h-0 flex-1 flex-col">
-      <div className="anim-fade-up flex flex-wrap items-center gap-3 mb-4">
-        {/* the day, and the one number the stage tiles do not show: how long the longest wait is */}
-        <div className="mr-auto flex flex-wrap items-center gap-2"><h1 className="sr-only">Front desk</h1>
-          <span className="toppill !h-9 !cursor-default"><Icon name="calendar" className="h-4 w-4 text-muted" />{dayLabel}</span>
-          {d && waiting.length > 0 && <span className={`toppill !h-9 !cursor-default ${longest >= 30 ? '!text-amber' : ''}`} title="The patient who has waited longest since arriving"><Icon name="clock" className="h-4 w-4" />Longest wait <b className="tabular-nums"><Num value={longest} /> min</b></span>}</div>
-        {tab === 'history'
-          ? <div className="flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab(canDesk ? 'now' : 'waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>
-          : canDesk && <div className="flex items-center gap-1.5 no-print"><button className="btn" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" />History</button></div>}
-      </div>
+      <h1 className="sr-only">Front desk</h1>
+      {tab === 'history' && <div className="anim-fade-up mb-4 flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab(canDesk ? 'now' : 'waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>}
       {canDesk && arrive && <ArrivalSheet key={`${arriveKey}:${arrive.patientId ?? ''}:${arrive.appointmentId ?? ''}:${arrive.reports?.encounterId ?? ''}`} init={arrive} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} />}
 
       {calling.length > 0 && <div role="alert" className="mb-3 flex flex-wrap items-center gap-3 rounded-[12px] border border-line-2 bg-paper-2 px-4 py-3 text-[14px] anim-fade-up"><Icon name="bell" className="h-5 w-5 text-clay" />{calling.map((v) => <span key={v.id}><b>{v.doctor ?? 'The doctor'}</b> is calling <b>{v.patient.fullName}</b> · token {v.opNumber}</span>)}<button className="btn btn-sm ml-auto" onClick={() => setCalling([])}>Sent</button></div>}
       {!d ? <Skeleton rows={3} /> : (
         <div>
           <div className="min-w-0">
-            {(d?.doctors ?? []).length > 1 && tab !== 'history' && <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={[{ value: 'all', label: 'All doctors', count: visitsAll.filter((v) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length }, ...(d?.doctors ?? []).map((x: any) => ({ value: x.id as string, label: x.name as string, count: visitsAll.filter((v) => v.practitionerId === x.id && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)).length }))]} />
-              {visitsAll.some((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)) && <span className="text-xs text-rose">{visitsAll.filter((v) => !v.practitionerId && ['waiting', 'intake', 'screened'].includes(v.status)).length} with no doctor picked</span>}
-            </div>}
             {tab !== 'history' && <StageStrip tab={tab} onTab={setTab}
-              items={[...(canDesk ? [['now', 'For you now', nowCount, nowCount > 0]] : []), ['waiting', 'Waiting', waiting.length, false], ...(screening !== 'off' || intake.length ? [['intake', 'Vitals', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ...(canDesk ? [['scheduled', 'Still to arrive', scheduled.length, false]] : []), ['all', 'All', visits.length + scheduled.length + noShows.length, false]] as [Tab, string, number, boolean][]}
-              extra={canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="ml-auto shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>} />}
+              items={[...(canDesk ? [['now', 'For you now', nowCount, nowCount > 0]] : []), ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest <Num value={longest} /> min</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ...(canDesk ? [['scheduled', 'Still to arrive', scheduled.length, false]] : []), ['all', 'All', visits.length + scheduled.length + noShows.length, false]] as [Tab, string, number, boolean, React.ReactNode?][]}
+              extra={<>{docFilter && (tab !== 'now' || view === 'schedule') && <span className="fd-chip">{docOptions.find((o) => o.value === docFilter)?.label}<button type="button" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button></span>}
+              {canDesk && <span className="self-center shrink-0 ml-auto"><Segmented size="sm" value={view} onChange={setView} options={[{ value: 'table', label: 'Table' }, { value: 'schedule', label: 'Schedule' }]} /></span>}
+              <span className={`fd-day ${canDesk ? '!ml-0' : ''}`}>{dayLabel}{canDesk && <> · <button type="button" onClick={() => setTab('history')}>History ›</button></>}</span>
+              {canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>}</>} />}
             {sel && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-[13px] text-paper anim-fade-up" role="toolbar" aria-label="Selected rows">
               <b>{sel.size} selected</b>
               <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set((tab === 'waiting' ? waiting.map((v) => v.id) : scheduled.map((a) => a.id))))}>All</button>
@@ -219,10 +227,13 @@ export function FrontDesk() {
               <span className="ml-auto" />
               <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-paper px-3 font-semibold text-ink hover:bg-paper-2 disabled:opacity-50" disabled={!sel.size || bulk.isPending} onClick={bulkAsk}>{tab === 'scheduled' ? 'Mark no-show' : 'Mark as left'}{sel.size ? ` · ${sel.size}` : ''}</button>
             </div>}
-            {tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
+            {view === 'schedule' && canDesk && tab !== 'history' ? <DaySchedule day={day} isToday={isToday} visits={visits} doctors={(d?.doctors ?? []).filter((x: any) => !docFilter || x.id === docFilter)} tab={tab} selectedId={selV?.id ?? null}
+                kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (checkout.includes(v) ? 'tests' : 'done') : 'waiting'}
+                onVisit={setPickV} onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} />
+            : tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
                 onReportsArrive={(o) => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })} freeDays={freeDays}
-                onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => collect.mutate({ c: v.due[0], method: 'cash' })} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
+                onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => collect.mutate({ c: v.due[0], method: 'cash' })} doctorHead={docOptions.length > 2 && <span className="fd-thf"><Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={docOptions} />{docFilter && <button type="button" className="fd-x" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button>}</span>} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
             : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
@@ -231,6 +242,9 @@ export function FrontDesk() {
             {canDesk && tab !== 'history' && <Filmstrip visits={visitsAll} selectedId={selV?.id ?? null} onSelect={setPickV}
               onEnter={(v) => { const s = canSend(v); if (['waiting', 'screened'].includes(v.status) && s.ok) upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} sent in`, 'info'), onError: (e) => toast(errText(e), 'err') }); else if (['waiting', 'screened'].includes(v.status)) toast(s.why, 'info'); }} />}
           </div>
+          {booking && <Modal title="Book" subtitle={`Today · ${booking.startTime}–${booking.endTime}${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId) ? ` · ${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
+            <BookForm session={booking} arriveEarly={cfg?.tenant?.settings?.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); setBooking(null); }} /></Modal>}
+          {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onClose={() => { setApptId(null); qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); }} />}
           {selV && <JourneyPanel key={selV.id} v={selV} order={reportsOpen.find((o) => o.encounterId === selV.encounterId)} screening={screening} inLine={waiting.findIndex((x) => x.id === selV.id) + 1} canDesk={canDesk}
               canSend={canSend} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })} onClose={() => setPickV('')}
               arrangeSlot={<CheckoutList bare visits={[selV]} canDesk={canDesk} canForce={can(perms, 'config.write')} />} />}

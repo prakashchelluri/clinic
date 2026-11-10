@@ -8,7 +8,7 @@ import { Chip, Icon, Num, money } from '../ui';
 import { vitalFields, vitalsText } from '../vitals';
 import '../frontdesk.css';
 
-/** The front desk as each patient's journey: Check-in → Vitals → Doctor → Tests & procedures → Reports → Done. */
+/** The front desk as each patient's journey: Check-in → Initial screening → Doctor → Tests & procedures → Reports → Done. */
 
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -58,7 +58,7 @@ export function SendIn({ ok, why, onClick, small = true }: { ok: boolean; why: s
 }
 
 /** The stage tiles: one ink drop slides and stretches to the chosen stage; a count that goes up pulses once. */
-export function StageStrip({ items, tab, onTab, extra }: { items: [string, string, number, boolean][]; tab: string; onTab: (k: any) => void; extra?: React.ReactNode }) {
+export function StageStrip({ items, tab, onTab, extra }: { items: [string, string, number, boolean, React.ReactNode?][]; tab: string; onTab: (k: any) => void; extra?: React.ReactNode }) {
   const box = useRef<HTMLDivElement>(null); const [drop, setDrop] = useState<{ x: number; w: number } | null>(null);
   useLayoutEffect(() => {
     const el = box.current?.querySelector<HTMLElement>(`[data-k="${tab}"]`);
@@ -74,10 +74,10 @@ export function StageStrip({ items, tab, onTab, extra }: { items: [string, strin
   return (
     <div ref={box} className="fd-tiles mb-3 no-print" role="tablist" aria-label="Stage">
       {drop && <i aria-hidden="true" className="fd-drop" style={{ width: drop.w, transform: `translateX(${drop.x}px)` }} />}
-      {items.map(([k, l, n, hot]) => (
+      {items.map(([k, l, n, hot, sub]) => (
         <button key={`${k}:${pulse[k] ?? 0}`} data-k={k} role="tab" aria-selected={tab === k} className={`fd-tile shrink-0 ${pulse[k] ? 'fd-pulse' : ''}`} onClick={() => onTab(k)}>
           <span className="fd-lbl">{l}</span>
-          <span className={`text-[22px] font-extrabold leading-none tabular-nums ${hot && tab !== k ? 'text-clay' : ''}`}><Num value={n} /></span></button>))}
+          <span className={`text-[22px] font-extrabold leading-none tabular-nums ${hot && tab !== k ? 'text-clay' : ''}`}><Num value={n} /></span>{sub && <span className="fd-sub">{sub}</span>}</button>))}
       {extra}
     </div>);
 }
@@ -116,10 +116,10 @@ export function Filmstrip({ visits, selectedId, onSelect, onEnter }: { visits: a
 }
 
 /** Only what needs the desk, in the order to do it, as one table. Everyone else is a chip at the bottom. */
-export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, withDue, idle, selectedId, onSelect, canSend, onSendIn, onReportsArrive, onCheckIn, onCollect, docName, catName, freeDays }: {
+export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, withDue, idle, selectedId, onSelect, canSend, onSendIn, onReportsArrive, onCheckIn, onCollect, docName, catName, freeDays, doctorHead }: {
   sendable: any[]; arrange: any[]; reportsIn: any[]; reportsLate: any[]; late: any[]; withDue: any[]; idle: { v: any; label: string }[];
   selectedId: string | null; onSelect: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onSendIn: (id: string) => void;
-  onReportsArrive: (o: any) => void; onCheckIn: (a: any) => void; onCollect: (v: any) => void; docName: (id: string | null) => string; catName: (code: string) => string; freeDays: number;
+  onReportsArrive: (o: any) => void; onCheckIn: (a: any) => void; onCollect: (v: any) => void; docName: (id: string | null) => string; catName: (code: string) => string; freeDays: number; doctorHead?: React.ReactNode;
 }) {
   const nav = useNavigate();
   // Send in: the row lifts and leaves first, then the request goes; if it fails the row comes back
@@ -143,11 +143,11 @@ export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, wi
       {total === 0 && <div className="px-5 py-10 text-center"><div className="text-[15px] font-bold">All clear</div><div className="mt-1 text-sm text-muted">Nothing needs the desk right now. New work shows here as it happens.</div></div>}
       {ticks.map((t) => <div key={t.id} className="fd-tick px-5 py-3 text-[14px]" role="status"><Icon name="check" className="h-5 w-5" />Nothing pending · {t.name} leaves this list</div>)}
       {total > 0 && <div className="overflow-x-auto"><table className="fd-table">
-        <thead><tr><th>Token</th><th>Patient</th><th>Visit</th><th>Doctor</th><th>Status</th><th>Time</th><th className="text-right">Action</th></tr></thead>
+        <thead><tr><th>Token</th><th>Patient</th><th>Visit</th><th>{doctorHead ?? 'Doctor'}</th><th>Status</th><th>Time</th><th className="text-right">Action</th></tr></thead>
         <Group title="Send in now" n={sendable.length} tone="sage" hint="in queue order">
           {sendable.map((v) => { const s = canSend(v); const w = minsSince(v.arrivedAt); return (
             <Item key={v.id} token={v.opNumber} tone={v.details?.reportsEncounterId ? 'sage' : ''} p={v.patient} visit={catName(v.category)} doctor={v.doctor ?? 'no doctor picked'} selected={selectedId === v.id} onSelect={() => onSelect(v.id)} wait={w} leaving={leaving.has(v.id)}
-              status={v.details?.reportsEncounterId ? { label: 'Back with reports', tone: 'sage' } : v.details?.screenedAt ? { label: 'Vitals done', tone: 'sky' } : !s.ok && s.why.startsWith('Room') ? { label: 'Room full', tone: 'amber' } : { label: 'Ready', tone: 'sage' }}
+              status={v.details?.reportsEncounterId ? { label: 'Back with reports', tone: 'sage' } : v.details?.screenedAt ? { label: 'Screening done', tone: 'sky' } : !s.ok && s.why.startsWith('Room') ? { label: 'Room full', tone: 'amber' } : { label: 'Ready', tone: 'sage' }}
               time={<span className={w >= WAIT_TARGET_MIN ? 'font-semibold text-amber' : ''}>waiting {w} min</span>}
               action={<SendIn ok={s.ok && !leaving.has(v.id)} why={s.why} onClick={() => send(v.id)} />} />); })}
         </Group>
@@ -234,7 +234,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
 
       <ol className="m-0 list-none p-0">
         <Step i={0} state="done" title="Checked in" meta={`${hhmm(v.arrivedAt)} · ${v.category}`}>{d.complaint && <div className="mt-0.5 text-[12.5px] text-muted">{d.complaint}</div>}</Step>
-        <Step i={1} state={vit[0]} title="Vitals" meta={vit[1]}>{vitals && <div className="mt-0.5 text-[12.5px] text-muted">{vitals}</div>}</Step>
+        <Step i={1} state={vit[0]} title="Initial screening" meta={vit[1]}>{vitals && <div className="mt-0.5 text-[12.5px] text-muted">{vitals}</div>}</Step>
         <Step i={2} state={doc[0]} title="Doctor" meta={doc[1]}>
           {seen && v.rxCount > 0 && <div className="mt-0.5 text-[12.5px] text-muted">{plural(v.rxCount, 'medicine')} · the pharmacy has the Rx</div>}
           {canDesk && waiting && (() => { const s = canSend(v); return <div className="mt-2"><SendIn ok={s.ok} why={s.why} onClick={() => onSendIn(v.id)} /></div>; })()}
