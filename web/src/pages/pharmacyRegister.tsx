@@ -1,8 +1,9 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import { get, post, today, errText } from '../api';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Filter, Skeleton, toast } from '../ui';
+import { Chip, Icon, toast } from '../ui';
+import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 
 const minusDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() - n); return x.toISOString().slice(0, 10); };
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
@@ -11,11 +12,21 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&
 const COLS = ['Date', 'Bill', 'Patient', 'Age / sex', 'Address', 'Prescriber', 'Reg. no.', 'Medicine', 'Class', 'Batch', 'Expiry', 'Qty', 'Returned'];
 const cells = (r: any) => [day(r.at), r.invoiceNo, `${r.patient} (${r.patientNo})`, [r.age, r.sex].filter(Boolean).join(' '), r.address ?? '', r.noRx ? 'NO PRESCRIPTION' : r.doctor ?? '', r.regNo ?? '', r.medicine, r.cls, r.batchNo ?? '', exp(r.expiry), r.qty, r.returned || ''];
 
+const RANGE: FilterDef<any> = { key: 'range', label: 'Dates', icon: 'calendar', initial: '30', options: [{ value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }, { value: '365', label: 'Last year' }, { value: 'custom', label: 'Pick dates' }] };
+const SCHED: FilterDef<any> = { key: 'sched', label: 'Schedule', icon: 'pill', options: [{ value: 'all', label: 'All schedules' }, { value: 'H', label: 'Schedule H' }, { value: 'H1', label: 'Schedule H1' }, { value: 'X', label: 'Schedule X' }] };
+/** Which of the register's cells a column shows, and whether it sorts. */
+const SORTS: Record<number, (r: any) => string | number> = { 0: (r) => r.at, 1: (r) => r.invoiceNo, 2: (r) => String(r.patient).toLowerCase(), 5: (r) => r.doctor ?? '', 7: (r) => String(r.medicine).toLowerCase(), 8: (r) => r.cls, 12: (r) => r.returned ?? 0 };
+const COLUMNS: Col<any>[] = COLS.map((label, k) => ({
+  key: String(k), label, fixed: k === 0, sort: SORTS[k], csv: (r: any) => cells(r)[k],
+  cell: (r: any) => { const c = cells(r)[k]; return k === 8 ? <Chip tone={c === 'H' ? '' : 'clay'}>{c}</Chip> : <span className={k === 5 && r.noRx ? 'font-bold text-rose' : k === 0 || k === 1 || k === 10 ? 'whitespace-nowrap' : ''}>{c}</span>; },
+}));
+
 /** The Schedule H / H1 / X register: built from the bills, nobody types into it. Print or download for an inspector. */
 export function RegisterTab({ clinic, licence }: { clinic: string; licence?: string | null }) {
-  const [range, setRange] = useState<'30' | '90' | '365' | 'custom'>('30');
-  const [from, setFrom] = useState(minusDays(today(), 29)); const [to, setTo] = useState(today());
-  const [cls, setCls] = useState<'all' | 'H' | 'H1' | 'X'>('all');
+  const [sp, setSp] = useSearchParams();
+  const range = filterValue(sp, RANGE), cls = filterValue(sp, SCHED);
+  const from = sp.get('from') ?? minusDays(today(), 29), to = sp.get('to') ?? today();
+  const setDate = (k: 'from' | 'to', v: string) => v && setSp((p) => { const n = new URLSearchParams(p); n.set(k, v); n.delete('p'); return n; }, { replace: true });
   const span = range === 'custom' ? [from, to] : [minusDays(today(), Number(range) - 1), today()];
   const bad = span[0] > span[1];
   const q = useQuery({ queryKey: ['pharmacy', 'register', span[0], span[1], cls], queryFn: () => get(`/pharmacy/schedule-register?from=${span[0]}&to=${span[1]}&cls=${cls}`), enabled: !bad });
@@ -36,21 +47,14 @@ export function RegisterTab({ clinic, licence }: { clinic: string; licence?: str
   };
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }, { value: '365', label: 'Last year' }, { value: 'custom', label: 'Pick dates' }]} />
-        {range === 'custom' && <><input type="date" aria-label="From" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} /><input type="date" aria-label="To" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} /></>}
-        <Filter value={cls} onChange={setCls} options={(['all', 'H', 'H1', 'X'] as const).map((c) => ({ value: c, label: c === 'all' ? 'All schedules' : `Schedule ${c}` }))} />
-        <span className="ml-auto flex gap-2"><button className="btn btn-sm" disabled={!rows.length || bad} onClick={print}><Icon name="print" className="h-3.5 w-3.5" />Print</button><button className="btn btn-sm" disabled={!rows.length || bad} onClick={csv}><Icon name="download" className="h-3.5 w-3.5" />Download</button></span>
-      </div>
-      {bad && <div className="text-sm text-rose">“From” is after “to”.</div>}
       {noRx > 0 && <div className="rounded-[10px] bg-amber-soft px-3.5 py-2 text-sm text-[#6E4D10]">{noRx} entr{noRx === 1 ? 'y was' : 'ies were'} sold with no prescription on file. These drugs need one: check those bills.</div>}
-      <section className="card-flat overflow-hidden">
-        {q.isLoading ? <div className="p-4"><Skeleton rows={5} /></div> : rows.length === 0 ? <Empty icon="pill" title="Nothing sold in this period" hint="Medicines marked Schedule H, H1 or X appear here by themselves when they are billed. Set a medicine's schedule under Settings → Medicines." /> : (
-          <div className="overflow-x-auto"><table className="table min-w-[980px]">
-            <thead><tr>{COLS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-            <tbody>{rows.map((r, i) => <tr key={i}>{cells(r).map((c, k) => <td key={k} className={k === 5 && r.noRx ? 'font-bold text-rose' : k === 8 ? '' : ''}>{k === 8 ? <Chip tone={c === 'H' ? '' : 'clay'}>{c}</Chip> : c}</td>)}</tr>)}</tbody>
-          </table></div>)}
-      </section>
+      <DataTable id="schedule-register" rows={rows.map((r, i) => ({ ...r, _k: i }))} rowKey={(r: any) => String(r._k)} columns={COLUMNS} loading={q.isLoading} exportable={false}
+        sort={{ key: '0', dir: -1 }} filters={[RANGE, SCHED]} search={{ placeholder: 'Find in the register: patient, medicine or bill', text: (r: any) => [r.patient, r.patientNo, r.medicine, r.invoiceNo, r.batchNo] }}
+        empty={{ title: bad ? 'Check the dates' : 'Nothing sold in this period', hint: bad ? '“From” is after “to”.' : "Medicines marked Schedule H, H1 or X appear here by themselves when they are billed. Set a medicine's schedule under Settings → Medicines." }}
+        toolbar={<>
+          {range === 'custom' && <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted"><input type="date" aria-label="From" className={`dt-select ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => setDate('from', e.target.value)} />to<input type="date" aria-label="To" className={`dt-select ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => setDate('to', e.target.value)} /></span>}
+          <span className="order-last ml-auto flex gap-2"><button type="button" className="dt-ghost" disabled={!rows.length || bad} onClick={print}><Icon name="print" className="h-3.5 w-3.5" />Print</button><button type="button" className="dt-ghost" disabled={!rows.length || bad} onClick={csv}><Icon name="download" className="h-3.5 w-3.5" />Download</button></span>
+        </>} />
       <div className="text-xs text-muted">Built from the pharmacy bills, so it cannot be edited. A return shows in the Returned column. Print or download is recorded in the audit log.</div>
     </div>
   );

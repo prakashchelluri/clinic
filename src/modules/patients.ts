@@ -27,13 +27,29 @@ export function patientRoutes(app: FastifyInstance) {
     const where = q
       ? and(eq(patient.tenantId, req.ctx.tenantId), or(ilike(patient.fullName, `%${q}%`), ilike(patient.phone, `${q}%`), ilike(patient.patientNo, `%${q}%`)))
       : eq(patient.tenantId, req.ctx.tenantId);
-    const rows = await tx.select().from(patient).where(where).orderBy(desc(patient.createdAt)).limit(25);
+    // The Patients table pages on the server (?page=): filters for last visit and flags, sort by name or newest; it gets { rows, total }.
+    // Without ?page= it is the quick search other screens use: the newest 25 matches, as a plain list.
+    const pg = z.object({ page: z.coerce.number().int().min(1).optional(), size: z.coerce.number().int().min(1).max(100).default(25), sort: z.enum(['new', 'name', 'name_desc', 'old']).default('new'),
+      seen: z.enum(['', 'month', 'quarter', 'year_plus', 'never']).default(''), flag: z.enum(['', 'vip', 'family', 'careful']).default('') }).parse(req.query);
+    const conds: any[] = [where];
+    const lastVisit = sql`(select max(e.created_at) from encounter e where e.patient_id = ${patient.id} and e.tenant_id = ${patient.tenantId})`;
+    if (pg.seen === 'never') conds.push(sql`${lastVisit} is null`);
+    if (pg.seen === 'month') conds.push(sql`${lastVisit} >= now() - interval '30 days'`);
+    if (pg.seen === 'quarter') conds.push(sql`${lastVisit} >= now() - interval '90 days'`);
+    if (pg.seen === 'year_plus') conds.push(sql`${lastVisit} < now() - interval '365 days'`);
+    if (pg.flag) conds.push(sql`coalesce(${patient.flags} ->> ${pg.flag}, 'false') not in ('false', 'null')`);
+    const order = pg.sort === 'name' ? sql`lower(${patient.fullName}) asc` : pg.sort === 'name_desc' ? sql`lower(${patient.fullName}) desc` : pg.sort === 'old' ? sql`${patient.createdAt} asc` : sql`${patient.createdAt} desc`;
+    const paged = pg.page != null;
+    const rows = await tx.select().from(patient).where(and(...conds)).orderBy(order).limit(paged ? pg.size : 25).offset(paged ? (pg.page! - 1) * pg.size : 0);
     // Two people with one name are told apart by age, last visit and main problem.
     const encs = rows.length ? await tx.select({ patientId: encounter.patientId, at: encounter.createdAt, data: encounter.data }).from(encounter)
       .where(and(eq(encounter.tenantId, req.ctx.tenantId), inArray(encounter.patientId, rows.map((r) => r.id)))).orderBy(desc(encounter.createdAt)) : [];
     const names = (x: any) => (Array.isArray(x) ? x.map((d) => (typeof d === 'string' ? d : d?.name)).filter(Boolean).join(', ') : '');
-    return rows.map((p) => { const e = encs.find((x) => x.patientId === p.id); const d: any = e?.data ?? {};
+    const out = rows.map((p) => { const e = encs.find((x) => x.patientId === p.id); const d: any = e?.data ?? {};
       return { ...p, lastVisitAt: e?.at ?? null, mainProblem: names(d.assessment?.diagnosis) || names(d.complaint?.chief_complaint) || null }; });
+    if (!paged) return out;
+    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(...conds));
+    return { rows: out, total: n };
   });
 
   // Flags: VIP, Family and friends, Handle carefully. The last one cannot be set without a reason; the doctor or owner sets and clears it.

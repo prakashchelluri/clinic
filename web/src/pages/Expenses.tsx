@@ -3,7 +3,8 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter, useAddFromNew } from '../ui';
+import { Chip, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter, useAddFromNew } from '../ui';
+import { DataTable } from '../table';
 
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 type Range = 'today' | '7' | '30' | 'month';
@@ -67,20 +68,27 @@ export function Expenses() {
           {d.byMethod.slice(0, 2).map((m: any, i: number) => <Stat key={m.method} label={'Paid by ' + m.method} value={money(m.total)} delay={80 + i * 40} />)}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 mt-5 items-start">
-          <Section title={<>Entries <span className="text-muted font-normal">· {rows.length}</span></>} delay={120}>
-            {rows.length === 0 ? <Empty icon="wallet" title="No expenses in this period" hint={canWrite ? 'Add one with New at the top.' : undefined} /> : (
-              <div className="overflow-x-auto"><table className="table"><thead><tr><th className="pl-4">Date</th><th>For</th><th>Category</th><th>Paid by</th><th className="text-right">Amount</th><th className="pr-4" /></tr></thead>
-                <tbody>{rows.map((r) => (
-                  <tr key={r.id} className={r.voidedAt ? 'opacity-50' : ''}>
-                    <td className="pl-4 whitespace-nowrap text-muted">{short(r.day)}</td>
-                    <td className="max-w-[260px]"><div className={'truncate ' + (r.voidedAt ? 'line-through' : '')} title={r.description}>{r.description}</div>{(r.enteredByName || r.voidedAt) && <div className="text-xs text-muted truncate">{r.voidedAt ? 'Removed' + (r.voidedReason ? ': ' + r.voidedReason : '') : 'by ' + r.enteredByName}</div>}</td>
-                    <td><Chip>{r.category}</Chip></td><td className="uppercase text-xs text-muted">{r.method}</td>
-                    <td className={'text-right whitespace-nowrap ' + (r.voidedAt ? 'line-through' : '')}>{money(r.amountPaise)}</td>
-                    <td className="pr-4 text-right whitespace-nowrap">{canWrite && !r.voidedAt && <>
-                      <button className="btn btn-ghost btn-icon" aria-label="Edit expense" title="Edit" onClick={() => setEdit({ id: r.id, description: r.description, amount: String(r.amountPaise / 100), method: r.method, category: r.category, day: r.day, note: r.note ?? '' })}><Icon name="edit" /></button>
-                      <button className="btn btn-ghost btn-icon" aria-label="Remove expense" title="Remove" onClick={() => setVoiding({ e: r, reason: '' })}><Icon name="x" /></button></>}</td>
-                  </tr>))}</tbody></table></div>)}
-          </Section>
+          <DataTable
+            id="expenses" exportName={`expenses-${d.from}-to-${d.to}`} rows={rows} rowKey={(r: any) => r.id} sort={{ key: 'day', dir: -1 }}
+            search={{ placeholder: 'Find an expense: what, category or who', text: (r: any) => [r.description, r.category, r.enteredByName, r.note] }}
+            empty={{ title: 'No expenses in this period', hint: canWrite ? 'Add one with New at the top.' : undefined }}
+            filters={[
+              { key: 'cat', label: 'Category', icon: 'list', options: [{ value: '', label: 'All categories' }, ...[...new Set(rows.map((r) => r.category as string))].sort().map((c) => ({ value: c, label: c }))], test: (r: any, v) => !v || r.category === v },
+              { key: 'paid', label: 'Paid by', icon: 'wallet', options: [{ value: '', label: 'Any' }, ...METHODS.map(([m, l]) => ({ value: m, label: l }))], test: (r: any, v) => !v || r.method === v },
+            ]}
+            toggles={[{ key: 'removed', label: 'Show removed', hides: (r: any) => !!r.voidedAt }]}
+            columns={[
+              { key: 'day', label: 'Date', fixed: true, sort: (r: any) => r.day, csv: (r: any) => r.day, cell: (r: any) => <span className="whitespace-nowrap font-semibold">{short(r.day)}</span> },
+              { key: 'for', label: 'For', sort: (r: any) => r.description.toLowerCase(), csv: (r: any) => r.description, cell: (r: any) => (
+                <div className="max-w-[300px]"><div className={'truncate ' + (r.voidedAt ? 'line-through text-muted' : '')} title={r.description}>{r.description}</div>{(r.enteredByName || r.voidedAt) && <div className="truncate text-[12px] text-muted">{r.voidedAt ? 'Removed' + (r.voidedReason ? ': ' + r.voidedReason : '') : 'by ' + r.enteredByName}</div>}</div>) },
+              { key: 'cat', label: 'Category', sort: (r: any) => r.category, csv: (r: any) => r.category, cell: (r: any) => <Chip>{r.category}</Chip> },
+              { key: 'paid', label: 'Paid by', sort: (r: any) => r.method, csv: (r: any) => r.method, cell: (r: any) => <span className="text-[12px] font-semibold uppercase text-muted">{r.method}</span> },
+              { key: 'amount', label: 'Amount', align: 'right', sort: (r: any) => r.amountPaise, csv: (r: any) => (r.amountPaise / 100).toFixed(2), cell: (r: any) => <span className={'whitespace-nowrap font-semibold ' + (r.voidedAt ? 'line-through text-muted' : '')}>{money(r.amountPaise)}</span> },
+              { key: 'act', label: '', fixed: true, align: 'right', cell: (r: any) => canWrite && !r.voidedAt ? <span className="inline-flex whitespace-nowrap">
+                <button className="btn btn-ghost btn-icon" aria-label="Edit expense" title="Edit" onClick={() => setEdit({ id: r.id, description: r.description, amount: String(r.amountPaise / 100), method: r.method, category: r.category, day: r.day, note: r.note ?? '' })}><Icon name="edit" /></button>
+                <button className="btn btn-ghost btn-icon" aria-label="Remove expense" title="Remove" onClick={() => setVoiding({ e: r, reason: '' })}><Icon name="x" /></button></span> : null },
+            ]}
+          />
           <Section title="By category" delay={160}>
             {d.byCategory.length === 0 ? <div className="px-5 py-4 text-sm text-muted">Nothing to show yet.</div> : <div className="p-4 space-y-3">{d.byCategory.map((c: any) => (
               <div key={c.category}><div className="flex justify-between text-sm"><span>{c.category}</span><span className="font-medium">{money(c.total)}</span></div>

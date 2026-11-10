@@ -13,16 +13,23 @@ import { TakePayment } from '../takePayment';
 import { Invoices } from '../invoices';
 import { CoursesCard } from '../courses';
 import { FlagChips, CarefulBanner, FlagEditor, GuardianPick } from '../flags';
+import { DataTable, filterValue, pageOf, type FilterDef } from '../table';
+
+const SEEN: FilterDef<any> = { key: 'seen', label: 'Last visit', icon: 'clock', options: [{ value: '', label: 'Any time' }, { value: 'month', label: 'In the last 30 days' }, { value: 'quarter', label: 'In the last 90 days' }, { value: 'year_plus', label: 'Over a year ago' }, { value: 'never', label: 'Never visited' }] };
+const FLAG: FilterDef<any> = { key: 'flag', label: 'Flag', icon: 'spark', options: [{ value: '', label: 'Any' }, { value: 'vip', label: 'VIP' }, { value: 'family', label: 'Family and friends' }, { value: 'careful', label: 'Handle carefully' }] };
 
 export function Patients() {
   const { id } = useParams(); const nav = useNavigate(); const { perms } = useOutletContext<any>();
   const [q] = usePageSearch('Find a patient: name, phone or ID', !id);
-  const list = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`) });
+  const [sp, setSp] = useSearchParams();
+  const { page, size } = pageOf(sp);
+  const sort = ({ name: sp.get('dir') === 'desc' ? 'name_desc' : 'name', registered: sp.get('dir') === 'desc' ? 'new' : 'old' } as Record<string, string>)[sp.get('sort') ?? ''] ?? 'new';
+  const listQs = new URLSearchParams({ q, page: String(page), size: String(size), sort, seen: filterValue(sp, SEEN), flag: filterValue(sp, FLAG) });
+  const list = useQuery({ queryKey: ['patients', 'table', listQs.toString()], queryFn: () => get(`/patients?${listQs}`), enabled: !id, placeholderData: (prev: any) => prev });
   const [showNew, setShowNew] = useState(false);
   const canMsg = can(perms, 'message.broadcast');
   const [view, setView] = useState<'patients' | 'sent'>('patients'); const [bulk, setBulk] = useState(false);
   useAddFromNew((w) => { if (w === 'message' && canMsg) setBulk(true); });
-  const [sp, setSp] = useSearchParams();
   useEffect(() => { if (sp.get('new')) { setShowNew(true); setSp({}, { replace: true }); } }, [sp]);
   return (
     <div>
@@ -32,17 +39,21 @@ export function Patients() {
           {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
         </PageHeader>}
       {id ? <Timeline key={id} id={id} /> : canMsg && view === 'sent' ? <SentMessages /> : <div className="space-y-3">
-        <Section delay={60}>
-          {list.isLoading ? <Skeleton rows={5} /> : (list.data ?? []).length === 0 ? <Empty icon="user" title="No patients found" /> :
-            (list.data ?? []).map((p: any) => (
-              <button key={p.id} className="row w-full text-left anim-fade-up md:grid md:grid-cols-[auto_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" onClick={() => nav(`/patients/${p.id}`, { viewTransition: true })}>
-                <Avatar name={p.fullName} size="h-8 w-8 text-[11px]" />
-                <div className="min-w-0 flex-1"><div className="text-[13px] font-semibold truncate">{p.fullName} <span className="text-xs text-muted font-normal">{p.ageYears ? `${p.ageYears} ` : ''}{p.sex ?? ''}</span> <FlagChips flags={p.flags} /></div></div>
-                <div className="text-xs text-muted truncate">{p.patientNo} · {p.phone ?? 'no phone'}{p.locality ? ` · ${p.locality}` : ''}</div>
-                <div className="text-xs text-muted truncate">{p.lastVisitAt ? `last visit ${fmtDate(p.lastVisitAt)}` : 'no visit yet'}{p.mainProblem ? ` · ${p.mainProblem}` : ''}</div>
-                <Icon name="chevR" className="h-4 w-4 text-muted/50" />
-              </button>))}
-        </Section>
+        <DataTable
+          id="patients" exportName={`patients-${new Date().toISOString().slice(0, 10)}`} rows={list.data?.rows ?? []} rowKey={(p: any) => p.id}
+          server={{ total: list.data?.total ?? 0 }} loading={list.isLoading} onRow={(p: any) => nav(`/patients/${p.id}`, { viewTransition: true })}
+          search={{ placeholder: 'Find a patient: name, phone or ID' }} sort={{ key: 'registered', dir: -1 }} filters={[SEEN, FLAG]}
+          empty={{ title: 'No patients found', hint: q ? 'Try part of the name, the phone number or the patient number.' : undefined }}
+          columns={[
+            { key: 'name', label: 'Patient', fixed: true, sort: (p: any) => p.fullName, csv: (p: any) => p.fullName, cell: (p: any) => (
+              <div className="flex min-w-[200px] items-center gap-2.5"><Avatar name={p.fullName} size="h-[30px] w-[30px] text-[11px]" />
+                <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5 font-bold">{p.fullName}<FlagChips flags={p.flags} /></div><div className="text-[12px] text-muted">{[p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</div></div></div>) },
+            { key: 'phone', label: 'Phone', csv: (p: any) => p.phone, cell: (p: any) => p.phone ? <span className="whitespace-nowrap font-semibold tabular-nums text-ink-2">{p.phone}</span> : <span className="text-muted">—</span> },
+            { key: 'locality', label: 'Area', hideOnPhone: true, csv: (p: any) => p.locality, cell: (p: any) => p.locality ?? <span className="text-muted">—</span> },
+            { key: 'last', label: 'Last visit', csv: (p: any) => p.lastVisitAt?.slice(0, 10), cell: (p: any) => p.lastVisitAt ? <div className="whitespace-nowrap"><div className="font-semibold">{fmtDate(p.lastVisitAt)}</div>{p.mainProblem && <div className="max-w-[260px] truncate text-[12px] text-muted" title={p.mainProblem}>{p.mainProblem}</div>}</div> : <span className="text-muted">No visit yet</span> },
+            { key: 'registered', label: 'Registered', sort: (p: any) => p.createdAt, csv: (p: any) => p.createdAt?.slice(0, 10), cell: (p: any) => <span className="whitespace-nowrap text-muted">{fmtDate(p.createdAt)}</span> },
+          ]}
+        />
       </div>}
       {bulk && <BroadcastDialog onClose={() => setBulk(false)} onSent={() => setView('sent')} />}
       {showNew && <NewPatient onClose={(p) => { setShowNew(false); if (p) { qc.invalidateQueries({ queryKey: ['patients'] }); nav(`/patients/${p.id}`); } }} />}

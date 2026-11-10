@@ -3,7 +3,8 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch, useAddFromNew } from '../ui';
+import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, useAddFromNew } from '../ui';
+import { DataTable, type Col, type FilterDef } from '../table';
 
 type Go = (next: Record<string, string>) => void;
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
@@ -66,8 +67,6 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const { perms } = useOutletContext<any>();
   const item = sp.get('item'); const count = sp.get('count');
   const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 30000 });
-  const [filter, setFilter] = useState<string>(sp.get('show') ?? 'all'); const [find] = usePageSearch('Find a medicine', !item && !count);
-  useEffect(() => { const v = sp.get('show'); if (v) setFilter(v); }, [sp]);
   const [review, setReview] = useState<string | null>(null);
   const countOne = useMutation({ mutationFn: (medicineId: string) => post('/stock/counts', { medicineId }), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
     onError: (e: any) => { if (e?.body?.code === 'COUNT_OPEN') { toast('A count is already open: finish it first', 'info'); go({ tab: 'stock', count: e.body.id }); } else toast(errText(e), 'err'); } });
@@ -75,9 +74,20 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   if (count) return <CountView id={count} go={go} />;
   if (q.isLoading || !q.data) return <Skeleton rows={6} />;
   const d = q.data; const t = d.tiles;
-  const rows = d.items.filter((i: any) => (filter === 'all' || i.status === filter || (filter === 'low' && i.status === 'out')) && (!find.trim() || i.name.toLowerCase().includes(find.trim().toLowerCase())));
-  const n = (s: string) => d.items.filter((i: any) => i.status === s).length;
-  const chips: [string, string, number][] = [['all', 'All', d.items.length], ['low', 'Running low', n('low') + n('out')], ['out', 'Out of stock', n('out')], ['expiring', 'Expiring', n('expiring')]];
+  const SHOW: FilterDef<any> = { key: 'show', label: 'Status', icon: 'filter', options: [{ value: 'all', label: 'All' }, { value: 'low', label: 'Running low' }, { value: 'out', label: 'Out of stock' }, { value: 'expiring', label: 'Expiring' }],
+    test: (i, v) => v === 'all' || i.status === v || (v === 'low' && i.status === 'out') };
+  const columns: Col<any>[] = [
+    { key: 'name', label: 'Medicine', fixed: true, sort: (i) => i.name.toLowerCase(), csv: (i) => i.name, cell: (i) => <div className="flex min-w-[220px] items-center gap-3"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${i.onHand <= 0 ? 'bg-rose-soft text-rose' : 'bg-clay-soft text-clay-ink'}`}><Icon name="pill" className="h-3.5 w-3.5" /></span>
+      <span><b className="block">{i.name}</b><span className="text-[12px] text-muted">{['tab', 'cap'].includes(i.form) ? `strip of ${i.packSize}` : i.form ?? ''} · MRP {money(i.mrpPaise)}{i.free90 ? ` · ${i.free90} free in 90 days` : ''}</span></span></div> },
+    { key: 'onhand', label: 'On hand', sort: (i) => i.onHand, csv: (i) => i.onHand, cell: (i) => <div className="font-semibold"><span className="inline-flex items-center gap-3"><span className="h-1.5 w-24 overflow-hidden rounded-full bg-paper-2" aria-hidden><span className={`bar-grow block h-full rounded-full ${i.onHand <= 0 ? 'bg-rose' : i.onHand <= i.reorderLevel ? 'bg-[#E39A1D]' : 'bg-clay'}`} style={{ width: `${Math.max(i.onHand > 0 ? 4 : 0, Math.min(100, (i.onHand / Math.max(1, i.reorderLevel * 3)) * 100))}%` }} /></span><span className={`w-10 ${i.onHand <= 0 ? 'text-rose' : i.onHand <= i.reorderLevel ? 'text-amber' : ''}`}>{i.onHand}</span></span>{i.expired > 0 && <div className="text-[12px] font-normal text-rose">+{i.expired} expired</div>}</div> },
+    { key: 'reorder', label: 'Reorder at', align: 'right', sort: (i) => i.reorderLevel, csv: (i) => i.reorderLevel, cell: (i) => i.reorderLevel },
+    { key: 'batches', label: 'Batches', align: 'right', hideOnPhone: true, sort: (i) => i.batches, csv: (i) => i.batches, cell: (i) => i.batches },
+    { key: 'next', label: 'Next out', sort: (i) => i.nearestExpiry ?? '9999', csv: (i) => i.nearestExpiry, cell: (i) => i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">exp {exp(i.nearestExpiry)}</Chip> : <span className="text-muted">exp {exp(i.nearestExpiry)}</span>) : '—' },
+    { key: 'value', label: 'Cost value', align: 'right', sort: (i) => i.costValuePaise, csv: (i) => (i.costValuePaise / 100).toFixed(2), cell: (i) => money(i.costValuePaise) },
+    { key: 'act', label: '', fixed: true, align: 'right', className: 'dt-act', cell: (i) => <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+      {i.onHand + i.expired > 0 && <button type="button" className="dt-ghost" disabled={countOne.isPending} title="Count this medicine on the shelf" onClick={() => countOne.mutate(i.id)}><Icon name="edit" className="h-3.5 w-3.5" />Count</button>}
+      {can(perms, 'stock.write') && <button type="button" className={`dt-ghost ${i.status === 'low' || i.status === 'out' ? '!border-clay !text-clay' : ''}`} onClick={() => go({ tab: 'orders', order: 'new', med: i.id, ...(i.vendorId ? { vendor: i.vendorId } : {}) })}><Icon name="plus" className="h-3.5 w-3.5" />Reorder</button>}</div> },
+  ];
   return (
     <div className="space-y-4">
       {d.reviews.length > 0 && <div className="card !p-0 overflow-x-auto anim-fade-up">
@@ -89,24 +99,10 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
             <td className="text-right"><button className="btn btn-sm btn-primary" onClick={() => setReview(r.id)}>Review</button></td></tr>)}</tbody></table>
       </div>}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Filter value={filter} onChange={setFilter} options={chips.map(([value, label, count]) => ({ value, label, count }))} />
-        {t.count && <button type="button" className="ml-auto text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>}
-      </div>
-
-      <div className="card !p-0 overflow-x-auto">
-        {rows.length === 0 ? <Empty icon="pill" title="Nothing here" /> : <table className="table min-w-[880px]"><thead><tr><th>Medicine</th><th>On hand</th><th className="!text-right">Reorder at</th><th className="!text-right">Batches</th><th>Next out</th><th className="!text-right">Cost value</th><th className="!text-right">Actions</th></tr></thead>
-          <tbody>{rows.map((i: any) => <tr key={i.id} className="cursor-pointer hover:bg-surface-2" onClick={() => go({ tab: 'stock', item: i.id })}>
-            <td><div className="flex items-center gap-3"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${i.onHand <= 0 ? 'bg-rose-soft text-rose' : 'bg-clay-soft text-clay-ink'}`}><Icon name="pill" className="h-3.5 w-3.5" /></span>
-              <span><button className="font-semibold text-left hover:underline" onClick={(e) => { e.stopPropagation(); go({ tab: 'stock', item: i.id }); }}>{i.name}</button><div className="text-xs text-muted">{['tab', 'cap'].includes(i.form) ? `strip of ${i.packSize}` : i.form ?? ''} · MRP {money(i.mrpPaise)}{i.free90 ? ` · ${i.free90} free in 90 days` : ''}</div></span></div></td>
-            <td className="font-semibold"><span className="inline-flex items-center gap-3"><span className="h-1.5 w-24 overflow-hidden rounded-full bg-paper-2" aria-hidden><span className={`bar-grow block h-full rounded-full ${i.onHand <= 0 ? 'bg-rose' : i.onHand <= i.reorderLevel ? 'bg-[#E39A1D]' : 'bg-clay'}`} style={{ width: `${Math.max(i.onHand > 0 ? 4 : 0, Math.min(100, (i.onHand / Math.max(1, i.reorderLevel * 3)) * 100))}%` }} /></span><span className={`w-10 ${i.onHand <= 0 ? 'text-rose' : i.onHand <= i.reorderLevel ? 'text-amber' : ''}`}>{i.onHand}</span></span>{i.expired > 0 && <div className="text-xs text-rose font-normal">+{i.expired} expired</div>}</td>
-            <td className="text-right">{i.reorderLevel}</td><td className="text-right">{i.batches}</td>
-            <td>{i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">exp {exp(i.nearestExpiry)}</Chip> : <span className="text-muted">exp {exp(i.nearestExpiry)}</span>) : '—'}</td><td className="text-right">{money(i.costValuePaise)}</td>
-            <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-              {i.onHand + i.expired > 0 && <button type="button" className="btn btn-sm btn-ghost" disabled={countOne.isPending} title="Count this medicine on the shelf" onClick={() => countOne.mutate(i.id)}><Icon name="edit" className="h-3.5 w-3.5" />Count</button>}
-              {can(perms, 'stock.write') && <button type="button" className={`btn btn-sm ml-1 ${i.status === 'low' || i.status === 'out' ? 'btn-primary' : ''}`} onClick={() => go({ tab: 'orders', order: 'new', med: i.id, ...(i.vendorId ? { vendor: i.vendorId } : {}) })}><Icon name="plus" className="h-3.5 w-3.5" />Reorder</button>}
-            </td></tr>)}</tbody></table>}
-      </div>
+      <DataTable id="inventory-stock" exportName={`stock-${today()}`} rows={d.items} rowKey={(i: any) => i.id} columns={columns} sort={{ key: 'name' }}
+        onRow={(i: any) => go({ tab: 'stock', item: i.id })} filters={[SHOW]} search={{ placeholder: 'Find a medicine', text: (i: any) => [i.name] }}
+        empty={{ title: 'No medicines yet', hint: 'Add medicines under Settings → Medicines, then receive a delivery.' }}
+        toolbar={t.count && <button type="button" className="text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>} />
       {review && <DecisionDialog id={review} onClose={() => setReview(null)} />}
     </div>
   );
@@ -379,18 +375,19 @@ function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
               {r.status === 'open' && <button className="btn btn-sm btn-ghost" onClick={async () => { if (await ask({ title: `Cancel ${r.docNo}?`, confirmLabel: 'Cancel order', cancelLabel: 'Keep', tone: 'danger' })) cancel.mutate(r.id); }}>Cancel</button>}
               <button className="btn btn-sm btn-primary" onClick={() => go({ tab: 'orders', receive: r.id })}><Icon name="inbox" className="h-3.5 w-3.5" />Receive</button></>}
           </div>
-        </div>; })}</div> : <div className="card !p-0 overflow-x-auto">
-        {docs.isLoading ? <div className="p-5"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="inbox" title={kind === 'order' ? 'No purchase orders yet' : kind === 'receipt' ? 'No deliveries yet' : 'No returns yet'} /> : (
-          <table className="table min-w-[760px]"><thead><tr><th>{kind === 'order' ? 'Order' : kind === 'receipt' ? 'Delivery' : 'Return'}</th><th>Date</th><th>Vendor</th><th>{kind === 'receipt' ? 'Bill' : kind === 'order' ? 'Deliver by' : 'Reason'}</th><th>Items</th><th className="!text-right">{kind === 'return' ? 'Credit' : 'Amount'}</th><th>Status</th><th></th></tr></thead>
-            <tbody>{rows.map((r) => <tr key={r.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpen(r.id)}>
-              <td className="font-semibold">{r.docNo}</td><td className="whitespace-nowrap">{fmtDate(r.createdAt)}</td><td>{r.vendor ?? 'Opening stock'}</td><td>{kind === 'receipt' ? r.billNo ?? '—' : kind === 'order' ? (r.dueDate ? fmtDate(r.dueDate) : '—') : r.note}</td>
-              <td className="text-sm">{r.lines.map((l: any) => l.name).slice(0, 2).join(', ')}{r.lines.length > 2 ? ` +${r.lines.length - 2}` : ''}</td>
-              <td className="text-right">{money(r.lines.reduce((n: number, l: any) => n + (l.amountPaise ?? l.creditPaise ?? 0), 0))}</td>
-              <td><Chip tone={tone(r.status)}>{label[r.status] ?? r.status}</Chip></td>
-              <td className="text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>{kind === 'order' && ['open', 'part'].includes(r.status) && can(perms, 'stock.write') && <>
-                {r.status === 'open' && <button className="btn btn-sm btn-ghost" onClick={async () => { if (await ask({ title: `Cancel ${r.docNo}?`, confirmLabel: 'Cancel order', cancelLabel: 'Keep', tone: 'danger' })) cancel.mutate(r.id); }}>Cancel</button>}
-                <button className="btn btn-sm btn-primary" onClick={() => go({ tab: 'orders', receive: r.id })}>Receive</button></>}</td></tr>)}</tbody></table>)}
-      </div>}
+        </div>; })}</div> : <DataTable id={`inventory-${kind}`} exportName={`${kind === 'receipt' ? 'deliveries' : kind === 'return' ? 'returns' : 'orders'}-${today()}`} rows={rows} rowKey={(r: any) => r.id}
+        loading={docs.isLoading} onRow={(r: any) => setOpen(r.id)} sort={{ key: 'date', dir: -1 }} search={{ placeholder: kind === 'receipt' ? 'Find a delivery: number, vendor or bill' : 'Find a return: number or vendor', text: (r: any) => [r.docNo, r.vendor, r.billNo, ...r.lines.map((l: any) => l.name)] }}
+        filters={[{ key: 'vendor', label: 'Vendor', icon: 'users', options: [{ value: '', label: 'All vendors' }, ...[...new Set(rows.map((r) => r.vendor ?? 'Opening stock'))].sort().map((v) => ({ value: v, label: v }))], test: (r: any, v) => !v || (r.vendor ?? 'Opening stock') === v }]}
+        empty={{ title: kind === 'order' ? 'No purchase orders yet' : kind === 'receipt' ? 'No deliveries yet' : 'No returns yet' }}
+        columns={[
+          { key: 'doc', label: kind === 'order' ? 'Order' : kind === 'receipt' ? 'Delivery' : 'Return', fixed: true, sort: (r: any) => r.docNo, csv: (r: any) => r.docNo, cell: (r: any) => <span className="font-bold">{r.docNo}</span> },
+          { key: 'date', label: 'Date', sort: (r: any) => r.createdAt, csv: (r: any) => r.createdAt?.slice(0, 10), cell: (r: any) => <span className="whitespace-nowrap">{fmtDate(r.createdAt)}</span> },
+          { key: 'vendor', label: 'Vendor', sort: (r: any) => r.vendor ?? '', csv: (r: any) => r.vendor ?? 'Opening stock', cell: (r: any) => r.vendor ?? 'Opening stock' },
+          { key: 'ref', label: kind === 'receipt' ? 'Bill' : kind === 'order' ? 'Deliver by' : 'Reason', csv: (r: any) => kind === 'receipt' ? r.billNo : kind === 'order' ? r.dueDate : r.note, cell: (r: any) => kind === 'receipt' ? r.billNo ?? '—' : kind === 'order' ? (r.dueDate ? fmtDate(r.dueDate) : '—') : r.note },
+          { key: 'items', label: 'Items', hideOnPhone: true, csv: (r: any) => r.lines.map((l: any) => l.name).join('; '), cell: (r: any) => <span className="text-[13px]">{r.lines.map((l: any) => l.name).slice(0, 2).join(', ')}{r.lines.length > 2 ? ` +${r.lines.length - 2}` : ''}</span> },
+          { key: 'amount', label: kind === 'return' ? 'Credit' : 'Amount', align: 'right', sort: (r: any) => r.lines.reduce((n: number, l: any) => n + (l.amountPaise ?? l.creditPaise ?? 0), 0), csv: (r: any) => (r.lines.reduce((n: number, l: any) => n + (l.amountPaise ?? l.creditPaise ?? 0), 0) / 100).toFixed(2), cell: (r: any) => <span className="font-semibold">{money(r.lines.reduce((n: number, l: any) => n + (l.amountPaise ?? l.creditPaise ?? 0), 0))}</span> },
+          { key: 'status', label: 'Status', sort: (r: any) => r.status, csv: (r: any) => label[r.status] ?? r.status, cell: (r: any) => <Chip tone={tone(r.status)}>{label[r.status] ?? r.status}</Chip> },
+        ]} />}
       {open && (kind === 'receipt' ? <DecisionDialog id={open} onClose={() => setOpen(null)} /> : <DocDialog id={open} onClose={() => setOpen(null)} />)}
     </div>
   );

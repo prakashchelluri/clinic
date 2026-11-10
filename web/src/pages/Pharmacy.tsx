@@ -7,6 +7,7 @@ import { openPrint } from '../printPreview';
 import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
+import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 
 type Tab = 'counter' | 'bills' | 'register';
 const INV: string[] = ['stock', 'batches', 'orders', 'vendors'];
@@ -41,7 +42,7 @@ export function Pharmacy() {
         <Segmented<Tab> value={tab} onChange={(v) => go({ tab: v })} options={tabs} />
       </div>
       {tab === 'counter' && <Counter sel={sp.get('rx')} pick={(rx) => go(rx ? { tab: 'counter', rx } : { tab: 'counter' })} />}
-      {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => go(bill ? { tab: 'bills', bill } : { tab: 'bills' })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
+      {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => setSp((p) => { const n = new URLSearchParams(p); bill ? n.set('bill', bill) : n.delete('bill'); return n; })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
       {tab === 'register' && <RegisterTab clinic={cfg?.tenant?.name ?? ''} licence={cfg?.tenant?.settings?.print?.drugLicence ?? cfg?.tenant?.settings?.drugLicence} />}
     </div>
   );
@@ -407,35 +408,41 @@ function PayDialog({ total, patient, build, onClose, onDone }: { total: number; 
 
 const minusDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() - n); return x.toISOString().slice(0, 10); };
 
+const RANGE: FilterDef<any> = { key: 'range', label: 'Dates', icon: 'calendar', initial: 'today', options: [{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'week', label: 'Last 7 days' }, { value: 'custom', label: 'Pick dates' }] };
+const PAID: FilterDef<any> = { key: 'paid', label: 'Paid by', icon: 'wallet', options: [{ value: '', label: 'Any' }, { value: 'cash', label: 'Cash' }, { value: 'upi', label: 'UPI' }, { value: 'card', label: 'Card' }, { value: 'split', label: 'Split' }], test: (r, v) => !v || r.method === v };
+
 function Bills({ sel, pick, onIssue }: { sel: string | null; pick: (id: string | null) => void; onIssue: (rx: string) => void }) {
-  const [range, setRange] = useState<'today' | 'yesterday' | 'week' | 'custom'>('today');
-  const [from, setFrom] = useState(today()); const [to, setTo] = useState(today()); const [q] = usePageSearch('Find a bill: number, patient or phone');
+  const [sp, setSp] = useSearchParams();
+  const range = filterValue(sp, RANGE); const from = sp.get('from') ?? today(), to = sp.get('to') ?? today();
+  const [q] = usePageSearch('Find a bill: number, patient or phone');
   const span = range === 'today' ? [today(), today()] : range === 'yesterday' ? [minusDays(today(), 1), minusDays(today(), 1)] : range === 'week' ? [minusDays(today(), 6), today()] : [from, to];
   const bad = span[0] > span[1];
+  const setDate = (k: 'from' | 'to', v: string) => v && setSp((p) => { const n = new URLSearchParams(p); n.set(k, v); n.delete('p'); return n; }, { replace: true });
   const list = useQuery({ queryKey: ['pharmacy', 'bills', span[0], span[1], q], queryFn: () => get(`/pharmacy/bills?from=${span[0]}&to=${span[1]}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`), enabled: !bad });
   const t = list.data?.totals; const rows: any[] = list.data?.rows ?? [];
+  const columns: Col<any>[] = [
+    { key: 'bill', label: 'Bill', fixed: true, sort: (r) => r.invoiceNo, csv: (r) => r.invoiceNo, cell: (r) => <span className="whitespace-nowrap font-bold">{r.invoiceNo}</span> },
+    { key: 'time', label: 'Time', sort: (r) => r.at, csv: (r) => r.at, cell: (r) => <span className="whitespace-nowrap text-muted">{range === 'today' ? fmtTime(r.at) : `${fmtDate(r.at)} ${fmtTime(r.at)}`}</span> },
+    { key: 'patient', label: 'Patient', sort: (r) => r.patient.fullName.toLowerCase(), csv: (r) => r.patient.fullName, cell: (r) => <div><div className="font-semibold">{r.patient.fullName}</div><div className="text-[12px] text-muted">{r.encounterId ? `Rx ${r.doctor ?? ''}` : 'Walk-in · no prescription'}</div></div> },
+    { key: 'items', label: 'Items', sort: (r) => r.items, csv: (r) => r.items, cell: (r) => <span className="text-[13px]">{r.items} item{r.items === 1 ? '' : 's'}{r.balance.length > 0 && <span className="ml-1.5 text-[12px] text-muted">· {r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)} left on Rx</span>}{r.notIssued > 0 && <span className="ml-1.5 text-[12px] text-muted">· {r.notIssued} not from us</span>}</span> },
+    { key: 'amount', label: 'Amount', align: 'right', sort: (r) => r.totalPaise, csv: (r) => (r.totalPaise / 100).toFixed(2), cell: (r) => <div className="whitespace-nowrap font-semibold">{money(r.totalPaise)}{r.refundPaise > 0 && <div className="text-[12px] text-rose">− {money(r.refundPaise)}</div>}</div> },
+    { key: 'paid', label: 'Paid by', sort: (r) => r.method, csv: (r) => r.method, cell: (r) => <span className="text-[12px] font-semibold uppercase text-muted">{r.method === 'split' ? r.payments.map((p: any) => p.method).join(' + ') : r.method}</span> },
+  ];
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'week', label: 'Last 7 days' }, { value: 'custom', label: 'Pick dates' }]} />
-        {range === 'custom' && <><input type="date" aria-label="From" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} /><span className="text-sm text-muted">to</span><input type="date" aria-label="To" className={`input !w-auto ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />{bad && <span className="text-xs text-rose">“From” is after “to”.</span>}</>}
-      </div>
       {t && <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[['Bills', money(t.total - t.refunds), `${t.count} bills${t.returns ? ` · ${t.returns} return${t.returns === 1 ? '' : 's'}` : ''}`], ['Cash in drawer should be', money(t.cash ?? 0), t.refunds ? `after ${money(t.refunds)} refunds` : 'cash payments'], ['UPI', money(t.upi ?? 0), ''], ['Card', money(t.card ?? 0), ''],
           ['Bought elsewhere or not at all', `${list.data.rx.notBought} of ${list.data.rx.total}`, 'prescriptions today · not a task, for the doctor to know']].map(([l, v, s]) => <div key={l} className="card !p-4"><div className="text-[12px] font-medium text-muted">{l}</div><div className="text-[24px] font-semibold tracking-tight mt-1.5">{v}</div>{s && <div className="text-xs text-muted mt-0.5">{s}</div>}</div>)}
       </div>}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-start">
-        <div className={`card !p-0 overflow-x-auto ${sel ? 'hidden lg:block' : ''}`}>
-          {list.isLoading ? <div className="p-5"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="pill" title="No bills in this range" /> : (
-            <table className="table min-w-[640px]"><thead><tr><th>Bill</th><th>Time</th><th>Patient</th><th>Items</th><th className="!text-right">Amount</th><th>Paid by</th></tr></thead>
-              <tbody>{rows.map((r) => (
-                <tr key={r.id} onClick={() => pick(r.id)} className={`cursor-pointer ${sel === r.id ? 'bg-paper-2' : 'hover:bg-surface-2'}`}>
-                  <td><button className="font-semibold hover:underline" onClick={(e) => { e.stopPropagation(); pick(r.id); }}>{r.invoiceNo}</button></td><td className="text-muted whitespace-nowrap">{range === 'today' ? fmtTime(r.at) : `${fmtDate(r.at)} ${fmtTime(r.at)}`}</td>
-                  <td><div className="font-medium">{r.patient.fullName}</div><div className="text-xs text-muted">{r.encounterId ? `Rx ${r.doctor ?? ''}` : 'Walk-in · no prescription'}</div></td>
-                  <td className="text-sm">{r.items} item{r.items === 1 ? '' : 's'}{r.balance.length > 0 && <span className="ml-1.5 text-xs text-muted">· {r.balance.map((b: any) => b.left).reduce((a: number, b: number) => a + b, 0)} left on Rx</span>}{r.notIssued > 0 && <span className="ml-1.5 text-xs text-muted">· {r.notIssued} not from us</span>}</td>
-                  <td className="text-right font-semibold">{money(r.totalPaise)}{r.refundPaise > 0 && <div className="text-xs text-rose">− {money(r.refundPaise)}</div>}</td>
-                  <td className="text-sm uppercase text-muted">{r.method === 'split' ? r.payments.map((p: any) => p.method).join(' + ') : r.method}</td>
-                </tr>))}</tbody></table>)}
+        <div className={sel ? 'hidden lg:block' : ''}>
+          <DataTable id="pharmacy-bills" exportName={`pharmacy-bills-${span[0]}-to-${span[1]}`} rows={rows} rowKey={(r) => r.id} columns={columns}
+            loading={list.isLoading} onRow={(r) => pick(r.id)} selected={sel} sort={{ key: 'time', dir: -1 }}
+            search={{ placeholder: 'Find a bill: number, patient or phone' }} filters={[RANGE, PAID]}
+            empty={{ title: bad ? 'Check the dates' : 'No bills in this range', hint: bad ? '“From” is after “to”.' : undefined }}
+            toolbar={range === 'custom' && <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted">
+              <input type="date" aria-label="From" className={`dt-select ${bad ? '!border-rose' : ''}`} value={from} onChange={(e) => setDate('from', e.target.value)} />to
+              <input type="date" aria-label="To" className={`dt-select ${bad ? '!border-rose' : ''}`} value={to} onChange={(e) => setDate('to', e.target.value)} /></span>} />
         </div>
         <div className={sel ? '' : 'hidden lg:block'}>{sel ? <BillDetail key={sel} id={sel} onClose={() => pick(null)} onIssue={onIssue} /> : <div className="card text-sm text-muted text-center py-10">Pick a bill to reprint it, issue the rest of a prescription, or take items back.</div>}</div>
       </div>

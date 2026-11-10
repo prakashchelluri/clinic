@@ -9,15 +9,19 @@ export type Col<T> = {
   sort?: (r: T) => string | number; csv?: (r: T) => string | number | null | undefined;
   align?: 'right'; className?: string; hideOnPhone?: boolean; fixed?: boolean; // fixed: never offered in Columns
 };
-/** A filter: options[0] means "no filter"; `initial` is where it starts (and where Reset returns). */
-export type FilterDef<T> = { key: string; label: string; icon?: string; options: { value: string; label: string }[]; test: (r: T, v: string) => boolean; initial?: string };
+/** A filter: options[0] means "no filter"; `initial` is where it starts (and where Reset returns).
+ *  Without `test` the server applies it: the page reads the value with filterValue() and fetches; the menu then shows no counts. */
+export type FilterDef<T> = { key: string; label: string; icon?: string; options: { value: string; label: string }[]; test?: (r: T, v: string) => boolean; initial?: string };
 /** A "show the hidden ones" switch: while off, rows it `hides` are left out. */
 export type ToggleDef<T> = { key: string; label: string; hides: (r: T) => boolean };
 
 type Props<T> = {
   id: string; rows: T[]; rowKey: (r: T) => string; columns: Col<T>[];
   filters?: FilterDef<T>[]; toggles?: ToggleDef<T>[];
-  search?: { placeholder: string; text: (r: T) => (string | null | undefined)[] };
+  search?: { placeholder: string; text?: (r: T) => (string | null | undefined)[] }; // no text: the page searches on the server
+  onRow?: (r: T) => void; selected?: string | null; // a click on the row (not on its buttons); the row shown open beside the table
+  toolbar?: ReactNode; exportable?: boolean; // extra controls after the filters (date pickers); false: the page has its own export
+  server?: { total: number }; // rows are this page only; the page fetches with pageOf() and filterValue()
   sort?: { key: string; dir?: 1 | -1 };
   tabs?: { value: string; label: string; count?: number }[]; tab?: string; onTab?: (v: string) => void;
   bulk?: (picked: T[], clear: () => void) => ReactNode;
@@ -27,6 +31,10 @@ type Props<T> = {
 
 const squash = (s: unknown) => String(s ?? '').toLowerCase().replace(/[\s-]/g, '');
 const SIZES = [10, 25, 50];
+/** What a filter is set to, for a page that applies it on the server. */
+export const filterValue = (sp: URLSearchParams, f: FilterDef<any>) => sp.get(f.key) ?? f.initial ?? f.options[0].value;
+/** The page and page size in the address, for a page that pages on the server. */
+export const pageOf = (sp: URLSearchParams, size = 25) => ({ page: Math.max(1, Number(sp.get('p')) || 1), size: SIZES.includes(Number(sp.get('n'))) ? Number(sp.get('n')) : size });
 const readHidden = (id: string): string[] => { try { return JSON.parse(localStorage.getItem(`dt-cols:${id}`) ?? '[]'); } catch { return []; } };
 
 /** The app's one list table: tabs, filters, sort, pages, selection, Columns and Export.
@@ -55,16 +63,16 @@ export function DataTable<T>(p: Props<T>) {
   const firstTab = useRef(true);
   useEffect(() => { if (firstTab.current) { firstTab.current = false; return; } if (sp.has('p')) write({}); }, [p.tab]);
 
-  const searched = useMemo(() => { const s = squash(q); return !s || !p.search ? p.rows : p.rows.filter((r) => p.search!.text(r).some((t) => squash(t).includes(s))); }, [p.rows, q]);
+  const searched = useMemo(() => { const s = squash(q); return !s || !p.search?.text || p.server ? p.rows : p.rows.filter((r) => p.search!.text!(r).some((t) => squash(t).includes(s))); }, [p.rows, q]);
   const shown = searched.filter((r) => toggles.every((t) => tv(t) || !t.hides(r)));
-  const passes = (r: T, skip?: string) => filters.every((f) => f.key === skip || f.test(r, fv(f)));
+  const passes = (r: T, skip?: string) => filters.every((f) => f.key === skip || !f.test || f.test(r, fv(f)));
   const col = p.columns.find((c) => c.key === sortKey && c.sort);
   const list = shown.filter((r) => passes(r));
-  if (col) list.sort((a, b) => { const x = col.sort!(a), y = col.sort!(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
-  const total = list.length, pages = Math.max(1, Math.ceil(total / size));
+  if (col && !p.server) list.sort((a, b) => { const x = col.sort!(a), y = col.sort!(b); return (x < y ? -1 : x > y ? 1 : 0) * dir; });
+  const total = p.server ? p.server.total : list.length, pages = Math.max(1, Math.ceil(total / size));
   const page = Math.min(Math.max(1, Number(sp.get('p')) || 1), pages);
-  const slice = list.slice((page - 1) * size, page * size);
-  const hiddenByFilters = shown.length - total;
+  const slice = p.server ? list : list.slice((page - 1) * size, page * size);
+  const hiddenByFilters = p.server ? 0 : shown.length - total;
   const cols = p.columns.filter((c) => c.fixed || !hidden.includes(c.key));
   const picked = p.rows.filter((r) => sel.has(p.rowKey(r)));
   const allOn = slice.length > 0 && slice.every((r) => sel.has(p.rowKey(r)));
@@ -93,7 +101,7 @@ export function DataTable<T>(p: Props<T>) {
 
       {picked.length > 0 && p.bulk ? (
         <div className="dt-bulk"><b>{picked.length} selected</b>{p.bulk(picked, () => setSel(new Set()))}<div className="flex-1" /><button type="button" className="dt-link" onClick={() => setSel(new Set())}>Clear selection</button></div>
-      ) : (filters.length > 0 || toggles.length > 0 || offerable.length > 0) && (
+      ) : (filters.length > 0 || toggles.length > 0 || offerable.length > 0 || p.toolbar) && (
         <div className="dt-tool">
           {filters.map((f) => {
             const v = fv(f), set = v !== f.options[0].value, cur = f.options.find((o) => o.value === v) ?? f.options[0];
@@ -107,12 +115,13 @@ export function DataTable<T>(p: Props<T>) {
                 <Floating anchor={anchorOf(f.key)} open={open === f.key} onClose={() => setOpen(null)} align="left">
                   <div role="menu" className="menu-list">{f.options.map((o) => (
                     <button key={o.value} type="button" role="menuitemradio" aria-checked={o.value === v} onClick={() => { setOpen(null); write({ [f.key]: o.value === (f.initial ?? f.options[0].value) ? null : o.value }); }}>
-                      <Icon name="check" className={`h-4 w-4 text-clay ${o.value === v ? '' : 'invisible'}`} /><span className="flex-1">{o.label}</span><span className="text-[12px] font-medium text-muted">{base.filter((r) => f.test(r, o.value)).length}</span>
+                      <Icon name="check" className={`h-4 w-4 text-clay ${o.value === v ? '' : 'invisible'}`} /><span className="flex-1">{o.label}</span>{f.test && !p.server && <span className="text-[12px] font-medium text-muted">{base.filter((r) => f.test!(r, o.value)).length}</span>}
                     </button>))}</div>
                 </Floating>
               </span>);
           })}
           {toggles.map((t) => <label key={t.key} className="dt-ghost"><input type="checkbox" className="dt-cb" checked={tv(t)} onChange={(e) => write({ [t.key]: e.target.checked ? '1' : null })} />{t.label}<span className="text-muted">({searched.filter(t.hides).length})</span></label>)}
+          {p.toolbar}
           {dirty && <button type="button" className="dt-link ml-1" onClick={reset}>Reset</button>}
           <div className="flex-1" />
           {offerable.length > 0 && <>
@@ -122,7 +131,7 @@ export function DataTable<T>(p: Props<T>) {
                 <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-[12px] px-3 py-2 text-[13.5px] font-semibold hover:bg-ink/6"><input type="checkbox" className="dt-cb" checked={!hidden.includes(c.key)} onChange={() => saveHidden(hidden.includes(c.key) ? hidden.filter((k) => k !== c.key) : [...hidden, c.key])} />{c.label}</label>))}</div>
             </Floating>
           </>}
-          <button type="button" className="dt-ghost" onClick={exportCsv} disabled={!total} title="Download what is shown, every page, as a spreadsheet (CSV)"><Icon name="download" className="h-3.5 w-3.5 text-muted" />Export</button>
+          {p.exportable !== false && <button type="button" className="dt-ghost" onClick={exportCsv} disabled={!total} title="Download what is shown, every page, as a spreadsheet (CSV)"><Icon name="download" className="h-3.5 w-3.5 text-muted" />Export</button>}
         </div>
       )}
 
@@ -138,12 +147,12 @@ export function DataTable<T>(p: Props<T>) {
             <thead><tr>
               {p.bulk && <th className="chk"><input type="checkbox" className="dt-cb" aria-label="Select every row on this page" checked={allOn} onChange={() => setSel((s) => { const n = new Set(s); slice.forEach((r) => allOn ? n.delete(p.rowKey(r)) : n.add(p.rowKey(r))); return n; })} /></th>}
               {cols.map((c) => <th key={c.key} className={c.align === 'right' ? 'r' : ''} aria-sort={sortKey === c.key ? (dir > 0 ? 'ascending' : 'descending') : undefined}>
-                {c.sort ? <button type="button" className={sortKey === c.key ? 'on' : ''} onClick={() => write({ sort: c.key, dir: sortKey === c.key && dir > 0 ? 'desc' : null })}>{c.label}
+                {c.sort ? <button type="button" className={sortKey === c.key ? 'on' : ''} onClick={() => write({ sort: c.key, dir: sortKey === c.key && dir > 0 ? 'desc' : 'asc' })}>{c.label}
                   <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d={sortKey !== c.key ? 'M8 9l4-4 4 4M8 15l4 4 4-4' : dir > 0 ? 'M8 14l4-4 4 4' : 'M8 10l4 4 4-4'} /></svg></button> : c.label}
               </th>)}
             </tr></thead>
             <tbody>{slice.map((r) => { const k = p.rowKey(r), on = sel.has(k); return (
-              <tr key={k} className={on ? 'sel' : ''}>
+              <tr key={k} className={`${on || p.selected === k ? 'sel' : ''} ${p.onRow ? 'cursor-pointer' : ''}`} onClick={p.onRow ? (e) => { if (!(e.target as HTMLElement).closest('button,a,input,select,label,textarea')) p.onRow!(r); } : undefined}>
                 {p.bulk && <td className="chk"><input type="checkbox" className="dt-cb" aria-label="Select this row" checked={on} onChange={() => setSel((s) => { const n = new Set(s); on ? n.delete(k) : n.add(k); return n; })} /></td>}
                 {cols.map((c, i) => <td key={c.key} className={`${i === 0 ? 'dt-first' : ''} ${c.align === 'right' ? 'r' : ''} ${c.hideOnPhone ? 'dt-hide-phone' : ''} ${c.className ?? ''}`}>{c.cell(r)}</td>)}
               </tr>); })}</tbody>
