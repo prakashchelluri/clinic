@@ -59,6 +59,44 @@ export function findParam(name: string, params: LabParam[] = LAB_PARAMS) {
   return params.find((p) => norm(p.name) === n || (p.aliases ?? []).some((a) => norm(a) === n));
 }
 
+/** The values one ordered test reports, so the desk types numbers under named boxes instead of knowing that CBC means Hb, WBC, platelets…
+ *  ponytail: a fixed list in code for the common panels; a Settings screen to edit it when a clinic asks. */
+export const LAB_PANELS: { name: string; aliases?: string[]; params: string[] }[] = [
+  { name: 'CBC', aliases: ['Complete blood count', 'CBP', 'Complete blood picture', 'Hemogram', 'Haemogram'], params: ['Haemoglobin', 'Total WBC', 'Platelets', 'Eosinophils', 'ESR'] },
+  { name: 'Thyroid profile', aliases: ['TFT', 'Thyroid function test', 'Thyroid', 'T3 T4 TSH'], params: ['TSH', 'Free T3', 'Free T4'] },
+  { name: 'LFT', aliases: ['Liver function test', 'Liver function tests'], params: ['SGOT (AST)', 'SGPT (ALT)', 'Alkaline phosphatase', 'Total bilirubin'] },
+  { name: 'KFT', aliases: ['RFT', 'Kidney function test', 'Renal function test'], params: ['Serum creatinine', 'Blood urea', 'Uric acid'] },
+  { name: 'Lipid profile', aliases: ['Lipids', 'Lipid panel'], params: ['Total cholesterol', 'Triglycerides', 'LDL', 'HDL'] },
+  { name: 'Iron studies', aliases: ['Iron profile'], params: ['Serum iron', 'Serum ferritin'] },
+  { name: 'Hormone profile', aliases: ['PCOS profile', 'PCOS panel', 'Hormonal profile'], params: ['Testosterone (total)', 'DHEA-S', 'Prolactin', 'LH', 'FSH'] },
+  { name: 'Blood sugar', aliases: ['Sugar', 'FBS PPBS', 'FBS & PPBS'], params: ['Fasting blood sugar', 'Post-prandial blood sugar'] },
+];
+
+/** The value names to ask for under an ordered test: a panel's values, the test itself when it is one value (TSH, KOH mount), else none (the desk adds its own). */
+export function paramsForTest(test: string): string[] {
+  const n = norm(test);
+  const panel = LAB_PANELS.find((p) => [p.name, ...(p.aliases ?? [])].some((a) => { const x = norm(a); return n === x || n.startsWith(`${x} `) || n.startsWith(`${x}(`); }));
+  if (panel) return panel.params;
+  const one = findParam(test);
+  return one ? [one.name] : [];
+}
+
+/** Self-check (npx tsx src/lib/labs.ts): the panels resolve, single tests resolve to themselves, unknown tests ask for nothing. */
+if (/labs\.ts$/.test(process.argv[1] ?? '')) {
+  const eq = (a: unknown, b: unknown) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${JSON.stringify(a)} !== ${JSON.stringify(b)}`); };
+  eq(paramsForTest('CBC'), LAB_PANELS[0].params);
+  eq(paramsForTest('complete  blood count'), LAB_PANELS[0].params);
+  eq(paramsForTest('Thyroid profile (T3, T4, TSH)'), ['TSH', 'Free T3', 'Free T4']);
+  eq(paramsForTest('TSH'), ['TSH']);
+  eq(paramsForTest('hb'), ['Haemoglobin']);
+  eq(paramsForTest('KOH mount'), ['KOH mount']);
+  eq(paramsForTest('Skin biopsy'), ['Skin biopsy']);
+  eq(paramsForTest('Something new'), []);
+  eq(paramsForTest('Free T4'), ['Free T4']); // a single value is not swallowed by a panel whose alias it starts like
+  for (const p of LAB_PANELS) for (const name of p.params) if (!findParam(name)) throw new Error(`${p.name} lists ${name}, which is not a known value`);
+  console.log('labs: ok');
+}
+
 /** 'low' | 'normal' | 'high' for a number against the range, 'normal' | 'abnormal' for text against the expected word, null when nothing can be said. */
 export function flagOf(value: string, p?: LabParam): 'low' | 'normal' | 'high' | 'abnormal' | null {
   const v = value.trim(); if (!v) return null;

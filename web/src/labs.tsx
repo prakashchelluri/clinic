@@ -21,6 +21,15 @@ const norm = (s: string) => s.trim().toLowerCase();
 export const findParam = (name: string, params: LabParam[]) => params.find((p) => norm(p.name) === norm(name) || (p.aliases ?? []).some((a) => norm(a) === norm(name)));
 const rangeText = (p?: { low?: number | null; high?: number | null; expect?: string }) => !p ? '' : p.expect ? p.expect : p.low !== undefined && p.low !== null && p.high !== undefined && p.high !== null ? `${p.low}–${p.high}` : p.high !== undefined && p.high !== null ? `≤ ${p.high}` : p.low !== undefined && p.low !== null ? `≥ ${p.low}` : '';
 const out = (f: LabRow['flag']) => f === 'low' || f === 'high' || f === 'abnormal';
+export { rangeText, out as isOut };
+/** The flag a typed value gets against the clinic's range, as the server will store it: a number against low/high, words against the expected word. */
+export function flagFor(value: string, p?: LabParam): LabRow['flag'] {
+  const v = value.trim(); if (!v || !p) return null;
+  const n = Number(v.replace(/,/g, ''));
+  if (!Number.isNaN(n) && (p.low !== undefined || p.high !== undefined)) return p.low !== undefined && n < p.low ? 'low' : p.high !== undefined && n > p.high ? 'high' : 'normal';
+  if (p.expect) { const e = norm(p.expect); const x = norm(v); return x === e || (e.startsWith('neg') && x.startsWith('neg')) || (e.startsWith('non') && x.startsWith('non')) ? 'normal' : 'abnormal'; }
+  return null;
+}
 
 export function FlagChip({ flag }: { flag: LabRow['flag'] }) {
   if (!flag) return null;

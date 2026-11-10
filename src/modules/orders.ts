@@ -5,6 +5,7 @@ import { recommendation, document, patient, encounter, practitioner } from '../d
 import { route } from '../lib/route.js';
 import { emit, todayIn } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
+import { paramsForTest } from '../lib/labs.js';
 
 /** Tests ordered together form one order: each test has its own report, the doctor reviews the order once, when every report is in. */
 export type OrderState = 'pending' | 'partial' | 'ready' | 'reviewed' | 'doctor_call' | 'closed';
@@ -32,7 +33,7 @@ export function orderRoutes(app: FastifyInstance) {
     const byKey = new Map<string, typeof rows>();
     for (const x of rows) { const k = `${x.r.encounterId}:${x.r.orderNo}`; byKey.set(k, [...(byKey.get(k) ?? []), x]); }
     const orders = [...byKey.entries()].map(([key, xs]) => {
-      const first = xs[0]; const tests = xs.map((x) => ({ id: x.r.id, name: x.r.notes ?? 'Test', expectedOn: x.r.expectedOn, receivedAt: x.r.receivedAt, reviewedAt: x.r.reviewedAt, reviewOutcome: x.r.reviewOutcome, informedAt: x.r.informedAt,
+      const first = xs[0]; const tests = xs.map((x) => ({ id: x.r.id, name: x.r.notes ?? 'Test', params: paramsForTest(x.r.notes ?? ''), expectedOn: x.r.expectedOn, receivedAt: x.r.receivedAt, reviewedAt: x.r.reviewedAt, reviewOutcome: x.r.reviewOutcome, informedAt: x.r.informedAt,
         late: !x.r.receivedAt && !!x.r.expectedOn && x.r.expectedOn < today, called: [...x.r.contactLog].reverse().find((c) => c.outcome === 'Called the lab')?.at ?? null,
         docs: docs.filter((d) => d.recommendationIds.includes(x.r.id)).map((d) => ({ id: d.id, title: d.title, mime: d.mime, kind: d.kind, sizeBytes: d.sizeBytes, createdAt: d.createdAt, note: d.note, reviewedAt: d.reviewedAt })) })).sort((a, b) => a.name.localeCompare(b.name));
       const state = stateOf(tests);
