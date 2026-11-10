@@ -322,3 +322,30 @@ h1 { letter-spacing: -0.025em; }
 .lg-bob { animation: lg-bob 5s ease-in-out infinite; }
 .lg-sight { stroke-dasharray: 3 7; animation: lg-dash 2.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .lg-walk, .lg-aR, .lg-aD, .lg-aP, .lg-rR, .lg-rD, .lg-rP, .lg-bob, .lg-sight { animation: none; } }
+
+/* Rxpad: what is picked sits on a soft tint of its section (--sec, set on the card); what can be added is a dashed + chip. */
+.pick, .pick-chip, .pick-tr > td { background: color-mix(in srgb, var(--sec, #8B929C) 10%, var(--color-surface)); }
+.pick { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 6px; border-radius: 10px; padding: 6px 10px; margin-top: 6px; }
+.pick:first-child { margin-top: 0; }
+.pick > b, .pick-chip, .pick-ink { color: color-mix(in srgb, var(--sec, #8B929C) 62%, var(--color-ink)); }
+.pick > b { font-weight: 600; }
+.pick .seg { background: var(--color-surface); }
+.pick .seg-pill { background: color-mix(in srgb, var(--sec, #8B929C) 20%, var(--color-surface)); box-shadow: none; }
+.pick .seg > button.on { color: color-mix(in srgb, var(--sec, #8B929C) 62%, var(--color-ink)); }
+.pick-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 5px 12px; min-height: 32px; font-size: 12.5px; font-weight: 600; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sec, #8B929C) 28%, transparent); }
+.opt-add { display: inline-flex; align-items: center; gap: 3px; border-radius: 999px; border: 1px dashed color-mix(in srgb, var(--color-muted) 45%, transparent); background: var(--color-surface); color: var(--color-muted); padding: 4px 11px; min-height: 30px; font-size: 12.5px; font-weight: 500; transition: color .15s, border-color .15s; }
+.opt-add::before { content: "+"; font-weight: 600; }
+.opt-add:hover { color: var(--color-ink); border-color: var(--color-muted); }
+.opt-add:disabled { opacity: .5; }
+.quick-label { font-size: 11px; color: var(--color-muted); margin-right: 4px; }
+
+/* The medicines table: a flat sheet. Square hairline cells; a cell reads as text and shows a box only when you are in it. */
+.rx-grid { border: 1px solid var(--color-line); border-radius: 8px; }
+.rx-grid th { background: var(--color-surface-2); border-bottom: 1px solid var(--color-line); }
+.rx-grid td { border-bottom: 1px solid var(--color-line); border-left: 1px solid var(--color-line); }
+.rx-grid td:first-child, .rx-grid th:first-child { border-left: 0; }
+.rx-grid tbody tr:last-child td { border-bottom: 0; }
+.cell-in { display: block; width: 100%; min-height: 36px; border: 0; border-radius: 0; background: transparent; padding: 8px; font: inherit; font-size: 13px; color: inherit; outline: none; }
+.cell-in::placeholder { color: color-mix(in srgb, var(--color-muted) 65%, transparent); font-weight: 400; }
+.cell-in:focus { background: var(--color-surface); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sec, #4F7396) 70%, var(--color-ink)); }
+.cell-in:disabled { color: var(--color-muted); }

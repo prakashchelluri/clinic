@@ -173,7 +173,10 @@ export function Floating({ anchor, open, onClose, children, width, align = 'righ
     return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); window.removeEventListener('resize', onClose); window.removeEventListener('scroll', away, true); };
   }, [open]);
   if (!open || !pos) return null;
-  return createPortal(<div ref={panel} className="pop anim-menu" style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, ...(align === 'left' ? { left: pos.left, right: 'auto' } : { right: pos.right, left: 'auto' }), zIndex: 70, width: width ? Math.min(width, window.innerWidth - 16) : undefined, maxHeight: pos.maxH, overflowY: 'auto' }}>{children}</div>, document.body);
+  const w = width ? Math.min(width, window.innerWidth - 16) : undefined;
+  // a wide panel on a right-hand button slides left only as far as it must to stay on screen
+  const right = w ? Math.max(8, Math.min(pos.right, window.innerWidth - 8 - w)) : pos.right;
+  return createPortal(<div ref={panel} className="pop anim-menu" style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, ...(align === 'left' ? { left: pos.left, right: 'auto' } : { right, left: 'auto' }), zIndex: 70, width: w, maxHeight: pos.maxH, overflowY: 'auto' }}>{children}</div>, document.body);
 }
 
 /** The ⋯ menu: secondary actions live here so a row shows one clear button. */

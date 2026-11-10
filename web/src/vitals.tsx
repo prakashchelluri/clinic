@@ -59,12 +59,15 @@ export function VitalsCard({ encounterId, patientId, details, heightCm, readOnly
         {bmi !== null && <div className="flex min-w-[112px] items-baseline gap-1.5 rounded-lg border border-line bg-surface-2 px-3 py-2"><span className="text-[11px] font-semibold uppercase tracking-[.06em] text-muted">BMI</span><b className="text-[15px]">{bmi}</b><span className={`chip ${bmi >= 25 || bmi < 18.5 ? 'chip-amber' : 'chip-sage'}`}>{bmiWord(bmi)}</span></div>}
         <button ref={anchor} type="button" className="btn btn-ghost btn-sm self-center" aria-expanded={past} onClick={() => setPast(!past)}>Past values</button>
       </div>
-      <Floating anchor={anchor} open={past} onClose={() => setPast(false)} width={520}>
-        <div className="p-2">
-          <div className="mb-2 text-[13px] font-semibold">Past values <span className="font-normal text-muted">· newest on the right</span></div>
+      <Floating anchor={anchor} open={past} onClose={() => setPast(false)} width={Math.min(140 + (VITALS.length + 1) * 92, 900)}>
+        <div className="overflow-x-auto p-2">
+          <div className="mb-2 text-[13px] font-semibold">Past values <span className="font-normal text-muted">· newest first, in the order they are taken</span></div>
           {hist.isLoading ? <div className="text-xs text-muted">Loading…</div> : rows.length === 0 ? <div className="text-xs text-muted">No earlier visits with vitals.</div> : (
-            <table className="w-full text-[12.5px]"><thead><tr><th className="py-1 text-left text-[11px] font-semibold text-muted" /> {[...rows].reverse().slice(-6).map((r: any) => <th key={r.day} className="py-1 text-right text-[11px] font-semibold text-muted">{fmtDate(r.day)}</th>)}</tr></thead>
-              <tbody>{[...VITALS, { key: 'bmi', label: 'BMI', unit: '', type: 'number' as const }].filter((v) => rows.some((r: any) => (v.key === 'bmi' ? bmiOf(r.weight_kg, r.height_cm) : r[v.key]) != null)).map((v) => <tr key={v.key} className="border-t border-line"><td className="py-1.5 font-semibold">{v.label}{v.unit ? <span className="font-normal text-muted"> {v.unit}</span> : ''}</td>{[...rows].reverse().slice(-6).map((r: any) => <td key={r.day} className="py-1.5 text-right tabular-nums">{(v.key === 'bmi' ? bmiOf(r.weight_kg, r.height_cm) : r[v.key]) ?? <span className="text-muted">—</span>}</td>)}</tr>)}</tbody></table>)}
+            <table className="w-full text-[12.5px]"><thead><tr><th className="py-1 text-left text-[11px] font-semibold uppercase tracking-[.06em] text-muted">Date</th>{[...VITALS.map((v) => v.label), 'BMI'].map((l) => <th key={l} className="px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-[.06em] text-muted">{l}</th>)}</tr></thead>
+              <tbody>{rows.slice(0, 6).map((r: any) => { const b = bmiOf(r.weight_kg, r.height_cm); return (
+                <tr key={r.day} className="border-t border-line"><td className="whitespace-nowrap py-1.5 text-muted">{fmtDate(r.day)}</td>
+                  {VITALS.map((v) => <td key={v.key} className="whitespace-nowrap px-2 py-1.5 tabular-nums">{r[v.key] == null || r[v.key] === '' ? <span className="text-muted">—</span> : <><b>{r[v.key]}</b>{v.unit && <span className="text-xs text-muted"> {v.unit}</span>}</>}</td>)}
+                  <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">{b === null ? <span className="text-muted">—</span> : <><b>{b}</b> <span className="text-xs text-muted">{bmiWord(b)}</span></>}</td></tr>); })}</tbody></table>)}
         </div>
       </Floating>
     </div>
