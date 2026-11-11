@@ -4,7 +4,7 @@ import { and, eq, desc, sql } from 'drizzle-orm';
 import { tenant, patient, visit, encounter, prescriptionItem, medicine, labResult, message, recommendation } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { HttpError } from '../lib/auth.js';
-import { emit } from '../lib/core.js';
+import { emit, OPTED_OUT } from '../lib/core.js';
 import { bookingSettings } from '../lib/booking.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { LAB_PARAMS, findParam, flagOf, numOf } from '../lib/labs.js';
@@ -149,8 +149,9 @@ export async function queueRxMessage(tx: any, ctx: any, encounterId: string) {
   const body = [w.rxFor(row.ten.name, row.p.fullName), `${w.medicines}: ${items.map((i: any) => i.name).join(', ')}.`,
     leaflets.length ? `${w.howToUse}:\n${leaflets.join('\n')}` : null, review?.dueOn ? w.reviewOn(review.dueOn) : null, row.ten.settings?.print?.phone ? w.questions(row.ten.settings.print.phone) : null].filter(Boolean).join('\n');
   const noPhone = !row.p.phone || !/^\d{10}$/.test(row.p.phone);
-  const status = !cfg.enabled || cfg.channel === 'none' || noPhone ? 'skipped' : 'pending';
+  const optedOut = !!row.p.noWhatsapp; // the patient asked for no WhatsApp messages: the prescription is printed instead
+  const status = !cfg.enabled || cfg.channel === 'none' || noPhone || optedOut ? 'skipped' : 'pending';
   const [m] = await tx.insert(message).values({ tenantId: t, patientId: row.p.id, appointmentId: null, kind: 'rx', channel: cfg.channel, toPhone: row.p.phone, body, params: { encounterId, leaflets: String(leaflets.length), lang },
-    status, sendAfter: new Date().toISOString(), error: status === 'skipped' ? (noPhone ? 'no mobile number' : 'messages are switched off') : null }).returning();
+    status, sendAfter: new Date().toISOString(), error: status === 'skipped' ? (noPhone ? 'no mobile number' : optedOut ? OPTED_OUT : 'messages are switched off') : null }).returning();
   return m;
 }

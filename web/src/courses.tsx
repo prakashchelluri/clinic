@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
-import { get, post, qc, errText } from './api';
+import { get, post, qc, errText, NO_WHATSAPP } from './api';
 import { can } from './App';
 import { Chip, Icon, Modal, MoneyInput, Section, money, toPaise, toast } from './ui';
 import { printReceipt } from './invoices';
@@ -53,7 +53,8 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   const pkgs: Pkg[] = ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.procedureId === rec.procedureId && k.sittings === sittings);
   const qs = useQuery({ queryKey: ['quotes', rec.id], queryFn: () => get(`/quotes?recommendationId=${rec.id}`) }); const quotes: any[] = qs.data ?? [];
   const makeQuote = useMutation({ mutationFn: (send: 'whatsapp' | 'print') => post('/quotes', { recommendationId: rec.id, validDays: days, send, ...(price !== '' && toPaise(price) !== list ? { totalPaise: toPaise(price) } : {}) }),
-    onSuccess: (r: any, send) => { qc.invalidateQueries({ queryKey: ['quotes', rec.id] }); toast(send === 'whatsapp' ? `Quote ${r.number} is on its way` : `Quote ${r.number} ready`); if (send === 'print') printQuote(r.id); },
+    onSuccess: (r: any, send) => { qc.invalidateQueries({ queryKey: ['quotes', rec.id] }); if (r.whatsapp === 'opted_out') { toast(`Quote ${r.number} saved. ${NO_WHATSAPP}`, 'info', { label: 'Print', run: () => printQuote(r.id) }); return; }
+      toast(send === 'whatsapp' ? `Quote ${r.number} is on its way` : `Quote ${r.number} ready`); if (send === 'print') printQuote(r.id); },
     onError: (e: any) => toast(e?.body?.code === 'NO_PHONE' ? 'This patient has no phone number for WhatsApp' : e?.body?.code === 'DISCOUNT_ABOVE_CAP_NEEDS_OWNER' ? `That is ${e.body.pct}% off. Above ${e.body.capPct}% only the owner can agree` : errText(e), 'err') });
   const agree = useMutation({ mutationFn: () => post('/courses', { recommendationId: rec.id, ...(price !== '' && toPaise(price) !== list ? { totalPaise: toPaise(price) } : {}) }), onSuccess: () => { refresh(); toast('Price agreed'); }, onError: (e: any) => toast(e?.body?.code === 'DISCOUNT_ABOVE_CAP_NEEDS_OWNER' ? `That is ${e.body.pct}% off. Above ${e.body.capPct}% only the owner can agree` : errText(e), 'err') });
   const per = c ? c.perSittingPaise : 0; const max = c ? Math.max(0, c.sittings - c.doneSittings - c.unusedSittings) : 0;

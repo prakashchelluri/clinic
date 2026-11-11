@@ -18,7 +18,7 @@ const MSG_STATUS: Record<string, string> = { pending: 'due', sent: 'sent', logge
  * Screens say "the patient is told" only when a message really went in the queue.
  */
 export const told = (w?: string) => w === 'queued' ? 'WhatsApp sent.'
-  : w === 'no_phone' ? 'No WhatsApp sent (no phone).' : w === 'not_connected' ? 'No WhatsApp sent (WhatsApp not connected).'
+  : w === 'no_phone' ? 'No WhatsApp sent (no phone).' : w === 'opted_out' ? 'Not sent: the patient asked for no WhatsApp. Tell the patient yourself.' : w === 'not_connected' ? 'No WhatsApp sent (WhatsApp not connected).'
   : w === 'off' ? 'No WhatsApp sent (messages are switched off).' : 'No WhatsApp sent.';
 const pron = (sex?: string | null) => (sex === 'F' ? 'her' : sex === 'M' ? 'him' : 'them');
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -37,7 +37,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
   const done = (msg: string) => { refreshBookings(); toast(msg); setMode(null); setReason(''); };
   const fail = (e: any) => toast(errText(e), 'err');
   const update = useMutation({ mutationFn: (b: any) => patch(`/appointments/${id}`, b), onSuccess: (r: any, b: any) => done(b.status === 'cancelled' ? `Cancelled${r.alsoCancelled ? ` with ${r.alsoCancelled} later visit${r.alsoCancelled === 1 ? '' : 's'}` : ''}. ${told(r.whatsapp)}` : b.status === 'confirmed' ? 'Marked confirmed' : b.status === 'no_show' ? 'Marked as did not come' : b.sessionId ? `Moved. ${told(r.whatsapp)}` : 'Updated'), onError: fail });
-  const remind = useMutation({ mutationFn: () => post(`/appointments/${id}/remind`), onSuccess: (r: any) => done(r?.whatsapp === 'queued' ? 'Reminder will go on WhatsApp' : `Reminder not sent. ${told(r?.whatsapp)}`), onError: fail });
+  const remind = useMutation({ mutationFn: () => post(`/appointments/${id}/remind`), onSuccess: (r: any) => done(r?.whatsapp === 'queued' ? 'Reminder will go on WhatsApp' : r?.whatsapp === 'opted_out' ? 'Reminder not sent: the patient asked for no WhatsApp. Tell the patient yourself.' : `Reminder not sent. ${told(r?.whatsapp)}`), onError: fail });
   const a = q.data;
   const open = a && ['booked', 'confirmed'].includes(a.status);
   const arriveEarly = cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 35;
@@ -84,7 +84,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
               <input id="cx-reason" className="input" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. patient travelling" />
               {a.series && a.series.index < a.series.total && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={seriesToo} onChange={(e) => setSeriesToo(e.target.checked)} />Also cancel the later repeat visits</label>}
               <div className="flex gap-2"><button className="btn btn-primary !bg-rose !border-rose" disabled={update.isPending} onClick={() => update.mutate({ status: 'cancelled', cancelReason: reason || undefined, series: seriesToo ? 'future' : 'one' })}>Cancel booking</button><button className="btn btn-ghost" onClick={() => setMode(null)}>Keep it</button></div>
-              <div className="text-xs text-muted">{a.patient.phone ? 'The patient gets a cancellation WhatsApp.' : 'No phone: no WhatsApp goes. Tell the patient yourself.'}</div>
+              <div className="text-xs text-muted">{a.patient.noWhatsapp ? 'The patient asked for no WhatsApp, so none goes. Tell the patient yourself.' : a.patient.phone ? 'The patient gets a cancellation WhatsApp.' : 'No phone: no WhatsApp goes. Tell the patient yourself.'}</div>
             </div>
           )}
           {mode === 'move' && <MovePicker appt={a} onPick={(sessionId) => update.mutate({ sessionId })} onClose={() => setMode(null)} busy={update.isPending} />}
@@ -126,7 +126,7 @@ function MovePicker({ appt, onPick, onClose, busy }: { appt: any; onPick: (sessi
         ))}</div>
       )}
       {sel && <div className="rounded-xl bg-paper px-3 py-2.5 text-sm anim-fade-in" role="status">
-        Move {first} to <b>{dayLabel(day)}, {sel.startTime}</b>{appt.patient.phone ? ` and send ${pron(appt.patient.sex)} a WhatsApp?` : '? No phone: no WhatsApp goes, so tell the patient yourself.'}
+        Move {first} to <b>{dayLabel(day)}, {sel.startTime}</b>{appt.patient.noWhatsapp ? '? The patient asked for no WhatsApp, so tell the patient yourself.' : appt.patient.phone ? ` and send ${pron(appt.patient.sex)} a WhatsApp?` : '? No phone: no WhatsApp goes, so tell the patient yourself.'}
         <div className="mt-2 flex gap-2"><button className="btn btn-primary btn-sm" disabled={busy} onClick={() => onPick(sel.id)}>Move</button><button className="btn btn-ghost btn-sm" onClick={() => setSel(null)}>Cancel</button></div>
       </div>}
       {!sel && <button className="btn btn-ghost btn-sm" onClick={onClose}>Back</button>}

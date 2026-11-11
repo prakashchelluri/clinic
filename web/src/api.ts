@@ -8,6 +8,8 @@ export const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, stale
   mutationCache: new MutationCache({ onError: (e, _v, _c, m) => { if (!m.options.onError) toast(errText(e), 'err'); } }) });
 startOfflineCache(qc);
 export { clearOfflineCache };
+/** Said wherever a prescription, receipt or quote would have gone on WhatsApp to a patient who asked for none. */
+export const NO_WHATSAPP = 'Not sent: the patient asked for no WhatsApp — print it instead';
 
 export class ApiError extends Error { constructor(public status: number, public body: any) { super(body?.code ?? `HTTP ${status}`); } }
 
@@ -93,7 +95,8 @@ const MESSAGES: Record<string, string> = {
   BAD_REQUEST: 'That request was not understood.',
   UNAUTHENTICATED: 'Please sign in again.',
   OFFLINE: OFFLINE_MSG,
-  CONSENT_NEEDED: 'No consent is on file for this procedure. Get the paper consent form signed first.',
+  CONSENT_NEEDED: 'No consent is on file for this procedure. Have the patient sign first, on the tablet or on the paper form.',
+  CONSENT_NOT_FOR_PATIENT: 'That signature belongs to another patient. Ask the patient to sign again.',
 };
 const FIELD_NAMES: Record<string, string> = { reason: 'Reason', note: 'Note', cancelReason: 'Reason', minutes: 'Length', color: 'Colour', pricePaise: 'Price', places: 'Places', fullName: 'Name', phone: 'Phone', ageYears: 'Age', amountPaise: 'Amount', description: 'Description', name: 'Name', email: 'Email', password: 'Password', weight_kg: 'Weight', height_cm: 'Height', temp_f: 'Temperature', spo2: 'SpO₂', pulse: 'Pulse', priority: 'Queue priority' };
 /** Turn any API failure into one plain sentence a receptionist can act on. */

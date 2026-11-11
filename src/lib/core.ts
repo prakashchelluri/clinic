@@ -31,6 +31,9 @@ export function daysBetween(a: string, b: string) {
   return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 }
 
+/** The reason kept on a message that is not sent because the patient asked for no WhatsApp (patient.noWhatsapp). */
+export const OPTED_OUT = 'patient asked for no WhatsApp messages';
+
 /** A PATCH changes only what was sent. Newer zod re-applies schema defaults on .partial(), which would silently reset untouched fields, so keep just the keys in the request. */
 export const sent = <T extends Record<string, any>>(parsed: T, raw: unknown): Partial<T> =>
   Object.fromEntries(Object.entries(parsed).filter(([k]) => raw && typeof raw === 'object' && k in (raw as object))) as Partial<T>;

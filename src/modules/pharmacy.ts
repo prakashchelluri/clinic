@@ -5,7 +5,7 @@ import { encounter, prescriptionItem, patient, visit, charge, payment, medicine,
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
-import { emit, todayIn, nextNumber, addDays } from '../lib/core.js';
+import { emit, todayIn, nextNumber, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { allocate, moveStock, type Actor } from './stock.js';
@@ -359,15 +359,18 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
     if (!got && !why) continue;
     await tx.update(prescriptionItem).set({ issuedQty: it.issuedQty + got, dispensed: it.dispensed || got > 0, notIssuedReason: why ? why.reason || 'Not issued' : it.notIssuedReason }).where(eq(prescriptionItem.id, it.id));
   }
+  let optedOut = false; // the patient asked for no WhatsApp: the receipt is recorded as not sent, and the screen says to print it
   if (body.whatsapp) {
     const p: any = walkIn ? { phone: sale.buyerPhone, fullName: sale.buyerName ?? 'Customer' } : (await tx.select().from(patient).where(eq(patient.id, pid)))[0];
     const ten = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
     const w = MSG[patientLang(p, ten?.settings)];
+    optedOut = !!p?.noWhatsapp;
     if (p?.phone) await tx.insert(message).values({ tenantId: t, patientId: pid, kind: 'pharmacy_receipt', channel: 'whatsapp', toPhone: p.phone, params: { patient: p.fullName, lang: patientLang(p, ten?.settings) },
-      body: [`${w.pharmacyBill} ${invoiceNo}`, ...lines.map((l) => `${l.name} × ${l.qty} · ₹${(l.amountPaise / 100).toFixed(2)}`), `${w.total} ₹${(total / 100).toFixed(2)} ${w.gstIncluded}`].join('\n'), status: 'pending' });
+      body: [`${w.pharmacyBill} ${invoiceNo}`, ...lines.map((l) => `${l.name} × ${l.qty} · ₹${(l.amountPaise / 100).toFixed(2)}`), `${w.total} ₹${(total / 100).toFixed(2)} ${w.gstIncluded}`].join('\n'),
+      status: optedOut ? 'skipped' : 'pending', error: optedOut ? OPTED_OUT : null });
   }
   if (opt.ctx) await emit(tx, opt.ctx as any, 'pharmacy.sold', 'pharmacy_sale', sale.id, { invoiceNo, totalPaise: total, method });
-  return sale;
+  return optedOut ? { ...sale, whatsapp: 'opted_out' as const } : sale;
 }
 
 async function returnItems(tx: Tx, a: Actor, saleId: string, b: z.infer<typeof ReturnIn>, ctx: any) {
