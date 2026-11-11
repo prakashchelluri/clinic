@@ -19,6 +19,7 @@ import { TestReports } from './pages/TestReports';
 import { Followups } from './pages/Followups';
 import { Help } from './pages/Help';
 import { Dashboard } from './pages/Dashboard';
+import { Clinic } from './pages/Clinic';
 import { PrintRx } from './pages/PrintRx';
 import { Pharmacy, InventoryPage } from './pages/Pharmacy';
 import { Settings } from './pages/Settings';
@@ -60,6 +61,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/followups" element={<Followups />} />
             <Route path="/help" element={<Help />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/clinic" element={<Clinic />} />
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/settings" element={<Settings />} />

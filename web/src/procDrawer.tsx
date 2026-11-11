@@ -35,7 +35,7 @@ const Head = ({ children }: { children: string }) => <div className="mb-1.5 text
 const outcomeText = (o: any) => (o && typeof o === 'object' ? Object.entries(o).filter(([, v]) => v !== null && v !== '' && typeof v !== 'object').map(([k, v]) => `${k.replace(/_/g, ' ')} ${v}`).join(' · ') : '');
 
 /** One procedure sitting, opened from the Calendar: only what the doctor needs for this procedure. The full record is one click away. */
-export function ProcedureDrawer({ id, canAct, onClose }: { id: string; canAct: boolean; onClose: () => void }) {
+export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; canAct: boolean; onClose: () => void; extra?: React.ReactNode }) {
   useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
@@ -104,7 +104,7 @@ export function ProcedureDrawer({ id, canAct, onClose }: { id: string; canAct: b
           )}
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
-            <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${p.id}`); }}><Icon name="user" />Open full record</button>
+            {extra}<button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${p.id}`); }}><Icon name="user" />Open full record</button>
           </div>
         </>)}
       </aside>

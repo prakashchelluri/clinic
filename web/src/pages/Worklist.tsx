@@ -98,15 +98,15 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onReschedule
 }
 
 /** Pick a day; the server lists rooms with the right capability and the free slots; conflicts are explained, override is explicit. */
-export function ScheduleModal({ rec, sitting, onClose }: { rec: any; sitting?: any; onClose: () => void }) {
+export function ScheduleModal({ rec, sitting, at, onClose }: { rec: any; sitting?: any; at?: { day: string; roomId: string; startTime: string }; onClose: () => void }) {
   const { cfg } = useOutletContext<any>();
   const proc = cfg.procedures.find((p: any) => p.id === rec.procedureId);
-  const [day, setDay] = useState(sitting ? (sitting.day >= today() ? sitting.day : today()) : rec.dueOn && rec.dueOn >= today() ? rec.dueOn : today());
+  const [day, setDay] = useState(at ? at.day : sitting ? (sitting.day >= today() ? sitting.day : today()) : rec.dueOn && rec.dueOn >= today() ? rec.dueOn : today());
   const [reason, setReason] = useState('');
   const toM = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
   const [minutes, setMinutes] = useState<number>(sitting ? Math.max(5, toM(sitting.endTime) - toM(sitting.startTime) - (proc?.bufferMinutes ?? 0)) : proc?.typicalMinutes ?? 30);
   const [doc, setDoc] = useState<string>(sitting ? sitting.practitionerId ?? '' : proc?.requiresMainDoctor ? cfg.practitioners[0]?.id ?? '' : '');
-  const [pick, setPick] = useState<{ roomId: string; startTime: string } | null>(null);
+  const [pick, setPick] = useState<{ roomId: string; startTime: string } | null>(at ? { roomId: at.roomId, startTime: at.startTime } : null); // a free room-hour tapped on the schedule
   const [manual, setManual] = useState({ startTime: '', roomId: '' });
   const [conf, setConf] = useState<any[] | null>(null);
   const endOf = (start: string) => { const m = toM(start) + minutes + (proc?.bufferMinutes ?? 0); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };

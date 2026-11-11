@@ -1,115 +1,151 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, patch, post, qc, today, errText, ApiError, dialable } from '../api';
+import { useOutletContext, useSearchParams } from 'react-router';
+import { get, patch, post, qc, today, errText, ApiError } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, Skeleton, ask, toast, Filter } from '../ui';
+import { Icon, Modal, Skeleton, ask, toast } from '../ui';
 import { ScheduleModal } from './Worklist';
 import { LoadError, clashLabel } from '../procBoard';
-import { MoneyChip, startBody, confirmDone } from '../procDrawer';
+import { ProcedureDrawer } from '../procDrawer';
+import '../frontdesk.css';
 
 const add = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
-const short = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
-const long = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
-const refresh = () => ['psessions', 'pcounts', 'calendar', 'worklist', 'psessions-upcoming'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+const long = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+const refresh = () => ['psessions', 'pcounts', 'calendar', 'worklist', 'psessions-upcoming', 'procedure-session'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
+const hourLabel = (h: number) => `${h % 12 || 12}–${(h + 1) % 12 || 12} ${h + 1 > 12 ? 'pm' : 'am'}`;
+const nowHHMM = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+
+/** Which rooms this computer shows: picked once, kept. */
+function useRoomsShown(): [Record<string, boolean>, (id: string, on: boolean) => void] {
+  const [s, setS] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('proc.rooms') ?? '{}'); } catch { return {}; } });
+  return [s, (id, on) => { const n = { ...s, [id]: on }; setS(n); try { localStorage.setItem('proc.rooms', JSON.stringify(n)); } catch { /* storage blocked */ } }];
+}
 
 /**
- * Procedures for one date: what is planned, in which room, with which doctor, and what still needs sorting out.
- * The coordinator plans tomorrow from here; the doctor can glance at any day. Plans still to be scheduled are the other tab.
+ * Sittings for one day by the hour, one column per room: the same shape as the front desk.
+ * A sitting opens the procedure drawer (Start asks about consent on the first sitting, Mark done says what happens to the money);
+ * a free room-hour books a sitting from the plans waiting for a date. The side panel holds only what needs the coordinator.
  */
 export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
-  const { me, perms, cfg } = useOutletContext<any>();
-  const nav = useNavigate();
+  const { perms, cfg } = useOutletContext<any>();
   const [sp, setSp] = useSearchParams();
   const t = today();
-  const isDoctor = !!me.practitionerId;
-  const day = sp.get('day') ?? t; // everyone opens on today; tomorrow is one tap away
+  const day = sp.get('day') ?? t;
   const setDay = (d: string) => setSp((p) => { p.set('tab', 'schedule'); p.set('day', d); return p; }, { replace: true });
-  const [docF, setDocF] = useState(''); const [roomF, setRoomF] = useState(''); const [mine, setMine] = useState(false); const [only, setOnly] = useState<'' | 'nodoc' | 'unconf'>('');
+  const [shown, setShown] = useRoomsShown();
+  const [openId, setOpenId] = useState<string | null>(null);
   const [moving, setMoving] = useState<any>(null); const [assigning, setAssigning] = useState<any>(null);
+  const [booking, setBooking] = useState<null | { roomId: string; startTime: string }>(null); const [bookRec, setBookRec] = useState<any>(null);
   const canWrite = can(perms, 'worklist.write');
 
-  const from = add(t, -1);
-  const counts = useQuery({ queryKey: ['pcounts', from], queryFn: () => get(`/procedure-sessions/counts?from=${from}&days=9`), refetchInterval: 30000 });
   const q = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1&detail=1`), refetchInterval: 15000 });
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), enabled: can(perms, 'worklist.read') });
   const DONE: Record<string, string> = { in_progress: 'Sitting started', completed: 'Marked done', missed: 'Moved to missed', cancelled: 'Sitting cancelled' };
   const setState = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/procedure-sessions/${id}`, b), onSuccess: (_r, v: any) => { refresh(); toast(DONE[v.state] ?? 'Updated'); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: (_r, v: any) => { refresh(); toast(v.confirmed ? 'Noted: the patient said yes' : 'Patient answer removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
-  const start = async (s: any) => { const b = await startBody(s); if (b) setState.mutate({ id: s.id, ...b }); };
-  const done = async (s: any) => { if (await confirmDone(s)) setState.mutate({ id: s.id, state: 'completed' }); };
 
   const all: any[] = q.data ?? [];
   const docs = (cfg?.practitioners ?? []).filter((p: any) => p.active !== false);
   const rooms = (cfg?.rooms ?? []).filter((r: any) => r.active !== false);
-  const open = (s: any) => ['confirmed', 'in_progress'].includes(s.state);
-  const noDoc = (s: any) => open(s) && !s.practitionerId;
-  const unconf = (s: any) => s.state === 'confirmed' && !s.patientConfirmedAt && day >= t;
-  const rows = all.filter((s) => (!docF || (docF === 'none' ? !s.practitionerId : s.practitionerId === docF)) && (!roomF || s.roomId === roomF) && (!mine || s.practitionerId === me.practitionerId)
-    && (only === '' || (only === 'nodoc' ? noDoc(s) : unconf(s))));
-  const nNoDoc = all.filter(noDoc).length; const nUnconf = all.filter(unconf).length;
-  const unscheduled = (plans.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length;
+  const cols = [...rooms.filter((r: any) => shown[r.id] !== false), ...(all.some((s) => !s.roomId) ? [{ id: '', name: 'No room' }] : [])];
+  const live = (s: any) => ['confirmed', 'in_progress'].includes(s.state);
+  const toCall = all.filter((s) => s.state === 'confirmed' && !s.patientConfirmedAt && day >= t);
+  const noDoc = all.filter((s) => live(s) && !s.practitionerId);
+  const waitingPlans = (plans.data ?? []).filter((r: any) => !r.next && ['open', 'contacted'].includes(r.status));
+  const nextId = day === t ? [...all].filter((s) => s.state === 'confirmed').sort((a, b) => a.startTime.localeCompare(b.startTime))[0]?.id : undefined;
+  const now = nowHHMM();
+  const startH = Math.min(9, ...all.map((s) => Number(s.startTime.slice(0, 2))));
+  const endH = Math.max(19, ...all.map((s) => Number(s.startTime.slice(0, 2))));
+  const hours = Array.from({ length: endH - startH + 1 }, (_, i) => startH + i);
+  const past = (h: number) => day < t || (day === t && hh(h + 1) <= now);
+  const nowH = day === t ? Number(now.slice(0, 2)) : -1;
 
-  // the strip: yesterday to a week ahead, plus the chosen day when it is outside
-  const strip = Array.from({ length: 9 }, (_, i) => add(from, i));
-  const stripDays = strip.includes(day) ? strip : [...strip, day];
-  const lab = (d: string) => d === t ? 'Today' : d === add(t, 1) ? 'Tomorrow' : d === add(t, -1) ? 'Yesterday' : short(d);
-
-  const status = (s: any) => s.state === 'completed' ? <Chip tone="sage">Done</Chip> : s.state === 'in_progress' ? <Chip tone="amber">In room</Chip> : s.state === 'missed' ? <Chip tone="rose">Missed</Chip>
-    : s.patientConfirmedAt ? <Chip tone="sage">Patient said yes</Chip> : day >= t ? <Chip tone="amber">Patient not called yet</Chip> : <Chip tone="sky">Booked</Chip>;
+  const chip = (s: any) => {
+    const k = s.state === 'completed' ? 'fd-k-done' : s.state === 'in_progress' ? 'fd-k-doctor' : s.state === 'missed' ? 'fd-k-late' : s.id === nextId ? 'fd-k-booked fd-k-next' : 'fd-k-booked';
+    const note = s.state === 'in_progress' ? 'in the room' : s.state === 'missed' ? 'missed' : [s.startTime, s.state === 'confirmed' && !s.patientConfirmedAt && day >= t ? 'not called' : null, !s.practitionerId && live(s) ? 'no doctor' : null].filter(Boolean).join(' · ');
+    return <button key={s.id} type="button" className={`fd-pc fd-sit ${k} ${openId === s.id ? 'sel' : ''}`} onClick={() => setOpenId(s.id)}>
+      <b>{s.state === 'completed' ? '✓ ' : ''}{s.patient.fullName}</b><span>{s.procedure ?? 'Procedure'} · {note}</span></button>;
+  };
+  const opened = all.find((s) => s.id === openId);
+  const act = (label: string, run: () => void, primary = false) => <button className={`btn btn-sm ${primary ? 'btn-primary' : ''}`} onClick={run}>{label}</button>;
+  const actions = (s: any) => canWrite && s.state === 'confirmed' ? <>
+    {act(s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }))}
+    {act(s.practitionerId ? 'Change doctor' : 'Pick doctor', () => { setOpenId(null); setAssigning(s); })}
+    {act('Reschedule', () => { setOpenId(null); setMoving(s); })}
+    {act('Mark as missed', async () => { if (await ask({ title: 'Mark this sitting as missed?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark missed', cancelLabel: 'Keep it' })) { setOpenId(null); setState.mutate({ id: s.id, state: 'missed' }); } })}
+    {act('Cancel sitting', async () => { const a = await ask({ title: 'Cancel this sitting?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and it goes back to Plans to schedule.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { setOpenId(null); setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } })}
+  </> : canWrite && s.state === 'missed' ? act('Reschedule', () => { setOpenId(null); setMoving(s); }, true) : null;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Filter icon="calendar" value={day} onChange={setDay} options={stripDays.map((d) => ({ value: d, label: lab(d), count: counts.data?.[d] ?? (d === day ? all.length : undefined) }))} />
-        <input type="date" aria-label="Pick a date" className="input !w-auto !py-2" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-lg font-semibold mr-2">{long(day)}</h2>
-        <select aria-label="Doctor" className="input !w-auto !py-2" value={docF} onChange={(e) => setDocF(e.target.value)}><option value="">All doctors</option><option value="none">Not assigned</option>{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <select aria-label="Room" className="input !w-auto !py-2" value={roomF} onChange={(e) => setRoomF(e.target.value)}><option value="">All rooms</option>{rooms.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
-        {isDoctor && <Filter<'all' | 'mine'> icon="user" value={mine ? 'mine' : 'all'} onChange={(v) => setMine(v === 'mine')} options={[{ value: 'all', label: 'Every doctor' }, { value: 'mine', label: 'Mine only' }]} />}
-      </div>
-
-      {(nNoDoc > 0 || nUnconf > 0) && (
-        <div className="card !py-3 !bg-amber-soft/60 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm anim-fade-up">
-          <b>Needs attention · {nNoDoc + nUnconf}</b>
-          {nNoDoc > 0 && <button className={`underline ${only === 'nodoc' ? 'font-semibold' : ''}`} onClick={() => setOnly(only === 'nodoc' ? '' : 'nodoc')}>{nNoDoc} without a doctor</button>}
-          {nUnconf > 0 && <button className={`underline ${only === 'unconf' ? 'font-semibold' : ''}`} onClick={() => setOnly(only === 'unconf' ? '' : 'unconf')}>{nUnconf} patient{nUnconf === 1 ? '' : 's'} not called yet</button>}
-          {only && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => setOnly('')}>Show all</button>}
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+      <div className="fd-sheet fd-sch overflow-hidden anim-fade-up">
+        <div className="fd-sch-bar">
+          <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous day" onClick={() => setDay(add(day, -1))}><Icon name="chevL" className="h-4 w-4" /></button>
+          <label className="fd-sch-date"><span>{day === t ? `Today · ${long(day)}` : day === add(t, 1) ? `Tomorrow · ${long(day)}` : long(day)}</span><input type="date" aria-label="Pick a day" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></label>
+          <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next day" onClick={() => setDay(add(day, 1))}><Icon name="chevR" className="h-4 w-4" /></button>
+          {day !== t && <button type="button" className="btn btn-sm" onClick={() => setDay(t)}>Today</button>}
+          <span className="ml-auto" />
+          {rooms.length > 1 && rooms.map((r: any) => { const on = shown[r.id] !== false; return <button key={r.id} type="button" className={`fd-cal ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => { if (on && rooms.filter((x: any) => shown[x.id] !== false).length === 1) return; setShown(r.id, !on); }}><span className="tick">{on ? '✓' : ''}</span>{r.name}</button>; })}
         </div>
-      )}
-
-      {q.isLoading ? <Skeleton rows={4} /> : q.isError && !q.data ? <LoadError onRetry={() => q.refetch()} /> : rows.length === 0 ? (
-        <div className="card"><Empty icon="stetho" title={all.length ? 'Nothing matches these filters' : `No procedures planned for ${lab(day).toLowerCase()}`} hint={all.length ? undefined : 'Every room is free.'} />
-          {!all.length && unscheduled > 0 && <div className="flex justify-center pb-5"><button className="btn btn-primary" onClick={onPlans}>{unscheduled} plan{unscheduled === 1 ? '' : 's'} waiting to be scheduled</button></div>}</div>
-      ) : (
-        <div className="card-flat overflow-hidden anim-fade-up">
-          <div className="hidden md:flex items-center gap-3 px-5 py-2.5 text-[11px] uppercase tracking-wider text-muted"><span className="w-14">Time</span><span className="flex-1">Patient and procedure</span><span className="w-44">Room</span><span className="w-40">Doctor</span><span className="w-44">Status</span><span className="w-9" /></div>
-          {rows.map((s) => (
-            <div key={s.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/70 px-5 py-3 first:border-t-0">
-              <b className="w-14 shrink-0 text-[15px]">{s.startTime}</b>
-              <div className="min-w-0 flex-1 basis-48">
-                <div className="flex items-center gap-2"><Avatar name={s.patient.fullName} size="h-7 w-7 text-[10px]" /><button className="truncate font-medium hover:underline text-left" onClick={() => nav(`/patients/${s.patient.id}`)}>{s.patient.fullName}</button><span className="text-xs text-muted">{[s.patient.ageYears ? `${s.patient.ageYears}${s.patient.sex ?? ''}` : '', s.patient.patientNo].filter(Boolean).join(' · ')}</span></div>
-                <div className="text-xs text-muted pl-9">{s.procedure ?? 'Procedure'} · sitting {s.sittingNo}{s.of ? ` of ${s.of}` : ''} · {s.startTime}–{s.endTime}<span className="md:hidden"> · {s.room ?? 'no room'} · {s.doctor ?? 'no doctor'}</span></div>
-              </div>
-              <span className="hidden md:block w-44 text-sm">{s.room ?? <span className="text-muted">no room</span>}</span>
-              <span className="hidden md:block w-40 text-sm">{s.doctor ?? <span className="text-rose">not assigned</span>}{s.supervisor && <div className="text-xs text-muted">supervised by {s.supervisor}</div>}</span>
-              <span className="flex w-44 flex-wrap gap-1">{status(s)}{noDoc(s) && <Chip tone="rose">no doctor</Chip>}<MoneyChip m={s.money} /></span>
-              {canWrite && s.state === 'confirmed' && s.day === t && <button className="btn btn-sm btn-primary" disabled={setState.isPending} onClick={() => start(s)}>Start</button>}
-              {canWrite && s.state === 'in_progress' && <button className="btn btn-sm btn-primary" disabled={setState.isPending} onClick={() => done(s)}><Icon name="check" className="h-3.5 w-3.5" />Mark done</button>}
-              <span className="w-9 text-right">{canWrite && <MoreMenu items={[
-                { label: 'Reschedule', hidden: !['confirmed', 'postponed', 'missed'].includes(s.state), onClick: () => setMoving(s) },
-                { label: s.practitionerId ? 'Change doctor' : 'Assign doctor', hidden: s.state !== 'confirmed', onClick: () => setAssigning(s) },
-                { label: s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', hidden: s.state !== 'confirmed', onClick: () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }) },
-                { label: 'Mark as missed', hidden: s.state !== 'confirmed', onClick: async () => { if (await ask({ title: 'Mark this sitting as missed?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark missed', cancelLabel: 'Keep it' })) setState.mutate({ id: s.id, state: 'missed' }); } },
-                { label: 'Cancel this sitting', danger: true, hidden: !['confirmed', 'missed'].includes(s.state), onClick: async () => { const a = await ask({ title: 'Cancel this sitting?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and it goes back to Plans to schedule.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } },
-              ]} />}</span>
+        {q.isLoading ? <div className="p-4"><Skeleton rows={4} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : !cols.length ? <div className="py-10 text-center text-muted">No rooms are set up. Rooms are added in Settings.</div> : (
+          <div className="overflow-x-auto">
+            <div className="fd-hgrid" style={{ minWidth: 88 + cols.length * 230, gridTemplateColumns: `88px repeat(${cols.length}, minmax(0, 1fr))` }}>
+              <span className="fd-hh" />
+              {cols.map((r: any) => <span key={r.id} className="fd-hh"><b>{r.name}</b> <span>{(r.capabilities ?? []).slice(0, 3).join(', ')}</span></span>)}
+              {hours.map((h) => [
+                <span key={`t${h}`} className={`fd-ht ${h === nowH ? 'now' : ''} ${past(h) ? 'past' : ''}`}>{hourLabel(h)}{h === nowH && <small>now</small>}</span>,
+                ...cols.map((r: any) => {
+                  const mine = all.filter((s) => (s.roomId ?? '') === r.id && Number(s.startTime.slice(0, 2)) === h).sort((a, b) => a.startTime.localeCompare(b.startTime));
+                  return (
+                    <div key={r.id + h} className={`fd-hc ${h === nowH ? 'now' : ''}`}>
+                      {mine.length > 0 && <div className="fd-hchips">{mine.map(chip)}</div>}
+                      {!mine.length && canWrite && r.id && !past(h) && waitingPlans.length > 0 && <button type="button" className="fd-sch-free quiet" onClick={() => setBooking({ roomId: r.id, startTime: hh(h) })}>+ Book</button>}
+                    </div>);
+                }),
+              ])}
             </div>
-          ))}
+          </div>)}
+        <div className="fd-hkey">
+          <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />In the room</span>
+          <span className="text-muted">✓ Done</span><span className="text-rose">Missed</span>
+          <span className="ml-auto">Tap a sitting for the drawer, “+ Book” to book that room and hour.</span>
         </div>
-      )}
-      <div className="text-xs text-muted">Plans the doctor made that are not scheduled yet are under “Plans to schedule”.</div>
+      </div>
+
+      {/* only what needs the coordinator */}
+      <aside className="flex flex-col gap-4">
+        <section className="fd-sheet overflow-hidden">
+          <div className="px-4 pb-2 pt-3.5"><b className="text-[15px]">Patient not called yet</b> <span className="text-[12.5px] text-muted">· say yes once they agree</span></div>
+          {toCall.length === 0 ? <div className="px-4 pb-4 text-[13px] text-muted">Everyone has said yes.</div> : toCall.map((s) => (
+            <div key={s.id} className="flex items-center gap-2 border-t border-line px-4 py-2.5">
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpenId(s.id)}><span className="block truncate text-[14px] font-semibold">{s.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{s.procedure ?? 'Procedure'} · {s.startTime} · {s.room ?? 'no room'}{s.patient.phone ? ` · ${s.patient.phone}` : ''}</span></button>
+              {canWrite && <button className="btn btn-sm shrink-0" disabled={confirm.isPending} onClick={() => confirm.mutate({ id: s.id, confirmed: true })}>Patient said yes</button>}
+            </div>))}
+        </section>
+        <section className="fd-sheet overflow-hidden">
+          <div className="px-4 pb-2 pt-3.5"><b className="text-[15px]">No doctor yet</b></div>
+          {noDoc.length === 0 ? <div className="px-4 pb-4 text-[13px] text-muted">Every sitting has a doctor.</div> : noDoc.map((s) => (
+            <div key={s.id} className="flex items-center gap-2 border-t border-line px-4 py-2.5">
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpenId(s.id)}><span className="block truncate text-[14px] font-semibold">{s.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{s.procedure ?? 'Procedure'} · {s.startTime}–{s.endTime}</span></button>
+              {canWrite && <button className="btn btn-sm shrink-0" onClick={() => setAssigning(s)}>Pick doctor</button>}
+            </div>))}
+        </section>
+        <section className="fd-sheet flex items-center gap-3 p-4">
+          <span className="min-w-0 flex-1"><b className="text-[15px]">Plans to schedule</b><span className="block text-[12.5px] text-muted">{waitingPlans.length ? `${waitingPlans.length} waiting for a date` : 'Nothing waiting'}</span></span>
+          <button className="btn btn-sm" onClick={onPlans}>Open</button>
+        </section>
+      </aside>
+
+      {opened && <ProcedureDrawer id={opened.id} canAct={canWrite} extra={actions(opened)} onClose={() => setOpenId(null)} />}
+      {booking && !bookRec && <Modal title="Book a sitting" subtitle={`${rooms.find((r: any) => r.id === booking.roomId)?.name ?? ''} · ${long(day)} · ${booking.startTime}`} onClose={() => setBooking(null)} width="max-w-md">
+        <div className="text-[13px] text-muted mb-2">Pick a plan that is waiting for a date.</div>
+        <div className="flex flex-col gap-1.5">{waitingPlans.map((r: any) => (
+          <button key={r.id} type="button" className="flex items-center justify-between gap-3 rounded-[12px] px-3 py-2.5 text-left ring-1 ring-line hover:bg-surface-2" onClick={() => setBookRec(r)}>
+            <span className="min-w-0"><b className="block truncate text-[14px]">{r.patient.fullName}</b><span className="block truncate text-[12px] text-muted">{r.procedure ?? 'Procedure'}{r.sittings ? ` · ${r.sittings} sittings` : ''}{r.dueOn ? ` · due ${new Date(r.dueOn + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : ''}</span></span>
+            <Icon name="chevR" className="h-4 w-4 shrink-0 text-muted" /></button>))}</div>
+      </Modal>}
+      {booking && bookRec && <ScheduleModal rec={bookRec} at={{ day, ...booking }} onClose={() => { setBooking(null); setBookRec(null); refresh(); }} />}
       {moving && <ScheduleModal rec={{ id: moving.recommendationId, procedureId: moving.procedureId, patient: { fullName: moving.patient.fullName, phone: moving.patient.phone }, sittings: moving.of }} sitting={moving} onClose={() => { setMoving(null); refresh(); }} />}
       {assigning && <AssignDoctor s={assigning} docs={docs} onClose={() => { setAssigning(null); refresh(); }} />}
     </div>

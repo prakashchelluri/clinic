@@ -16,6 +16,7 @@ export function can(perms: string[] | undefined, needed: string) {
 
 export type NavItem = { to: string; label: string; icon: string; group?: 'clinic'; show: (c: (p: string) => boolean) => boolean };
 export const NAV: NavItem[] = [
+  { to: '/clinic', label: 'Clinic', icon: 'home', group: 'clinic', show: (c) => c('finance.read') },
   { to: '/dashboard', label: 'Dashboard', icon: 'chart', group: 'clinic', show: (c) => c('report.read') || c('finance.read') },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },

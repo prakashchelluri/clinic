@@ -83,6 +83,30 @@ export function dayCloseRoutes(app: FastifyInstance) {
     return rows.map((r) => ({ day: r.day, counts: r.counts, closedBy: r.closedBy, differences: Object.keys(r.notes) }));
   });
 
+  /** The owner's Clinic page in one call: yesterday and today by section and mode, this week's totals, and what needs the owner
+   *  (days never closed, money still due, EMI the lender has not paid). Stock and doctors come from their own endpoints. */
+  route(app, 'get', '/owner/summary', 'finance.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const tz = req.ctx.timezone; const today = todayIn(tz); const yesterday = addDays(today, -1);
+    const closedRows = await tx.select().from(dayClose).where(and(eq(dayClose.tenantId, t), gte(dayClose.day, addDays(today, -14))));
+    const closedOn = new Map(closedRows.map((r) => [r.day, r]));
+    const y = await dayFigures(tx, t, tz, yesterday); const yc = closedOn.get(yesterday);
+    const td = await dayFigures(tx, t, tz, today);
+    // Monday of this week up to today
+    const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7;
+    const week = [];
+    for (let i = dow; i >= 0; i--) { const d = addDays(today, -i); week.push({ day: d, totalPaise: d === today ? td.money.total.total : d === yesterday ? y.money.total.total : (await dayFigures(tx, t, tz, d)).money.total.total }); }
+    // a day with patients or money in the last two weeks that nobody closed
+    const worked = await tx.select({ day: visit.day }).from(visit).where(and(eq(visit.tenantId, t), gte(visit.day, addDays(today, -14)), lt(visit.day, today))).groupBy(visit.day);
+    const unclosed = [];
+    for (const { day } of worked.sort((a, b) => a.day.localeCompare(b.day))) if (!closedOn.has(day)) { const f = day === yesterday ? y : await dayFigures(tx, t, tz, day); unclosed.push({ day, money: f.money }); }
+    const dues = await tx.select({ total: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId})::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
+    const emi = await tx.select({ total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int`, n: sql<number>`count(*)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt)));
+    return {
+      today, yesterday: { day: yesterday, money: y.money, closed: yc ? { by: yc.closedBy, at: yc.createdAt, cashDiffPaise: (yc.cashCountedPaise ?? 0) - ((yc.totals as any)?.drawer?.expectedCashPaise ?? 0), notes: yc.notes } : null },
+      todayMoney: td.money, week, unclosed, dues: { totalPaise: dues[0]?.total ?? 0, patients: dues[0]?.patients ?? 0 }, emi: { totalPaise: emi[0]?.total ?? 0, n: emi[0]?.n ?? 0 },
+    };
+  });
+
   /** Per-doctor tiles, a daily trend, and the times that matter, each against the month before rather than an outside benchmark. */
   route(app, 'get', '/dashboard', 'report.read', async (req, tx) => {
     const t = req.ctx.tenantId; const tz = req.ctx.timezone; const money = can(req.perms, 'fees.see'); const allMoney = can(req.perms, 'finance.read'); // a doctor sees only their own revenue
