@@ -47,8 +47,8 @@ export function BroadcastDialog({ onClose, onSent }: { onClose: () => void; onSe
 
         {step === 1 && <>
           <div><div className="label">Send to</div><div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Who gets the message">{AUDIENCES.map((a) => <button key={a.key} role="radio" aria-checked={aud === a.key} className={`toggle-opt ${aud === a.key ? 'on' : ''}`} onClick={() => setAud(a.key)}>{a.label}</button>)}</div></div>
-          {!aud ? <div className="rounded-2xl bg-white/70 px-4 py-3 text-sm text-muted">Pick who should get this message.</div> : <>
-          <div className="rounded-2xl bg-white/70 px-4 py-3">
+          {!aud ? <div className="rounded-2xl bg-surface/70 px-4 py-3 text-sm text-muted">Pick who should get this message.</div> : <>
+          <div className="rounded-2xl bg-surface/70 px-4 py-3">
             {pre.isLoading ? <span className="text-sm text-muted">Counting…</span> : pre.isError ? <span className="text-sm text-rose">{errText(pre.error)}</span> : <><b className="text-[15px]">{checked.size} patient{checked.size === 1 ? '' : 's'}</b> <span className="text-sm text-muted">ticked of {total} in this group</span>
               {(pre.data?.skipped ?? 0) > 0 && <div className="text-xs text-muted mt-0.5">{pre.data.skipped} left out: {[pre.data.optedOut ? `${pre.data.optedOut} asked for no WhatsApp` : '', pre.data.skipped - (pre.data.optedOut ?? 0) > 0 ? `${pre.data.skipped - (pre.data.optedOut ?? 0)} without a valid mobile number` : ''].filter(Boolean).join(', ')}</div>}
               {capped && <div className="text-xs text-amber mt-0.5">Only the first {listed.toLocaleString('en-IN')} of {total.toLocaleString('en-IN')} (A to Z by name) can be listed here. The other {(total - listed).toLocaleString('en-IN')} will not get this message; send to smaller groups to reach them.</div>}</>}
@@ -84,7 +84,7 @@ export function BroadcastDialog({ onClose, onSent }: { onClose: () => void; onSe
 
         {step === 3 && <>
           <div className="rounded-2xl bg-amber-soft px-4 py-3 text-sm text-amber"><b>Demo mode.</b> Messages are recorded but not sent. Connect WhatsApp in Settings to send for real.</div>
-          <div className="rounded-2xl bg-white/70 px-4 py-3 text-sm"><b>{checked.size} patient{checked.size === 1 ? '' : 's'}</b> · {AUDIENCES.find((a) => a.key === aud)?.label}{capped ? ` · ${(total - listed).toLocaleString('en-IN')} in this group not reached (list limit)` : ''}<div className="mt-1.5 whitespace-pre-wrap text-xs text-muted">{body}</div></div>
+          <div className="rounded-2xl bg-surface/70 px-4 py-3 text-sm"><b>{checked.size} patient{checked.size === 1 ? '' : 's'}</b> · {AUDIENCES.find((a) => a.key === aud)?.label}{capped ? ` · ${(total - listed).toLocaleString('en-IN')} in this group not reached (list limit)` : ''}<div className="mt-1.5 whitespace-pre-wrap text-xs text-muted">{body}</div></div>
         </>}
 
         <div className="modal-foot">

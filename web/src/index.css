@@ -274,6 +274,18 @@ h1 { letter-spacing: -0.025em; }
   .menu button, .menu a, .menu-list button, .menu-list a { min-height: 44px; }
   input[type="checkbox"]:not(.sr-only):not(.peer), input[type="radio"]:not(.sr-only):not(.peer) { width: 20px; height: 20px; }
   .tap, .rail-item, .dt-act button { min-height: 44px; }
+  /* the rest of the touch pass (UX audit 7.2 #14): chips, tabs, segments and the front desk's own controls. :root lifts these over frontdesk.css, which loads later. */
+  :root :is(.cnt, .seg > button, .dtab, .tabs > button, .fd-sch-free, .opt-add, .pick-chip, .toppill, .fd-cal, .fd-sch-date) { min-height: 44px; }
+  :root button.fd-pc, :root .fd-ft { height: auto; min-height: 44px; }
+  /* small round icons (a chip's ×, a switch) keep their look; an invisible ring around them takes the finger */
+  :root :is(.fd-x, .fd-chip button, [role="switch"]) { position: relative; }
+  :root :is(.fd-x, .fd-chip button, [role="switch"])::before { content: ''; position: absolute; inset: -12px; }
+  /* type: 16 px body and form text (no zoom-on-focus on phones), nothing under 13 px */
+  body, .input, .typebar, textarea, select { font-size: 16px; }
+  :root :is(.text-\[10px\], .text-\[10\.5px\], .text-\[11px\], .text-\[11\.5px\], .text-xs, .text-\[12px\], .text-\[12\.5px\]) { font-size: 13px; }
+  :root :is(.chip, .toggle-opt, .btn-sm, .cnt, .seg-sm > button, .tab-count, .kbd, .label, .opt-add, .pick-chip, .quick-label, .table th,
+    .fd-tile .fd-lbl, .fd-tile .fd-sub, .fd-pc, .fd-pc .tk, .fd-pc .tg, .fd-hcap, .fd-hh span, .fd-ht small, .fd-sit span, .fd-ft, .fd-table thead th, .fd-hkey, .fd-sch-free, .fd-cal) { font-size: 13px; }
+  :root .tip::after { font-size: 13px; }
 }
 
 /* A side drawer on the right (booking, procedure sitting): no dimmed or blurred page, the page beside it stays usable. Same as the front desk's patient drawer. */

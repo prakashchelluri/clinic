@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate, useOutletContext } from 'react-router';
+import { Link, useNavigate, useOutletContext } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
 import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
@@ -17,9 +17,9 @@ const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h
 const nowHHMM = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 const addDay = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 /** "9–10 am", "12–1 pm": how the clinic says an hour */
-const hourLabel = (a: string, b: string) => { const f = (m: number) => { const h = Math.floor(m / 60) % 12 || 12; const mm = m % 60; return mm ? `${h}:${String(mm).padStart(2, '0')}` : `${h}`; }; const s = toMin(a), e = toMin(b); return `${f(s)}–${f(e)} ${e > 12 * 60 ? 'pm' : 'am'}`; };
+export const hourLabel = (a: string, b: string) => { const f = (m: number) => { const h = Math.floor(m / 60) % 12 || 12; const mm = m % 60; return mm ? `${h}:${String(mm).padStart(2, '0')}` : `${h}`; }; const s = toMin(a), e = toMin(b); return `${f(s)}–${f(e)} ${e > 12 * 60 ? 'pm' : 'am'}`; };
 /** "10:00–13:00, 16:00–20:00" from back-to-back windows. */
-const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const last = out[out.length - 1]; if (last && last[1] === w.startTime) last[1] = w.endTime; else out.push([w.startTime, w.endTime]); return out; }, []).map(([a, b]) => `${a}–${b}`).join(', ');
+export const hoursOf = (ws: any[]) => ws.reduce((out: [string, string][], w) => { const last = out[out.length - 1]; if (last && last[1] === w.startTime) last[1] = w.endTime; else out.push([w.startTime, w.endTime]); return out; }, []).map(([a, b]) => `${a}–${b}`).join(', ');
 /** Allergies first, then the conditions recorded once on the patient (diabetes, BP, thyroid…). */
 const medical = (p: any, cfg: any): string => [p?.allergies ? `Allergic to ${p.allergies}` : null,
   ...(cfg?.historyCategories ?? []).flatMap((c: any) => (Array.isArray(p?.history?.[c.key]) ? p.history[c.key].map((x: any) => x.name) : []))].filter(Boolean).join(' · ');
@@ -210,7 +210,8 @@ export function Today() {
           </section>}
 
           <section className="fd-sheet p-4 sm:p-5 anim-fade-up">
-            <div className="flex items-baseline gap-2"><b className="text-[15px]">Tomorrow</b><span className="text-xs text-muted">{new Date(tmr + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}</span></div>
+            <div className="flex items-baseline gap-2"><b className="text-[15px]">Tomorrow</b><span className="text-xs text-muted">{new Date(tmr + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}</span>
+              {doc && <Link to="/today/week" className="tap ml-auto inline-flex items-center gap-1 text-[13px] font-semibold text-clay hover:underline">My week<Icon name="chevR" className="h-3.5 w-3.5" /></Link>}</div>
             <div className="mt-1 text-sm text-muted">{tom.isLoading ? '…' : tw.length ? <>{hoursOf(tw)} · <b className="text-ink">{tBooked} booked{tom.data?.procedures?.length ? ` · ${tom.data.procedures.length} procedure${tom.data.procedures.length === 1 ? '' : 's'}` : ''}</b></> : (tom.data?.blocks ?? []).some((b: any) => b.kind === 'leave') ? 'Away' : 'Not working'}</div>
             {canChange && tw.length > 0 && <button className="btn btn-sm mt-3" onClick={() => setChange({ kind: 'away', day: tmr })}>I'm not coming</button>}
           </section>

@@ -22,9 +22,9 @@ const fill = (t: string) => t.replace(/\{(\w+)\}/g, (m, k) => SAMPLE[k] ?? m);
 const save = (settings: any) => patch('/admin/clinic', { settings });
 
 const Toggle = ({ on, onChange, label, hint, id }: { on: boolean; onChange: (v: boolean) => void; label: string; hint?: string; id: string }) => (
-  <label htmlFor={id} className="flex cursor-pointer items-start gap-3">
+  <label htmlFor={id} className="tap flex cursor-pointer items-start gap-3">
     <input id={id} type="checkbox" className="sr-only peer" checked={on} onChange={(e) => onChange(e.target.checked)} />
-    <span aria-hidden className={`mt-0.5 relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors duration-300 peer-focus-visible:ring-2 peer-focus-visible:ring-clay ${on ? 'bg-ink' : 'bg-line-2'}`}><i className="absolute top-[3px] h-4 w-4 rounded-full bg-white transition-all duration-300" style={{ left: on ? 19 : 3 }} /></span>
+    <span aria-hidden className={`mt-0.5 relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors duration-300 peer-focus-visible:ring-2 peer-focus-visible:ring-clay ${on ? 'bg-ink' : 'bg-line-2'}`}><i className="absolute top-[3px] h-4 w-4 rounded-full bg-surface shadow-sm transition-all duration-300" style={{ left: on ? 19 : 3 }} /></span>
     <span><span className="text-sm font-medium">{label}</span>{hint && <span className="block text-xs text-muted">{hint}</span>}</span>
   </label>
 );
@@ -65,7 +65,7 @@ export function ServicesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
       <Section title={<>Visit types <span className="font-normal text-muted">· what patients book</span></>}>
         {list.isLoading ? <div className="p-4"><Skeleton rows={3} /></div> : items.length === 0 ? <Empty icon="calendar" title="No visit types yet" hint="Add what patients come for: new consultation, review, procedure follow-up." /> : items.map((s) => (
-          <button key={s.id} className={`row w-full text-left ${s.active ? '' : 'opacity-50'} ${edit?.id === s.id ? 'bg-white' : ''}`} onClick={() => setEdit({ ...s, price: s.pricePaise == null ? '' : String(s.pricePaise / 100), feeCategoryId: s.feeCategoryId ?? '', description: s.description ?? '' })}>
+          <button key={s.id} className={`row w-full text-left ${s.active ? '' : 'opacity-50'} ${edit?.id === s.id ? 'bg-surface' : ''}`} onClick={() => setEdit({ ...s, price: s.pricePaise == null ? '' : String(s.pricePaise / 100), feeCategoryId: s.feeCategoryId ?? '', description: s.description ?? '' })}>
             <i className="h-3.5 w-3.5 shrink-0 rounded" style={{ background: s.color }} />
             <div className="min-w-0 flex-1"><div className="font-medium">{s.name}</div><div className="truncate text-xs text-muted">{s.minutes} min{s.pricePaise != null ? ` · ${money(s.pricePaise)}` : ''}{s.places > 1 ? ` · uses ${s.places} booking slots` : ''} · {s.practitionerIds.length ? s.practitionerIds.map((id: string) => cfg.practitioners.find((p: any) => p.id === id)?.name ?? '?').join(', ') : 'all doctors'}</div></div>
             {!s.active ? <Chip tone="rose">archived</Chip> : null}
@@ -104,7 +104,7 @@ function ServiceEditor({ value, cfg, onDone, onCancel }: { value: any; cfg: any;
         <div><label className="label" htmlFor="sv-buf">Buffer after (min)</label><NumInput id="sv-buf" max={240} className={`input ${bufBad ? '!border-rose' : ''}`} value={f.bufferMinutes} onChange={(e) => set('bufferMinutes', e.target.value)} /></div>
         <div><label className="label" htmlFor="sv-fee">Fee at check-in</label><select id="sv-fee" className="input" value={f.feeCategoryId} onChange={(e) => set('feeCategoryId', e.target.value)}><option value="">Decide at check-in</option>{cfg.feeCategories.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.amountPaise != null ? ` · ${money(c.amountPaise)}` : ''}</option>)}</select></div>
       </div>
-      <div><span className="label">Colour</span><div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Colour">{COLORS.map((c) => <button key={c} type="button" role="radio" aria-checked={f.color === c} aria-label={c} onClick={() => set('color', c)} className="h-7 w-7 rounded-full transition-shadow" style={{ background: c, boxShadow: f.color === c ? '0 0 0 2px #fff, 0 0 0 4px var(--color-ink)' : undefined }} />)}</div></div>
+      <div><span className="label">Colour</span><div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Colour">{COLORS.map((c) => <button key={c} type="button" role="radio" aria-checked={f.color === c} aria-label={c} onClick={() => set('color', c)} className="h-7 w-7 rounded-full transition-shadow" style={{ background: c, boxShadow: f.color === c ? '0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-ink)' : undefined }} />)}</div></div>
       <div><span className="label">Doctors</span><div className="flex flex-wrap gap-1.5"><button type="button" className={`toggle-opt ${f.practitionerIds.length === 0 ? 'on' : ''}`} onClick={() => set('practitionerIds', [])}>All doctors</button>{cfg.practitioners.map((p: any) => <button key={p.id} type="button" className={`toggle-opt ${f.practitionerIds.includes(p.id) ? 'on' : ''}`} onClick={() => toggleDoc(p.id)}>{p.name}</button>)}</div></div>
       <div><label className="label" htmlFor="sv-desc">Shown to patients (optional)</label><textarea id="sv-desc" className="input min-h-[64px]" maxLength={300} value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="e.g. Follow-up within 15 days of your first visit" /></div>
       <div className="flex flex-wrap gap-2 pt-1">
@@ -204,7 +204,7 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
         <div className="text-xs text-muted">{KINDS.find((k) => k[0] === kind)?.[2]}</div>
         <textarea aria-label="Message text" className={`input min-h-[96px] ${unknown.length ? '!border-rose' : ''}`} maxLength={900} value={cur} onChange={(e) => setTpl({ ...tpl, [kind]: e.target.value })} />
         {unknown.length > 0 && <div className="text-xs text-rose">Unknown {unknown.length === 1 ? 'word' : 'words'} in braces: {unknown.map((u) => `{${u}}`).join(', ')}. {unknown.length === 1 ? 'It' : 'They'} would be sent as written.</div>}
-        <div className="flex flex-wrap gap-1">{VARS.map((v) => <button key={v} type="button" className="chip hover:bg-white" onClick={() => setTpl({ ...tpl, [kind]: `${cur} {${v}}` })}>{`{${v}}`}</button>)}</div>
+        <div className="flex flex-wrap gap-1">{VARS.map((v) => <button key={v} type="button" className="chip hover:bg-surface" onClick={() => setTpl({ ...tpl, [kind]: `${cur} {${v}}` })}>{`{${v}}`}</button>)}</div>
         <div className="rounded-2xl bg-sage-soft/60 px-4 py-3 text-sm"><div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-sage">Preview</div>{fill(cur)}</div>
         <div className="flex items-center gap-2"><label className="label !mb-0 shrink-0" htmlFor="ms-ptpl">Meta template name</label><input id="ms-ptpl" className="input" maxLength={100} placeholder="optional, e.g. appointment_confirmation" value={ptpl[kind] ?? ''} onChange={(e) => setPtpl({ ...ptpl, [kind]: e.target.value.replace(/[^a-z0-9_]/gi, '').toLowerCase() })} /></div>
         <div className="text-xs text-muted">With a template name, WhatsApp sends your approved template with these values in order: patient, date, time, doctor, link. Without one, the text above is sent (WhatsApp delivers that only if the patient wrote to you in the last 24 hours).</div>
