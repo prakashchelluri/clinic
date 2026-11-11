@@ -25,6 +25,18 @@ const PatientIn = z.object({
   language: z.enum(['en', 'te', 'hi']).optional().nullable(),
 });
 
+const FlagsIn = z.object({ vip: z.boolean().optional(), family: z.boolean().optional(), careful: z.object({ note: z.string().trim().min(3, 'Say why').max(300) }).nullable().optional() });
+/** Turn the sent flags on or off over what the patient has; Handle carefully keeps who set it and when.
+ *  The desk sets VIP and Family and friends; Handle carefully stays with the doctor or owner. */
+function applyFlags(cur: PatientFlags, b: z.infer<typeof FlagsIn>, by: string, perms: string[]): PatientFlags {
+  if (b.careful !== undefined && !can(perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:encounter.complete');
+  const flags: PatientFlags = { ...cur };
+  if (b.vip !== undefined) { if (b.vip) flags.vip = true; else delete flags.vip; }
+  if (b.family !== undefined) { if (b.family) flags.family = true; else delete flags.family; }
+  if (b.careful !== undefined) { if (b.careful) flags.careful = { note: b.careful.note, by, at: new Date().toISOString() }; else delete flags.careful; }
+  return flags;
+}
+
 /** Names compared loosely: case, dots and extra spaces do not count. */
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
 function editDistance(a: string, b: string) {
@@ -99,16 +111,13 @@ export function patientRoutes(app: FastifyInstance) {
     return { rows: out, total: n };
   });
 
-  // Flags: VIP, Family and friends, Handle carefully. The last one cannot be set without a reason; the doctor or owner sets and clears it.
-  route(app, 'patch', '/patients/:id/flags', 'encounter.complete', async (req, tx) => {
+  // Flags: VIP, Family and friends (anyone who edits patients, the desk included), Handle carefully (doctor or owner, never without a reason).
+  route(app, 'patch', '/patients/:id/flags', 'patient.write', async (req, tx) => {
     const id = (req.params as any).id; const t = req.ctx.tenantId;
-    const b = z.object({ vip: z.boolean().optional(), family: z.boolean().optional(), careful: z.object({ note: z.string().trim().min(3, 'Say why').max(300) }).nullable().optional() }).parse(req.body);
+    const b = FlagsIn.parse(req.body);
     const cur = await tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
-    const flags: PatientFlags = { ...cur.flags };
-    if (b.vip !== undefined) { if (b.vip) flags.vip = true; else delete flags.vip; }
-    if (b.family !== undefined) { if (b.family) flags.family = true; else delete flags.family; }
-    if (b.careful !== undefined) { if (b.careful) flags.careful = { note: b.careful.note, by: req.ctx.name, at: new Date().toISOString() }; else delete flags.careful; }
+    const flags = applyFlags(cur.flags, b, req.ctx.name, req.perms);
     req.auditBefore = { flags: cur.flags };
     const [row] = await tx.update(patient).set({ flags }).where(and(eq(patient.id, id), eq(patient.tenantId, t))).returning();
     return row;
@@ -116,6 +125,7 @@ export function patientRoutes(app: FastifyInstance) {
 
   route(app, 'post', '/patients', 'patient.write', async (req, tx) => {
     const body = PatientIn.parse(req.body);
+    const flagsIn = FlagsIn.optional().parse((req.body as any)?.flags);
     const t = req.ctx.tenantId;
     // Duplicate warning (not a block): same phone and a similar name, or the same name with the same age or date of birth
     if (!(req.query as any).force) {
@@ -123,7 +133,7 @@ export function patientRoutes(app: FastifyInstance) {
       if (matches.length) throw new HttpError(409, 'POSSIBLE_DUPLICATE', { existing: matches[0], matches });
     }
     const n = await nextNumber(tx, t, 'patient_no', 'tenant');
-    const [row] = await tx.insert(patient).values({ ...body, ...withHistory(body.history, {}, req.ctx.name), tenantId: t, patientNo: `P${String(n).padStart(5, '0')}` }).returning();
+    const [row] = await tx.insert(patient).values({ ...body, ...withHistory(body.history, {}, req.ctx.name), ...(flagsIn ? { flags: applyFlags({}, flagsIn, req.ctx.name, req.perms) } : {}), tenantId: t, patientNo: `P${String(n).padStart(5, '0')}` }).returning();
     await emit(tx, req.ctx, 'patient.registered', 'patient', row.id, { patientNo: row.patientNo });
     return row;
   });

@@ -6,7 +6,7 @@ import { get, post, patch, qc, uuid, ApiError, today, errText, listOut, dialable
 import { openPrint } from '../printPreview';
 import { ScheduleModal } from './Worklist';
 import { can } from '../App';
-import { FlagChips } from '../flags';
+import { FlagChips, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { CourseDialog } from '../courses';
 import { Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
@@ -456,6 +456,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const [q, setQ] = useState('');
   const [patientId, setPatientId] = useState(init.patientId);
   const [newP, setNewP] = useState<null | { fullName: string; phone: string }>(null);
+  const [newFlags, setNewFlags] = useState(NO_FLAGS); // asked only when registering here
   const [first, setFirst] = useState<First>(NO_FIRST); // first-visit details: asked once, kept on the patient
   const [cat, setCat] = useState('');
   const vitalList = enabledVitals(cfg?.tenant.settings); // the clinic's vitals (Settings → Consultation form fields)
@@ -496,7 +497,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const submit = useMutation({
     mutationFn: async () => {
       let pid = patientId;
-      if (!pid && newP) { const np = await post(forceNew ? '/patients?force=1' : '/patients', { fullName: newP.fullName.trim(), phone: newP.phone || null, locality: locality.trim() || null, ...firstBody() }); pid = np.id; }
+      if (!pid && newP) { const np = await post(forceNew ? '/patients?force=1' : '/patients', { fullName: newP.fullName.trim(), phone: newP.phone || null, locality: locality.trim() || null, ...firstBody(), ...flagBody(newFlags) }); pid = np.id; }
       else if (pid && isFirst) await patch(`/patients/${pid}`, { ...firstBody(), ...(locality.trim() ? { locality: locality.trim() } : {}) });
       if (!pid) throw new Error('Pick or register a patient');
       const complaints = [...list, ...(draft.text.trim() ? [{ text: draft.text.trim(), duration: draft.duration.trim() }] : [])];
@@ -526,7 +527,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   useEffect(() => setPartOk(false), [collect, fee]);
   const MODE: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'card', bank: 'bank' };
   const modes = [...new Set(pays.filter((_, i) => amtOf(i) > 0).map((x) => MODE[x.method]))].join(' + ');
-  const blocker =!chosen ? 'Pick a visit type' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : taking && collect <= 0 ? 'Enter the amount collected' : taking && collect > fee ? `That is more than the ${money(fee)} fee` : short && !partOk ? 'Tick to take less than the fee' : '';
+  const blocker =!chosen ? 'Pick a visit type' : newP && flagDraftBad(newFlags) ? 'Say why the patient is to be handled carefully' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : taking && collect <= 0 ? 'Enter the amount collected' : taking && collect > fee ? `That is more than the ${money(fee)} fee` : short && !partOk ? 'Tick to take less than the fee' : '';
   const facts = sug.data?.facts;
   const doctorName = (id?: string) => cfg?.practitioners.find((x: any) => x.id === id)?.name;
   const cats: any[] = cfg?.historyCategories ?? [];
@@ -543,7 +544,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
           {q.length < 2 ? <div className="p-4 text-sm text-muted">Type at least 2 characters</div> : search.isLoading ? <Skeleton rows={2} /> : (search.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No match. Register below.</div> :
             search.data.map((x: any) => <button key={x.id} className="row w-full text-left" onClick={() => setPatientId(x.id)}><Avatar name={x.fullName} /><div className="flex-1 min-w-0"><div className="text-sm font-medium">{x.fullName} <span className="text-muted font-normal text-xs">{x.ageYears ? `${x.ageYears}` : ''} {x.sex ?? ''}</span></div><div className="text-xs text-muted">{x.patientNo} · {x.phone ?? 'no phone'} · {x.locality ?? ''}</div></div><Icon name="chevR" className="text-muted" /></button>)}
         </div>
-        <button className="btn mt-3" onClick={() => { setFirst(NO_FIRST); setNewP({ fullName: /^\d+$/.test(q) ? '' : q, phone: /^\d+$/.test(q) ? q : '' }); }}><Icon name="plus" />New patient</button>
+        <button className="btn mt-3" onClick={() => { setFirst(NO_FIRST); setNewFlags(NO_FLAGS); setNewP({ fullName: /^\d+$/.test(q) ? '' : q, phone: /^\d+$/.test(q) ? q : '' }); }}><Icon name="plus" />New patient</button>
       </div>
     </Modal>
   );
@@ -562,6 +563,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                   <div><label htmlFor="np-phone" className="label">Mobile</label><input id="np-phone" className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
                   <button className="btn btn-ghost" onClick={() => setNewP(null)}>Back to search</button>
                 </div>
+                <FlagPick value={newFlags} onChange={setNewFlags} canCareful={can(perms, 'encounter.complete')} />
               </Sec>
             ) : (
               <section aria-label="Patient" className="flex flex-col gap-3 rounded-[18px] bg-surface px-5 py-4 ring-1 ring-line">

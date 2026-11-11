@@ -23,11 +23,11 @@ export function CarefulBanner({ flags }: { flags?: Flags | null }) {
   return <div className="mt-2 rounded-xl bg-amber-soft px-3 py-2 text-sm text-amber" role="note"><b>Handle carefully.</b> {c.note} <span className="opacity-80">· set by {c.by}, {fmtDate(c.at)}</span></div>;
 }
 
-export function FlagEditor({ patientId, flags, onClose }: { patientId: string; flags: Flags; onClose: () => void }) {
+export function FlagEditor({ patientId, flags, onClose, canCareful = true }: { patientId: string; flags: Flags; onClose: () => void; canCareful?: boolean }) {
   const [vip, setVip] = useState(!!flags.vip); const [family, setFamily] = useState(!!flags.family);
   const [careful, setCareful] = useState(!!flags.careful); const [note, setNote] = useState(flags.careful?.note ?? '');
   const save = useMutation({
-    mutationFn: () => patch(`/patients/${patientId}/flags`, { vip, family, careful: careful ? { note: note.trim() } : null }),
+    mutationFn: () => patch(`/patients/${patientId}/flags`, { vip, family, ...(canCareful ? { careful: careful ? { note: note.trim() } : null } : {}) }),
     onSuccess: () => { ['timeline', 'patients', 'frontdesk'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Saved'); onClose(); },
     onError: (e) => toast(errText(e), 'err'),
   });
@@ -37,7 +37,7 @@ export function FlagEditor({ patientId, flags, onClose }: { patientId: string; f
       <div className="space-y-3">
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={vip} onChange={(e) => setVip(e.target.checked)} /> VIP</label>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={family} onChange={(e) => setFamily(e.target.checked)} /> Family and friends</label>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={careful} onChange={(e) => setCareful(e.target.checked)} /> Handle carefully</label>
+        {canCareful && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={careful} onChange={(e) => setCareful(e.target.checked)} /> Handle carefully</label>}
         {careful && <div className="anim-fade-up"><label className="label" htmlFor="why">Why (the whole front desk will see this)</label>
           <input id="why" autoFocus maxLength={300} className="input" placeholder="for example: sensitive diagnosis; discuss only with the mother" value={note} onChange={(e) => setNote(e.target.value)} />
           <div className="mt-1 text-xs text-muted">Messages and reminders for this patient will not carry the diagnosis or procedure name.</div></div>}
@@ -45,6 +45,22 @@ export function FlagEditor({ patientId, flags, onClose }: { patientId: string; f
       </div>
     </Modal>
   );
+}
+
+/** Flags asked at registration. VIP and Family for everyone who registers; Handle carefully only for the doctor or owner (it needs a reason). */
+export type FlagDraft = { vip: boolean; family: boolean; careful: boolean; note: string };
+export const NO_FLAGS: FlagDraft = { vip: false, family: false, careful: false, note: '' };
+export const flagBody = (f: FlagDraft) => (f.vip || f.family || f.careful ? { flags: { vip: f.vip, family: f.family, ...(f.careful ? { careful: { note: f.note.trim() } } : {}) } } : {});
+export const flagDraftBad = (f: FlagDraft) => f.careful && f.note.trim().length < 3;
+export function FlagPick({ value, onChange, canCareful }: { value: FlagDraft; onChange: (f: FlagDraft) => void; canCareful: boolean }) {
+  const opt = (k: 'vip' | 'family' | 'careful', l: string) => <button type="button" aria-pressed={value[k]} className={`toggle-opt ${value[k] ? 'on' : ''}`} onClick={() => onChange({ ...value, [k]: !value[k] })}>{l}</button>;
+  return <div>
+    <span className="label">Flag <span className="font-normal text-muted">(optional, shown beside the name)</span></span>
+    <div className="flex flex-wrap gap-1" role="group" aria-label="Flag">{opt('vip', 'VIP')}{opt('family', 'Family and friends')}{canCareful && opt('careful', 'Handle carefully')}</div>
+    {value.careful && <div className="mt-2 anim-fade-up"><label className="label" htmlFor="flag-why">Why (the whole front desk will see this)</label>
+      <input id="flag-why" maxLength={300} className="input" placeholder="for example: sensitive diagnosis; discuss only with the mother" value={value.note} onChange={(e) => onChange({ ...value, note: e.target.value })} />
+      {flagDraftBad(value) && <div className="mt-1 text-xs text-rose">Say why, in a few words.</div>}</div>}
+  </div>;
 }
 
 /** Pick the parent: search by name, phone or ID. */
