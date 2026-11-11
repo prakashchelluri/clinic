@@ -40,20 +40,20 @@ export function Reports() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
           <Section title="By visit category" delay={160}>
             {d.byCategory.length === 0 ? <Empty icon="users" title="No visits recorded" /> : (
-              <div className="overflow-x-auto"><table className="table min-w-[460px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Refunded</th></tr></thead>
+              <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Refunded</th></tr></thead>
                 <tbody>{d.byCategory.map((c: any) => <tr key={c.code}><td className="pl-4">{c.name}</td><td className="text-right">{c.visits}</td><td className="text-right">{money(c.billed)}</td><td className="text-right text-muted">{money(c.waived)}</td><td className="text-right pr-4 text-muted">{money(c.refunded)}</td></tr>)}</tbody></table></div>)}
           </Section>
           <Section title="Expenses" delay={200}>
             {d.expenses.length === 0 ? <div className="px-4 pt-4 text-sm text-muted">No expenses entered.</div> :
-              <div className="overflow-x-auto"><table className="table min-w-[460px]"><tbody>{d.expenses.map((e: any) => <tr key={e.id}><td className="pl-4">{e.description}<div className="text-xs text-muted">{e.category}</div></td><td><Chip>{e.method}</Chip></td><td className="text-right pr-4">{money(e.amountPaise)}</td></tr>)}</tbody></table></div>}
+              <div className="overflow-x-auto"><table className="table min-w-[540px]"><tbody>{d.expenses.map((e: any) => <tr key={e.id}><td className="pl-4">{e.description}<div className="text-xs text-muted">{e.category}</div></td><td><Chip>{e.method}</Chip></td><td className="text-right pr-4">{money(e.amountPaise)}</td></tr>)}</tbody></table></div>}
             {can(perms, 'expense.read') && <div className="p-4 no-print border-t border-line"><Link to="/expenses" className="btn btn-sm"><Icon name="rupee" className="h-3.5 w-3.5" />Add or manage expenses</Link></div>}
           </Section>
         </div>
         {can(perms, 'payment.record') && <EmiAwaiting />}
         <Section title={<>Payments <span className="text-muted font-normal">· {d.payments.length}</span></>} delay={240} className="mt-5">
           {d.payments.length === 0 ? <Empty icon="wallet" title="No payments yet today" /> :
-            <div className="overflow-x-auto"><table className="table min-w-[460px]"><thead><tr><th className="pl-4">Time</th><th>Patient</th><th>For</th><th>Method</th><th className="text-right pr-4">Amount</th></tr></thead>
-              <tbody>{d.payments.map((p: any) => <tr key={p.id}><td className="pl-4 text-muted">{fmtTime(p.receivedAt)}</td><td className="font-medium">{p.patient}</td><td className="text-muted">{p.description ?? ''}</td><td><Chip tone={p.amountPaise < 0 ? 'amber' : undefined}>{p.amountPaise < 0 ? `${p.method} refund` : p.method}</Chip></td><td className="text-right pr-4">{money(p.amountPaise)}</td></tr>)}</tbody></table></div>}
+            <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Time</th><th>Receipt</th><th>Patient</th><th>For</th><th>Method</th><th className="text-right pr-4">Amount</th></tr></thead>
+              <tbody>{d.payments.map((p: any) => <tr key={p.id}><td className="pl-4 text-muted">{fmtTime(p.receivedAt)}</td><td className="text-muted">{p.receiptNo ?? '—'}</td><td className="font-medium">{p.patient}</td><td className="text-muted">{p.description ?? ''}</td><td><Chip tone={p.amountPaise < 0 ? 'amber' : undefined}>{p.amountPaise < 0 ? `${p.method} refund` : p.method}</Chip></td><td className="text-right pr-4">{money(p.amountPaise)}</td></tr>)}</tbody></table></div>}
         </Section>
       </>)}
     </div>

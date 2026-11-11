@@ -9,6 +9,7 @@ import { emit, nextNumber, todayIn, daysBetween, addDays } from '../lib/core.js'
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { Vitals } from './rxpad.js';
 import { assertDayOpen } from './dayclose.js';
+import { nextReceiptNo } from './billing.js';
 
 /** How many patients may be inside the consultation room at once. ponytail: fixed for every clinic; a tenant setting if one asks. */
 export const ROOM_MAX = 3;
@@ -120,13 +121,15 @@ export function visitRoutes(app: FastifyInstance) {
     }
     const [ch] = await tx.insert(charge).values({ tenantId: t, patientId: body.patientId, visitId: v.id, description: `Consultation (${cat.name})`, amountPaise: amount, taxRateBp: cat.taxRateBp,
       status, adjustmentReason: body.waive?.reason, adjustedBy: body.waive ? req.ctx.userId : null }).returning();
+    let receiptNo: string | null = null;
     if (body.payment && body.payment.amountPaise > 0) {
       if (!can(req.perms, 'payment.record')) throw new HttpError(403, 'FORBIDDEN:payment.record');
-      await tx.insert(payment).values({ tenantId: t, patientId: body.patientId, chargeId: ch.id, amountPaise: body.payment.amountPaise, method: body.payment.method, reference: body.payment.reference, receivedBy: req.ctx.userId });
+      receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone); // the check-in fee gets its own numbered receipt
+      await tx.insert(payment).values({ tenantId: t, patientId: body.patientId, chargeId: ch.id, amountPaise: body.payment.amountPaise, method: body.payment.method, reference: body.payment.reference, receiptNo, receivedBy: req.ctx.userId });
       if (body.payment.amountPaise >= amount) { await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, ch.id)); ch.status = 'paid'; }
     }
     await emit(tx, req.ctx, 'visit.checked_in', 'visit', v.id, { patientId: body.patientId, opNumber, category: cat.code, amountPaise: amount, status });
-    return { ...v, charge: ch };
+    return { ...v, charge: ch, receiptNo };
   });
 
   /** History across days: visits and no-shows in a date range, searchable, with outcome and what to tell the patient. */

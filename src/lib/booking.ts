@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
 import { appointment, message, patient, practitioner, service, session, tenant } from '../db/schema.js';
+import { FALLBACK, TRANSLATED_TEMPLATES, patientLang, type Lang } from './patientText.js';
 
 /** Clinic booking settings with defaults, so a clinic that never opened Settings still works sensibly. */
 export function bookingSettings(settings: any) {
@@ -28,7 +29,12 @@ export const DEFAULT_TEMPLATES: Record<MessageKind, string> = {
   late: 'Hello {patient}, {doctor} at {clinic} is running about {reason} late today. Your {time} visit will start a little later. Sorry for the wait.',
   reschedule: 'Hello {patient}, {doctor} is not available for your visit on {date}, {time} at {clinic}. {reason} Please pick another time: {link}',
 };
-export const TEMPLATE_VARS = ['patient', 'clinic', 'visitType', 'date', 'time', 'arriveBy', 'doctor', 'link', 'reason'];
+export const TEMPLATE_VARS = ['patient', 'clinic', 'visitType', 'date', 'time', 'arriveBy', 'doctor', 'link', 'reason', 'minutes'];
+
+/** The text for one message: Telugu and Hindi use the standard translation; English uses the clinic's own text if it wrote one. */
+export function templateFor(kind: MessageKind, lang: Lang, settings: any): string {
+  return lang === 'en' ? bookingSettings(settings).messages.templates[kind] ?? DEFAULT_TEMPLATES[kind] : TRANSLATED_TEMPLATES[lang][kind];
+}
 
 export const newToken = () => randomBytes(18).toString('base64url');
 const hm = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -56,13 +62,13 @@ export async function appointmentView(tx: Tx, tenantId: string, appointmentId: s
   return r ?? null;
 }
 
-export function renderVars(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>, origin: string, extra: Record<string, string> = {}) {
+export function renderVars(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>, origin: string, extra: Record<string, string> = {}, lang: Lang = 'en') {
   const cfg = bookingSettings(v.t.settings);
-  const date = new Date(v.s.day + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const date = new Date(v.s.day + 'T00:00:00Z').toLocaleDateString(`${lang}-IN`, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   return {
-    patient: v.p.fullName, clinic: v.t.name, visitType: v.svc?.name ?? 'visit', date, time: `${v.s.startTime}–${v.s.endTime}`,
-    arriveBy: hhmm(Math.max(0, hm(v.s.startTime) - cfg.arriveEarlyMinutes)), doctor: v.doc ?? 'the doctor',
-    link: v.a.publicToken ? `${origin}/a/${v.t.slug}/${v.a.publicToken}` : '', reason: '', ...extra,
+    patient: v.p.fullName, clinic: v.t.name, visitType: v.svc?.name ?? FALLBACK[lang].visitType, date, time: `${v.s.startTime}–${v.s.endTime}`,
+    arriveBy: hhmm(Math.max(0, hm(v.s.startTime) - cfg.arriveEarlyMinutes)), doctor: v.doc ?? FALLBACK[lang].doctor,
+    link: v.a.publicToken ? `${origin}/a/${v.t.slug}/${v.a.publicToken}` : '', reason: '', minutes: '', ...extra, lang,
   } as Record<string, string>;
 }
 export const fill = (tpl: string, vars: Record<string, string>) => tpl.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? vars[k] : m)).replace(/\s+\./g, '.').trim();
@@ -71,10 +77,11 @@ export const fill = (tpl: string, vars: Record<string, string>) => tpl.replace(/
 export async function queueMessage(tx: Tx, tenantId: string, appointmentId: string, kind: MessageKind, origin: string, opts: { sendAfter?: Date; extra?: Record<string, string> } = {}) {
   const v = await appointmentView(tx, tenantId, appointmentId); if (!v) return null;
   const cfg = bookingSettings(v.t.settings).messages;
-  const vars = renderVars(v, origin, opts.extra);
+  const lang = patientLang(v.p, v.t.settings);
+  const vars = renderVars(v, origin, opts.extra, lang);
   const noPhone = !v.p.phone || !/^\d{10}$/.test(v.p.phone);
   const status = !cfg.enabled || cfg.channel === 'none' || noPhone ? 'skipped' : 'pending';
-  const [row] = await tx.insert(message).values({ tenantId, patientId: v.p.id, appointmentId, kind, channel: cfg.channel, toPhone: v.p.phone, body: fill(cfg.templates[kind] ?? DEFAULT_TEMPLATES[kind], vars),
+  const [row] = await tx.insert(message).values({ tenantId, patientId: v.p.id, appointmentId, kind, channel: cfg.channel, toPhone: v.p.phone, body: fill(templateFor(kind, lang, v.t.settings), vars),
     params: vars, status, sendAfter: (opts.sendAfter ?? new Date()).toISOString(), error: status === 'skipped' ? (noPhone ? 'no mobile number' : 'messages are switched off') : null }).returning();
   return row;
 }

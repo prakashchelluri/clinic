@@ -5,6 +5,7 @@ import { charge, course, message, patient, practitioner, procedureCatalog, proce
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, addDays } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
+import { MSG, patientLang } from '../lib/patientText.js';
 
 const money = (p: number) => '₹' + (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
@@ -38,9 +39,10 @@ export function planRoutes(app: FastifyInstance) {
       if (!p?.phone || !/^\d{10}$/.test(p.phone)) throw new HttpError(400, 'NO_PHONE');
       const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
       const extraTotal = b.extras.reduce((s, x) => s + x.pricePaise, 0);
-      const label = p.flags?.careful ? 'Your treatment plan' : proc?.name ?? 'Procedure'; // a Handle carefully patient's messages never name the procedure
-      await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'quote', channel: 'whatsapp', toPhone: p.phone, params: { quote: number },
-        body: `${ten?.name ?? 'Clinic'} · Quote ${number}\n${label}: ${sittings} sittings ${money(total)}${b.extras.map((x) => `\n${x.name} ${money(x.pricePaise)}`).join('')}\nTotal ${money(total + extraTotal)}. Valid until ${validUntil}.\nReply YES to book your first sitting.` });
+      const lang = patientLang(p, ten?.settings); const w = MSG[lang];
+      const label = p.flags?.careful ? w.plan : proc?.name ?? 'Procedure'; // a Handle carefully patient's messages never name the procedure
+      await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'quote', channel: 'whatsapp', toPhone: p.phone, params: { quote: number, lang },
+        body: `${ten?.name ?? 'Clinic'} · ${w.quote} ${number}\n${label}: ${sittings} ${w.sittings} ${money(total)}${b.extras.map((x) => `\n${x.name} ${money(x.pricePaise)}`).join('')}\n${w.total} ${money(total + extraTotal)}. ${w.validUntil(validUntil)}\n${w.replyYes}` });
       messaged = true;
     }
     await emit(tx, req.ctx, 'quote.created', 'quote', row.id, { number, totalPaise: total, send: b.send });

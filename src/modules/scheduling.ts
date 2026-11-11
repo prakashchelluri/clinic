@@ -281,7 +281,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     }
     let moved = 0;
     for (const a of affected) {
-      if (b.kind === 'late') { await queueMessage(tx, t, a.id, 'late', origin, { extra: { reason: `${lateMins} minutes` } }); continue; }
+      if (b.kind === 'late') { await queueMessage(tx, t, a.id, 'late', origin, { extra: { reason: `${lateMins} minutes`, minutes: String(lateMins) } }); continue; }
       if (b.handling === 'move' && a.to) {
         await tx.update(appointment).set({ sessionId: a.to.sessionId }).where(eq(appointment.id, a.id));
         await emit(tx, req.ctx, 'appointment.moved', 'appointment', a.id, { from: a.sessionId, sessionId: a.to.sessionId, why: b.kind });

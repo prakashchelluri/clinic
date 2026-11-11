@@ -195,10 +195,11 @@ export function MessagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
           </div>
           {hBad && <div className="mt-1 text-xs text-rose">Between 1 and 168 hours.</div>}
         </div>
-        <div><span className="label">Language</span><div className="flex gap-1">{[['en', 'English'], ['te', 'Telugu']].map(([k, l]) => <button key={k} type="button" className={`toggle-opt ${f.language === k ? 'on' : ''}`} onClick={() => setF({ ...f, language: k })}>{l}</button>)}</div></div>
+        <div><span className="label">Patients' language</span><div className="flex gap-1">{[['en', 'English'], ['te', 'Telugu'], ['hi', 'Hindi']].map(([k, l]) => <button key={k} type="button" className={`toggle-opt ${f.language === k ? 'on' : ''}`} onClick={() => setF({ ...f, language: k })}>{l}</button>)}</div><div className="mt-1 text-xs text-muted">For patients with no language of their own. Also used on the patient link and the waiting-room screen.</div></div>
       </div>
       <div className="card space-y-3">
-        <div className="card-title">Message text</div>
+        <div className="card-title">Message text (English)</div>
+        <div className="text-xs text-muted">Patients who read Telugu or Hindi get the standard text in their language.</div>
         <div className="flex flex-wrap gap-1.5">{KINDS.map(([k, l]) => <button key={k} type="button" className={`toggle-opt ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{l}{tpl[k] && tpl[k] !== defaults[k] ? ' •' : ''}</button>)}</div>
         <div className="text-xs text-muted">{KINDS.find((k) => k[0] === kind)?.[2]}</div>
         <textarea aria-label="Message text" className={`input min-h-[96px] ${unknown.length ? '!border-rose' : ''}`} maxLength={900} value={cur} onChange={(e) => setTpl({ ...tpl, [kind]: e.target.value })} />
