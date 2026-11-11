@@ -155,7 +155,8 @@ export function schedulingRoutes(app: FastifyInstance) {
   /** A day with each window's patients (booked, arrived, no-show) so the calendar can show names, not just counts. */
   async function calendarDay(tx: Tx, t: string, day: string, pid: string | null) {
     const windows = await windowsForDay(tx, t, day, pid);
-    const appts = windows.length ? await tx.select({ id: appointment.id, sessionId: appointment.sessionId, status: appointment.status, note: appointment.note, source: appointment.source, seriesId: appointment.seriesId, patientId: patient.id, name: patient.fullName, phone: patient.phone, serviceId: appointment.serviceId, service: service.name, color: service.color })
+    const appts = windows.length ? await tx.select({ id: appointment.id, sessionId: appointment.sessionId, status: appointment.status, note: appointment.note, source: appointment.source, seriesId: appointment.seriesId, patientId: patient.id, name: patient.fullName, phone: patient.phone, serviceId: appointment.serviceId, service: service.name, color: service.color,
+      visitStatus: sql<string | null>`(select v.status from visit v where v.appointment_id = ${appointment.id} order by v.arrived_at desc limit 1)` }) // seen or with the doctor, not just arrived
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(service, eq(service.id, appointment.serviceId))
       .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('booked','confirmed','arrived','no_show')`)).orderBy(asc(appointment.createdAt)) : [];
     const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : [])));

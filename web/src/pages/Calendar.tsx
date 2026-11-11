@@ -28,6 +28,8 @@ type Pick = { k: 'doc' | 'room' | 'all'; id?: string };
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } } };
 // the front desk's calm chips (frontdesk.css fd-k-*): booked is a thin outline, here is warm grey, didn't come is red text
 const PILL: Record<string, string> = { booked: 'fd-k-booked', confirmed: 'fd-k-booked', arrived: 'fd-k-waiting', no_show: 'fd-k-noshow' };
+// once the patient is here, the visit says more than the booking: with the junior, with the doctor, seen, or left without being seen
+const VISIT: Record<string, [string, string]> = { intake: ['fd-k-intake', 'with junior'], in_consult: ['fd-k-doctor', 'with doctor'], done: ['fd-k-done', '✓ seen'], left: ['fd-k-noshow', 'left'] };
 const stripe = { background: 'repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 6px,transparent 6px 12px)' };
 
 /** Calendar for the front desk: one doctor or room at a time (or all as cards), day or week, book on a phone call, what needs handling. */
@@ -166,8 +168,8 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
                 {(w?.appointments ?? []).map((ap: any) => (
                   <button key={ap.id} draggable={grid.canBook && OPEN.includes(ap.status) && !past} title={[ap.phone, ap.service, ap.note, ap.status.replace('_', '-')].filter(Boolean).join(' · ')}
                     onDragStart={(e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: ap.id, sessionId: w.id, name: ap.name })); e.dataTransfer.effectAllowed = 'move'; }}
-                    onClick={() => grid.onOpen(ap.id)} className={`fd-pc ${PILL[ap.status] ?? PILL.booked}`}>
-                    {ap.color && <i className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: ap.color }} />}<span className="truncate">{ap.name}</span>{ap.status === 'arrived' ? <span className="tg">here</span> : ap.status === 'no_show' ? <span className="tg">didn't come</span> : ap.status === 'confirmed' ? <span className="tg">✓</span> : null}
+                    onClick={() => grid.onOpen(ap.id)} className={`fd-pc ${VISIT[ap.visitStatus]?.[0] ?? PILL[ap.status] ?? PILL.booked}`}>
+                    {ap.color && <i className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: ap.color }} />}<span className="truncate">{ap.name}</span>{VISIT[ap.visitStatus] ? <span className="tg">{VISIT[ap.visitStatus][1]}</span> : ap.status === 'arrived' ? <span className="tg">here</span> : ap.status === 'no_show' ? <span className="tg">didn't come</span> : ap.status === 'confirmed' ? <span className="tg">confirmed</span> : null}
                   </button>))}
                 {r.procs.map((p) => <button key={p.id} type="button" title={p.room ?? ''} onClick={() => grid.onOpenProc?.(p.id)} className={`fd-pc fd-sit ${p.state === 'completed' ? 'fd-k-done' : 'fd-k-proc'}`}><b>{p.state === 'completed' ? '✓ ' : ''}{p.patient}</b><span>{p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''} · {p.startTime}{p.room ? ` · ${p.room}` : ''}</span></button>)}
                 {w && !closed && w.free > 0 && !past && (!isToday || w.endTime > now) && (grid.canBook
