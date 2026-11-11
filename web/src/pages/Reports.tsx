@@ -10,10 +10,11 @@ import { Chip, Empty, Icon, PageHeader, Section, Segmented, Skeleton, Stat, mone
 /** Daily collections + expenses: replaces the two-page printout and the handwritten ledger. */
 export function Reports() {
   const { perms, me } = useOutletContext<any>();
-  const [day, setDay] = useState(today()); const [view, setView] = useState<'daily' | 'eod'>('daily');
+  const [sp, setSp] = useSearchParams(); // ?day=…&view=eod opens a given day's End of day (from Accounts and the Clinic page)
+  const [day, setDay] = useState(() => /^\d{4}-\d{2}-\d{2}$/.test(sp.get('day') ?? '') ? sp.get('day')! : today());
+  const [view, setView] = useState<'daily' | 'eod'>(() => (sp.get('view') === 'eod' && can(perms, 'fees.see') ? 'eod' : 'daily'));
   const r = useQuery({ queryKey: ['daily', day], queryFn: () => get(`/reports/daily?day=${day}`) });
   const d = r.data;
-  const [sp, setSp] = useSearchParams();
   useEffect(() => { if (d && sp.get('print')) { setSp({}, { replace: true }); if (me?.privacy?.canExport) listOut(`Printed the daily report ${day}`, undefined, () => setTimeout(() => window.print(), 400)); } }, [d, sp]);
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   return (

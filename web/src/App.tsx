@@ -19,6 +19,7 @@ export function can(perms: string[] | undefined, needed: string) {
 export type NavItem = { to: string; label: string; icon: string; show: (c: (p: string) => boolean) => boolean };
 export const NAV: NavItem[] = [
   { to: '/clinic', label: 'Clinic', icon: 'home', show: (c) => c('finance.read') },
+  { to: '/accounts', label: 'Accounts', icon: 'wallet', show: (c) => c('finance.read') },
   { to: '/dashboard', label: 'Dashboard', icon: 'chart', show: (c) => c('report.read') || c('finance.read') },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
@@ -30,7 +31,7 @@ export const NAV: NavItem[] = [
   { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', show: (c) => c('pharmacy.read') },
   { to: '/inventory', label: 'Inventory', icon: 'inbox', show: (c) => c('stock.read') },
   { to: '/reports', label: 'Reports', icon: 'chart', show: (c) => c('report.daily') || c('finance.read') },
-  { to: '/expenses', label: 'Expenses', icon: 'wallet', show: (c) => c('expense.read') },
+  { to: '/expenses', label: 'Expenses', icon: 'wallet', show: (c) => c('expense.read') && !c('finance.read') }, // the owner has them in Accounts › Spending
   { to: '/settings', label: 'Settings', icon: 'gear', show: (c) => c('config.write') },
   { to: '/audit', label: 'Audit log', icon: 'lock', show: (c) => c('user.write') },
   { to: '/platform', label: 'Clinics', icon: 'home', show: (c) => c('platform.read') },
@@ -40,7 +41,7 @@ export const NAV: NavItem[] = [
 export type Mode = 'owner' | 'doctor' | 'desk' | 'junior' | 'coordinator' | 'pharmacy';
 const MODE_LABEL: Record<Mode, string> = { owner: 'Owner', doctor: 'Doctor', desk: 'Desk', junior: 'Junior doctor', coordinator: 'Procedures', pharmacy: 'Pharmacy' };
 const MENU: Record<Mode, string[]> = {
-  owner: ['/clinic', '/dashboard', '/reports', '/settings', '/audit'],
+  owner: ['/clinic', '/accounts', '/dashboard', '/settings', '/audit'],
   doctor: ['/today', '/appointments', '/patients', '/tests', '/worklist'],
   desk: ['/queue', '/appointments', '/patients', '/calls', '/reports'],
   junior: ['/queue', '/patients'],

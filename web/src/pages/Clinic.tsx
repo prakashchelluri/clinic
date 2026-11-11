@@ -50,7 +50,7 @@ export function Clinic() {
   // only what needs the owner, each with the one place to deal with it
   const needs: Need[] = [
     // one day: its money table; several: one row, each day listed in the drawer
-    ...(s.unclosed.length === 1 ? s.unclosed.map((u: any): Need => ({ key: `day${u.day}`, red: true, title: `${dayLabel(u.day)} was never closed`, where: 'End of day', act: 'Open End of day', to: '/reports',
+    ...(s.unclosed.length === 1 ? s.unclosed.map((u: any): Need => ({ key: `day${u.day}`, red: true, title: `${dayLabel(u.day)} was never closed`, where: 'End of day', act: 'Open End of day', to: `/reports?day=${u.day}&view=eod`,
       body: <>{table(u.money)}<p className="text-[13px] text-muted">Payments for this day stay open until it is closed. Counting the cash and the diary is on the End of day screen.</p></> }))
       : s.unclosed.length > 1 ? [{ key: 'days', red: true, title: `${s.unclosed.length} days were never closed`, where: 'End of day', act: 'Open End of day', to: '/reports',
         body: <><div>{s.unclosed.map((u: any) => <div key={u.day} className="flex justify-between gap-3 border-t border-line py-2.5 text-[14px] font-semibold tabular-nums"><span>{dayLabel(u.day)}</span><span className="font-medium text-muted">{money(u.money.total.total)} taken</span></div>)}</div>
@@ -58,8 +58,8 @@ export function Clinic() {
     ...(reviews.length ? [{ key: 'stock', title: `${reviews.length} deliver${reviews.length === 1 ? 'y differs' : 'ies differ'} from the bill`, where: 'Inventory', act: 'Check deliveries', to: '/inventory',
       body: <div>{reviews.map((r: any) => <div key={r.id} className="flex justify-between gap-3 border-t border-line py-2.5 text-[14px] font-semibold"><span>{r.vendor ?? 'Vendor'}{r.billNo ? ` · bill ${r.billNo}` : ''}</span><span className="text-[13px] font-medium text-muted">{r.lines?.length ?? 0} line{r.lines?.length === 1 ? '' : 's'} to check</span></div>)}</div> }] : []),
     ...(expired > 0 ? [{ key: 'exp', title: `${expired} expired still on the shelf`, where: 'Inventory', act: 'Take them off', to: '/inventory?tab=batches', body: <p className="text-[14px]">They can no longer be sold. Taking them off writes them off the stock.</p> }] : []),
-    ...(s.emi.n ? [{ key: 'emi', title: `${money(s.emi.totalPaise)} EMI not yet paid by the lender`, where: 'Reports', act: 'Open Reports', to: '/reports', body: <p className="text-[14px]">{s.emi.n} EMI payment{s.emi.n === 1 ? '' : 's'} counted as received, waiting for the lender to settle.</p> }] : []),
-    ...(s.dues.totalPaise ? [{ key: 'due', title: `${money(s.dues.totalPaise)} still due from ${s.dues.patients} patient${s.dues.patients === 1 ? '' : 's'}`, where: 'Reports', act: 'Open Reports', to: '/reports', body: <p className="text-[14px]">Consultations, sittings or other charges billed and not yet paid.</p> }] : []),
+    ...(s.emi.n ? [{ key: 'emi', title: `${money(s.emi.totalPaise)} EMI not yet paid by the lender`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">{s.emi.n} EMI payment{s.emi.n === 1 ? '' : 's'} counted as received, waiting for the lender to settle.</p> }] : []),
+    ...(s.dues.totalPaise ? [{ key: 'due', title: `${money(s.dues.totalPaise)} still due from ${s.dues.patients} patient${s.dues.patients === 1 ? '' : 's'}`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">Consultations, sittings or other charges billed and not yet paid.</p> }] : []),
   ];
   const yc = s.yesterday.closed;
   const max = Math.max(1, ...s.week.map((w: any) => w.totalPaise));

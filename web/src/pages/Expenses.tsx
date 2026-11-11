@@ -13,14 +13,15 @@ const METHODS: [string, string][] = [['cash', 'Cash'], ['upi', 'UPI'], ['bank', 
 const blank = (cat = 'Other') => ({ description: '', amount: '', method: 'cash', category: cat, day: today(), note: '' });
 const short = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 
-/** Money going out. Quick to enter, hard to get wrong, nothing is ever silently deleted. */
-export function Expenses() {
+/** Money going out. Quick to enter, hard to get wrong, nothing is ever silently deleted.
+ *  On Accounts it is the Spending tab: the period comes from there, and Accounts already shows the totals. */
+export function Expenses({ period }: { period?: { from: string; to: string } } = {}) {
   const { perms } = useOutletContext<any>();
   const canWrite = can(perms, 'expense.write');
   const [range, setRange] = useState<Range>('30');
-  const { from, to } = rangeOf(range);
+  const { from, to } = period ?? rangeOf(range);
   const q = useQuery({ queryKey: ['expenses', from, to], queryFn: () => get(`/expenses?from=${from}&to=${to}`) });
-  const d = q.data; const refresh = () => { qc.invalidateQueries({ queryKey: ['expenses'] }); qc.invalidateQueries({ queryKey: ['daily'] }); };
+  const d = q.data; const refresh = () => { qc.invalidateQueries({ queryKey: ['expenses'] }); qc.invalidateQueries({ queryKey: ['daily'] }); qc.invalidateQueries({ queryKey: ['finance'] }); };
   const [form, setForm] = useState(blank());
   const [edit, setEdit] = useState<any>(null);
   const [adding, setAdding] = useState(false);
@@ -38,9 +39,9 @@ export function Expenses() {
 
   return (
     <div>
-      <PageHeader title="Expenses" subtitle={d ? `${short(d.from)} to ${short(d.to)}` : ' '}>
+      {!period && <PageHeader title="Expenses" subtitle={d ? `${short(d.from)} to ${short(d.to)}` : ' '}>
         <Filter icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: 'month', label: 'This month' }]} />
-      </PageHeader>
+      </PageHeader>}
 
       {canWrite && adding && (
         <Modal title="Add an expense" subtitle="Stays open after each one, for the next" onClose={() => setAdding(false)} width="max-w-xl">
@@ -62,12 +63,12 @@ export function Expenses() {
       )}
 
       {!d ? <Skeleton rows={4} /> : (<>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {!period && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat label="Total spent" value={money(d.totalPaise)} tone="clay" sub={`${live.length} ${live.length === 1 ? 'entry' : 'entries'}`} />
           <Stat label="Biggest category" value={top ? money(top.total) : '₹0'} sub={top ? top.category : 'nothing yet'} delay={40} />
           {d.byMethod.slice(0, 2).map((m: any, i: number) => <Stat key={m.method} label={'Paid by ' + m.method} value={money(m.total)} delay={80 + i * 40} />)}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 mt-5 items-start">
+        </div>}
+        <div className={period ? '' : 'grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 mt-5 items-start'}>
           <DataTable
             id="expenses" exportName={`expenses-${d.from}-to-${d.to}`} rows={rows} rowKey={(r: any) => r.id} sort={{ key: 'day', dir: -1 }} error={q.error} onRetry={() => q.refetch()}
             search={{ placeholder: 'Find an expense: what, category or who', text: (r: any) => [r.description, r.category, r.enteredByName, r.note] }}
@@ -89,11 +90,11 @@ export function Expenses() {
                 <button className="btn btn-ghost btn-icon" aria-label="Remove expense" title="Remove" onClick={() => setVoiding({ e: r, reason: '' })}><Icon name="x" /></button></span> : null },
             ]}
           />
-          <Section title="By category" delay={160}>
+          {!period && <Section title="By category" delay={160}>
             {d.byCategory.length === 0 ? <div className="px-5 py-4 text-sm text-muted">Nothing to show yet.</div> : <div className="p-4 space-y-3">{d.byCategory.map((c: any) => (
               <div key={c.category}><div className="flex justify-between text-sm"><span>{c.category}</span><span className="font-medium">{money(c.total)}</span></div>
                 <div className="h-1.5 rounded-full bg-ink/10 mt-1.5 overflow-hidden"><div className="h-full rounded-full bg-clay" style={{ width: Math.max(3, Math.round((c.total / d.totalPaise) * 100)) + '%' }} /></div></div>))}</div>}
-          </Section>
+          </Section>}
         </div>
       </>)}
 
