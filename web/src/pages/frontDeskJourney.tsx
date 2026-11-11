@@ -6,6 +6,7 @@ import { openPrint } from '../printPreview';
 import { FlagChips } from '../flags';
 import { Chip, Icon, Num, money } from '../ui';
 import { vitalFields, vitalsText } from '../vitals';
+import { ReportDialog } from './TestReports';
 import '../frontdesk.css';
 
 /** The front desk as each patient's journey: Check-in → Initial screening → Doctor → Tests & procedures → Reports → Done. */
@@ -207,6 +208,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
   onSendIn: (id: string) => void; onToJunior?: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onClose: () => void;
 }) {
   const nav = useNavigate(); const { cfg } = useOutletContext<any>() ?? {};
+  const [upload, setUpload] = useState<string | null>(null); // the test whose report is being added, right here in the drawer
   const d = v.details ?? {}; const left = v.status === 'left';
   const waiting = ['waiting', 'screened'].includes(v.status);
   const recs = (v.recommendations ?? []).filter(live); const open = openRecs(v);
@@ -245,7 +247,11 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
             : <ul className="mt-1 space-y-0.5 text-[12.5px] text-muted">{recs.map((r: any) => <li key={r.id} className="flex items-center gap-1.5"><Icon name="check" className="h-3.5 w-3.5 text-clay" />{recName(r)}</li>)}</ul>)}
         </Step>
         <Step i={4} state={rep[0]} title="Reports" meta={rep[1]}>
-          {order && held && <div className="mt-1 space-y-0.5 text-[12.5px] text-muted">{order.tests.map((t: any) => <div key={t.name}>{t.name}: {t.receivedAt ? <b className="text-sage">in</b> : t.expectedOn ? `expected ${new Date(t.expectedOn).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'pending'}</div>)}<div>The consultation stays open until the doctor sees them.</div></div>}
+          {order && held && <div className="mt-1.5 space-y-1.5 text-[12.5px] text-muted">{order.tests.map((t: any) => (
+            <div key={t.id ?? t.name} className="flex items-center gap-2"><span className="min-w-0 flex-1"><b className="text-ink">{t.name}</b> · {t.receivedAt ? <b className="text-sage">in</b> : t.expectedOn ? `expected ${new Date(t.expectedOn).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'pending'}</span>
+              {canDesk && !t.receivedAt && <button type="button" className="btn btn-sm shrink-0" onClick={() => setUpload(t.id)}><Icon name="plus" className="h-3.5 w-3.5" />Upload report</button>}</div>))}
+            <div>The consultation stays open until the doctor sees them.</div></div>}
+          {upload && order && <ReportDialog order={order} testId={upload} onClose={() => setUpload(null)} />}
         </Step>
         <Step i={5} last state={finished ? 'done' : 'next'} title={left ? 'Left' : 'Done'} meta={finished ? (left ? 'did not see the doctor' : 'nothing left open') : held ? 'when the doctor has seen the reports' : ''} />
       </ol>

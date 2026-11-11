@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, type DragEvent } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { get } from '../api';
-import { Icon, Skeleton } from '../ui';
+import { get, patch, qc, errText, ApiError } from '../api';
+import { Icon, Skeleton, ask, toast } from '../ui';
+import { told } from '../apptDrawer';
 
 /** The front desk's day by the hour: a row per booking hour, a column per doctor (and per room when asked for).
  *  Patients are booked into an hour, not a minute, and seen in the order they arrive. A name opens the side drawer, "+ Book" books that hour.
@@ -23,9 +24,9 @@ function useShown(): [Record<string, boolean>, (k: string, on: boolean) => void]
   return [s, (k, on) => { const n = { ...s, [k]: on }; setS(n); try { localStorage.setItem('fd.cals', JSON.stringify(n)); } catch { /* storage blocked */ } }];
 }
 
-export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, kindOf, nextIds, onVisit, onOpenAppt, onBook, onTable }: {
+export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, kindOf, nextIds, onVisit, onOpenAppt, onBook, canOverbook = false, tools }: {
   today: string; visitsToday: any[]; doctors: any[]; rooms: any[]; selectedId: string | null; kindOf: (v: any) => Kind; nextIds: Set<string>;
-  onVisit: (id: string) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void; onTable: () => void;
+  onVisit: (id: string) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void; canOverbook?: boolean; tools?: React.ReactNode;
 }) {
   const nav = useNavigate();
   const [day, setDay] = useState(today);
@@ -36,6 +37,20 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
   const docOn = (id: string) => shown[`d:${id}`] !== false; // doctors on unless switched off
   const roomOn = shown.rooms === true;                    // rooms off unless switched on
+  // drag a booked name to another hour to move it, as on the Appointments calendar
+  const [over, setOver] = useState<string | null>(null);
+  const move = useMutation({
+    mutationFn: ({ appt, to, overbook }: any) => patch(`/appointments/${appt.id}`, { sessionId: to.id, overbook }),
+    onSuccess: (r: any, { appt, to }: any) => { ['calendar', 'frontdesk', 'queue'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`${appt.name} moved to ${to.startTime}. ${told(r?.whatsapp)}`); },
+    onError: (e: any, vars: any) => {
+      if (e instanceof ApiError && e.body?.code === 'WINDOW_FULL' && canOverbook && !vars.overbook) {
+        ask({ title: `${vars.to.startTime} is full`, body: `Move ${vars.appt.name} into it anyway? It will go over the places set for that hour.`, confirmLabel: 'Add anyway (over the limit)', cancelLabel: 'Leave it' }).then((r) => { if (r) move.mutate({ ...vars, overbook: true }); });
+        return;
+      }
+      toast(errText(e), 'err');
+    },
+  });
+  const drop = (e: DragEvent, w: any) => { e.preventDefault(); setOver(null); try { const a = JSON.parse(e.dataTransfer.getData('application/x-appt')); if (a.sessionId !== w.id) move.mutate({ appt: a, to: w }); } catch { /* not ours */ } };
 
   const cals = [...doctors.map((d) => ({ key: `d:${d.id}`, label: d.name as string, on: docOn(d.id) })), ...(rooms.length ? [{ key: 'rooms', label: rooms.length === 1 ? rooms[0].name : 'Rooms', on: roomOn }] : [])];
   const bar = (
@@ -46,7 +61,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       {!isToday && <button type="button" className="btn btn-sm" onClick={() => setDay(today)}>Today</button>}
       <span className="ml-auto" />
       {cals.length > 1 && cals.map((c) => <button key={c.key} type="button" className={`fd-cal ${c.on ? 'on' : ''}`} aria-pressed={c.on} onClick={() => setShown(c.key, !c.on)}><span className="tick">{c.on ? '✓' : ''}</span>{c.label}</button>)}
-      <button type="button" className="btn btn-sm" title="The same day as a list with stages" onClick={onTable}>Table</button>
+      {tools}
     </div>);
   if (!cal.data || (!isToday && other.isLoading)) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="p-4"><Skeleton rows={4} /></div></div>;
 
@@ -69,13 +84,15 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const homeOf = (v: any, ws: any[]) => ws.find((w) => w.appointments?.some((a: any) => a.id === v.appointmentId)) ?? ws.find((w) => w.startTime === rowOf(hhmm(v.arrivedAt))?.start);
   const visitChip = (v: any) => {
     const k = kindOf(v); const next = isToday && nextIds.has(v.id);
-    const tag = k === 'intake' ? 'with junior' : k === 'doctor' ? '' : k === 'tests' ? 'tests' : next ? 'next' : v.details?.reportsEncounterId ? 'reports' : !v.appointmentId && k !== 'done' ? 'walk-in' : '';
-    return <Chip key={v.id} k={k} next={next} tok={k === 'done' ? '✓' : v.opNumber} name={v.patient.fullName} tag={tag} sel={selectedId === v.id}
+    const tag = k === 'intake' ? 'with junior' : k === 'doctor' || k === 'tests' ? '' : next ? 'next' : v.details?.reportsEncounterId ? 'reports' : !v.appointmentId && k !== 'done' ? 'walk-in' : '';
+    return <Chip key={v.id} k={k} next={next} tok={k === 'done' ? '✓' : ''} name={v.patient.fullName} tag={tag} warn={k === 'tests'} sel={selectedId === v.id}
       onClick={() => (isToday ? onVisit(v.id) : nav(`/patients/${v.patient.id}`))} />;
   };
   const apptChip = (a: any, w: any) => {
     const k: Kind = a.status === 'no_show' ? 'noshow' : gone(w.endTime) ? 'late' : 'booked';
-    return <Chip key={a.id} k={k} next={false} tok="" name={a.name} tag={k === 'late' || k === 'noshow' ? "didn't come" : a.service ?? ''} sel={false} onClick={() => onOpenAppt(a.id)} />;
+    const canDrag = !!onBook && k === 'booked' && ['booked', 'confirmed'].includes(a.status);
+    return <Chip key={a.id} k={k} next={false} tok="" name={a.name} tag={k === 'late' || k === 'noshow' ? "didn't come" : a.service ?? ''} sel={false} onClick={() => onOpenAppt(a.id)}
+      drag={canDrag ? (e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: a.id, sessionId: w.id, name: a.name })); e.dataTransfer.effectAllowed = 'move'; } : undefined} />;
   };
   const nowRow = isToday ? rows.findIndex((r) => toMin(r.start) <= nowM && nowM < toMin(r.end)) : -1;
 
@@ -97,8 +114,11 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
                 const here = visits.filter((v) => v.practitionerId === d.id && homeOf(v, ws)?.id === w.id);
                 const booked = (w.appointments ?? []).filter((a: any) => a.status !== 'arrived' && a.status !== 'cancelled' && !visits.some((v) => v.appointmentId === a.id));
                 const shut = w.effectiveCapacity === 0 && w.reductions?.length;
+                const canDrop = !!onBook && !past && !shut;
                 return (
-                  <div key={d.id + r.start} className={`fd-hc ${i === nowRow ? 'now' : ''}`}>
+                  <div key={d.id + r.start} className={`fd-hc ${i === nowRow ? 'now' : ''} ${over === w.id ? 'drop' : ''}`}
+                    onDragOver={canDrop ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(w.id); } } : undefined}
+                    onDragLeave={() => setOver(null)} onDrop={canDrop ? (e) => drop(e, w) : undefined}>
                     <span className="fd-hcap">{shut ? w.reductions[0].note ?? 'Closed' : `${w.allocated} of ${w.effectiveCapacity} booked`}</span>
                     <div className="fd-hchips">{here.map(visitChip)}{booked.map((a: any) => apptChip(a, w))}</div>
                     {!shut && !past && w.free > 0 && onBook && <button type="button" className="fd-sch-free" onClick={() => onBook({ ...w, day })}>+ Book · {w.free} free</button>}
@@ -119,13 +139,13 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       </div>
       <div className="fd-hkey">
         <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
-        <span className="text-muted">✓ Done</span><span className="text-rose">Didn't come</span>
-        <span className="ml-auto">Tap a name for the drawer, “+ Book” to book that hour.</span>
+        <span className="text-muted">✓ Done</span><span className="text-rose">Didn't come</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
+        <span className="ml-auto">Tap a name for the drawer, “+ Book” to book that hour, drag a booking to move it.</span>
       </div>
     </div>);
 }
 
-function Chip({ k, next, tok, name, tag, sel, onClick }: { k: Kind; next: boolean; tok: string; name: string; tag: string; sel: boolean; onClick: () => void }) {
-  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${sel ? 'sel' : ''}`} title={`${name} · ${next ? 'Next' : LABEL[k]}`} aria-pressed={sel} onClick={onClick}>
-    {tok && <span className="tk">{tok}</span>}<span className="truncate">{name}</span>{tag && <span className="tg">{tag}</span>}</button>;
+function Chip({ k, next, tok, name, tag, warn = false, sel, onClick, drag }: { k: Kind; next: boolean; tok: string; name: string; tag: string; warn?: boolean; sel: boolean; onClick: () => void; drag?: (e: DragEvent) => void }) {
+  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${sel ? 'sel' : ''}`} title={`${name} · ${next ? 'Next' : LABEL[k]}${drag ? ' · drag to move' : ''}`} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
+    {tok && <span className="tk">{tok}</span>}<span className="truncate">{name}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{tag}</span>}</button>;
 }

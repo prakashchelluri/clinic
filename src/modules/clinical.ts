@@ -16,7 +16,7 @@ const RxItem = z.object({ id: z.string().uuid().optional(), medicineId: z.string
   frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
   intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
-const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false) });
+const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false) });
 
 /** Validate submitted data against the form definition: required fields and option membership only. */
 /** Assistant-only users save intake and hand back to the doctor; a doctor who also holds assistant stays in consult. */
@@ -74,7 +74,7 @@ export function clinicalRoutes(app: FastifyInstance) {
         provenance: { source: intakeOnly ? 'intake' : 'typed', openedBy: req.ctx.userId } }).returning();
       await bringIn(intakeOnly ? 'intake' : 'in_consult');
       await emit(tx, req.ctx, 'encounter.opened', 'encounter', enc.id, { visitId, by: req.ctx.role });
-    } else if (intakeOnly && v.status !== 'intake' && enc.status === 'draft') {
+    } else if (intakeOnly && ['waiting', 'screened'].includes(v.status) && enc.status === 'draft') { // the junior can reopen a screened patient; never pulls one back from the doctor
       await bringIn('intake');
     }
     await markOpened();
@@ -171,9 +171,10 @@ export function clinicalRoutes(app: FastifyInstance) {
       await tx.update(visit).set({ status: 'done' }).where(eq(visit.id, enc.visitId));
       await emit(tx, req.ctx, testsPending ? 'encounter.awaiting_reports' : 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length, overrides: Array.isArray(data.overrides) ? data.overrides.length : 0, ...(amending ? { amended: true } : {}) });
       await queueRxMessage(tx, req.ctx, id); // the prescription and any "how to apply" leaflets go out on WhatsApp
-    } else if (isIntakeOnly(req)) {
-      const cur = await tx.select({ details: visit.details }).from(visit).where(eq(visit.id, enc.visitId)).then((r) => r[0]);
-      await tx.update(visit).set({ status: 'screened', details: { ...(cur?.details ?? {}), screenedAt: new Date().toISOString(), screenedBy: req.ctx.name } }).where(eq(visit.id, enc.visitId)); // screening done, the doctor's line
+    } else if (isIntakeOnly(req) && body.screened) {
+      // only "Save & return to queue" hands the patient on; autosave or leaving the pad keeps them with the junior
+      const cur = await tx.select({ details: visit.details, status: visit.status }).from(visit).where(eq(visit.id, enc.visitId)).then((r) => r[0]);
+      if (cur?.status === 'intake') await tx.update(visit).set({ status: 'screened', details: { ...(cur?.details ?? {}), screenedAt: new Date().toISOString(), screenedBy: req.ctx.name } }).where(eq(visit.id, enc.visitId)); // screening done, the doctor's line
     }
     return getEncounter(tx, t, id);
   });

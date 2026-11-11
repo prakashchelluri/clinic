@@ -10,7 +10,7 @@ import { saveLabValues, findParam, flagFor, rangeText, isOut, type LabDraft } fr
 
 type Val = { id: string; test: string; value: string; unit: string | null; low: number | null; high: number | null; flag: 'low' | 'normal' | 'high' | 'abnormal' | null };
 type Test = { id: string; name: string; params: string[]; expectedOn: string | null; receivedAt: string | null; reviewedAt: string | null; late: boolean; called: string | null; docs: any[]; values?: Val[] };
-type Order = { key: string; encounterId: string; orderNo: number; patient: { id: string; fullName: string; patientNo: string; phone: string | null }; doctor: string | null; tests: Test[]; state: 'pending' | 'partial' | 'ready' | 'reviewed' | 'doctor_call' | 'closed'; got: number; abnormal?: number;
+export type Order = { key: string; encounterId: string; orderNo: number; patient: { id: string; fullName: string; patientNo: string; phone: string | null }; doctor: string | null; tests: Test[]; state: 'pending' | 'partial' | 'ready' | 'reviewed' | 'doctor_call' | 'closed'; got: number; abnormal?: number;
   outcome: string | null; note: string | null; reviewedBy: string | null; informedHow: string | null; late: string[]; nextDue: string | null };
 type Tab = 'review' | 'collect' | 'explain' | 'done';
 
@@ -32,7 +32,7 @@ async function prepare(file: File): Promise<{ title: string; mime: string; dataB
 }
 
 /** The receptionist's report: pick or photograph the pages, say which tests they are for, save. Several tests can share one report. */
-function ReportDialog({ order, testId, onClose }: { order: Order; testId: string; onClose: () => void }) {
+export function ReportDialog({ order, testId, onClose }: { order: Order; testId: string; onClose: () => void }) {
   const open = order.tests.filter((t) => !t.receivedAt);
   const [ids, setIds] = useState<string[]>([testId]); const [files, setFiles] = useState<File[]>([]); const [note, setNote] = useState('');
   // the values asked for under each test: its usual ones already named (CBC: Hb, WBC, platelets…), plus any the desk adds

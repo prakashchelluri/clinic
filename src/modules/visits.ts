@@ -50,6 +50,8 @@ const CheckIn = z.object({
   feeCategoryCode: z.string(), practitionerId: z.string().uuid().nullable().optional(),
   details: Details.default({}),
   payment: z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0).max(100000000), reference: z.string().optional() }).optional(),
+  // the fee split across modes (₹100 cash + ₹100 card); one receipt covers them all
+  payments: z.array(z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0).max(100000000), reference: z.string().trim().max(60).optional() })).max(4).optional(),
   waive: z.object({ reason: z.string().trim().min(3, 'Say why') }).optional(),
   allowReview: z.object({ reason: z.string().trim().min(3) }).optional(), // one more free review than the limit allows
   idempotencyKey: z.string().optional(),
@@ -61,6 +63,8 @@ export function visitRoutes(app: FastifyInstance) {
   /** Arrival: register visit details, fee, payment and queue entry in one call. */
   route(app, 'post', '/visits', 'visit.write', async (req, tx) => {
     const body = CheckIn.parse(req.body); const t = req.ctx.tenantId; const day = todayIn(req.ctx.timezone);
+    let parts = (body.payments ?? (body.payment ? [body.payment] : [])).filter((p) => p.amountPaise > 0);
+    const paying = () => parts.reduce((s, p) => s + p.amountPaise, 0);
     if (body.idempotencyKey) {
       const dup = await tx.select().from(visit).where(and(eq(visit.tenantId, t), eq(visit.idempotencyKey, body.idempotencyKey))).then((r) => r[0]);
       if (dup) return dup;
@@ -89,8 +93,8 @@ export function visitRoutes(app: FastifyInstance) {
       }
     }
     // Money at check-in: never more than the fee (less is allowed and stays due), and not into a day that has been closed.
-    if (body.payment && body.payment.amountPaise > 0 && !freeReturn) {
-      if (body.payment.amountPaise > cat.amountPaise) throw new HttpError(400, 'MORE_THAN_FEE', { feePaise: cat.amountPaise });
+    if (paying() > 0 && !freeReturn) {
+      if (paying() > cat.amountPaise) throw new HttpError(400, 'MORE_THAN_FEE', { feePaise: cat.amountPaise });
       await assertDayOpen(tx, req.ctx);
     }
     const branchId = body.branchId ??(await tx.query.branch.findFirst({ where: (b, { eq }) => eq(b.tenantId, t) }))!.id;
@@ -114,7 +118,7 @@ export function visitRoutes(app: FastifyInstance) {
     // Fee: a charge row even when ₹0, so reports reconcile by category
     const amount = cat.amountPaise;
     let status = amount === 0 ? 'paid' : 'due';
-    if (freeReturn && amount > 0) { status = 'waived'; body.waive = { reason: `Back with reports within ${freeDays} days` }; body.payment = undefined; }
+    if (freeReturn && amount > 0) { status = 'waived'; body.waive = { reason: `Back with reports within ${freeDays} days` }; parts = []; }
     else if (body.waive) {
       if (!can(req.perms, 'payment.waive')) throw new HttpError(403, 'FORBIDDEN:payment.waive');
       status = 'waived';
@@ -122,11 +126,11 @@ export function visitRoutes(app: FastifyInstance) {
     const [ch] = await tx.insert(charge).values({ tenantId: t, patientId: body.patientId, visitId: v.id, description: `Consultation (${cat.name})`, amountPaise: amount, taxRateBp: cat.taxRateBp,
       status, adjustmentReason: body.waive?.reason, adjustedBy: body.waive ? req.ctx.userId : null }).returning();
     let receiptNo: string | null = null;
-    if (body.payment && body.payment.amountPaise > 0) {
+    if (paying() > 0) {
       if (!can(req.perms, 'payment.record')) throw new HttpError(403, 'FORBIDDEN:payment.record');
       receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone); // the check-in fee gets its own numbered receipt
-      await tx.insert(payment).values({ tenantId: t, patientId: body.patientId, chargeId: ch.id, amountPaise: body.payment.amountPaise, method: body.payment.method, reference: body.payment.reference, receiptNo, receivedBy: req.ctx.userId });
-      if (body.payment.amountPaise >= amount) { await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, ch.id)); ch.status = 'paid'; }
+      for (const p of parts) await tx.insert(payment).values({ tenantId: t, patientId: body.patientId, chargeId: ch.id, amountPaise: p.amountPaise, method: p.method, reference: p.reference || null, receiptNo, receivedBy: req.ctx.userId });
+      if (paying() >= amount) { await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, ch.id)); ch.status = 'paid'; }
     }
     await emit(tx, req.ctx, 'visit.checked_in', 'visit', v.id, { patientId: body.patientId, opNumber, category: cat.code, amountPaise: amount, status });
     return { ...v, charge: ch, receiptNo };

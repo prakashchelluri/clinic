@@ -74,6 +74,25 @@ test('a refund comes off the day it is given, in the mode it was paid; receipt n
   assert.notEqual(rc.receivedBy, name(ownerName));
 });
 
+test('check-in fee split across modes: one receipt, references kept, never more than the fee; junior autosave does not mark screened', async () => {
+  const R = as(await login('reception@demo.clinic'));
+  const p = (await R('POST', '/patients', { fullName: 'Desk Money Split', phone: phone() })).body;
+  const over = await R('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payments: [{ method: 'cash', amountPaise: 20000 }, { method: 'card', amountPaise: 20000 }] });
+  assert.equal(over.status, 400); assert.equal(over.body.code, 'MORE_THAN_FEE');
+  const v = await R('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payments: [{ method: 'cash', amountPaise: 10000 }, { method: 'upi', amountPaise: 20000, reference: 'UPI123' }], idempotencyKey: 'dm-split-1' });
+  assert.equal(v.status, 200, JSON.stringify(v.body)); assert.equal(v.body.charge.status, 'paid'); assert.ok(v.body.receiptNo);
+  // the junior saves (autosave or leaving the pad): still with the junior; only "Save & return" hands the patient on
+  const J = as(await login('assistant@demo.clinic'));
+  const e = (await J('POST', `/visits/${v.body.id}/encounter`)).body;
+  assert.equal((await J('PATCH', `/encounters/${e.id}`, { data: {} })).status, 200);
+  const st = async () => (await R('GET', '/frontdesk')).body.visits.find((x: any) => x.id === v.body.id).status;
+  assert.equal(await st(), 'intake');
+  assert.equal((await J('PATCH', `/encounters/${e.id}`, { data: {}, screened: true })).status, 200);
+  assert.equal(await st(), 'screened');
+  assert.equal((await J('POST', `/visits/${v.body.id}/encounter`)).status, 200, 'the junior can reopen a screened patient');
+  assert.equal(await st(), 'intake');
+});
+
 test('a closed day takes no check-in money and no refund', async () => {
   const R = as(await login('reception@demo.clinic')); const O = as(await login('owner@demo.clinic'));
   const p = (await R('POST', '/patients', { fullName: 'Desk Money Three', phone: phone() })).body;

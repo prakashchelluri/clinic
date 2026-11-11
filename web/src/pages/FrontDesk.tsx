@@ -19,6 +19,16 @@ import { enabledVitals, vitalProblem } from '../vitals';
 import { TakePayment, moneyErr } from '../takePayment';
 import { printReceipt, RefundDialog } from '../invoices';
 
+/** Table or Schedule as two small icons, and History beside them where it is easy to find. */
+function ViewSwitch({ view, onView, onHistory }: { view: 'table' | 'schedule'; onView: (v: 'table' | 'schedule') => void; onHistory: () => void }) {
+  const opt = (v: 'table' | 'schedule', icon: string, label: string) => <button type="button" role="radio" aria-checked={view === v} aria-label={label} title={label} onClick={() => onView(v)}
+    className={`grid h-7 w-8 place-items-center rounded-[7px] transition-colors ${view === v ? 'bg-ink text-paper' : 'text-muted hover:text-ink'}`}><Icon name={icon} className="h-4 w-4" /></button>;
+  return <span className="inline-flex shrink-0 items-center gap-1.5">
+    <span role="radiogroup" aria-label="View" className="inline-flex gap-0.5 rounded-[9px] bg-surface-2 p-[3px] ring-1 ring-line">{opt('table', 'list', 'Table')}{opt('schedule', 'calendar', 'Schedule')}</span>
+    <button type="button" className="btn btn-sm" onClick={onHistory}><Icon name="clock" className="h-3.5 w-3.5" />History</button>
+  </span>;
+}
+
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
@@ -145,7 +155,8 @@ export function FrontDesk() {
   const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not yet arrived', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['checkout', 'Checkout', checkout.length], ['reports', 'Reports pending', reportsOpen.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount], ['history', 'History', -1]];
 
   type Row = { type: 'waiting' | 'doctor' | 'appt' | 'noshow' | 'done'; v?: any; a?: any; i?: number };
-  const W = { group: 'Waiting · in order', rows: waiting.map((v, i): Row => ({ type: 'waiting', v, i })) };
+  // the junior's list: who still needs screening first, the screened ones at the bottom (still editable until the doctor finishes)
+  const W = { group: 'Waiting · in order', rows: (isJunior ? [...waiting.filter((v) => v.status !== 'screened'), ...waiting.filter((v) => v.status === 'screened')] : waiting).map((v, i): Row => ({ type: 'waiting', v, i })) };
   const S = { group: 'Scheduled · not yet arrived', rows: scheduled.map((a): Row => ({ type: 'appt', a })) };
   const D = { group: 'With the doctor', rows: inConsult.map((v): Row => ({ type: 'doctor', v })) };
   const C = { group: 'Completed · newest first', rows: [...completed.map((v): Row => ({ type: 'done', v })), ...noShows.map((a): Row => ({ type: 'noshow', a }))] };
@@ -182,12 +193,13 @@ export function FrontDesk() {
             <button className={`btn btn-sm shrink-0 ${nextIds.has(v.id) ? 'btn-primary' : ''}`} disabled={!s.ok} title={s.why} onClick={() => sendIn(v)}>Send in</button>
           </div>); })}
       </section>
-      {late.length + withDue.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
-        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Needs you · {late.length + withDue.length}</span>
-        {withDue.map((v) => <button key={v.id} className="btn btn-sm !justify-start" onClick={() => setCollecting(v)}>{money(dueOf(v))} due · {v.patient.fullName}</button>)}
-        {late.map((a) => <button key={a.id} className="btn btn-sm !justify-start" onClick={() => setApptId(a.id)}>{a.patient.fullName} didn't come</button>)}
+      {checkout.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
+        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Tests &amp; procedures advised · {checkout.length}</span>
+        {checkout.map((v) => { const open = (v.recommendations ?? []).filter((r: any) => r.status === 'open'); const t = open.filter((r: any) => r.kind === 'investigation'); const pr = open.filter((r: any) => r.kind === 'procedure'); return (
+          <button key={v.id} type="button" className={`btn btn-sm !h-auto !justify-start !py-1.5 text-left ${selV?.id === v.id ? '!bg-surface-2' : ''}`} onClick={() => setPickV(v.id)}>
+            <span className="fd-warn">!</span><span className="min-w-0"><span className="block truncate font-semibold">{v.patient.fullName}</span>
+              <span className="block truncate text-[12px] font-medium text-muted">{[t.length && `Tests: ${t.map((r: any) => r.notes).filter(Boolean).join(', ') || t.length}`, pr.length && `Procedure: ${pr.map((r: any) => r.procedure ?? 'procedure').join(', ')}`, open.some((r: any) => r.kind === 'followup') && 'Review to book'].filter(Boolean).join(' · ')}</span></span></button>); })}
       </section>}
-      <button type="button" className="self-start px-1 text-[13px] font-semibold text-muted hover:text-ink" onClick={() => setTab('history')}>History ›</button>
     </aside>);
   const render = (r: Row) => {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting';
@@ -196,7 +208,7 @@ export function FrontDesk() {
         top={<>{who(v.patient, v.id)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
         sub={meta([v.patient.patientNo, v.patient.phone, `arrived ${hhmm(v.arrivedAt)} · waited ${minsSince(v.arrivedAt)} min`, v.category, v.details?.complaint, v.details?.weight_kg && `${v.details.weight_kg} kg`, v.details?.bp && `BP ${v.details.bp}`])}
         actions={<>
-          {isJunior && ['waiting', 'intake'].includes(v.status) && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>{v.status === 'intake' ? 'Open' : 'Intake'}</button>}
+          {isJunior && ['waiting', 'intake', 'screened'].includes(v.status) && <button className={`btn btn-sm ${v.status === 'screened' ? '' : 'btn-primary'}`} onClick={() => openEncounter.mutate(v.id)}>{v.status === 'intake' ? 'Open' : v.status === 'screened' ? 'Edit' : 'Intake'}</button>}
           {isDoctorUser && <button className="btn btn-sm" disabled={withJr} title={withJr ? 'With the junior doctor right now' : 'Open the consultation yourself; the desk is told'} onClick={() => openEncounter.mutate(v.id)}>Open</button>}
           {canDesk && <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || full || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : full ? `${inside} already inside: the room takes ${ROOM_MAX}. Send the next one in when someone comes out.` : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>{full ? 'Room full' : 'Send in'}</button>}
           {canDesk && <MoreMenu items={[{ label: 'Profile', onClick: () => nav(`/patients/${v.patient.id}`) }, { label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Change doctor', hidden: !(d?.doctors ?? []).length, onClick: () => setMoving(v) }, { label: 'Left without consultation', danger: true, onClick: () => markLeft(v) }]} />}
@@ -220,7 +232,7 @@ export function FrontDesk() {
     return (
       <Row key={v.id} token={v.opNumber} cls={due ? 'bg-rose-soft/30' : handled || left ? 'opacity-70' : ''}
         top={<>{who(v.patient, v.id)}{due ? <Chip tone="rose">{money(due)} due</Chip> : left ? <Chip>left</Chip> : v.encounterStatus === 'awaiting_reports' ? <Chip tone="amber">held for reports</Chip> : <Chip tone="sage">completed</Chip>}{v.doctor && <Chip>{v.doctor}</Chip>}
-          {!left && v.recommendations.map((rc: any) => <Chip key={rc.id} tone={rc.kind === 'procedure' ? 'sky' : rc.kind === 'investigation' ? 'clay' : 'amber'}>{rc.kind === 'procedure' ? `${rc.procedure ?? 'Procedure'}${rc.sittings ? ` × ${rc.sittings}` : ''}` : rc.kind === 'investigation' ? `Test: ${rc.notes}` : `Review ${rc.dueOn ? fmtDate(rc.dueOn) : ''}`}</Chip>)}</>}
+          {!left && (v.recommendations ?? []).some((rc: any) => rc.status === 'open') && <span className="fd-warn" title="Tests or procedures pending">!</span>}</>}
         sub={meta([v.patient.patientNo, v.patient.phone, left ? `left · arrived ${hhmm(v.arrivedAt)}` : v.completedAt ? `finished ${hhmm(v.completedAt)}` : null, left ? 'did not see the doctor' : v.rxCount ? `${v.rxCount} medicine${v.rxCount === 1 ? '' : 's'} · pharmacy has the Rx` : v.recommendations.length ? null : 'no tests or procedures'])}
         actions={<>
           {canDesk && v.due[0] && <button className="btn btn-sm btn-primary" disabled={!!collecting} onClick={() => setCollecting(v)}>Collect {money(due)}</button>}
@@ -247,8 +259,8 @@ export function FrontDesk() {
             {tab !== 'history' && !onSchedule && <StageStrip tab={tab} onTab={setTab}
               items={[...(canDesk ? [['now', 'For you now', nowCount, nowCount > 0]] : []), ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest <Num value={longest} /> min</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ...(canDesk ? [['scheduled', 'Still to arrive', scheduled.length, false]] : []), ['all', 'All', visits.length + scheduled.length + noShows.length, false]] as [Tab, string, number, boolean, React.ReactNode?][]}
               extra={<>{docFilter && tab !== 'now' && view !== 'schedule' && <span className="fd-chip">{docOptions.find((o) => o.value === docFilter)?.label}<button type="button" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button></span>}
-              {canDesk && <span className="self-center shrink-0 ml-auto"><Segmented size="sm" value={view} onChange={setView} options={[{ value: 'table', label: 'Table' }, { value: 'schedule', label: 'Schedule' }]} /></span>}
-              <span className={`fd-day ${canDesk ? '!ml-0' : ''}`}>{dayLabel}{canDesk && <> · <button type="button" onClick={() => setTab('history')}>History ›</button></>}</span>
+              {canDesk && <span className="self-center shrink-0 ml-auto"><ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} /></span>}
+              <span className={`fd-day ${canDesk ? '!ml-0' : ''}`}>{dayLabel}</span>
               {canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>}</>} />}
             {sel && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-[13px] text-paper anim-fade-up" role="toolbar" aria-label="Selected rows">
               <b>{sel.size} selected</b>
@@ -261,7 +273,7 @@ export function FrontDesk() {
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} onTable={() => setView('table')} />
+                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} tools={<ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} />} />
               {waitingPanel}</div>
             : tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
@@ -389,9 +401,9 @@ const firstOf = (p: any): First => ({ dob: p.dob ?? '', ageYears: p.ageYears != 
 export const ageFrom = (dob: string, now = new Date()) => { const [y, m, d] = dob.split('-').map(Number); return now.getFullYear() - y - (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d) ? 1 : 0); };
 
 /** One numbered part of check-in: the number, a title that reads first, one line of help, then the fields. */
-function Sec({ n, title, hint, aside, children }: { n: number; title: string; hint?: string; aside?: React.ReactNode; children: React.ReactNode }) {
+function Sec({ n, title, hint, aside, compact = false, children }: { n: number; title: string; hint?: string; aside?: React.ReactNode; compact?: boolean; children: React.ReactNode }) {
   return (
-    <section aria-label={title} className="flex flex-col gap-4 rounded-[18px] bg-surface p-5 ring-1 ring-line">
+    <section aria-label={title} className={`flex flex-col rounded-[18px] bg-surface ring-1 ring-line ${compact ? 'gap-2.5 px-5 py-3.5' : 'gap-4 p-5'}`}>
       <div className="flex items-start gap-3">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[9px] bg-ink text-[13px] font-extrabold text-paper">{n}</span>
         <div className="min-w-0 flex-1"><h3 className="text-[16px] font-extrabold leading-tight text-ink">{title}</h3>{hint && <p className="mt-0.5 text-[13px] text-muted">{hint}</p>}</div>
@@ -458,11 +470,12 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const [list, setList] = useState<Complaint[]>([]);
   const [draft, setDraft] = useState<Complaint>({ text: '', duration: '' });
   const comp = useTemplates('complaint');
-  const [method, setMethod] = useState('cash'); const [amount, setAmount] = useState('');
+  // the fee can be split across modes (₹100 cash + ₹100 card); a blank amount on the first line means "the rest of the fee"
+  const [pays, setPays] = useState<{ method: string; amount: string; ref: string }[]>([{ method: 'cash', amount: '', ref: '' }]);
+  const setPay = (i: number, x: Partial<{ method: string; amount: string; ref: string }>) => setPays(pays.map((p, j) => (j === i ? { ...p, ...x } : p)));
   const [partOk, setPartOk] = useState(false); // ticked: taking less than the fee on purpose, the rest stays due
   const [visitKey] = useState(uuid); // one check-in, one key: a retry after a timeout cannot check in twice
-  const [waive, setWaive] = useState(init.reports?.free ? `Back with reports · consultation of ${fmtDate(init.reports.since)}` : '');
-  const [waiving, setWaiving] = useState(false);
+  const waive = !!init.reports?.free; // back with reports within the free days: the server waives it by the clinic's rule
   const [pickedDoc, setPractitionerId] = useState('');
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: !patientId && q.length >= 2 });
   const sug = useQuery({ queryKey: ['suggest', patientId], queryFn: () => get(`/patients/${patientId}/suggest-category`), enabled: !!patientId });
@@ -497,7 +510,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
       for (const f of vitalList) if (vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
       return post('/visits', { patientId: pid, appointmentId: appt?.id ?? init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
         details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: init.reports ? `Back with reports: ${init.reports.tests}` : complaints.map((c) => c.text).join(', '), ...(init.reports ? { reportsEncounterId: init.reports.encounterId } : {}) },
-        payment: !waive && fee > 0 ? { method, amountPaise: toPaise(amount || String(fee / 100)) } : undefined, waive: waive ? { reason: waive } : undefined, allowReview: allowReview.current ? { reason: allowReview.current } : undefined, idempotencyKey: visitKey });
+        payments: taking ? pays.map((x, i) => ({ method: x.method, amountPaise: amtOf(i), reference: x.method !== 'cash' && x.ref.trim() ? x.ref.trim() : undefined })).filter((x) => x.amountPaise > 0) : undefined, allowReview: allowReview.current ? { reason: allowReview.current } : undefined, idempotencyKey: visitKey });
     },
     onSuccess: (v: any) => { toast(`Checked in · token ${v.opNumber}${v.receiptNo ? ` · receipt ${v.receiptNo}` : ''}`, 'ok', v.receiptNo ? { label: 'Print receipt', run: () => printReceipt(v.receiptNo) } : undefined); onClose(); },
     onError: async (e: any) => {
@@ -512,10 +525,14 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   useEffect(() => { if (forceNew) { submit.mutate(); setForceNew(false); } }, [forceNew]);
   const step = !patientId && !newP ? 1 : 2;
   const badVital = vitalList.map((f) => vitalProblem(f, vit[f.key] ?? '')).find(Boolean);
-  const collect = toPaise(amount === '' ? String(fee / 100) : amount);
+  const typed = (i: number) => (pays[i].amount === '' ? 0 : toPaise(pays[i].amount));
+  const amtOf = (i: number) => (i === 0 && pays[0].amount === '' ? Math.max(0, fee - pays.slice(1).reduce((s, _, j) => s + typed(j + 1), 0)) : typed(i));
+  const collect = pays.reduce((s, _, i) => s + amtOf(i), 0);
   const taking = fee > 0 && !waive; const short = taking && collect > 0 && collect < fee;
   useEffect(() => setPartOk(false), [collect, fee]);
-  const blocker = !chosen ? 'Pick a visit type' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : waive && waive.trim().length < 3 ? 'Say why the fee is waived (at least 3 letters)' : taking && collect <= 0 ? 'Enter the amount collected' : taking && collect > fee ? `That is more than the ${money(fee)} fee` : short && !partOk ? 'Tick to take less than the fee' : '';
+  const MODE: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'card', bank: 'bank' };
+  const modes = [...new Set(pays.filter((_, i) => amtOf(i) > 0).map((x) => MODE[x.method]))].join(' + ');
+  const blocker =!chosen ? 'Pick a visit type' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : taking && collect <= 0 ? 'Enter the amount collected' : taking && collect > fee ? `That is more than the ${money(fee)} fee` : short && !partOk ? 'Tick to take less than the fee' : '';
   const facts = sug.data?.facts;
   const doctorName = (id?: string) => cfg?.practitioners.find((x: any) => x.id === id)?.name;
   const cats: any[] = cfg?.historyCategories ?? [];
@@ -565,7 +582,6 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                 </div>
                 {!init.patientId && <button className="btn btn-ghost shrink-0" onClick={() => setPatientId(undefined)}>Change</button>}
                </div>
-                {!isFirst && <div className="flex items-center gap-3 border-t border-line pt-3"><label htmlFor="locality" className="label !mb-0 shrink-0">Location today</label><input id="locality" className="input !min-h-0 max-w-xs !py-1.5" maxLength={200} placeholder={p?.locality ? `${p.locality} (same as before)` : 'Area or town'} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>}
               </section>
             )}
             {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>This looks like a patient already registered: {dup.fullName ?? ''} ({dup.patientNo}){dup.phone ? ` · ${dup.phone}` : ''}{dup.ageYears ? ` · ${dup.ageYears} yrs` : ''}.</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
@@ -588,9 +604,9 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
             )}
 
             {/* vitals */}
-            <Sec n={n++} title="Vitals" hint={`Optional. BMI is worked out from weight and height.`}
+            <Sec n={n++} title="Vitals" compact
               aside={bmi ? <span className="rounded-[8px] bg-clay-soft px-2.5 py-1 text-[12px] font-bold text-clay-ink">BMI {bmi}</span> : undefined}>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
                 {vitalList.map((f) => {
                   const bad = vitalProblem(f, vit[f.key] ?? '');
                   return (
@@ -605,12 +621,13 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
             </Sec>
 
             {/* complaints */}
-            <Sec n={n++} title="Why they came" hint="Each complaint opens its checklist for the doctors.">
+            <Sec n={n++} title="Complaints">
               {init.reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px] text-amber"><b>Back with reports:</b> {init.reports.tests}. No new complaint is needed; the doctor opens the same consultation.{init.reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
               <div className="flex flex-col gap-2">
                 {list.map((c, i) => (
                   <div key={i} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5 anim-scale-in">
-                    <div className="input flex items-center !bg-surface-2 !shadow-none font-semibold">{c.text}</div><div className="input flex items-center !bg-surface-2 !shadow-none text-muted">{c.duration || '—'}</div>
+                    <div className="input flex items-center !bg-surface-2 !shadow-none font-semibold">{c.text}</div>
+                    <input className="input" aria-label={`${c.text}: since when`} placeholder="Since when" maxLength={30} value={c.duration} onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, duration: e.target.value } : x)))} />
                     <button type="button" className="btn btn-ghost btn-icon" aria-label={`Remove ${c.text}`} onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
                   </div>))}
                 <div className="grid grid-cols-[minmax(0,1fr)_150px_auto] items-center gap-2.5">
@@ -618,7 +635,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                   <input className="input" aria-label="Since when" placeholder="Since when" value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
                   <button type="button" className="btn" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
                 </div>
-                {suggestions.length > 0 && <div className="text-[13px] text-muted">Common: {suggestions.map((t, i) => <span key={t.id}>{i ? ' · ' : ''}<button type="button" className="font-semibold text-clay hover:underline" onClick={() => setList([...list, { text: t.name, duration: '' }])}>{t.name}</button></span>)}</div>}
+                {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-1"><span className="quick-label">Quick add</span>{suggestions.map((t) => <button key={t.id} type="button" className="opt-add" onClick={() => setList([...list, { text: t.name, duration: '' }])}>{t.name}</button>)}</div>}
               </div>
             </Sec>
           </div>
@@ -635,18 +652,26 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
             <div><label htmlFor="visit-type" className="label">Visit type</label>
               <select id="visit-type" className="input" value={chosen} onChange={(e) => setCat(e.target.value)}>{cfg?.feeCategories.map((c: any) => <option key={c.code} value={c.code}>{c.name} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code ? ' (suggested)' : ''}</option>)}</select>
               {facts && <p className="mt-1.5 text-[12.5px] text-muted">{facts.days_since_last_paid_consult < 9999 ? `Last paid consultation ${facts.days_since_last_paid_consult} days ago` : 'No paid consultation before'} → {sug.data.suggested.name}.</p>}</div>
-            {fee > 0 && !waive && <div><span className="label">Paid by</span><Seg full label="Payment method" value={method} options={[['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card']]} onChange={setMethod} /></div>}
+            {taking && <div className="flex flex-col gap-2.5"><span className="label !mb-0">Paid by</span>
+              {pays.map((x, i) => (
+                <div key={i} className={`flex flex-col gap-1.5 ${i ? 'border-t border-line pt-2.5' : ''}`}>
+                  <div className="flex items-center gap-1.5"><Seg full label={`Payment ${i + 1} method`} value={x.method} options={[['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['bank', 'Bank']]} onChange={(m) => setPay(i, { method: m })} />
+                    {pays.length > 1 && <button type="button" className="btn btn-ghost btn-icon shrink-0" aria-label={`Remove payment ${i + 1}`} onClick={() => setPays(pays.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>}</div>
+                  <div className="flex gap-1.5">
+                    {x.method !== 'cash' && <input className="input min-w-0 flex-1 !py-1.5 text-[13px]" aria-label={`Payment ${i + 1} reference`} maxLength={60} placeholder={x.method === 'upi' ? 'UPI ref no.' : x.method === 'card' ? 'Card / approval no.' : 'Bank ref no.'} value={x.ref} onChange={(e) => setPay(i, { ref: e.target.value })} />}
+                    <MoneyInput label={`Payment ${i + 1} amount`} className={x.method === 'cash' ? 'flex-1' : 'w-28'} placeholder={String(amtOf(i) / 100)} value={x.amount} onChange={(v) => setPay(i, { amount: v })} />
+                  </div>
+                </div>))}
+              {pays.length < 4 && <button type="button" className="self-start text-[13px] font-semibold text-clay hover:underline" onClick={() => setPays([...pays, { method: pays.some((x) => x.method === 'cash') ? 'card' : 'cash', amount: '', ref: '' }])}>+ Split across another mode</button>}
+            </div>}
             <div className="flex items-center justify-between gap-3 border-t border-dashed border-line-2 pt-3.5">
-              <span className="text-[12.5px] font-semibold text-ink-2">{fee === 0 ? `Nothing to collect for ${catRow?.name?.split(' (')[0] ?? 'this visit'}` : waive ? 'Fee waived' : 'Collect now'}</span>
-              {fee > 0 && !waive ? <MoneyInput label="Amount collected" className="w-36 [&_input]:!text-right [&_input]:!text-[22px] [&_input]:!font-extrabold" value={amount === '' ? String(fee / 100) : amount} onChange={setAmount} /> : <b className="text-[24px] font-extrabold">₹0</b>}
+              <span className="text-[12.5px] font-semibold text-ink-2">{fee === 0 ? `Nothing to collect for ${catRow?.name?.split(' (')[0] ?? 'this visit'}` : waive ? 'No fee · back with reports' : 'Collect now'}</span>
+              <b className="text-[24px] font-extrabold">{money(taking ? collect : 0)}</b>
             </div>
             {short && <label className="-mt-2 flex cursor-pointer items-start gap-2 rounded-[10px] bg-amber-soft px-3 py-2 text-[12.5px] font-semibold text-amber"><input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-clay" checked={partOk} onChange={(e) => setPartOk(e.target.checked)} />Fee is {money(fee)}. Taking {money(collect)} leaves {money(fee - collect)} due.</label>}
-            {waive && <p className="-mt-2 text-[12.5px] text-amber">Waived · {waive}</p>}
-            {(waiving || waive) && fee > 0 && can(perms, 'payment.waive') && <input aria-label="Why the fee is waived" className="input !py-1.5 text-[13px]" placeholder="Why? (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
             <p role="status" className="min-h-[18px] text-[12.5px] font-semibold text-amber">{blocker}</p>
-            <button className="btn btn-primary !h-12 w-full justify-center text-[15px]" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{taking && !blocker ? ` · collect ${money(collect)} ${method === 'upi' ? 'UPI' : method === 'card' ? 'card' : 'cash'}` : ''}</button>
-            <div className="flex items-center justify-between">
-              {fee > 0 && can(perms, 'payment.waive') && !waiving && !waive ? <button type="button" className="text-[13px] font-semibold text-clay hover:underline" onClick={() => setWaiving(true)}>Waive the fee</button> : <span />}
+            <button className="btn btn-primary !h-12 w-full justify-center text-[15px]" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{taking && !blocker ? ` · collect ${money(collect)} ${modes}` : ''}</button>
+            <div className="flex items-center justify-end">
               <button type="button" className="text-[13px] font-semibold text-muted hover:underline" onClick={onClose}>Cancel</button>
             </div>
           </aside>
@@ -697,10 +722,9 @@ function CheckoutList({ visits, canDesk, canForce, bare = false }: { visits: any
             <div className={`flex flex-wrap items-center gap-2 ${bare ? 'hidden' : ''}`}><b className="text-[16px]">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /><span className="text-xs text-muted">{v.opNumber} · seen {v.completedAt ? hhmm(v.completedAt) : ''}{v.doctor ? ` by ${v.doctor}` : ''}{v.patient.phone ? ` · ${v.patient.phone}` : ''}</span><span className="ml-auto" />{open.length ? <Chip tone="amber">{open.length} open</Chip> : <Chip>ready to close</Chip>}</div>
             <div className="mt-2.5 space-y-1.5">
               {procs.map((r) => <Item key={r.id} tag="procedure" tone="sky" title={r.procedure ?? 'Procedure'} sub={r.sittings ? `${r.sittings} sittings planned` : undefined} rs={[r]} action={r.procedureId ? 'Plan' : 'Schedule'} onAction={() => r.procedureId ? setCourse({ rec: { ...r, patient: v.patient }, patient: v.patient }) : setSched({ rec: { ...r, patient: v.patient }, patient: v.patient })} />)}
-              {tests.length > 0 && <Item tag="tests" tone="clay" title={tests.map((r) => r.notes).filter(Boolean).join(', ') || 'Tests'} sub="lab slip" rs={tests} action="Slip given" onAction={() => act(tests.filter((r) => r.status === 'open').map((r) => r.id), 'contacted', 'Lab slip given').then(() => toast('Marked: lab slip given', 'info'))} />}
+              {tests.length > 0 && <Item tag="tests" tone="clay" title={tests.map((r) => r.notes).filter(Boolean).join(', ') || 'Tests'} sub="explain to the patient" rs={tests} action="Explained" onAction={() => act(tests.filter((r) => r.status === 'open').map((r) => r.id), 'contacted', 'Explained').then(() => toast('Marked: tests explained', 'info'))} />}
               {fus.map((r) => <Item key={r.id} tag="follow-up" tone="amber" title={r.dueOn ? `Review around ${fmtDate(r.dueOn)}` : 'Review'} rs={[r]} action="Book visit" onAction={() => nav(`?book=1&patient=${v.patient.id}&pname=${encodeURIComponent(v.patient.fullName)}&rec=${r.id}${r.dueOn ? `&day=${r.dueOn}` : ''}${v.practitionerId ? `&doc=${v.practitionerId}` : ''}`)} />)}
               {waitingRep && <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-3 py-2.5 text-sm"><Chip tone="amber">reports</Chip><span className="min-w-0 flex-1"><b>{got} of {tst.length} received</b><span className="text-muted"> · carries on in Awaiting reports, it does not hold up closing</span></span></div>}
-              <div className="flex items-start gap-2 px-3 py-1 text-xs text-muted"><Chip>hand-off</Chip><span>Consultation was paid at check-in.{v.rxCount > 0 ? ` Medicines (${v.rxCount}) are waiting at the pharmacy counter; the pharmacist collects.` : ''}{procs.length > 0 ? ' Procedures are paid on the procedure day.' : ''}</span></div>
             </div>
             {canDesk && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-3"><span className="text-xs text-muted">{open.length ? 'Close visit unlocks when nothing above is pending.' : 'Nothing pending.'}</span><span className="ml-auto" />
               {v.encounterId && !bare && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Print Rx</button>}

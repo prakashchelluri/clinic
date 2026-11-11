@@ -119,14 +119,14 @@ function Reception() {
     <H2 id="checkout">Checkout: after the doctor</H2>
     <P>When the doctor finishes, the patient appears under <b>Checkout</b> with a count such as &ldquo;3 open&rdquo;. Work through the lines, then close the visit.</P>
     <Flow label="Checkout in order. Close visit is last.">
-      <Step n={1} who="reception" title="Tests">Give the lab slip, then tap <b>Slip given</b>. The patient moves to Awaiting reports.</Step>
+      <Step n={1} who="reception" title="Tests">Explain the tests to the patient, then tap <b>Explained</b>. Upload each report from the same side bar when it comes in.</Step>
       <Step n={2} who="reception" title="Procedure">Tap <b>Price &amp; advance</b> to agree the price and take an advance. Tap <b>Schedule</b> to book a sitting.</Step>
       <Step n={3} who="reception" title="Review">Tap <b>Book visit</b>. The doctor&rsquo;s date is filled in.</Step>
       <Step n={4} who="reception" title="Close visit">Tap <b>Close visit</b> when nothing above is open.</Step>
     </Flow>
     <Table head={['Line', 'What to do']} rows={[
       ['Procedure', <>Price &amp; advance opens the price screen (see Procedures below). Schedule books the first sitting.</>],
-      ['Tests', 'Slip given. The reports themselves come later, from the Test reports page.'],
+      ['Tests', 'Explained. Upload each report beside its test in the side bar when it arrives.'],
       ['Follow-up', 'Book visit opens the booking screen for the date the doctor asked for. A Sunday or closed day is warned about.'],
       ['Hand-off (grey)', 'Information only. It says the consultation was paid at check-in, medicines are at the pharmacy, and procedures are paid on the day.'],
     ]} />
@@ -137,7 +137,7 @@ function Reception() {
     <P>Tests are ordered together as one <b>order</b>. The doctor reviews the order once, when <b>every</b> report is in. A slow test, like a biopsy, is kept as its own order so it does not hold the others back.</P>
     <Flow label="Life of a test order. The patient never needs a login: you add the photo.">
       <Step n={1} who="doctor" title="Doctor orders tests">Appear on Checkout as Tests.</Step>
-      <Step n={2} who="reception" title="Slip given">Patient goes to the lab.</Step>
+      <Step n={2} who="reception" title="Explained">Patient goes to the lab.</Step>
       <Step n={3} who="reception" title="Add each report">On Test reports, tap the order and take a photo with the phone.</Step>
       <Step n={4} who="doctor" title="Doctor reviews">When all are in. Or &ldquo;Review what is in&rdquo; to split off a missing one.</Step>
       <Step n={5} who="reception" title="Tell the patient">In person, by phone or WhatsApp. Mark Informed.</Step>
