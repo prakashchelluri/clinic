@@ -46,10 +46,10 @@ export function Inventory({ tab, sp, go }: { tab: InvTab; sp: URLSearchParams; g
     <div className="space-y-5">
       {!deep && <>
         {t && <div className="anim-fade-up flex flex-wrap items-center gap-x-9 gap-y-3">
-          <Stat lead icon="pill" value={t.low} label="Lines at or under reorder" onClick={() => go({ tab: 'stock', show: 'low' })} />
-          <Stat icon="clock" value={money(t.expiringValuePaise)} extra={t.expired > 0 ? <span className="rounded-full bg-rose-soft px-2 py-0.5 text-[11.5px] font-semibold text-rose">{t.expired} expired</span> : null} label="Expired or within 90 days, at cost" onClick={() => go({ tab: 'batches' })} />
+          <Stat lead icon="pill" value={t.low} label="Medicines running low" onClick={() => go({ tab: 'stock', show: 'low' })} />
+          <Stat icon="clock" value={money(t.expiringValuePaise)} extra={t.expired > 0 ? <span className="rounded-full bg-rose-soft px-2 py-0.5 text-[11.5px] font-semibold text-rose">{t.expired} expired</span> : null} label="Expiring in 90 days (₹ at cost)" onClick={() => go({ tab: 'batches' })} />
           <Stat icon="inbox" value={t.ordersOpen} label="Orders on the way" onClick={() => go({ tab: 'orders' })} />
-          {d.reviews.length > 0 && <Stat icon="bell" value={d.reviews.length} label="Deliveries waiting for a decision" onClick={() => go({ tab: 'stock' })} />}
+          {d.reviews.length > 0 && <Stat icon="bell" value={d.reviews.length} label="Deliveries for the owner to check" onClick={() => go({ tab: 'stock' })} />}
         </div>}
         <div className="anim-fade-up flex flex-wrap items-center gap-2" style={{ animationDelay: '60ms' }}>
           <Tabs<InvTab> className="w-full" value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Stock' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
@@ -82,8 +82,8 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
     { key: 'onhand', label: 'On hand', sort: (i) => i.onHand, csv: (i) => i.onHand, cell: (i) => <div className="font-semibold"><span className="inline-flex items-center gap-3"><span className="h-1.5 w-24 overflow-hidden rounded-full bg-paper-2" aria-hidden><span className={`bar-grow block h-full rounded-full ${i.onHand <= 0 ? 'bg-rose' : i.onHand <= i.reorderLevel ? 'bg-[#E39A1D]' : 'bg-clay'}`} style={{ width: `${Math.max(i.onHand > 0 ? 4 : 0, Math.min(100, (i.onHand / Math.max(1, i.reorderLevel * 3)) * 100))}%` }} /></span><span className={`w-10 ${i.onHand <= 0 ? 'text-rose' : i.onHand <= i.reorderLevel ? 'text-amber' : ''}`}>{i.onHand}</span></span>{i.expired > 0 && <div className="text-[12px] font-normal text-rose">+{i.expired} expired</div>}</div> },
     { key: 'reorder', label: 'Reorder at', align: 'right', sort: (i) => i.reorderLevel, csv: (i) => i.reorderLevel, cell: (i) => i.reorderLevel },
     { key: 'batches', label: 'Batches', align: 'right', hideOnPhone: true, sort: (i) => i.batches, csv: (i) => i.batches, cell: (i) => i.batches },
-    { key: 'next', label: 'Next out', sort: (i) => i.nearestExpiry ?? '9999', csv: (i) => i.nearestExpiry, cell: (i) => i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">exp {exp(i.nearestExpiry)}</Chip> : <span className="text-muted">exp {exp(i.nearestExpiry)}</span>) : '—' },
-    { key: 'value', label: 'Cost value', align: 'right', sort: (i) => i.costValuePaise, csv: (i) => (i.costValuePaise / 100).toFixed(2), cell: (i) => money(i.costValuePaise) },
+    { key: 'next', label: 'Expires first', sort: (i) => i.nearestExpiry ?? '9999', csv: (i) => i.nearestExpiry, cell: (i) => i.nearestExpiry ? (i.status === 'expiring' ? <Chip tone="rose">exp {exp(i.nearestExpiry)}</Chip> : <span className="text-muted">exp {exp(i.nearestExpiry)}</span>) : '—' },
+    { key: 'value', label: 'Stock value (cost)', align: 'right', sort: (i) => i.costValuePaise, csv: (i) => (i.costValuePaise / 100).toFixed(2), cell: (i) => money(i.costValuePaise) },
     { key: 'act', label: '', fixed: true, align: 'right', className: 'dt-act', cell: (i) => <div className="flex items-center justify-end gap-1 whitespace-nowrap">
       {i.onHand + i.expired > 0 && <button type="button" className="dt-ghost" disabled={countOne.isPending} title="Count this medicine on the shelf" onClick={() => countOne.mutate(i.id)}><Icon name="edit" className="h-3.5 w-3.5" />Count</button>}
       {can(perms, 'stock.write') && <button type="button" className={`dt-ghost ${i.status === 'low' || i.status === 'out' ? '!border-clay !text-clay' : ''}`} onClick={() => go({ tab: 'orders', order: 'new', med: i.id, ...(i.vendorId ? { vendor: i.vendorId } : {}) })}><Icon name="plus" className="h-3.5 w-3.5" />Reorder</button>}</div> },
@@ -134,11 +134,11 @@ function BatchesTab({ go }: { go: Go }) {
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
       <section className="card anim-fade-up overflow-hidden">
         <div className="flex flex-wrap items-start gap-3">
-          <div className="mr-auto"><div className="card-title">Expiry runway</div><div className="text-[12.5px] text-muted">Each bar is a batch, from delivery to expiry. The number is the order it leaves the shelf.</div></div>
+          <div className="mr-auto"><div className="card-title">When each batch expires</div><div className="text-[12.5px] text-muted">Each bar is a batch, from delivery to expiry. The number is the order it leaves the shelf.</div></div>
           <Filter value={range} onChange={setRange} options={[{ value: 'soon', label: 'Expiring within 90 days' }, { value: 'all', label: 'Every batch' }]} />
         </div>
         <div className="mt-3 flex flex-wrap gap-4 text-[12px] text-muted">{[['bg-clay', 'More than 90 days'], ['bg-[#E39A1D]', 'Within 90 days'], ['bg-rose', 'Expired · not sold']].map(([c, l]) => <span key={l} className="flex items-center gap-1.5"><i className={`h-2 w-4 rounded-full ${c}`} />{l}</span>)}</div>
-        {meds.length === 0 ? <Empty icon="check" title="Nothing expires in the next 90 days" hint="Switch to Everything to see every batch." /> : <div className="mt-3 overflow-x-auto overflow-y-hidden"><div className="min-w-[620px] pr-6">
+        {meds.length === 0 ? <Empty icon="check" title="Nothing expires in the next 90 days" hint="Switch to Every batch to see them all." /> : <div className="mt-3 overflow-x-auto overflow-y-hidden"><div className="min-w-[620px] pr-6">
           <div className="relative ml-[180px] h-5 border-b border-line text-[11px] text-muted">{ticks.map((x) => <span key={x.at} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${x.at}%` }}>{x.label}</span>)}<span className="absolute bottom-0 top-0 w-0.5 rounded bg-ink/50" style={{ left: `${pct(day(now))}%` }} title="Today" /></div>
           {meds.map((m, mi) => <div key={m.id} className="grid grid-cols-[180px_minmax(0,1fr)] items-center border-b border-line/60 py-2.5 last:border-b-0 anim-fade-up" style={{ animationDelay: `${Math.min(mi, 14) * 30}ms` }}>
             <button type="button" className="min-w-0 pr-3 text-left" onClick={() => go({ tab: 'stock', item: m.id })}><b className="block truncate text-[13px] hover:underline">{m.name}</b><small className="text-[11.5px] text-muted">{m.bs.filter((b) => b.expiry >= now).reduce((k, b) => k + b.qty, 0)} usable</small></button>
@@ -187,12 +187,12 @@ export function DecisionDialog({ id, onClose }: { id: string; onClose: () => voi
         {d.status === 'review' ? (can(perms, 'stock.approve') ? <div className="space-y-2">
           <div className="label">Decision</div>
           {([['owe', 'Pay the bill, vendor owes the free units', `${short} unit${short === 1 ? '' : 's'} go on this vendor's owed list and are checked on the next delivery.`],
-            ['debit', 'Pay the promised rate, vendor owes the free units', `A debit note of ${money(extra)} for the vendor; the free units go on the owed list.`],
+            ['debit', `Pay agreed rate; ask vendor to return ${money(extra)}`, 'The free units go on the owed list.'],
             ['accept', 'Accept everything as billed', 'No owed list, no debit note. Needs a reason.']] as const).map(([k, l, h]) => (
             <label key={k} className={`flex cursor-pointer gap-3 rounded-[10px] border px-4 py-3 ${choice === k ? 'border-ink-2 bg-[#E9EBEF]' : 'border-line bg-surface'}`}><input type="radio" name="decision" className="mt-1 accent-clay" checked={choice === k} onChange={() => setChoice(k)} /><span><b>{l}</b><div className={`text-xs text-muted`}>{h}</div></span></label>))}
           <label className="block"><span className="label">Reason {choice === 'accept' ? '' : '(optional)'}</span><input className="input" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} /></label>
         </div> : <div className="text-sm text-muted">Waiting for the owner to decide.</div>)
-          : d.decision && <div className="text-sm">Decided by {d.decision.by}: <b>{d.decision.choice === 'owe' ? 'vendor owes the free units' : d.decision.choice === 'debit' ? `debit note ${money(d.decision.debitPaise ?? 0)}` : 'accepted as billed'}</b>{d.decision.reason ? ` · ${d.decision.reason}` : ''}</div>}
+          : d.decision && <div className="text-sm">Decided by {d.decision.by}: <b>{d.decision.choice === 'owe' ? 'vendor owes the free units' : d.decision.choice === 'debit' ? `ask vendor to return ${money(d.decision.debitPaise ?? 0)}` : 'accepted as billed'}</b>{d.decision.reason ? ` · ${d.decision.reason}` : ''}</div>}
       </div>}
       <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Close</button>{d?.status === 'review' && can(perms, 'stock.approve') && <button className="btn btn-primary" disabled={decide.isPending || (choice === 'accept' && reason.trim().length < 3)} onClick={() => decide.mutate()}>Save decision</button>}</div>
     </Modal>
@@ -227,7 +227,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile label="On hand" value={d.onHand} sub={`${live.length} batch${live.length === 1 ? '' : 'es'}`} />
-        <Tile label="Real cost per pack" value={rupees2(d.avgCostPaise)} sub="Average, free units included" />
+        <Tile label="Cost per pack after free goods" value={rupees2(d.avgCostPaise)} sub="Average, free units included" />
         <Tile label="Margin at MRP" value={margin} sub={`${money(m.mrpPaise)} − ${rupees2(d.avgCostPaise)}`} />
         <Tile label="Sold, last 30 days" value={d.sold30} sub={`Reorder at ${m.reorderLevel}${d.onHand === 0 ? ' · out of stock' : d.sold30 ? ` · about ${Math.max(1, Math.round((d.onHand / d.sold30) * 30 / 7))} weeks left` : ''}`} />
       </div>
@@ -438,7 +438,7 @@ function OrderEditor({ go, vendorId: initial, med }: { go: Go; vendorId: string;
           </div>
           {vendorId && <div className="mt-2 text-xs text-muted">{med ? 'Started with the medicine you chose to reorder; add more below.' : 'Pre-filled with the medicines below their reorder level.'} Rates and schemes come from the last order; change only what the vendor quoted differently.{draft.data?.owed?.length ? ` This vendor still owes: ${draft.data.owed.map((o: any) => `${o.qty} ${o.name}`).join(', ')}.` : ''}</div>}
           <div className="mt-3 -mx-5 overflow-x-auto">
-            <table className="table min-w-[940px]"><thead><tr><th>Medicine</th><th className="!text-right">Order qty</th><th>Scheme promised</th><th className="!text-right">Free</th><th className="!text-right">Rate ₹</th><th className="!text-right">Disc %</th><th className="!text-right">GST</th><th className="!text-right">Real cost</th><th className="!text-right">Amount</th><th></th></tr></thead>
+            <table className="table min-w-[940px]"><thead><tr><th>Medicine</th><th className="!text-right">Order qty</th><th>Free offer (e.g. 10+1)</th><th className="!text-right">Free</th><th className="!text-right">Rate ₹</th><th className="!text-right">Disc %</th><th className="!text-right">GST</th><th className="!text-right">Real cost</th><th className="!text-right">Amount</th><th></th></tr></thead>
               <tbody>{lines.length === 0 ? <tr><td colSpan={10} className="text-center text-muted">{vendorId ? 'Nothing is low. Add medicines below.' : 'Pick the vendor first.'}</td></tr> : lines.map((l, i) => { const c = calc[i]; const up = l.lastPaidPaise && c.rate > l.lastPaidPaise; return (
                 <tr key={l.medicineId} className={up ? 'bg-amber-soft/40' : ''}>
                   <td><div className="font-semibold">{l.name}</div><div className="text-xs text-muted">{l.lastPaidPaise ? `last paid ${rupees2(l.lastPaidPaise)} · ` : ''}on hand {l.onHand ?? 0}</div></td>
@@ -471,7 +471,7 @@ function OrderEditor({ go, vendorId: initial, med }: { go: Go; vendorId: string;
   );
 }
 
-type RLine = { medicineId: string; name: string; gstBp: number; mrp: string; qty: string; free: string; rate: string; disc: string; batch: string; expiry: string; promised?: any };
+type RLine = { medicineId: string; name: string; gstBp: number; mrp: string; oldMrp?: number; qty: string; free: string; rate: string; disc: string; batch: string; expiry: string; promised?: any };
 
 function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
   const order = useQuery({ queryKey: ['stockdocs', orderId], queryFn: () => get(`/stock/docs/${orderId}`), enabled: !!orderId });
@@ -481,12 +481,13 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
   const [vendorId, setVendorId] = useState(''); const [billNo, setBillNo] = useState(''); const [billDate, setBillDate] = useState(today()); const [billTotal, setBillTotal] = useState('');
   const [photo, setPhoto] = useState<{ mime: string; dataBase64: string; name: string } | null>(null); const [keepOpen, setKeepOpen] = useState(false);
   const [lines, setLines] = useState<RLine[]>([]); const [tried, setTried] = useState(false);
+  const [adj, setAdj] = useState(''); const adjP = Math.round((Number(adj) || 0) * 100); // round-off, freight or cash discount on the bill, + or −
   const opening = !orderId && vendorId === 'opening';
   useEffect(() => {
     if (!order.data || !meds.data || !prior.data) return;
     const got = (id: string) => prior.data.filter((r: any) => r.orderId === order.data.id).reduce((n: number, r: any) => n + (r.lines.find((x: any) => x.medicineId === id)?.qty ?? 0), 0);
     setLines(order.data.lines.map((l: any) => { const m = meds.data.find((x: any) => x.id === l.medicineId); const left = Math.max(0, l.qty - got(l.medicineId));
-      return { medicineId: l.medicineId, name: l.name, gstBp: l.gstBp, mrp: toRupees(m?.mrpPaise), qty: String(left), free: String(Math.floor((l.freeQty * left) / l.qty)), rate: toRupees(l.ratePaise), disc: l.discBp ? String(l.discBp / 100) : '', batch: '', expiry: '', promised: { ...l, left } }; }));
+      return { medicineId: l.medicineId, name: l.name, gstBp: l.gstBp, mrp: '', oldMrp: m?.mrpPaise, qty: String(left), free: String(Math.floor((l.freeQty * left) / l.qty)), rate: toRupees(l.ratePaise), disc: l.discBp ? String(l.discBp / 100) : '', batch: '', expiry: '', promised: { ...l, left } }; }));
   }, [order.data, meds.data, prior.data]);
   const set = (i: number, p: Partial<RLine>) => setLines((ls) => ls.map((l, k) => k === i ? { ...l, ...p } : l));
   const calc = lines.map((l) => { const qty = Number(l.qty) || 0; const free = Number(l.free) || 0; const rate = toPaise(l.rate); const disc = Math.round(Number(l.disc || 0) * 100); const amt = withGst(taxable(qty, rate, disc), l.gstBp);
@@ -497,13 +498,13 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
   const thisMonth = today().slice(0, 7); const soonMonth = (() => { const d = new Date(); d.setMonth(d.getMonth() + 6); return d.toISOString().slice(0, 7); })();
   const vendor = !orderId && !opening ? vendorId : order.data?.vendorId;
   const problem = !orderId && !vendorId ? 'Pick the vendor, or Opening stock.' : !lines.length ? 'Add the items that arrived.' : calc.some((c) => c.qty + c.free <= 0) ? 'Every line needs a quantity, or remove it.'
-    : lines.some((l) => !l.batch.trim()) ? 'Enter the batch number for every line.' : lines.some((l) => !l.expiry) ? 'Enter the expiry for every line.' : lines.some((l) => l.expiry < thisMonth) ? 'A batch has already expired.'
-    : calc.some((c) => c.rate < 0) ? 'Rate is missing.' : vendor && !billNo.trim() ? "Enter the vendor's bill number." : vendor && !billTotal ? 'Enter the bill total from the paper bill.' : vendor && Math.abs(billP - computed) > 500 ? `The lines add up to ${rupees2(computed)}; the bill says ${rupees2(billP)}. Check rates, quantities and discounts.`
+    : lines.some((l) => !l.batch.trim()) ? 'Enter the batch number for every line.' : lines.some((l) => !l.expiry) ? 'Enter the expiry for every line.' : lines.some((l) => l.expiry < thisMonth) ? 'A batch has already expired.' : lines.some((l) => !l.mrp) ? 'Type the MRP printed on the box for every line.'
+    : calc.some((c) => c.rate < 0) ? 'Rate is missing.' : vendor && !billNo.trim() ? "Enter the vendor's bill number." : vendor && !billTotal ? 'Enter the bill total from the paper bill.' : vendor && Math.abs(billP - computed - adjP) > 500 ? `The lines add up to ${rupees2(computed + adjP)}; the bill says ${rupees2(billP)}. Check rates and quantities, or enter the round-off / freight / cash discount.`
     : vendor && !photo ? "Add a photo of the vendor's bill." : '';
-  const save = useMutation({ mutationFn: () => post('/stock/receipts', { orderId: orderId ?? undefined, vendorId: !orderId && !opening ? vendorId : undefined, billNo: billNo.trim() || undefined, billDate: billDate || undefined, billTotalPaise: vendor ? billP : undefined,
+  const save = useMutation({ mutationFn: () => post('/stock/receipts', { orderId: orderId ?? undefined, vendorId: !orderId && !opening ? vendorId : undefined, billNo: billNo.trim() || undefined, billDate: billDate || undefined, billTotalPaise: vendor ? billP : undefined, adjustPaise: vendor && adjP ? adjP : undefined,
     billPhoto: photo ? { mime: photo.mime, dataBase64: photo.dataBase64 } : undefined, keepOpen,
     lines: lines.map((l, i) => ({ medicineId: l.medicineId, qty: calc[i].qty, freeQty: calc[i].free, ratePaise: calc[i].rate, discBp: calc[i].disc, batchNo: l.batch.trim(), expiry: l.expiry, mrpPaise: l.mrp ? toPaise(l.mrp) : undefined })) }),
-    onSuccess: (d: any) => { toast(d.status === 'review' ? `${d.docNo} saved · differences go to the owner` : `${d.docNo} saved · stock is on the shelf`); refresh(); go({ tab: 'stock' }); }, onError: (e) => toast(errText(e), 'err') });
+    onSuccess: (d: any) => { toast(d.status === 'review' ? `Delivery ${d.docNo} saved · differences go to the owner` : `Delivery ${d.docNo} saved · stock is on the shelf`); refresh(); go({ tab: 'stock' }); }, onError: (e) => toast(errText(e), 'err') });
   const pickFile = (f?: File) => { if (!f) return; if (f.size > 10 * 1024 * 1024) return toast('That file is too large (10 MB at most).', 'err'); if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(f.type)) return toast('Only JPG, PNG, WebP and PDF files can be added.', 'err');
     const r = new FileReader(); r.onload = () => setPhoto({ mime: f.type, dataBase64: String(r.result), name: f.name }); r.readAsDataURL(f); };
   const addable = (meds.data ?? []).filter((m: any) => !lines.some((l) => l.medicineId === m.id));
@@ -521,11 +522,12 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
             {!opening && <><label><span className="label">Vendor bill no.</span><input className={`input ${tried && vendor && !billNo.trim() ? '!border-rose' : ''}`} maxLength={40} value={billNo} onChange={(e) => setBillNo(e.target.value)} /></label>
               <label><span className="label">Bill date</span><input type="date" className="input" max={today()} value={billDate} onChange={(e) => setBillDate(e.target.value)} /></label>
               <label><span className="label">Bill total on paper</span><MoneyInput label="Bill total on paper" value={billTotal} onChange={setBillTotal} /></label>
+              <label><span className="label">Round-off / freight / cash discount (₹)</span><input className="input" inputMode="decimal" aria-label="Round-off, freight or cash discount in rupees" placeholder="e.g. -2.40 or 150" value={adj} onChange={(e) => setAdj(e.target.value.replace(/[^0-9.-]/g, '').replace(/(?!^)-/g, ''))} /></label>
               <label><span className="label">Bill photo (required)</span><span className={`input flex cursor-pointer items-center gap-2 ${tried && vendor && !photo ? '!border-rose' : ''}`}><Icon name="export" className="h-4 w-4 text-muted" /><span className="truncate">{photo ? photo.name : 'Take or pick a photo'}</span>
                 <input type="file" className="sr-only" accept="image/*,application/pdf" capture="environment" onChange={(e) => pickFile(e.target.files?.[0])} /></span></label></>}
           </div>
           <div className="mt-3 -mx-5 overflow-x-auto">
-            <table className="table min-w-[1060px]"><thead><tr><th>Medicine</th>{orderId && <th className="!text-right">Promised</th>}<th className="!text-right">Billed qty</th><th className="!text-right">Free got</th><th className="!text-right">Rate on bill</th><th className="!text-right">Disc %</th><th>Batch</th><th>Expiry</th><th className="!text-right">MRP</th><th>Check</th><th></th></tr></thead>
+            <table className="table min-w-[1060px]"><thead><tr><th>Medicine</th>{orderId && <th className="!text-right">Promised</th>}<th className="!text-right">Paid qty</th><th className="!text-right">Free qty</th><th className="!text-right">Price per pack (before GST)</th><th className="!text-right">Disc %</th><th>Batch</th><th>Expiry</th><th className="!text-right">MRP</th><th>Check</th><th></th></tr></thead>
               <tbody>{lines.length === 0 ? <tr><td colSpan={11} className="text-center text-muted">Add the items that arrived.</td></tr> : lines.map((l, i) => { const c = calc[i]; const p = l.promised; const soon = l.expiry && l.expiry < soonMonth; return (
                 <tr key={l.medicineId} className={c.extra || c.short ? 'bg-rose-soft/30' : ''}>
                   <td className="font-semibold">{l.name}</td>
@@ -536,15 +538,15 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
                   <td className="text-right"><NumInput aria-label={`Discount ${l.name}`} decimal className="input !w-16 !px-2 text-right" max={99} value={l.disc} onChange={(e) => set(i, { disc: e.target.value })} /></td>
                   <td><input aria-label={`Batch ${l.name}`} className={`input !w-28 !px-2 uppercase ${tried && !l.batch.trim() ? '!border-rose' : ''}`} maxLength={30} value={l.batch} onChange={(e) => set(i, { batch: e.target.value.toUpperCase() })} /></td>
                   <td><input type="month" aria-label={`Expiry ${l.name}`} className={`input !w-36 !px-2 ${tried && (!l.expiry || l.expiry < thisMonth) ? '!border-rose' : soon ? '!border-amber' : ''}`} min={thisMonth} value={l.expiry} onChange={(e) => set(i, { expiry: e.target.value })} />{soon && l.expiry >= thisMonth && <div className="text-[11px] text-[#7a5410]">under 6 months</div>}</td>
-                  <td className="text-right"><MoneyInput label={`MRP ${l.name}`} className="!w-24" value={l.mrp} onChange={(x) => set(i, { mrp: x })} /></td>
+                  <td className="text-right"><MoneyInput label={`MRP on the box ${l.name}`} className={`!w-24 ${tried && !l.mrp ? '!border-rose' : l.mrp && l.oldMrp && toPaise(l.mrp) !== l.oldMrp ? '!border-amber' : ''}`} placeholder="on the box" value={l.mrp} onChange={(x) => set(i, { mrp: x })} />{l.oldMrp ? <div className="text-[11px] text-muted">was {money(l.oldMrp)}</div> : null}</td>
                   <td className="whitespace-nowrap">{!p ? <span className="text-xs text-muted">no order</span> : !c.extra && !c.short ? <Chip tone="sage">matches</Chip> : <span className="space-x-1">{c.extra > 0 && <Chip tone="rose">+{money(c.extra)}</Chip>}{c.short > 0 && <Chip tone="amber">{c.short} free short</Chip>}</span>}</td>
                   <td><button className="btn btn-ghost btn-icon" aria-label={`Remove ${l.name}`} onClick={() => setLines((ls) => ls.filter((_, k) => k !== i))}><Icon name="x" /></button></td></tr>); })}</tbody></table>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <select className="input !w-72" aria-label="Add item" value="" onChange={(e) => { const m = addable.find((x: any) => x.id === e.target.value); if (m) setLines((ls) => [...ls, { medicineId: m.id, name: m.name, gstBp: m.gstBp, mrp: toRupees(m.mrpPaise), qty: '', free: '0', rate: '', disc: '', batch: '', expiry: '' }]); }}><option value="">+ Add item that arrived</option>{addable.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+            <select className="input !w-72" aria-label="Add item" value="" onChange={(e) => { const m = addable.find((x: any) => x.id === e.target.value); if (m) setLines((ls) => [...ls, { medicineId: m.id, name: m.name, gstBp: m.gstBp, mrp: '', oldMrp: m.mrpPaise, qty: '', free: '0', rate: '', disc: '', batch: '', expiry: '' }]); }}><option value="">+ Add item that arrived</option>{addable.map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
             {orderId && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay h-4 w-4" checked={keepOpen} onChange={(e) => setKeepOpen(e.target.checked)} />Part delivery: keep the order open for the rest</label>}
           </div>
-          <div className="mt-2 text-xs text-muted">The promised column cannot be changed here. Expiry under 6 months turns amber. A bill total that differs from the lines by more than ₹5 stops the save.</div>
+          <div className="mt-2 text-xs text-muted">The promised column cannot be changed here. Expiry under 6 months turns amber. Type the MRP printed on the box: a new batch can carry a new price. If the bill has a round-off, freight or cash discount, enter it so the total matches.</div>
           {tried && problem && <div className="mt-2 text-sm text-rose">{problem}</div>}
           <div className="mt-4 flex justify-end"><button className="btn btn-primary" disabled={save.isPending} onClick={() => { setTried(true); if (!problem) save.mutate(); }}><Icon name="check" />Save receipt · stock goes on the shelf</button></div>
         </div>
@@ -554,7 +556,8 @@ function ReceiveView({ go, orderId }: { go: Go; orderId: string | null }) {
               {calc[i].extra > 0 && <div className="flex justify-between gap-2"><span>{l.name}: {rupees2(calc[i].rate)} vs {rupees2(l.promised.ratePaise)}</span><b>{money(calc[i].extra)} more</b></div>}
               {calc[i].short > 0 && <div className="flex justify-between gap-2"><span>{l.name}: free</span><b>{calc[i].short} short</b></div>}</div>)}
             {vendor && <div className="flex justify-between border-t border-ink/10 pt-2"><span>Lines add up to</span><b>{rupees2(computed)}</b></div>}
-            {vendor && billTotal && <div className={`flex justify-between ${Math.abs(billP - computed) > 500 ? 'text-rose' : ''}`}><span>Bill says</span><b>{rupees2(billP)}</b></div>}
+            {vendor && adjP !== 0 && <div className="flex justify-between"><span>Round-off / freight / discount</span><b>{adjP > 0 ? '+' : '−'}{rupees2(Math.abs(adjP))}</b></div>}
+            {vendor && billTotal && <div className={`flex justify-between ${Math.abs(billP - computed - adjP) > 500 ? 'text-rose' : ''}`}><span>Bill says</span><b>{rupees2(billP)}</b></div>}
             {(totalExtra > 0 || totalShort > 0) && <div className="pt-1 text-xs text-muted">Stock goes on the shelf when you save. The owner decides on the money and the free units.</div>}
           </div>
           {vendor && lines.length > 0 && <div className="card text-sm"><div className="label">Sent to the vendor when saved</div>
@@ -625,8 +628,8 @@ function VendorAccount({ id, go, onEdit }: { id: string; go: Go; onEdit: (v: any
         {can(perms, 'stock.write') && <><button className="btn btn-sm" onClick={() => onEdit(v)}><Icon name="edit" />Edit</button><button className="btn" onClick={() => setReturning(true)}>Return stock</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new', vendor: v.id })}>New order</button></>}</div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile label="Free units still owed" value={t.owedUnits} sub={t.owedUnits ? 'Settled when they arrive in a later delivery' : 'Nothing owed'} />
-        <Tile label="Paid above promise, 6 months" value={money(t.extraPaise)} sub={`${t.extraDeliveries} of ${t.deliveries} deliveries`} />
-        <Tile label="Free received on the day, 6 months" value={`${t.gotFree} of ${t.promisedFree}`} sub={t.promisedFree ? `${Math.round((t.gotFree / t.promisedFree) * 100)}%` : 'No schemes yet'} />
+        <Tile label="Overcharged vs agreed (6 mo)" value={money(t.extraPaise)} sub={`${t.extraDeliveries} of ${t.deliveries} deliveries`} />
+        <Tile label="Free goods received with the bill (6 mo)" value={`${t.gotFree} of ${t.promisedFree}`} sub={t.promisedFree ? `${Math.round((t.gotFree / t.promisedFree) * 100)}%` : 'No schemes yet'} />
         <Tile label="Billed, 6 months" value={money(t.billedPaise)} sub={`${t.deliveries} deliver${t.deliveries === 1 ? 'y' : 'ies'}`} />
       </div>
       <div className="card !p-0 overflow-x-auto">

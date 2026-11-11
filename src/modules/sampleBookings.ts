@@ -237,7 +237,7 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
 
     // C. counter sales without a prescription: real invoices from catalogue prices, a few every day (the first one of the day is the marker)
     const sold = await tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), sql`${pharmacySale.encounterId} is null`, sql`${pharmacySale.createdAt} >= ${at(day, '00:00')} and ${pharmacySale.createdAt} < ${at(addDays(day, 1), '00:00')}`)).limit(1);
-    const priced = meds.filter((m) => m.mrpPaise > 0 && !KEEP_STOCK.test(m.name));
+    const priced = meds.filter((m) => m.mrpPaise > 0 && !KEEP_STOCK.test(m.name) && !['H', 'H1', 'X'].includes(m.scheduleClass ?? '')); // counter sales: over-the-counter items only
     if (!sold.length && priced.length) {
       for (let i = 0; i < 3 + rnd(2); i++) {
         const items = Array.from({ length: 1 + rnd(3) }, () => ({ medicineId: priced[rnd(priced.length)].id, qty: 1 + rnd(3) }))

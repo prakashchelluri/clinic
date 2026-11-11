@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { Floating, Icon, Skeleton, usePageSearch } from './ui';
+import { listOut, qc, useMe } from './api';
 import './table.css';
 
 /** One column: what its cell shows, and optionally how it sorts and what it exports. */
@@ -26,6 +27,7 @@ type Props<T> = {
   tabs?: { value: string; label: string; count?: number }[]; tab?: string; onTab?: (v: string) => void;
   bulk?: (picked: T[], clear: () => void) => ReactNode;
   loading?: boolean; empty?: { title: string; hint?: string };
+  error?: unknown; onRetry?: () => void; // the fetch failed: say so, never "nothing found"
   pageSize?: number; exportName?: string;
 };
 
@@ -41,6 +43,11 @@ const readHidden = (id: string): string[] => { try { return JSON.parse(localStor
  *  Page, sort, filters and switches live in the address, so Back and a shared link keep them; search is the header's box (?q=). */
 export function DataTable<T>(p: Props<T>) {
   const [sp, setSp] = useSearchParams();
+  const me = useMe();
+  // lists of patients leave the app only for roles the owner allows (privacy.canExport), and every export is audited by the server first
+  const canExport = p.exportable !== false && !!(me.data as any)?.privacy?.canExport;
+  const failed = !!p.error && !p.loading;
+  const retry = p.onRetry ?? (() => { qc.refetchQueries({ type: 'active' }); });
   const [q] = usePageSearch(p.search?.placeholder ?? '', !!p.search);
   const filters = p.filters ?? [], toggles = p.toggles ?? [];
   const fv = (f: FilterDef<T>) => sp.get(f.key) ?? f.initial ?? f.options[0].value;
@@ -88,6 +95,8 @@ export function DataTable<T>(p: Props<T>) {
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' }));
     a.download = `${p.exportName ?? p.id}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
+  // the server checks the role and writes the audit record; a refusal shows as a message, nothing is downloaded
+  const exportGuarded = () => listOut(`Downloaded the ${p.exportName ?? p.id} list (${list.length} row${list.length === 1 ? '' : 's'})`, list.length, exportCsv);
   // page numbers: the first, the last, and the two either side of this one
   const nums = Array.from({ length: pages }, (_, i) => i + 1).filter((n) => n === 1 || n === pages || Math.abs(n - page) <= 1);
   const offerable = p.columns.filter((c) => !c.fixed && c.label);
@@ -131,13 +140,19 @@ export function DataTable<T>(p: Props<T>) {
                 <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-[12px] px-3 py-2 text-[13.5px] font-semibold hover:bg-ink/6"><input type="checkbox" className="dt-cb" checked={!hidden.includes(c.key)} onChange={() => saveHidden(hidden.includes(c.key) ? hidden.filter((k) => k !== c.key) : [...hidden, c.key])} />{c.label}</label>))}</div>
             </Floating>
           </>}
-          {p.exportable !== false && <button type="button" className="dt-ghost" onClick={exportCsv} disabled={!total} title="Download what is shown, every page, as a spreadsheet (CSV)"><Icon name="download" className="h-3.5 w-3.5 text-muted" />Export</button>}
+          {canExport && <button type="button" className="dt-ghost" onClick={exportGuarded} disabled={!list.length} title={p.server ? 'Download this page as a spreadsheet (CSV)' : 'Download what is shown, every page, as a spreadsheet (CSV)'}><Icon name="download" className="h-3.5 w-3.5 text-muted" />Export</button>}
         </div>
       )}
 
-      {p.loading ? <Skeleton rows={5} /> : total === 0 ? (
+      {failed && total > 0 && <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-line bg-amber-soft px-5 py-2 text-[13px] font-semibold text-amber">Couldn't refresh this list. What you see may be out of date.<button type="button" className="dt-link" onClick={retry}>Retry</button></div>}
+      {p.loading ? <Skeleton rows={5} /> : failed && total === 0 ? (
+        <div className="px-5 py-14 text-center" role="alert">
+          <div className="text-[15px] font-bold">Couldn't load. Check the internet and try again.</div>
+          <button type="button" className="dt-ghost mt-3" onClick={retry}>Retry</button>
+        </div>
+      ) : total === 0 ? (
         <div className="px-5 py-14 text-center">
-          <div className="text-[15px] font-bold">{hiddenByFilters > 0 ? 'No one matches these filters' : p.empty?.title ?? 'Nothing here'}</div>
+          <div className="text-[15px] font-bold">{hiddenByFilters > 0 ? 'Nothing matches these filters' : p.empty?.title ?? 'Nothing here'}</div>
           {(hiddenByFilters > 0 || p.empty?.hint) && <div className="mt-1 text-[13px] text-muted">{hiddenByFilters > 0 ? `${hiddenByFilters} hidden by the filters` : p.empty?.hint}</div>}
           {hiddenByFilters > 0 && <button type="button" className="dt-ghost mt-3" onClick={() => write(Object.fromEntries(filters.map((f) => [f.key, f.options[0].value === (f.initial ?? f.options[0].value) ? null : f.options[0].value])))}>Show all</button>}
         </div>

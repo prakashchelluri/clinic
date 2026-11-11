@@ -6,6 +6,7 @@ import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
+import { clinical } from './patients.js';
 
 type Kind = 'review' | 'missed_visit' | 'missed_sitting' | 'schedule' | 'advised';
 const TABS = { reviews: ['review'], missed: ['missed_visit', 'missed_sitting'], schedule: ['schedule'], advised: ['advised'] } as const;
@@ -19,7 +20,7 @@ const dxOf = (d: any): string => ((d?.assessment?.diagnosis ?? []) as any[]).map
 const dayLabel = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
 /** Every patient the desk should call, in four lists. A call outcome of Booked or Not interested takes the row off the list. */
-async function build(tx: Tx, t: string, tz: string) {
+async function build(tx: Tx, t: string, tz: string, dx = true) {
   const today = todayIn(tz);
   const open = sql`${recommendation.status} in ('open','contacted')`;
   const recs = (kind: string) => tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId))
@@ -28,7 +29,7 @@ async function build(tx: Tx, t: string, tz: string) {
   const agreed = new Set((await tx.select({ id: course.recommendationId }).from(course).where(eq(course.tenantId, t))).map((c) => c.id));
   const booked = procs.length ? new Set((await tx.select({ id: procedureSession.recommendationId }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, procs.map((x) => x.r.id)), eq(procedureSession.state, 'confirmed')))).map((x) => x.id)) : new Set<string>();
   const rows: Row[] = [];
-  for (const x of followups) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: x.r.notes?.trim() || dxOf(x.enc) || 'Review', dueOn: x.r.dueOn });
+  for (const x of followups) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: dx ? x.r.notes?.trim() || dxOf(x.enc) || 'Review' : 'Follow-up visit', dueOn: x.r.dueOn });
   for (const x of procs) {
     if (booked.has(x.r.id)) continue;
     const what = `${x.proc ?? 'Procedure'}${x.r.sittings ? ` · ${x.r.sittings} sittings` : ''}`;
@@ -58,7 +59,8 @@ async function build(tx: Tx, t: string, tz: string) {
 
 export function followupRoutes(app: FastifyInstance) {
   route(app, 'get', '/followups', 'worklist.read', async (req, tx) => {
-    const all = await build(tx, req.ctx.tenantId, req.ctx.timezone);
+    // the reason for a review is the diagnosis: only clinical roles see it
+    const all = await build(tx, req.ctx.tenantId, req.ctx.timezone, clinical(req.perms));
     const tab = (String((req.query as any).tab ?? 'reviews') as Tab); if (!TABS[tab]) throw new HttpError(400, 'BAD_TAB');
     const counts = Object.fromEntries((Object.keys(TABS) as Tab[]).map((k) => [k, all.filter((r) => (TABS[k] as readonly string[]).includes(r.kind) && !r.waiting).length]));
     return { counts, rows: all.filter((r) => (TABS[tab] as readonly string[]).includes(r.kind)) };

@@ -8,7 +8,8 @@ import { whatsappReady } from '../lib/messaging.js';
 import { padConfig, printSettings } from '../lib/pad.js';
 import { LAB_PARAMS } from '../lib/labs.js';
 import { historyCategories } from '../lib/history.js';
-import { verifyPassword, HttpError } from '../lib/auth.js';
+import { verifyPassword, hashPassword, HttpError, can } from '../lib/auth.js';
+import { testDataAllowed } from './sample.js';
 import { route } from '../lib/route.js';
 
 const Login = z.object({ tenant: z.string().optional(), email: z.string().email(), password: z.string() });
@@ -51,6 +52,16 @@ export function identityRoutes(app: FastifyInstance) {
 
   route(app, 'get', '/me', null, async (req) => ({ ...req.ctx, perms: req.perms, privacy: req.privacy }));
 
+  /** Anyone signed in changes their own password: the current one first, then a new one of at least 8 characters. */
+  route(app, 'patch', '/me/password', null, async (req, tx) => {
+    const b = z.object({ currentPassword: z.string().min(1).max(200), newPassword: z.string().min(8).max(200) }).parse(req.body);
+    const u = await tx.select().from(appUser).where(and(eq(appUser.id, req.ctx.userId), eq(appUser.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (!u || !verifyPassword(b.currentPassword, u.passwordHash)) throw new HttpError(400, 'WRONG_CURRENT_PASSWORD');
+    if (b.newPassword === b.currentPassword) throw new HttpError(400, 'SAME_PASSWORD');
+    await tx.update(appUser).set({ passwordHash: hashPassword(b.newPassword) }).where(eq(appUser.id, u.id));
+    return { ok: true };
+  });
+
   // Everything the UI needs to render forms, pickers and prices, in one call.
   route(app, 'get', '/config', null, async (req, tx) => {
     const t = req.ctx.tenantId;
@@ -66,10 +77,17 @@ export function identityRoutes(app: FastifyInstance) {
       tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true))),
       tx.select().from(service).where(and(eq(service.tenantId, t), eq(service.active, true))).orderBy(service.sortOrder, service.name),
     ]);
-    // The clinic's allowed addresses and privacy rules are for the owner only.
-    const settings = req.ctx.roles.includes('owner') ? ten.settings : { ...ten.settings, security: undefined };
+    // The clinic's allowed addresses and privacy rules are for the owner only; the waiting-room screen's secret only for who manages settings.
+    const owner = req.ctx.roles.includes('owner'); const seeFees = can(req.perms, 'fees.see');
+    let settings: any = owner ? ten.settings : { ...ten.settings, security: undefined };
+    if (!can(req.perms, 'config.write')) settings = { ...settings, display: undefined };
+    // Without 'See fees and payments' (the junior doctor) no prices travel: fee amounts (only "free" stays, the pad uses it to spot reviews), MRP, procedure and package prices.
+    if (!seeFees && Array.isArray(settings.packages)) settings = { ...settings, packages: settings.packages.map(({ pricePaise, ...k }: any) => k) };
+    const priced = seeFees ? { feeCategories: fees, medicines: meds, procedures: procs, services }
+      : { feeCategories: fees.map((c) => ({ ...c, amountPaise: c.amountPaise === 0 ? 0 : null })), medicines: meds.map((m) => ({ ...m, mrpPaise: null })), procedures: procs.map((p) => ({ ...p, pricePaise: null })), services: services.map((x) => ({ ...x, pricePaise: null })) };
     return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings },
-      branches, practitioners, feeCategories: fees, forms, medicines: meds, procedures: procs, specialties: specs, rooms, services, whatsappReady: whatsappReady(),
+      testData: owner ? await testDataAllowed(tx, t, req.ctx.tenantKind) : false,
+      branches, practitioners, ...priced, forms, specialties: specs, rooms, whatsappReady: whatsappReady(),
       pad: padConfig(ten.settings), printRx: printSettings(ten.settings), labParams: LAB_PARAMS, historyCategories: historyCategories(ten.settings) };
   });
 

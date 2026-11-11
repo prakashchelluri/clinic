@@ -125,9 +125,19 @@ const RULES: Rule[] = [
   ['POST', /^\/procedure-sessions/, 'change', () => 'Changed a procedure sitting'],
   ['PATCH', /^\/procedure-sessions/, 'change', (b) => b.state ? `Procedure sitting ${b.state}` : 'Changed a procedure sitting'],
   ['PUT', /^\/security$/, 'settings', () => 'Changed privacy and access settings'],
+  ['PATCH', /^\/me\/password$/, 'settings', () => 'Changed their own password'],
   ['PATCH', /^\/admin\/clinic$/, 'settings', () => 'Changed clinic settings'],
+  ['POST', /^\/admin\/fee-categories$/, 'settings', (b) => `Added a fee · ${b.name ?? b.code ?? ''}${typeof b.amountPaise === 'number' ? ` ${rupees(b.amountPaise)}` : ''}`],
+  ['PATCH', /^\/admin\/fee-categories\/[^/]+$/, 'settings', (b) => feeSummary(b.name ?? 'a fee', undefined, b.amountPaise)],
   [' ', /^\/(?:admin\/)?(users|roles|practitioners|medicines|fee-categories|services|forms|procedures|rooms|vendors|calendar\/routine)/, 'settings', () => ''],
 ];
+const rupees = (p: number) => `₹${(p / 100).toLocaleString('en-IN')}`;
+/** "Changed the fee for New consult: ₹400 → ₹500", in rupees, never paise. */
+export function feeSummary(name: string, beforePaise: number | undefined, afterPaise: number | undefined) {
+  if (typeof afterPaise !== 'number') return `Changed the fee ${name}`;
+  if (typeof beforePaise !== 'number') return `Changed the fee for ${name} to ${rupees(afterPaise)}`;
+  return beforePaise === afterPaise ? `Changed the fee ${name} (amount unchanged, ${rupees(afterPaise)})` : `Changed the fee for ${name}: ${rupees(beforePaise)} → ${rupees(afterPaise)}`;
+}
 const NOUN: Record<string, string> = { practitioners: 'a doctor', users: 'a team member', roles: 'a role', medicines: 'a medicine', fees: 'a fee', 'fee-categories': 'a fee', services: 'a visit type', forms: 'the consultation form', procedures: 'a procedure', rooms: 'a room', vendors: 'a vendor', 'calendar/routine': 'weekly hours' };
 const VERB: Record<string, string> = { POST: 'Added', PATCH: 'Changed', PUT: 'Changed', DELETE: 'Removed' };
 

@@ -5,6 +5,8 @@ import { get, patch, post, qc, today, errText, ApiError, dialable } from '../api
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, Skeleton, ask, toast, Filter } from '../ui';
 import { ScheduleModal } from './Worklist';
+import { LoadError, clashLabel } from '../procBoard';
+import { MoneyChip, startBody, confirmDone } from '../procDrawer';
 
 const add = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const short = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -21,7 +23,7 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
   const [sp, setSp] = useSearchParams();
   const t = today();
   const isDoctor = !!me.practitionerId;
-  const day = sp.get('day') ?? (isDoctor ? t : add(t, 1)); // the coordinator plans ahead, the doctor looks at today
+  const day = sp.get('day') ?? t; // everyone opens on today; tomorrow is one tap away
   const setDay = (d: string) => setSp((p) => { p.set('tab', 'schedule'); p.set('day', d); return p; }, { replace: true });
   const [docF, setDocF] = useState(''); const [roomF, setRoomF] = useState(''); const [mine, setMine] = useState(false); const [only, setOnly] = useState<'' | 'nodoc' | 'unconf'>('');
   const [moving, setMoving] = useState<any>(null); const [assigning, setAssigning] = useState<any>(null);
@@ -29,10 +31,13 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
 
   const from = add(t, -1);
   const counts = useQuery({ queryKey: ['pcounts', from], queryFn: () => get(`/procedure-sessions/counts?from=${from}&days=9`), refetchInterval: 30000 });
-  const q = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1`), refetchInterval: 15000 });
+  const q = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1&detail=1`), refetchInterval: 15000 });
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), enabled: can(perms, 'worklist.read') });
-  const setState = useMutation({ mutationFn: ({ id, state, reason }: any) => patch(`/procedure-sessions/${id}`, { state, reason }), onSuccess: () => { refresh(); toast('Updated'); }, onError: (e) => toast(errText(e), 'err') });
-  const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: (_r, v: any) => { refresh(); toast(v.confirmed ? 'Marked as confirmed by the patient' : 'Confirmation removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
+  const DONE: Record<string, string> = { in_progress: 'Sitting started', completed: 'Marked done', missed: 'Moved to missed', cancelled: 'Sitting cancelled' };
+  const setState = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/procedure-sessions/${id}`, b), onSuccess: (_r, v: any) => { refresh(); toast(DONE[v.state] ?? 'Updated'); }, onError: (e) => toast(errText(e), 'err') });
+  const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: (_r, v: any) => { refresh(); toast(v.confirmed ? 'Noted: the patient said yes' : 'Patient answer removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
+  const start = async (s: any) => { const b = await startBody(s); if (b) setState.mutate({ id: s.id, ...b }); };
+  const done = async (s: any) => { if (await confirmDone(s)) setState.mutate({ id: s.id, state: 'completed' }); };
 
   const all: any[] = q.data ?? [];
   const docs = (cfg?.practitioners ?? []).filter((p: any) => p.active !== false);
@@ -50,8 +55,8 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
   const stripDays = strip.includes(day) ? strip : [...strip, day];
   const lab = (d: string) => d === t ? 'Today' : d === add(t, 1) ? 'Tomorrow' : d === add(t, -1) ? 'Yesterday' : short(d);
 
-  const status = (s: any) => s.state === 'completed' ? <Chip tone="sage">done</Chip> : s.state === 'in_progress' ? <Chip tone="amber">in progress</Chip> : s.state === 'missed' ? <Chip tone="rose">missed</Chip>
-    : s.patientConfirmedAt ? <Chip tone="sage">patient confirmed</Chip> : day >= t ? <Chip tone="amber">not confirmed</Chip> : <Chip tone="sky">scheduled</Chip>;
+  const status = (s: any) => s.state === 'completed' ? <Chip tone="sage">Done</Chip> : s.state === 'in_progress' ? <Chip tone="amber">In room</Chip> : s.state === 'missed' ? <Chip tone="rose">Missed</Chip>
+    : s.patientConfirmedAt ? <Chip tone="sage">Patient said yes</Chip> : day >= t ? <Chip tone="amber">Patient not called yet</Chip> : <Chip tone="sky">Booked</Chip>;
 
   return (
     <div className="space-y-3">
@@ -70,12 +75,12 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
         <div className="card !py-3 !bg-amber-soft/60 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm anim-fade-up">
           <b>Needs attention · {nNoDoc + nUnconf}</b>
           {nNoDoc > 0 && <button className={`underline ${only === 'nodoc' ? 'font-semibold' : ''}`} onClick={() => setOnly(only === 'nodoc' ? '' : 'nodoc')}>{nNoDoc} without a doctor</button>}
-          {nUnconf > 0 && <button className={`underline ${only === 'unconf' ? 'font-semibold' : ''}`} onClick={() => setOnly(only === 'unconf' ? '' : 'unconf')}>{nUnconf} patient{nUnconf === 1 ? '' : 's'} not confirmed</button>}
+          {nUnconf > 0 && <button className={`underline ${only === 'unconf' ? 'font-semibold' : ''}`} onClick={() => setOnly(only === 'unconf' ? '' : 'unconf')}>{nUnconf} patient{nUnconf === 1 ? '' : 's'} not called yet</button>}
           {only && <button className="btn btn-ghost btn-sm ml-auto" onClick={() => setOnly('')}>Show all</button>}
         </div>
       )}
 
-      {q.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? (
+      {q.isLoading ? <Skeleton rows={4} /> : q.isError && !q.data ? <LoadError onRetry={() => q.refetch()} /> : rows.length === 0 ? (
         <div className="card"><Empty icon="stetho" title={all.length ? 'Nothing matches these filters' : `No procedures planned for ${lab(day).toLowerCase()}`} hint={all.length ? undefined : 'Every room is free.'} />
           {!all.length && unscheduled > 0 && <div className="flex justify-center pb-5"><button className="btn btn-primary" onClick={onPlans}>{unscheduled} plan{unscheduled === 1 ? '' : 's'} waiting to be scheduled</button></div>}</div>
       ) : (
@@ -90,16 +95,15 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
               </div>
               <span className="hidden md:block w-44 text-sm">{s.room ?? <span className="text-muted">no room</span>}</span>
               <span className="hidden md:block w-40 text-sm">{s.doctor ?? <span className="text-rose">not assigned</span>}{s.supervisor && <div className="text-xs text-muted">supervised by {s.supervisor}</div>}</span>
-              <span className="flex w-44 flex-wrap gap-1">{status(s)}{noDoc(s) && <Chip tone="rose">no doctor</Chip>}</span>
+              <span className="flex w-44 flex-wrap gap-1">{status(s)}{noDoc(s) && <Chip tone="rose">no doctor</Chip>}<MoneyChip m={s.money} /></span>
+              {canWrite && s.state === 'confirmed' && s.day === t && <button className="btn btn-sm btn-primary" disabled={setState.isPending} onClick={() => start(s)}>Start</button>}
+              {canWrite && s.state === 'in_progress' && <button className="btn btn-sm btn-primary" disabled={setState.isPending} onClick={() => done(s)}><Icon name="check" className="h-3.5 w-3.5" />Mark done</button>}
               <span className="w-9 text-right">{canWrite && <MoreMenu items={[
                 { label: 'Reschedule', hidden: !['confirmed', 'postponed', 'missed'].includes(s.state), onClick: () => setMoving(s) },
                 { label: s.practitionerId ? 'Change doctor' : 'Assign doctor', hidden: s.state !== 'confirmed', onClick: () => setAssigning(s) },
-                { label: s.patientConfirmedAt ? 'Undo patient confirmation' : 'Mark patient confirmed', hidden: s.state !== 'confirmed', onClick: () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }) },
-                
-                { label: 'Start', hidden: !(s.state === 'confirmed' && s.day === t), onClick: () => setState.mutate({ id: s.id, state: 'in_progress' }) },
-                { label: 'Mark done', hidden: s.state !== 'in_progress', onClick: () => setState.mutate({ id: s.id, state: 'completed' }) },
-                { label: 'Mark as missed', hidden: s.state !== 'confirmed', onClick: () => setState.mutate({ id: s.id, state: 'missed' }) },
-                { label: 'Cancel this sitting', danger: true, hidden: !['confirmed', 'missed'].includes(s.state), onClick: async () => { const a = await ask({ title: 'Cancel this sitting?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and the plan goes back to open.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } },
+                { label: s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', hidden: s.state !== 'confirmed', onClick: () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }) },
+                { label: 'Mark as missed', hidden: s.state !== 'confirmed', onClick: async () => { if (await ask({ title: 'Mark this sitting as missed?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark missed', cancelLabel: 'Keep it' })) setState.mutate({ id: s.id, state: 'missed' }); } },
+                { label: 'Cancel this sitting', danger: true, hidden: !['confirmed', 'missed'].includes(s.state), onClick: async () => { const a = await ask({ title: 'Cancel this sitting?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and it goes back to Plans to schedule.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } },
               ]} />}</span>
             </div>
           ))}
@@ -124,9 +128,9 @@ function AssignDoctor({ s, docs, onClose }: { s: any; docs: any[]; onClose: () =
       <div className="space-y-4">
         <div><label className="label" htmlFor="as-doc">Doctor</label>
           <select id="as-doc" className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setConf(null); }}>{!s.requiresMainDoctor && <option value="">No doctor needed</option>}{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-          {doc && <div className="mt-1 text-[11px] text-amber">Blocks this doctor's OP capacity for the slot.</div>}</div>
+          {doc && <div className="mt-1 text-[11px] text-amber">{docs.find((p: any) => p.id === doc)?.name ?? 'This doctor'} gets no OPD bookings {s.startTime}–{s.endTime}.</div>}</div>
         <div><label className="label" htmlFor="as-sup">Supervised by (optional)</label><select id="as-sup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Nobody</option>{docs.filter((p: any) => p.id !== doc).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-        {conf && <div className="rounded-xl bg-amber-soft p-3 text-sm text-amber anim-fade-up"><div className="mb-1 font-medium">This doctor is busy then:</div>{conf.map((c, i) => <div key={i}>• {c.kind}: {c.who} ({c.startTime}–{c.endTime})</div>)}</div>}
+        {conf && <div className="rounded-xl bg-amber-soft p-3 text-sm text-amber anim-fade-up"><div className="mb-1 font-medium">This doctor is busy then:</div>{conf.map((c, i) => <div key={i}>• {clashLabel(c.kind)}: {c.who} ({c.startTime}–{c.endTime})</div>)}</div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           {conf ? <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}>Assign anyway</button> : <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(false)}><Icon name="check" />Assign</button>}</div>
       </div>

@@ -8,6 +8,7 @@ import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, daysBetween, addDays } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { Vitals } from './rxpad.js';
+import { assertDayOpen } from './dayclose.js';
 
 /** How many patients may be inside the consultation room at once. ponytail: fixed for every clinic; a tenant setting if one asks. */
 export const ROOM_MAX = 3;
@@ -18,7 +19,7 @@ async function eligibilityContext(tx: Tx, ctx: Ctx, patientId: string) {
   const p = await tx.select().from(patient).where(and(eq(patient.id, patientId), eq(patient.tenantId, t))).then((r) => r[0]);
   if (!p) throw new HttpError(404, 'PATIENT_NOT_FOUND');
   const lastPaid = await tx.select({ at: payment.receivedAt }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId))
-    .where(and(eq(payment.tenantId, t), eq(payment.patientId, patientId), sql`${charge.description} like 'Consultation%'`)).orderBy(desc(payment.receivedAt)).limit(1).then((r) => r[0]);
+    .where(and(eq(payment.tenantId, t), eq(payment.patientId, patientId), gt(payment.amountPaise, 0), sql`${charge.description} like 'Consultation%'`)).orderBy(desc(payment.receivedAt)).limit(1).then((r) => r[0]);
   const openCourse = await tx.select({ id: recommendation.id }).from(recommendation)
     .where(and(eq(recommendation.tenantId, t), eq(recommendation.patientId, patientId), eq(recommendation.kind, 'procedure'), sql`${recommendation.status} in ('open','contacted','scheduled')`)).limit(1);
   const visits = await tx.select({ n: sql<number>`count(*)::int` }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, patientId)));
@@ -48,7 +49,7 @@ const CheckIn = z.object({
   feeCategoryCode: z.string(), practitionerId: z.string().uuid().nullable().optional(),
   details: Details.default({}),
   payment: z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().min(0).max(100000000), reference: z.string().optional() }).optional(),
-  waive: z.object({ reason: z.string().min(1) }).optional(),
+  waive: z.object({ reason: z.string().trim().min(3, 'Say why') }).optional(),
   allowReview: z.object({ reason: z.string().trim().min(3) }).optional(), // one more free review than the limit allows
   idempotencyKey: z.string().optional(),
 });
@@ -79,14 +80,19 @@ export function visitRoutes(app: FastifyInstance) {
     if (cat.code === 'REN' && !freeReturn) {
       const limit = Number((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings?.reviewLimit ?? 1);
       const lastPaid = await tx.select({ at: payment.receivedAt }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId))
-        .where(and(eq(payment.tenantId, t), eq(payment.patientId, body.patientId), sql`${charge.description} like 'Consultation%'`, sql`${charge.amountPaise} > 0`)).orderBy(desc(payment.receivedAt)).limit(1).then((r) => r[0]);
+        .where(and(eq(payment.tenantId, t), eq(payment.patientId, body.patientId), gt(payment.amountPaise, 0), sql`${charge.description} like 'Consultation%'`, sql`${charge.amountPaise} > 0`)).orderBy(desc(payment.receivedAt)).limit(1).then((r) => r[0]);
       const used = await tx.select({ n: sql<number>`count(*)::int` }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, body.patientId), eq(visit.feeCategoryId, cat.id), lastPaid ? gt(visit.arrivedAt, lastPaid.at) : sql`true`)).then((r) => r[0]?.n ?? 0);
       if (used >= limit) {
         if (!body.allowReview) throw new HttpError(409, 'REVIEW_LIMIT', { used, limit });
         if (!can(req.perms, 'payment.refund')) throw new HttpError(403, 'FORBIDDEN:payment.refund');
       }
     }
-    const branchId = body.branchId ?? (await tx.query.branch.findFirst({ where: (b, { eq }) => eq(b.tenantId, t) }))!.id;
+    // Money at check-in: never more than the fee (less is allowed and stays due), and not into a day that has been closed.
+    if (body.payment && body.payment.amountPaise > 0 && !freeReturn) {
+      if (body.payment.amountPaise > cat.amountPaise) throw new HttpError(400, 'MORE_THAN_FEE', { feePaise: cat.amountPaise });
+      await assertDayOpen(tx, req.ctx);
+    }
+    const branchId = body.branchId ??(await tx.query.branch.findFirst({ where: (b, { eq }) => eq(b.tenantId, t) }))!.id;
     const settings = (await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings ?? {};
     const scope = settings.numbering?.opNumberScope === 'day' ? `${branchId}:${day}` : `${branchId}:${day}:${cat.code}`;
     const n = await nextNumber(tx, t, 'op_number', scope);
@@ -129,11 +135,11 @@ export function visitRoutes(app: FastifyInstance) {
     const to = String(q.to ?? todayIn(req.ctx.timezone)); const from = String(q.from ?? addDays(to, -6));
     const term = String(q.q ?? '').trim(); const filter = String(q.filter ?? 'all');
     const like = (c: any) => ilike(c, `%${term}%`);
-    const vrows = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags }, doctor: practitioner.name, encounterId: encounter.id, completedAt: encounter.completedAt })
+    const vrows = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, dob: patient.dob, sex: patient.sex, flags: patient.flags }, doctor: practitioner.name, encounterId: encounter.id, completedAt: encounter.completedAt })
       .from(visit).innerJoin(patient, eq(patient.id, visit.patientId)).leftJoin(practitioner, eq(practitioner.id, visit.practitionerId)).leftJoin(encounter, eq(encounter.visitId, visit.id))
       .where(and(eq(visit.tenantId, t), gte(visit.day, from), lte(visit.day, to), sql`${visit.status} in ('done','left')`, term ? or(like(patient.fullName), like(patient.phone), like(patient.patientNo), like(visit.opNumber)) : undefined))
       .orderBy(desc(visit.day), desc(visit.arrivedAt)).limit(500);
-    const arows = await tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags }, w: { day: session.day, startTime: session.startTime, practitionerId: session.practitionerId } })
+    const arows = await tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, dob: patient.dob, sex: patient.sex, flags: patient.flags }, w: { day: session.day, startTime: session.startTime, practitionerId: session.practitionerId } })
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId))
       .where(and(eq(appointment.tenantId, t), eq(appointment.status, 'no_show'), gte(session.day, from), lte(session.day, to), term ? or(like(patient.fullName), like(patient.phone), like(patient.patientNo)) : undefined))
       .orderBy(desc(session.day), desc(session.startTime)).limit(200);
@@ -159,10 +165,10 @@ export function visitRoutes(app: FastifyInstance) {
   /** Everything the front desk screen shows, in one call: appointments, visits with plans and dues, money, doctors. */
   route(app, 'get', '/frontdesk', 'visit.read', async (req, tx) => {
     const t = req.ctx.tenantId; const day = String((req.query as any).day ?? todayIn(req.ctx.timezone));
-    const appts = await tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex, locality: patient.locality, flags: patient.flags }, w: { startTime: session.startTime, endTime: session.endTime, practitionerId: session.practitionerId } })
+    const appts = await tx.select({ a: appointment, p: { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, dob: patient.dob, sex: patient.sex, locality: patient.locality, flags: patient.flags }, w: { startTime: session.startTime, endTime: session.endTime, practitionerId: session.practitionerId } })
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId))
       .where(and(eq(appointment.tenantId, t), eq(session.day, day))).orderBy(asc(session.startTime), asc(appointment.createdAt));
-    const visits = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags }, cat: feeCategory.code, doctor: practitioner.name, encounterId: encounter.id, encounterStatus: encounter.status, completedAt: encounter.completedAt })
+    const visits = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, dob: patient.dob, sex: patient.sex, flags: patient.flags }, cat: feeCategory.code, doctor: practitioner.name, encounterId: encounter.id, encounterStatus: encounter.status, completedAt: encounter.completedAt })
       .from(visit).innerJoin(patient, eq(patient.id, visit.patientId)).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId))
       .leftJoin(practitioner, eq(practitioner.id, visit.practitionerId)).leftJoin(encounter, eq(encounter.visitId, visit.id))
       .where(and(eq(visit.tenantId, t), eq(visit.day, day))).orderBy(desc(visit.priority), asc(visit.queuePosition));
@@ -170,7 +176,10 @@ export function visitRoutes(app: FastifyInstance) {
     const encIds = visits.map((x) => x.encounterId).filter(Boolean) as string[];
     const recs = encIds.length ? await tx.select({ r: recommendation, procedure: procedureCatalog.name }).from(recommendation).leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), sql`${recommendation.encounterId} in ${encIds}`)) : [];
     const rxRows = encIds.length ? await tx.select({ encounterId: prescriptionItem.encounterId, n: sql<number>`count(*)::int` }).from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), sql`${prescriptionItem.encounterId} in ${encIds}`)).groupBy(prescriptionItem.encounterId) : [];
-    const dues = vids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), sql`${charge.visitId} in ${vids}`)) : [];
+    const dueRows = vids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), sql`${charge.visitId} in ${vids}`)) : [];
+    // what is already paid on each due charge (a part payment at check-in), so the desk collects only the rest
+    const partPaid = dueRows.length ? await tx.select({ id: payment.chargeId, n: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, dueRows.map((c) => c.id)))).groupBy(payment.chargeId) : [];
+    const dues = dueRows.map((c) => ({ ...c, paidPaise: partPaid.find((p) => p.id === c.id)?.n ?? 0 }));
     const pays = vids.length ? await tx.select({ method: payment.method, total: sql<number>`sum(${payment.amountPaise})::int` }).from(payment).innerJoin(charge, eq(charge.id, payment.chargeId)).where(and(eq(payment.tenantId, t), sql`${charge.visitId} in ${vids}`)).groupBy(payment.method) : [];
     const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
     const windows = await tx.select({ practitionerId: session.practitionerId, startTime: session.startTime, endTime: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day))).orderBy(asc(session.startTime));
@@ -187,7 +196,7 @@ export function visitRoutes(app: FastifyInstance) {
   /** Live queue for a day: waiting first by priority then position, then in-consult, then done. */
   route(app, 'get', '/queue', 'visit.read', async (req, tx) => {
     const day = String((req.query as any).day ?? todayIn(req.ctx.timezone));
-    const rows = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags },
+    const rows = await tx.select({ v: visit, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, dob: patient.dob, sex: patient.sex, flags: patient.flags },
       cat: feeCategory.code, doctor: practitioner.name, encounterId: encounter.id, encounterStatus: encounter.status })
       .from(visit).innerJoin(patient, eq(patient.id, visit.patientId)).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId))
       .leftJoin(practitioner, eq(practitioner.id, visit.practitionerId)).leftJoin(encounter, eq(encounter.visitId, visit.id))

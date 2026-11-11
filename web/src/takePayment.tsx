@@ -2,6 +2,18 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, post, qc, errText } from './api';
 import { Chip, Icon, Modal, MoneyInput, Section, money, toPaise, toast, fmtDate } from './ui';
+import { printReceipt } from './invoices';
+
+/** The money codes the server sends, in the desk's words. */
+export function moneyErr(e: any): string {
+  const b = e?.body; const c = b?.code;
+  if (c === 'MORE_THAN_DUE') return b.duePaise ? `That is more than the ${money(b.duePaise)} due.` : 'Nothing is due on this any more.';
+  if (c === 'MORE_THAN_FEE') return `That is more than the ${money(b.feePaise)} fee.`;
+  if (c === 'DAY_CLOSED') return 'Today has been closed: no money can be taken or given back today.';
+  if (c === 'ALREADY_REFUNDED') return 'This was already refunded.';
+  return errText(e);
+}
+const MODE_NAME: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'card', emi: 'EMI', bank: 'bank transfer' };
 
 type Part = { method: 'cash' | 'upi' | 'card' | 'bank' | 'emi'; amount: string; reference: string; lender: string };
 const MODES: [Part['method'], string][] = [['upi', 'UPI'], ['cash', 'Cash'], ['card', 'Card'], ['emi', 'EMI'], ['bank', 'Bank']];
@@ -21,8 +33,11 @@ export function TakePayment({ patientId, patientName, charges, payments, onClose
   const problem = !picked.length ? 'Tick at least one invoice' : total <= 0 ? 'Enter the amount' : total > owed ? `That is ${money(total - owed)} more than is due` : parts.some((p, i) => p.method === 'emi' && amt(p, i) > 0 && (!p.lender.trim() || !p.reference.trim())) ? 'EMI needs the lender and the approval code' : '';
   const go = useMutation({
     mutationFn: () => post('/payments/take', { patientId, chargeIds: picked, idempotencyKey: key, parts: parts.map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0) }),
-    onSuccess: (r: any) => { refresh(); toast(r.balancePaise ? `Taken ${money(total)}. ${money(r.balancePaise)} still due` : `Taken ${money(total)}. Nothing due`); onClose(); },
-    onError: (e) => toast(errText(e), 'err'),
+    onSuccess: (r: any) => {
+      refresh(); const modes = [...new Set(parts.filter((p, i) => amt(p, i) > 0).map((p) => MODE_NAME[p.method] ?? p.method))].join(' + ');
+      toast(`${money(total)} ${modes} from ${patientName.split(' ')[0]}${r.balancePaise ? ` · ${money(r.balancePaise)} still due` : ''}`, 'ok', r.receiptNo ? { label: 'Receipt', run: () => printReceipt(r.receiptNo) } : undefined); onClose();
+    },
+    onError: (e) => toast(moneyErr(e), 'err'),
   });
   return (
     <Modal title="Take payment" subtitle={`${patientName} · ${money(owed)} due`} onClose={onClose} width="max-w-xl">

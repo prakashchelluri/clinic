@@ -7,6 +7,7 @@ import { can } from '../App';
 import { Chip, Icon, Num, Skeleton, toast, fmtDate } from '../ui';
 import { ChangeMyDay, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
+import { ageText } from '../rxLine';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -143,7 +144,7 @@ export function Today() {
         {inRoom.map((v, i) => { const fresh = notOpened(v); return (
           <div key={v.id} className={`flex items-center gap-3 ${i === 0 ? 'mt-1.5' : 'mt-2 border-t border-line/60 pt-2'} ${fresh ? 'anim-fade-up' : ''}`} role={fresh ? 'alert' : undefined}>
             <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><div className="truncate text-lg font-semibold">{v.patient.fullName}</div>{fresh && <Chip tone="amber">sent in {minsSince(v.details.calledAt)} min ago</Chip>}{!fresh && i > 0 && <Chip>inside</Chip>}</div>
-              <div className="text-xs text-muted">{[v.patient.ageYears ? `${v.patient.ageYears} ${v.patient.sex ?? ''}` : null, v.details?.reportsEncounterId ? 'back with reports' : v.details?.complaints?.[0]?.text ?? v.details?.complaint, v.details?.bp && `BP ${v.details.bp}`].filter(Boolean).join(' · ')}</div></div>
+              <div className="text-xs text-muted">{[ageText(v.patient) ? `${ageText(v.patient)} ${v.patient.sex ?? ''}` : null, v.details?.reportsEncounterId ? 'back with reports' : v.details?.complaints?.[0]?.text ?? v.details?.complaint, v.details?.bp && `BP ${v.details.bp}`].filter(Boolean).join(' · ')}</div></div>
             {can(perms, 'encounter.intake') && <button className={`btn ${fresh || i === 0 ? 'btn-primary' : ''}`} disabled={open.isPending} onClick={() => open.mutate(v.id)}>{fresh ? 'Open' : 'Continue'}</button>}
           </div>); })}
         {next && <div className="my-3 border-t border-line" />}
@@ -151,7 +152,7 @@ export function Today() {
       {next ? <>
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted">Next</div>
         <div className="mt-1.5 flex items-center gap-3"><div className="min-w-0 flex-1"><div className="truncate text-lg font-semibold">{next.patient.fullName}</div>
-          <div className="text-xs text-muted">{[next.patient.ageYears ? `${next.patient.ageYears} ${next.patient.sex ?? ''}` : null, next.details?.complaints?.[0]?.text ?? next.details?.complaint, `waiting ${minsSince(next.arrivedAt)} min`].filter(Boolean).join(' · ')}</div>
+          <div className="text-xs text-muted">{[ageText(next.patient) ? `${ageText(next.patient)} ${next.patient.sex ?? ''}` : null, next.details?.complaints?.[0]?.text ?? next.details?.complaint, `waiting ${minsSince(next.arrivedAt)} min`].filter(Boolean).join(' · ')}</div>
           {lastEnc && <div className="mt-1 text-xs text-muted">Last visit {fmtDate(lastEnc.createdAt)}: {joinList(lastEnc.data?.assessment?.diagnosis) || joinList(lastEnc.data?.complaint?.chief_complaint) || 'consultation'}{lastEnc.prescription?.length ? ` · ${lastEnc.prescription.map((i: any) => i.name).slice(0, 2).join(', ')}` : ''}</div>}</div>
           {can(perms, 'encounter.intake') && <button className={`btn ${withYou ? '' : 'btn-primary'}`} disabled={open.isPending} title="Reception usually sends the patient in; this opens the consultation yourself and tells the desk" onClick={() => open.mutate(next.id)}>Open</button>}</div>
         <div className="mt-2.5 text-xs text-muted">{waiting[1] ? `Then ${waiting[1].patient.fullName} (${minsSince(waiting[1].arrivedAt)} min). ` : ''}{withJunior.length ? `${withJunior.length} with the junior doctor. ` : ''}{screening === 'required' && unscreened.length ? `${unscreened.length} waiting for screening. ` : ''}{toCome ? `${toCome} more booked after them.` : 'No more bookings to come.'}</div>

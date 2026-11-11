@@ -30,6 +30,10 @@ import { Bookings } from './pages/Bookings';
 import { PatientLink } from './pages/PatientLink';
 import { Display } from './pages/Display';
 import { NotFound } from './ui';
+import { useParams } from 'react-router';
+
+/** A fresh pad per patient: keyed on the id, nothing from patient A's pad can carry over (or autosave) into patient B's. */
+function EncounterById() { return <Encounter key={useParams().id} />; }
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -49,7 +53,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/booking" element={<Navigate to="/calendar?book=1" replace />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:id" element={<Patients />} />
-            <Route path="/encounter/:id" element={<Encounter />} />
+            <Route path="/encounter/:id" element={<EncounterById />} />
             <Route path="/worklist" element={<Worklist />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/tests" element={<TestReports />} />

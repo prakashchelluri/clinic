@@ -10,7 +10,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'n
 const exp = (d: string | null) => (d ? d.slice(5, 7) + '/' + d.slice(2, 4) : '');
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const COLS = ['Date', 'Bill', 'Patient', 'Age / sex', 'Address', 'Prescriber', 'Reg. no.', 'Medicine', 'Class', 'Batch', 'Expiry', 'Qty', 'Returned'];
-const cells = (r: any) => [day(r.at), r.invoiceNo, `${r.patient} (${r.patientNo})`, [r.age, r.sex].filter(Boolean).join(' '), r.address ?? '', r.noRx ? 'NO PRESCRIPTION' : r.doctor ?? '', r.regNo ?? '', r.medicine, r.cls, r.batchNo ?? '', exp(r.expiry), r.qty, r.returned || ''];
+const cells = (r: any) => [day(r.at), r.invoiceNo, r.patientNo ? `${r.patient} (${r.patientNo})` : r.patient, [r.age, r.sex].filter(Boolean).join(' '), r.address ?? '', r.noRx ? 'No Rx (not prescribed)' : r.doctor ?? '', r.regNo ?? '', r.medicine, r.cls, r.batchNo ?? '', exp(r.expiry), r.qty, r.returned || ''];
 
 const RANGE: FilterDef<any> = { key: 'range', label: 'Dates', icon: 'calendar', initial: '30', options: [{ value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }, { value: '365', label: 'Last year' }, { value: 'custom', label: 'Pick dates' }] };
 const SCHED: FilterDef<any> = { key: 'sched', label: 'Schedule', icon: 'pill', options: [{ value: 'all', label: 'All schedules' }, { value: 'H', label: 'Schedule H' }, { value: 'H1', label: 'Schedule H1' }, { value: 'X', label: 'Schedule X' }] };
@@ -47,7 +47,7 @@ export function RegisterTab({ clinic, licence }: { clinic: string; licence?: str
   };
   return (
     <div className="space-y-3">
-      {noRx > 0 && <div className="rounded-[10px] bg-amber-soft px-3.5 py-2 text-sm text-[#6E4D10]">{noRx} entr{noRx === 1 ? 'y was' : 'ies were'} sold with no prescription on file. These drugs need one: check those bills.</div>}
+      {noRx > 0 && <div className="rounded-[10px] bg-amber-soft px-3.5 py-2 text-sm text-[#6E4D10]">{noRx} entr{noRx === 1 ? 'y was' : 'ies were'} sold without a prescription line (older bills, before the counter checked this). These drugs need one: check those bills.</div>}
       <DataTable id="schedule-register" rows={rows.map((r, i) => ({ ...r, _k: i }))} rowKey={(r: any) => String(r._k)} columns={COLUMNS} loading={q.isLoading} exportable={false}
         sort={{ key: '0', dir: -1 }} filters={[RANGE, SCHED]} search={{ placeholder: 'Find in the register: patient, medicine or bill', text: (r: any) => [r.patient, r.patientNo, r.medicine, r.invoiceNo, r.batchNo] }}
         empty={{ title: bad ? 'Check the dates' : 'Nothing sold in this period', hint: bad ? '“From” is after “to”.' : "Medicines marked Schedule H, H1 or X appear here by themselves when they are billed. Set a medicine's schedule under Settings → Medicines." }}

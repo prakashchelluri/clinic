@@ -66,7 +66,9 @@ const ReceiptLine = z.object({ medicineId: z.string().uuid(), qty: z.number().in
   batchNo: z.string().trim().min(1).max(30), expiry: Expiry, mrpPaise: z.number().int().min(0).max(100000000).optional() });
 const Photo = z.object({ mime: z.enum(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']), dataBase64: z.string().min(8) });
 const ReceiptIn = z.object({ orderId: z.string().uuid().optional(), vendorId: z.string().uuid().optional(), billNo: z.string().trim().max(40).optional(), billDate: z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/).optional(),
-  billTotalPaise: z.number().int().min(0).max(1000000000).optional(), billPhoto: Photo.optional(), lines: z.array(ReceiptLine).min(1).max(100), keepOpen: z.boolean().default(false), at: z.string().optional() });
+  billTotalPaise: z.number().int().min(0).max(1000000000).optional(),
+  adjustPaise: z.number().int().min(-10000000).max(10000000).optional(), // round-off, freight or cash discount printed on the bill (+ or −)
+  billPhoto: Photo.optional(), lines: z.array(ReceiptLine).min(1).max(100), keepOpen: z.boolean().default(false), at: z.string().optional() });
 const VendorIn = z.object({ name: z.string().trim().min(2).max(100), phone: z.string().regex(/^[0-9]{10}$/).optional().nullable(), gstin: z.string().trim().max(15).optional().nullable(), address: z.string().trim().max(200).optional().nullable(), note: z.string().trim().max(200).optional().nullable(), active: z.boolean().optional() });
 
 /**
@@ -111,13 +113,16 @@ export async function receiveStock(tx: Tx, a: Actor, body: z.infer<typeof Receip
     }
     return out;
   });
-  if (v && Math.abs(computed - (body.billTotalPaise ?? 0)) > 500) throw new HttpError(400, 'BILL_TOTAL_MISMATCH', { computedPaise: computed });
+  const adjust = body.adjustPaise ?? 0;
+  // the lines plus the bill's own round-off / freight / cash discount must match the paper bill within ₹5
+  if (v && Math.abs(computed + adjust - (body.billTotalPaise ?? 0)) > 500) throw new HttpError(400, 'BILL_TOTAL_MISMATCH', { computedPaise: computed + adjust });
 
   const review = lines.some((l) => l.extraPaise > 0 || l.freeShort > 0);
   const n = await nextNumber(tx, t, 'stock_grn', 'tenant');
   const when = body.at ?? new Date().toISOString();
+  const adj = v && adjust ? `Bill adjustment (round-off / freight / cash discount) ${adjust > 0 ? '+' : '−'}₹${(Math.abs(adjust) / 100).toFixed(2)}` : null;
   const [doc] = await tx.insert(stockDoc).values({ tenantId: t, kind: 'receipt', docNo: `GRN-${String(n).padStart(4, '0')}`, vendorId, orderId: order?.id ?? null, status: review ? 'review' : 'ok',
-    billNo: body.billNo ?? null, billDate: body.billDate ?? null, billTotalPaise: body.billTotalPaise ?? null, note: v ? null : 'Opening stock', lines, createdBy: a.userId, createdByName: a.name, createdAt: when }).returning();
+    billNo: body.billNo ?? null, billDate: body.billDate ?? null, billTotalPaise: body.billTotalPaise ?? null, note: v ? adj : 'Opening stock', lines, createdBy: a.userId, createdByName: a.name, createdAt: when }).returning();
   if (body.billPhoto) {
     const bytes = Buffer.from(body.billPhoto.dataBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (bytes.length > 10 * 1024 * 1024) throw new HttpError(413, 'TOO_LARGE');

@@ -91,11 +91,12 @@ export function Filmstrip({ visits, selectedId, onSelect, onEnter }: { visits: a
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (e.altKey || e.ctrlKey || e.metaKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable || document.querySelector('.modal-back')) return;
+      if (e.altKey || e.ctrlKey || e.metaKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable || t.closest?.('[role=dialog],[role=alertdialog],dialog,.modal-back') || document.querySelector('.modal-back')) return;
       const { list, selectedId, onSelect, onEnter } = cur.current; if (!list.length) return;
       const i = list.findIndex((v) => v.id === selectedId);
-      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const j = i < 0 ? (e.key === 'ArrowRight' ? list.findIndex((v) => rank(v) === 4) : list.length - 1) : Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1))); onSelect(list[j < 0 ? 0 : j].id); }
-      else if (e.key === 'Enter' && i >= 0 && t.tagName !== 'BUTTON' && t.tagName !== 'A') { e.preventDefault(); onEnter(list[i]); }
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); const j = i < 0 ? (e.key === 'ArrowRight' ? list.findIndex((v) => rank(v) === 4) : list.length - 1) : Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowRight' ? 1 : -1))); const id = list[j < 0 ? 0 : j].id; onSelect(id); requestAnimationFrame(() => strip.current?.querySelector<HTMLElement>(`[data-ft="${id}"]`)?.focus({ preventScroll: true })); }
+      // Enter sends in only from the strip itself (focus on a token), never from wherever focus happened to land after a dialog closed
+      else if (e.key === 'Enter' && i >= 0 && strip.current?.contains(t)) { e.preventDefault(); onEnter(list[i]); }
     };
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, []);
@@ -174,9 +175,9 @@ export function NextForYou({ sendable, arrange, reportsIn, reportsLate, late, wi
             action={<button className="btn btn-sm btn-primary" onClick={() => onCheckIn(a)}>Check in</button>} />)}
         </Group>
         <Group title="Money due" n={withDue.length} tone="rose">
-          {withDue.map((v) => { const due = v.due.reduce((x: number, c: any) => x + c.amountPaise, 0); return (
+          {withDue.map((v) => { const due = v.due.reduce((x: number, c: any) => x + c.amountPaise - (c.paidPaise ?? 0), 0); return (
             <Item key={v.id} token={v.opNumber} tone="rose" p={v.patient} visit={catName(v.category)} doctor={v.doctor} selected={selectedId === v.id} onSelect={() => onSelect(v.id)}
-              status={{ label: `${money(due)} due`, tone: 'rose' }} action={<button className="btn btn-sm btn-primary" onClick={() => onCollect(v)}>Collect {money(v.due[0].amountPaise)}</button>} />); })}
+              status={{ label: `${money(due)} due`, tone: 'rose' }} action={<button className="btn btn-sm btn-primary" onClick={() => onCollect(v)}>Collect {money(due)}</button>} />); })}
         </Group>
       </table></div>}
       {idle.length > 0 && <div className={`flex flex-wrap items-center gap-1.5 px-5 pb-3 pt-3 ${total ? 'border-t border-line' : ''}`}>
@@ -252,7 +253,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3.5">
         <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>
         {v.encounterId && !left && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
-        {v.due?.length > 0 && <Chip tone="rose">{money(v.due.reduce((x: number, c: any) => x + c.amountPaise, 0))} due</Chip>}
+        {v.due?.length > 0 && <Chip tone="rose">{money(v.due.reduce((x: number, c: any) => x + c.amountPaise - (c.paidPaise ?? 0), 0))} due</Chip>}
       </div>
     </Drawer>);
 }

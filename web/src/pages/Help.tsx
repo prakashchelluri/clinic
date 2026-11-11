@@ -20,7 +20,7 @@ type Who = keyof typeof WHO;
 
 function Step({ n, who, title, children }: { n?: number; who: Who; title: string; children?: ReactNode }) {
   return (
-    <div className="flex min-w-0 flex-1 basis-[150px] flex-col gap-1.5 rounded-2xl border border-line bg-white/80 p-3">
+    <div className="flex min-w-0 flex-1 basis-[150px] flex-col gap-1.5 rounded-2xl border border-line bg-surface/80 p-3">
       <div className="flex items-center gap-2">{n !== undefined && <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink text-xs font-bold text-white">{n}</span>}<span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${WHO[who]}`}>{WHO_NAME[who]}</span></div>
       <div className="text-sm font-semibold leading-snug">{title}</div>
       {children && <div className="text-xs leading-relaxed text-ink-2">{children}</div>}
@@ -30,7 +30,7 @@ function Step({ n, who, title, children }: { n?: number; who: Who; title: string
 const Arrow = () => <span aria-hidden className="grid shrink-0 place-items-center text-lg text-muted md:px-0.5"><span className="md:hidden">↓</span><span className="hidden md:inline">→</span></span>;
 /** A diagram: steps in a row on a wide screen, a column on a phone. */
 function Flow({ label, children }: { label: string; children: ReactNode[] }) {
-  return <figure className="my-4 rounded-3xl bg-white/50 p-3 md:p-4" aria-label={label}><div className="flex flex-col items-stretch gap-1 md:flex-row md:flex-wrap md:items-stretch">{children.flatMap((c, i) => (i ? [<Arrow key={`a${i}`} />, c] : [c]))}</div><figcaption className="mt-2 text-xs text-muted">{label}</figcaption></figure>;
+  return <figure className="my-4 rounded-3xl bg-surface/50 p-3 md:p-4" aria-label={label}><div className="flex flex-col items-stretch gap-1 md:flex-row md:flex-wrap md:items-stretch">{children.flatMap((c, i) => (i ? [<Arrow key={`a${i}`} />, c] : [c]))}</div><figcaption className="mt-2 text-xs text-muted">{label}</figcaption></figure>;
 }
 const H2 = ({ id, children }: { id: string; children: ReactNode }) => <h2 id={id} className="serif mt-10 scroll-mt-6 text-2xl first:mt-0">{children}</h2>;
 const H3 = ({ children }: { children: ReactNode }) => <h3 className="mb-1.5 mt-6 text-[15px] font-semibold">{children}</h3>;
@@ -38,9 +38,9 @@ const P = ({ children }: { children: ReactNode }) => <p className="my-2 text-[14
 const Steps = ({ children }: { children: ReactNode[] }) => <ol className="my-3 space-y-2">{children.map((c, i) => <li key={i} className="flex gap-3 text-[14.5px] leading-relaxed text-ink-2"><span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-ink text-xs font-bold text-white">{i + 1}</span><span className="min-w-0 flex-1">{c}</span></li>)}</ol>;
 const Tip = ({ children }: { children: ReactNode }) => <div className="my-3 rounded-2xl bg-sage-soft px-4 py-3 text-sm leading-relaxed text-sage" role="note"><b>Good to know. </b>{children}</div>;
 const Warn = ({ children }: { children: ReactNode }) => <div className="my-3 rounded-2xl bg-amber-soft px-4 py-3 text-sm leading-relaxed text-amber" role="note"><b>Careful. </b>{children}</div>;
-const Btn = ({ children }: { children: ReactNode }) => <span className="whitespace-nowrap rounded-full border border-line bg-white px-2 py-0.5 text-[13px] font-semibold text-ink">{children}</span>;
+const Btn = ({ children }: { children: ReactNode }) => <span className="whitespace-nowrap rounded-full border border-line bg-surface px-2 py-0.5 text-[13px] font-semibold text-ink">{children}</span>;
 function Table({ head, rows }: { head: [string, string]; rows: [ReactNode, ReactNode][] }) {
-  return <div className="my-3 overflow-hidden rounded-2xl border border-line bg-white/70"><table className="w-full text-sm"><thead><tr className="bg-ink/5 text-left text-xs uppercase tracking-wider text-muted"><th className="w-[34%] px-3 py-2">{head[0]}</th><th className="px-3 py-2">{head[1]}</th></tr></thead><tbody>{rows.map(([a, b], i) => <tr key={i} className="border-t border-line/60 align-top"><td className="px-3 py-2 font-semibold">{a}</td><td className="px-3 py-2 leading-relaxed text-ink-2">{b}</td></tr>)}</tbody></table></div>;
+  return <div className="my-3 overflow-hidden rounded-2xl border border-line bg-surface/70"><table className="w-full text-sm"><thead><tr className="bg-ink/5 text-left text-xs uppercase tracking-wider text-muted"><th className="w-[34%] px-3 py-2">{head[0]}</th><th className="px-3 py-2">{head[1]}</th></tr></thead><tbody>{rows.map(([a, b], i) => <tr key={i} className="border-t border-line/60 align-top"><td className="px-3 py-2 font-semibold">{a}</td><td className="px-3 py-2 leading-relaxed text-ink-2">{b}</td></tr>)}</tbody></table></div>;
 }
 
 /* ---------- the guides ---------- */
@@ -67,9 +67,9 @@ function Overview() {
     <H2 id="money">Where money is taken</H2>
     <P>Money is always taken where the thing is given. <b>Checkout does not take money.</b></P>
     <div className="my-4 grid gap-3 md:grid-cols-3">
-      <div className="rounded-2xl border border-line bg-white/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Consultation fee</div><div className="font-semibold">At check-in</div><div className="mt-1 text-sm text-ink-2">Reception, on the Check-in screen. Cash, UPI or card. A free or waived visit takes nothing.</div></div>
-      <div className="rounded-2xl border border-line bg-white/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Medicines</div><div className="font-semibold">At the pharmacy counter</div><div className="mt-1 text-sm text-ink-2">The pharmacist bills the prescription and takes the money. Reception does not.</div></div>
-      <div className="rounded-2xl border border-line bg-white/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Procedures</div><div className="font-semibold">On the day of each sitting</div><div className="mt-1 text-sm text-ink-2">Or ahead of time: the patient can pay for some sittings in advance (for example 2 of 6).</div></div>
+      <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Consultation fee</div><div className="font-semibold">At check-in</div><div className="mt-1 text-sm text-ink-2">Reception, on the Check-in screen. Cash, UPI or card. A free or waived visit takes nothing.</div></div>
+      <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Medicines</div><div className="font-semibold">At the pharmacy counter</div><div className="mt-1 text-sm text-ink-2">The pharmacist bills the prescription and takes the money. Reception does not.</div></div>
+      <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Procedures</div><div className="font-semibold">On the day of each sitting</div><div className="mt-1 text-sm text-ink-2">Or ahead of time: the patient can pay for some sittings in advance (for example 2 of 6).</div></div>
     </div>
 
     <H2 id="words">Words you will see</H2>
@@ -315,7 +315,7 @@ export function Help() {
         <Overview />
         {guide === 'reception' && <Reception />}{guide === 'doctor' && <Doctor />}{guide === 'junior' && <Junior />}{guide === 'pharmacy' && <Pharmacy />}{guide === 'owner' && <Owner />}
         <H2 id="faq">If something looks wrong</H2>
-        <div className="my-3 space-y-2">{FAQ.map(([q, a]) => <details key={q} className="rounded-2xl border border-line bg-white/70 px-4 py-3"><summary className="cursor-pointer text-sm font-semibold">{q}</summary><p className="mt-2 text-sm leading-relaxed text-ink-2">{a}</p></details>)}</div>
+        <div className="my-3 space-y-2">{FAQ.map(([q, a]) => <details key={q} className="rounded-2xl border border-line bg-surface/70 px-4 py-3"><summary className="cursor-pointer text-sm font-semibold">{q}</summary><p className="mt-2 text-sm leading-relaxed text-ink-2">{a}</p></details>)}</div>
         <div className="mt-8 text-xs text-muted">Still stuck? Tell the owner exactly what you tapped and what the screen said. <Chip>Tip</Chip> Press the ? button at the top of any page to come back here.</div>
       </article>
     </div>

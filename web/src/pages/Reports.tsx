@@ -30,10 +30,13 @@ export function Reports() {
       {view === 'eod' ? <EndOfDay day={day} /> : !d ? <Skeleton rows={3} /> : (<>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat label="Visits" value={d.totals.visits} delay={0} />
-          <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.byMethod.length ? d.byMethod.map((m: any) => `${m.method.toUpperCase()} ${money(m.total)}`).join(' · ') : 'no payments yet'} delay={40} />
+          <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.pharmacyPaise ? `includes pharmacy ${money(d.pharmacyPaise)} · less refunds` : 'less refunds · same as End of day'} delay={40} />
           <Stat label="Expenses" value={money(d.totals.expensesPaise)} sub={`${d.expenses.length} entries`} delay={80} />
           <Stat label="Net for the day" value={money(d.totals.netPaise)} tone="clay" sub={`Outstanding overall ${money(d.outstanding.total)} across ${d.outstanding.n}`} delay={120} />
         </div>
+        {d.byMode && <div aria-label="Collected by mode" className="card mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 !py-3 text-[15px]">
+          {([['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['other', 'EMI / other']] as const).filter(([k]) => k !== 'other' || d.byMode.other).map(([k, l]) => <span key={k}><span className="text-muted">{l}</span> <b className="text-ink">{money(d.byMode[k])}</b></span>)}
+        </div>}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
           <Section title="By visit category" delay={160}>
             {d.byCategory.length === 0 ? <Empty icon="users" title="No visits recorded" /> : (
@@ -50,7 +53,7 @@ export function Reports() {
         <Section title={<>Payments <span className="text-muted font-normal">· {d.payments.length}</span></>} delay={240} className="mt-5">
           {d.payments.length === 0 ? <Empty icon="wallet" title="No payments yet today" /> :
             <div className="overflow-x-auto"><table className="table min-w-[460px]"><thead><tr><th className="pl-4">Time</th><th>Patient</th><th>For</th><th>Method</th><th className="text-right pr-4">Amount</th></tr></thead>
-              <tbody>{d.payments.map((p: any) => <tr key={p.id}><td className="pl-4 text-muted">{fmtTime(p.receivedAt)}</td><td className="font-medium">{p.patient}</td><td className="text-muted">{p.description ?? ''}</td><td><Chip>{p.method}</Chip></td><td className="text-right pr-4">{money(p.amountPaise)}</td></tr>)}</tbody></table></div>}
+              <tbody>{d.payments.map((p: any) => <tr key={p.id}><td className="pl-4 text-muted">{fmtTime(p.receivedAt)}</td><td className="font-medium">{p.patient}</td><td className="text-muted">{p.description ?? ''}</td><td><Chip tone={p.amountPaise < 0 ? 'amber' : undefined}>{p.amountPaise < 0 ? `${p.method} refund` : p.method}</Chip></td><td className="text-right pr-4">{money(p.amountPaise)}</td></tr>)}</tbody></table></div>}
         </Section>
       </>)}
     </div>

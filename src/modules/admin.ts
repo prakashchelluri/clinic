@@ -8,6 +8,7 @@ import { db } from '../db/index.js';
 import { putFile, getFile } from '../lib/storage.js';
 import { originOf } from '../lib/booking.js';
 import { emit, sent } from '../lib/core.js';
+import { writeAudit, feeSummary } from '../lib/audit.js';
 import jsonLogic from 'json-logic-js';
 import { DEFAULT_ROLES, PERMISSIONS, hashPassword, HttpError, can, rolesFor, isKnownPerm, expandPerms, BUILTIN_NAMES } from '../lib/auth.js';
 
@@ -29,6 +30,8 @@ export function adminRoutes(app: FastifyInstance) {
       .refine((xs) => new Set(xs.map((x) => x.key)).size === xs.length, 'DUPLICATE_VITAL').parse(body.settings.vitalFields);
     if (body.settings?.vitals !== undefined) body.settings.vitals = z.array(z.string().regex(/^[a-z][a-z0-9_]{1,30}$/)).max(24).parse(body.settings.vitals);
     if (body.settings?.reports !== undefined) body.settings.reports = z.object({ freeDays: z.number().int().min(0).max(365) }).parse(body.settings.reports);
+    // UPI ID for the pharmacy's payment QR (name@bank); empty clears it
+    if (body.settings?.upiId !== undefined) body.settings.upiId = z.string().trim().regex(/^([a-zA-Z0-9._-]{2,64}@[a-zA-Z0-9]{2,64})?$/, 'UPI_ID_FORMAT').parse(body.settings.upiId) || null;
     if (body.settings && 'display' in body.settings) throw new HttpError(400, 'DISPLAY_TOKEN_IS_GENERATED');
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
     if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)
@@ -53,10 +56,11 @@ export function adminRoutes(app: FastifyInstance) {
   });
 
   // --- users: one person, several roles (owner + doctor is the common case) ---
-  const UserIn = z.object({ name: Name, email: z.string().trim().email().max(200), password: z.string().min(6).max(200).optional(), roles: z.array(z.string().min(1)).min(1), practitionerId: z.string().uuid().nullable().optional(), active: z.boolean().optional() });
+  const UserIn = z.object({ name: Name, email: z.string().trim().email().max(200), password: z.string().min(8).max(200).optional(), roles: z.array(z.string().min(1)).min(1), practitionerId: z.string().uuid().nullable().optional(), active: z.boolean().optional() });
   route(app, 'post', '/admin/users', 'user.write', async (req, tx) => {
     const body = UserIn.parse(req.body); await checkRoles(tx, req.ctx.tenantId, body.roles);
     if (!body.password) throw new HttpError(400, 'PASSWORD_REQUIRED');
+    if (body.roles.includes('owner') && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'OWNER_ONLY_GRANT');
     const [row] = await tx.insert(appUser).values({ tenantId: req.ctx.tenantId, name: body.name, email: body.email.toLowerCase(), passwordHash: hashPassword(body.password), role: body.roles[0], roles: body.roles, practitionerId: body.practitionerId ?? null }).returning();
     await emit(tx, req.ctx, 'user.created', 'user', row.id, { roles: body.roles });
     return pub(row);
@@ -64,6 +68,16 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/users/:id', 'user.write', async (req, tx) => {
     const body = sent(UserIn.partial().parse(req.body), req.body); const id = (req.params as any).id; if (body.roles) await checkRoles(tx, req.ctx.tenantId, body.roles);
     if (id === req.ctx.userId && body.active === false) throw new HttpError(400, 'CANNOT_DEACTIVATE_SELF');
+    const cur = await tx.select().from(appUser).where(and(eq(appUser.id, id), eq(appUser.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    // The owner role: only an owner hands it out or takes it away, only an owner changes an owner's sign-in, and the clinic always keeps one active owner.
+    const iAmOwner = req.ctx.roles.includes('owner'); const wasOwner = (cur.roles?.length ? cur.roles : [cur.role]).includes('owner'); const staysOwner = (body.roles ?? (cur.roles?.length ? cur.roles : [cur.role])).includes('owner');
+    if (wasOwner !== staysOwner && !iAmOwner) throw new HttpError(403, 'OWNER_ONLY_GRANT');
+    if (wasOwner && !iAmOwner && ((body.email !== undefined && body.email.toLowerCase() !== cur.email) || body.password || (body.active !== undefined && body.active !== cur.active))) throw new HttpError(403, 'OWNER_ONLY_EDIT');
+    if (wasOwner && cur.active && (!staysOwner || body.active === false)) {
+      const others = await tx.select({ id: appUser.id }).from(appUser).where(and(eq(appUser.tenantId, req.ctx.tenantId), eq(appUser.active, true), sql`${appUser.id} <> ${id}`, sql`'owner' = any(${appUser.roles})`)).limit(1);
+      if (!others.length) throw new HttpError(409, 'LAST_OWNER');
+    }
     const set: any = { ...body }; delete set.password; if (body.password) set.passwordHash = hashPassword(body.password); if (body.email) set.email = body.email.toLowerCase(); if (body.roles) set.role = body.roles[0];
     const [row] = await tx.update(appUser).set(set).where(and(eq(appUser.id, id), eq(appUser.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
@@ -138,10 +152,21 @@ export function adminRoutes(app: FastifyInstance) {
   });
   route(app, 'patch', '/admin/rooms/:id', 'config.write', async (req, tx) => upd(tx, room, req, sent(RoomIn.partial().parse(req.body), req.body)));
 
+  /** Switched-off doctors, fees, procedures and rooms: /config sends only active ones, so Settings lists these to switch them back on. */
+  route(app, 'get', '/admin/inactive', 'config.write', async (req, tx) => {
+    const off = (tb: any) => tx.select().from(tb).where(and(eq(tb.tenantId, req.ctx.tenantId), eq(tb.active, false))) as Promise<any[]>;
+    return { practitioners: await off(practitioner), feeCategories: await off(feeCategory), procedures: await off(procedureCatalog), rooms: await off(room) };
+  });
+
   // --- fee categories ---
   const FeeIn = z.object({ code: z.string().min(1).max(8).toUpperCase(), name: Name, amountPaise: z.number().int().min(0).max(100000000), taxRateBp: z.number().int().min(0).optional(), priority: z.number().int().min(0).max(99).optional(), affectsCapacity: z.boolean().optional(), eligibility: z.any().optional().nullable(), eligibilityNote: z.string().optional().nullable(), active: z.boolean().optional() });
   route(app, 'post', '/admin/fee-categories', 'config.write', async (req, tx) => { const b = FeeIn.parse(req.body); checkRule(b.eligibility); return (await tx.insert(feeCategory).values({ ...b, tenantId: req.ctx.tenantId }).returning())[0]; });
-  route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => { const b = sent(FeeIn.partial().parse(req.body), req.body); checkRule(b.eligibility); return upd(tx, feeCategory, req, b); });
+  route(app, 'patch', '/admin/fee-categories/:id', 'config.write', async (req, tx) => {
+    const b = sent(FeeIn.partial().parse(req.body), req.body); checkRule(b.eligibility); const row = await upd(tx, feeCategory, req, b);
+    // the audit row names the fee and says old → new in rupees
+    await writeAudit(tx, req.ctx, { kind: 'settings', action: 'PATCH /admin/fee-categories/:id', summary: feeSummary(row.name, (req.auditBefore as any)?.amountPaise, b.amountPaise), entity: 'admin', entityId: row.id, before: req.auditBefore, after: b });
+    req.audited = true; return row;
+  });
 
   // --- medicines ---
   const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), packSize: z.number().int().min(1).max(1000).optional(), reorderLevel: z.number().int().min(0).max(100000).optional(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), mrpPaise: z.number().int().min(0).max(100000000).optional(), gstBp: z.number().int().min(0).max(2800).optional(), hsn: z.string().max(10).optional().nullable(), leafletUrl: z.string().trim().url().max(500).optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });

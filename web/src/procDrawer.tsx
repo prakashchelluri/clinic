@@ -3,11 +3,30 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, qc, today, errText } from './api';
-import { Chip, Icon, Skeleton, toast, useScrollLock } from './ui';
+import { Chip, Icon, Skeleton, ask, money, toast, useScrollLock } from './ui';
 import { FlagChips } from './flags';
 
+type Money = { kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number } | null | undefined;
+/** "Prepaid", "₹2,500 due", "Paid" or "No price agreed", for a sitting row or the drawer. Nothing when the user cannot see fees. */
+export function MoneyChip({ m }: { m: Money }) {
+  if (!m) return null;
+  return m.kind === 'prepaid' ? <Chip tone="sage">Prepaid</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price agreed</Chip>;
+}
+/** Before starting: on the patient's first sitting of a procedure, ask whether the consent form is signed. Returns the body to send, or null to not start. */
+export async function startBody(s: { firstSitting?: boolean; procedure?: string | null }): Promise<{ state: 'in_progress'; consent?: boolean } | null> {
+  if (!s.firstSitting) return { state: 'in_progress' };
+  const a = await ask({ title: `Has the patient signed the consent form for ${s.procedure ?? 'this procedure'}?`, body: 'This is the first sitting. Start only after the form is signed.', confirmLabel: 'Yes, signed', cancelLabel: 'Not yet' });
+  return a ? { state: 'in_progress', consent: true } : null;
+}
+/** Marking done makes the charge, so say what it will be first. */
+export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
+  const m = s.money;
+  const pay = !m ? '' : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'prepaid' ? ' It is paid from the advance.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
+  return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} sitting ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
+}
+
 const STATE: Record<string, { label: string; tone: '' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
-  confirmed: { label: 'scheduled', tone: 'sky' }, in_progress: { label: 'in progress', tone: 'amber' }, completed: { label: 'done', tone: 'sage' },
+  confirmed: { label: 'Booked', tone: 'sky' }, in_progress: { label: 'in progress', tone: 'amber' }, completed: { label: 'done', tone: 'sage' },
   missed: { label: 'missed', tone: 'rose' }, cancelled: { label: 'cancelled', tone: 'rose' }, postponed: { label: 'postponed', tone: 'amber' },
 };
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -20,8 +39,8 @@ export function ProcedureDrawer({ id, canAct, onClose }: { id: string; canAct: b
   useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
-  const setState = useMutation({ mutationFn: (state: 'in_progress' | 'completed') => patch(`/procedure-sessions/${id}`, { state }),
-    onSuccess: (_r, state) => { ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(state === 'completed' ? 'Sitting marked done' : 'Sitting started'); },
+  const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean }) => patch(`/procedure-sessions/${id}`, b),
+    onSuccess: (_r, b) => { ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Sitting marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Sitting started'); },
     onError: (e) => toast(errText(e), 'err') });
   useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   const s = q.data;
@@ -32,10 +51,11 @@ export function ProcedureDrawer({ id, canAct, onClose }: { id: string; canAct: b
   return createPortal(
     <div className="fixed inset-0 z-40 anim-fade-in" style={{ background: 'rgba(28,27,25,.28)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
       <aside role="dialog" aria-label="Procedure sitting" className="absolute inset-y-0 right-0 flex w-full max-w-[420px] flex-col gap-4 overflow-y-auto bg-surface p-5 anim-slide-in sm:p-6" style={{ boxShadow: '-30px 0 60px -30px rgba(40,30,20,.45)' }} onClick={(e) => e.stopPropagation()}>
-        {q.isError ? <div className="text-sm text-rose">{errText(q.error)}</div> : !s ? <Skeleton rows={6} /> : (<>
+        {q.isError ? <div className="text-sm text-rose">Couldn't load. {errText(q.error)} <button className="btn btn-sm ml-1" onClick={() => q.refetch()}>Retry</button></div> :!s ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
             <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>
-            <span className="truncate text-xs text-muted">Procedure sitting{s.patientConfirmedAt ? ' · patient confirmed' : ''}</span>
+            <span className="truncate text-xs text-muted">Procedure sitting{s.patientConfirmedAt ? ' · patient said yes' : ''}</span>
+            <MoneyChip m={s.money} />
             <button className="btn btn-ghost btn-icon ml-auto" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
           </div>
           <div>
@@ -50,8 +70,8 @@ export function ProcedureDrawer({ id, canAct, onClose }: { id: string; canAct: b
             {s.notes && <div className="mt-2 rounded-xl bg-paper px-3 py-2 text-sm">“{s.notes}”</div>}
             {s.stateReason && <div className="mt-2 text-sm text-amber">Reason: {s.stateReason}</div>}
           </div>
-          {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => setState.mutate('in_progress')}><Icon name="check" />Start sitting</button>}
-          {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => setState.mutate('completed')}><Icon name="check" />Mark done</button>}
+          {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { const b = await startBody(s); if (b) setState.mutate(b); }}><Icon name="check" />Start sitting</button>}
+          {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
 
           <div>
             <Head>Before you start</Head>

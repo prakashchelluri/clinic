@@ -5,7 +5,7 @@ import { charge, payment, expense, visit, feeCategory, patient, tenant, appUser 
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
-import { assertDayOpen } from './dayclose.js';
+import { assertDayOpen, dayFigures } from './dayclose.js';
 
 /** [start,end) in UTC for a local day in the tenant timezone. */
 export function dayBounds(day: string, tz: string) {
@@ -26,10 +26,16 @@ export function billingRoutes(app: FastifyInstance) {
       const dup = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.idempotencyKey, body.idempotencyKey))).then((r) => r[0]);
       if (dup) return dup;
     }
+    // Against a charge: never more than is still due on it (a double tap or a typo must not take the money twice).
+    const ch = body.chargeId ? await tx.select().from(charge).where(and(eq(charge.id, body.chargeId), eq(charge.tenantId, t))).then((r) => r[0]) : undefined;
+    if (body.chargeId && !ch) throw new HttpError(404, 'CHARGE_NOT_FOUND');
+    if (ch) {
+      const [{ paid }] = await tx.select({ paid: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, ch.id));
+      const duePaise = ch.status === 'due' ? Math.max(0, ch.amountPaise - paid) : 0;
+      if (body.amountPaise > duePaise) throw new HttpError(400, 'MORE_THAN_DUE', { duePaise });
+    }
     const [row] = await tx.insert(payment).values({ ...body, tenantId: t, receivedBy: req.ctx.userId }).returning();
-    if (body.chargeId) {
-      const ch = await tx.select().from(charge).where(and(eq(charge.id, body.chargeId), eq(charge.tenantId, t))).then((r) => r[0]);
-      if (!ch) throw new HttpError(404, 'CHARGE_NOT_FOUND');
+    if (ch) {
       const [{ paid }] = await tx.select({ paid: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, ch.id));
       if (paid >= ch.amountPaise) await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, ch.id));
     }
@@ -39,11 +45,25 @@ export function billingRoutes(app: FastifyInstance) {
 
   /** Waive or refund a charge; the row is kept, status + reason change, event recorded. */
   route(app, 'post', '/charges/:id/adjust', 'payment.waive', async (req, tx) => {
-    const body = z.object({ kind: z.enum(['waived', 'refunded']), reason: z.string().min(1) }).parse(req.body);
+    const body = z.object({ kind: z.enum(['waived', 'refunded']), reason: z.string().trim().min(3, 'Say why').max(200) }).parse(req.body);
     if (body.kind === 'refunded' && !can(req.perms, 'payment.refund')) throw new HttpError(403, 'FORBIDDEN:payment.refund');
-    const [row] = await tx.update(charge).set({ status: body.kind, adjustmentReason: body.reason, adjustedBy: req.ctx.userId })
-      .where(and(eq(charge.id, (req.params as any).id), eq(charge.tenantId, req.ctx.tenantId))).returning();
-    if (!row) throw new HttpError(404, 'NOT_FOUND');
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const cur = await tx.select().from(charge).where(and(eq(charge.id, id), eq(charge.tenantId, t))).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    if (cur.status === 'refunded') throw new HttpError(409, 'ALREADY_REFUNDED');
+    if (body.kind === 'refunded') {
+      // ponytail: a refund is money going out today, so it is written as negative payment rows (one per original payment, same mode),
+      // the way course refunds already are. End of day, the daily report and the history totals then net it out with no extra rule.
+      // A schema-level refund table is the upgrade if partial refunds or a different refund mode are ever needed.
+      const pays = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.chargeId, id)));
+      const net = pays.reduce((s, p) => s + p.amountPaise, 0);
+      if (net > 0) {
+        await assertDayOpen(tx, req.ctx); // the money leaves today, so today must still be open
+        let seq = 0;
+        for (const p of pays.filter((x) => x.amountPaise > 0)) await tx.insert(payment).values({ tenantId: t, patientId: p.patientId, chargeId: id, amountPaise: -p.amountPaise, method: p.method, reference: `Refund · ${body.reason}`.slice(0, 200), receivedBy: req.ctx.userId, idempotencyKey: `refund:${id}#${seq++}` });
+      }
+    }
+    const [row] = await tx.update(charge).set({ status: body.kind, adjustmentReason: body.reason, adjustedBy: req.ctx.userId }).where(eq(charge.id, id)).returning();
     await emit(tx, req.ctx, `charge.${body.kind}`, 'charge', row.id, { reason: body.reason, amountPaise: row.amountPaise });
     return row;
   });
@@ -140,11 +160,11 @@ export function billingRoutes(app: FastifyInstance) {
   /** Everything taken in one go, for printing. */
   route(app, 'get', '/receipts/:no', 'payment.record', async (req, tx) => {
     if (!can(req.perms, 'fees.see')) throw new HttpError(403, 'FORBIDDEN:fees.see');
-    const rows = await tx.select({ p: payment, c: charge, pt: patient }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId))
+    const rows = await tx.select({ p: payment, c: charge, pt: patient, by: appUser.name }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId)).leftJoin(appUser, eq(appUser.id, payment.receivedBy))
       .where(and(eq(payment.tenantId, req.ctx.tenantId), eq(payment.receiptNo, (req.params as any).no))).orderBy(payment.receivedAt);
     if (!rows.length) throw new HttpError(404, 'NOT_FOUND');
     const ten = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any) => r[0]);
-    return { receiptNo: (req.params as any).no, at: rows[0].p.receivedAt, patient: { fullName: rows[0].pt.fullName, patientNo: rows[0].pt.patientNo }, clinic: { name: ten?.name, print: ten?.settings?.print ?? {} }, receivedBy: req.ctx.name,
+    return { receiptNo: (req.params as any).no, at: rows[0].p.receivedAt, patient: { fullName: rows[0].pt.fullName, patientNo: rows[0].pt.patientNo }, clinic: { name: ten?.name, print: ten?.settings?.print ?? {} }, receivedBy: [...new Set(rows.map((r) => r.by).filter(Boolean))].join(', ') || '—', // who took the money, not who is printing
       lines: rows.map((r) => ({ description: r.c?.description ?? 'Payment', amountPaise: r.p.amountPaise, method: r.p.method, reference: r.p.reference, lender: r.p.lender })), totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0) };
   });
 
@@ -216,9 +236,12 @@ export function billingRoutes(app: FastifyInstance) {
     const outstanding = await tx.select({ total: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int`, n: sql<number>`count(*)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
     const payments = await tx.select({ pay: payment, patient: patient.fullName, desc: charge.description }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId))
       .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end))).orderBy(desc(payment.receivedAt));
-    const collected = byMethod.reduce((s, m) => s + m.total, 0);
+    // One "Collected" for the whole app: the same figure as End of day (payments net of refunds, plus pharmacy sales less returns).
+    const f = await dayFigures(tx, t, req.ctx.timezone, day); const m = f.money.total;
+    const collected = m.total;
     const spent = expenses.reduce((s, e) => s + e.amountPaise, 0);
     return { day, byMethod, byCategory, expenses, outstanding: outstanding[0], payments: payments.map((p) => ({ ...p.pay, patient: p.patient, description: p.desc })),
+      byMode: { cash: m.cash, upi: m.upi, card: m.card, other: m.other }, pharmacyPaise: f.money.pharmacy.total,
       totals: { collectedPaise: collected, expensesPaise: spent, netPaise: collected - spent, visits: byCategory.reduce((s, c) => s + c.visits, 0) }, prevDay: addDays(day, -1), nextDay: addDays(day, 1) };
   });
 }

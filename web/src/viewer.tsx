@@ -71,8 +71,8 @@ function Viewer({ v }: { v: View }) {
             : <iframe ref={frame} src={url} title={d.title} className="block h-full w-full bg-white" />}
         </div>
         {list.length > 1 && <>
-          <button aria-label="Previous document" disabled={i === 0} onClick={() => go(-1)} className="absolute left-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-lg shadow-lg disabled:opacity-30"><Icon name="chevL" /></button>
-          <button aria-label="Next document" disabled={i === list.length - 1} onClick={() => go(1)} className="absolute right-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-white/95 text-lg shadow-lg disabled:opacity-30"><Icon name="chevR" /></button></>}
+          <button aria-label="Previous document" disabled={i === 0} onClick={() => go(-1)} className="absolute left-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-surface/95 text-ink text-lg shadow-lg disabled:opacity-30"><Icon name="chevL" /></button>
+          <button aria-label="Next document" disabled={i === list.length - 1} onClick={() => go(1)} className="absolute right-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-surface/95 text-ink text-lg shadow-lg disabled:opacity-30"><Icon name="chevR" /></button></>}
       </div>
       {list.length > 1 && <div className="mt-3 flex flex-wrap items-center gap-1.5"><span className="text-xs text-muted">Other documents</span>{list.map((x, j) => <button key={x.id} className={`toggle-opt !py-1 !text-xs ${j === i ? 'on' : ''}`} onClick={() => setI(j)}>{x.title.length > 26 ? x.title.slice(0, 24) + '…' : x.title}</button>)}</div>}
       <div className="modal-foot">

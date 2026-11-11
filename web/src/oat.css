@@ -21,6 +21,7 @@
 }
 
 html:not([data-theme="dark"]) {
+  .app-orbs { display: none; } /* --g-orb is 0 here: no orbs drawn, no blur paid */
   h1, h2 { color: var(--color-nav-active); font-weight: 700; }
   ::selection { background: var(--color-clay-soft); }
 }

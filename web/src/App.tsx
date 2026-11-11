@@ -2,7 +2,7 @@ import { Component, useEffect, useState, type ReactNode } from 'react';
 import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, patch, qc, ApiError } from './api';
-import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, PageSearchCtx, PageSearchBox, revealTheme } from './ui';
+import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, useOnline, PageSearchCtx, PageSearchBox, revealTheme } from './ui';
 import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
 import { settingsTopic } from './pages/Settings';
@@ -157,6 +157,7 @@ export function App() {
   const [pageSearch, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
   const [theme, toggleTheme] = useTheme();
   const [navOpen, toggleNav] = useNav();
+  const online = useOnline();
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
@@ -185,8 +186,19 @@ export function App() {
   }, [idleMin, inConsult]);
 
   if (me.isLoading) return <div className="min-h-dvh grid place-items-center text-muted text-sm anim-fade-in">Opening clinic…</div>;
-  if (me.isError) { if (!(me.error instanceof ApiError && me.error.body?.code === 'IP_NOT_ALLOWED')) location.href = '/login'; return null; }
-  const signOut = async () => { await post('/auth/logout'); qc.clear(); nav('/login'); };
+  if (!me.data) {
+    // Signed out (401) goes to sign-in; outside the clinic's internet the api already moved to the sign-in notice.
+    // Anything else is a dropped connection: say so and keep trying, never throw the person out.
+    const e = me.error;
+    if (e instanceof ApiError && (e.status === 401 || e.body?.code === 'IP_NOT_ALLOWED')) { if (e.status === 401 && location.pathname !== '/login') location.href = '/login'; return null; }
+    return (
+      <div className="min-h-dvh grid place-items-center p-6 text-center anim-fade-in" role="alert">
+        <div className="space-y-3"><div className="text-[15px] font-semibold">Can't reach the clinic server. Retrying…</div><div className="text-sm text-muted">{online ? 'The app tries again every few seconds.' : 'No internet on this computer. Check the Wi-Fi or cable.'}</div>
+          <button className="btn btn-primary" disabled={me.isFetching} onClick={() => me.refetch()}>{me.isFetching ? 'Trying…' : 'Retry'}</button></div>
+      </div>
+    );
+  }
+  const signOut = async () => { window.dispatchEvent(new Event('app:save-now')); await new Promise((r) => setTimeout(r, 300)); await post('/auth/logout').catch(() => {}); qc.clear(); nav('/login'); };
   const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
   const topic = loc.pathname === '/settings' ? settingsTopic(new URLSearchParams(loc.search).get('tab')) : null;
   // Back: the screen you came from; opened from a link or a fresh tab, the page above this one
@@ -230,6 +242,7 @@ export function App() {
               {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted">{roles.map(roleLabel).join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
             </div>
         </header>
+        {!online && <div role="status" className="no-print sticky top-[68px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">No internet. Changes won't save until it's back.</div>}
 
         <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}>{pageSearch && <PageSearchBox placeholder={pageSearch} className="mb-3 flex w-full md:hidden" />}<PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>

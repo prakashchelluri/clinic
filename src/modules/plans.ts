@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { charge, course, message, patient, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, addDays } from '../lib/core.js';
@@ -78,12 +78,14 @@ export function planRoutes(app: FastifyInstance) {
     if (!ids.length) return { counts: { advised: 0, agreed: 0, paid: 0 }, plans: [] };
     const courses = await tx.select().from(course).where(and(eq(course.tenantId, t), inArray(course.recommendationId, ids)));
     const sessions = await tx.select({ ps: procedureSession, doctor: practitioner.name }).from(procedureSession).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId)).where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, ids))).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
-    const charges = courses.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), inArray(charge.courseId, courses.map((c) => c.id)))) : [];
+    // every live sitting charge, with or without a course (a sitting with no course is billed at list price); cancelled ones no longer count
+    const sids = sessions.map((s) => s.ps.id);
+    const charges = sids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), inArray(charge.sessionId, sids), notInArray(charge.status, ['cancelled', 'waived']))) : [];
     const quotes = await tx.select().from(quote).where(and(eq(quote.tenantId, t), inArray(quote.recommendationId, ids))).orderBy(sql`${quote.createdAt} desc`);
     const plans = recs.map((x) => {
       const c = courses.find((k) => k.recommendationId === x.r.id); const sit = x.r.sittings ?? 1;
       const mine = sessions.filter((s) => s.ps.recommendationId === x.r.id); const done = mine.filter((s) => s.ps.state === 'completed');
-      const ch = c ? charges.filter((k) => k.courseId === c.id) : [];
+      const ch = charges.filter((k) => mine.some((s) => s.ps.id === k.sessionId));
       const paidAll = c ? ch.filter((k) => k.status === 'paid').length >= sit : false;
       const q = quotes.find((k) => k.recommendationId === x.r.id);
       const state = !c ? (mine.length > 0 ? 'agreed' : 'advised') : paidAll || x.r.status === 'done' ? 'paid' : 'agreed';

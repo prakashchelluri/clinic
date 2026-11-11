@@ -440,11 +440,14 @@ export const pharmacySale = pgTable('pharmacy_sale', {
   encounterId: uuid('encounter_id'),                 // the prescription this bill issued against
   payments: jsonb('payments').$type<{ method: string; amountPaise: number; reference: string | null }[]>().notNull().default([]),
   returns: jsonb('returns').$type<SaleReturn[]>().notNull().default([]),
-}, (t) => [uniqueIndex('pharmacy_invoice').on(t.tenantId, t.invoiceNo), index('pharmacy_sale_at').on(t.tenantId, t.createdAt)]);
+  idempotencyKey: text('idempotency_key'),           // one per bill from the counter: a retry returns the same sale
+  buyerName: text('buyer_name'),                     // walk-in with no record: optional name and phone kept on the sale only
+  buyerPhone: text('buyer_phone'),
+}, (t) => [uniqueIndex('pharmacy_invoice').on(t.tenantId, t.invoiceNo), index('pharmacy_sale_at').on(t.tenantId, t.createdAt), uniqueIndex('pharmacy_sale_idem').on(t.tenantId, t.idempotencyKey)]);
 
 export type SaleLine = { medicineId: string; name: string; hsn: string | null; qty: number; mrpPaise: number; gstBp: number; amountPaise: number;
-  batchId?: string | null; batchNo?: string | null; expiry?: string | null; prescriptionItemId?: string | null };
-export type SaleReturn = { creditNoteNo: string; at: string; by: string; reason: string; method: string; reference: string | null; refundPaise: number; lines: { line: number; qty: number; amountPaise: number }[] };
+  batchId?: string | null; batchNo?: string | null; expiry?: string | null; prescriptionItemId?: string | null; overReason?: string | null };
+export type SaleReturn = { creditNoteNo: string; at: string; by: string; reason: string; method: string; reference: string | null; refundPaise: number; lines: { line: number; qty: number; amountPaise: number; restock?: boolean }[] };
 
 // --- pharmacy stock ---
 // Who the clinic buys from.

@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from './api';
 import { can } from './App';
-import { Chip, Icon, MoneyInput, Section, Skeleton, fmtDate, money, toPaise, toast } from './ui';
+import { Chip, Icon, MoneyInput, Section, Skeleton, ask, fmtDate, money, toPaise, toast } from './ui';
 
 const ROWS: [string, string][] = [['consultation', 'Consultations'], ['procedure', 'Procedures'], ['pharmacy', 'Pharmacy'], ['other', 'Other']];
 
@@ -50,7 +50,12 @@ export function EndOfDay({ day }: { day: string }) {
               <td className="text-right">{locked ? d.closed.counts[k] : d.counts[k]}</td>
               <td className="pr-4">{off ? (locked ? <span className="text-xs text-muted">{d.closed.notes[k]}</span> : <input aria-label={`Why ${k} differs`} className="input !py-1" placeholder="Why do they differ?" maxLength={300} value={notes[k] ?? ''} onChange={(e) => setNotes({ ...notes, [k]: e.target.value })} />) : <Chip tone="sage">same</Chip>}</td></tr>; })}</tbody></table>
       </Section>
-      {!locked && can(perms, 'day.close') && <div className="flex items-center gap-3"><button className="btn btn-primary" disabled={close.isPending || counted === '' || lacking.length > 0} onClick={() => close.mutate()}><Icon name="lock" />Close the day</button>
+      {!locked && can(perms, 'day.close') && <div className="flex items-center gap-3"><button className="btn btn-primary" disabled={close.isPending || counted === '' || lacking.length > 0} onClick={async () => {
+          const dayName = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+          const ok = await ask({ title: `Close ${dayName}?`, tone: 'danger', confirmLabel: 'Close the day',
+            body: <>Collected <b>{money(m.total.total)}</b> (cash {money(m.total.cash)} · UPI {money(m.total.upi)} · card {money(m.total.card)}{m.total.other ? ` · other ${money(m.total.other)}` : ''}). Cash counted <b>{money(toPaise(counted))}</b>{cashDiff ? `, ${cashDiff > 0 ? 'over' : 'short'} by ${money(Math.abs(cashDiff))}` : ', matches the app'}. No more payments or refunds can be recorded for this day after this.</> });
+          if (ok) close.mutate();
+        }}><Icon name="lock" />Close the day…</button>
         <span className="text-sm text-muted">{counted === '' ? 'Count the drawer first.' : lacking.length ? 'Each difference needs a note before the day can close.' : 'Nothing is left to explain.'}</span></div>}
       {!locked && !can(perms, 'day.close') && <div className="text-sm text-muted">Closing the day needs the Close the day permission.</div>}
     </div>

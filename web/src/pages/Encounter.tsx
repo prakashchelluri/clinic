@@ -9,7 +9,7 @@ import { Avatar, Chip, Floating, Icon, Modal, Segmented, Skeleton, Tabs, fmtDate
 import { openPrint } from '../printPreview';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
-import { parseRxLine, qtyFor } from '../rxLine';
+import { parseRxLine, qtyFor, allergyHit, rxWarnings, pregnancyFlag, ageText } from '../rxLine';
 import { FlagChips, CarefulBanner } from '../flags';
 import { useTemplates, suggests, norm, uniq, type Tmpl, type TmplKind } from '../templates';
 import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, type History } from '../screening';
@@ -34,16 +34,7 @@ const REVIEW_IN: [number | null, string][] = [[7, '7d'], [14, '14d'], [30, '1 m'
 const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
 const DX_STATUS = ['Provisional', 'Confirmed'];
 const DX_OPTIONS = ['Acne vulgaris', 'Melasma', 'Tinea corporis', 'Tinea cruris', 'Psoriasis vulgaris', 'Alopecia areata', 'Androgenetic alopecia', 'Verruca vulgaris', 'Atopic dermatitis', 'Seborrheic dermatitis', 'Contact dermatitis', 'Acute urticaria', 'Chronic urticaria', 'Vitiligo', 'Post-inflammatory hyperpigmentation', 'Scabies', 'Pityriasis versicolor', 'Lichen planus', 'Rosacea', 'Molluscum contagiosum', 'Impetigo', 'Herpes zoster'];
-// ponytail: a small word list for drug-class allergies; a proper allergy/interaction database is the upgrade path.
-const ALLERGY_CLASSES: Record<string, string[]> = { sulfa: ['sulfa', 'sulpha', 'cotrimoxazole', 'dapsone', 'sulfasalazine'], penicillin: ['penicillin', 'amoxi', 'ampi', 'cloxa'], nsaid: ['ibuprofen', 'diclofenac', 'aceclofenac', 'aspirin', 'naproxen'] };
-const allergyHit = (allergies: string | null | undefined, med: string) => {
-  if (!allergies) return null; const m = med.toLowerCase();
-  for (const word of allergies.toLowerCase().split(/[^a-z]+/).filter((w) => w.length >= 4)) {
-    const cls = Object.entries(ALLERGY_CLASSES).find(([k, v]) => word.startsWith(k) || v.some((x) => word.startsWith(x)));
-    if ((cls ? cls[1] : [word]).some((x) => m.includes(x))) return word;
-  }
-  return null;
-};
+// ponytail: the allergy, pregnancy and interaction word lists live in rxLine.ts (tested there); a proper drug database is the upgrade path.
 const sameLine = (a: RxItem, b: RxItem) => a.name === b.name && (a.dose ?? '') === (b.dose ?? '') && (a.frequency ?? '') === (b.frequency ?? '') && (a.durationDays ?? null) === (b.durationDays ?? null) && (a.instructions ?? '') === (b.instructions ?? '');
 const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, _issued, ...i }: any): RxItem => i;
 /** The pad's own lines keep their id so a held-open consultation updates them instead of re-issuing; issued lines are locked. */
@@ -58,6 +49,7 @@ const examOptionFor = (fields: Field[], f: string): { field: Field; opt: string 
   return null;
 };
 const pinFindings = (p: { finding: string | null }) => (p.finding ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+const PH = 'placeholder:italic placeholder:opacity-60'; // a placeholder that cannot be mistaken for a value
 const withQty = (i: RxItem): RxItem => (i._qtyTouched || i.qty ? i : { ...i, qty: qtyFor(i) ?? undefined });
 const ICON: Record<string, [string, string]> = { vitals: ['♡', '#5B8DB8'], symptoms: ['S', '#C53B14'], diagnosis: ['Dx', '#8A2E10'], exam: ['Ex', '#6F8F78'], medicines: ['℞', '#4F7396'], advice: ['A', '#B98B6E'], tests: ['T', '#7A6FB0'], results: ['R', '#B8860B'], followup: ['→', '#6F8F78'], procedures: ['Pr', '#285C9C'], notes: ['N', '#8B929C'], referral: ['Rf', '#5B8DB8'], history: ['H', '#8A2E10'], photos: ['P', '#6F8F78'] };
 
@@ -315,17 +307,20 @@ export function Encounter() {
     }
   }, [enc.data, timeline.data]);
   const cleanRx = () => rx.filter((i) => i.name).map(({ _qtyTouched, _issued, ...i }) => i);
+  const [saveFailed, setSaveFailed] = useState(false); // the last save did not reach the server: say so, the notes stay on screen
   const save = useMutation({
-    mutationFn: ({ complete }: { complete: boolean; back?: boolean }) => patch(`/encounters/${id}`, { data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
+    // d: the data to send when it was changed in the same tick (the reason given at Finish), before React has re-rendered
+    mutationFn: ({ complete, d }: { complete: boolean; back?: boolean; d?: Record<string, any> }) => patch(`/encounters/${id}`, { data: d ?? data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete }),
     onSuccess: (_e, { complete, back }) => {
-      if (complete) { setErrors([]); setShowMissing(false); } dirty.current = false; setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+      if (complete) { setErrors([]); setShowMissing(false); } dirty.current = false; setSaveFailed(false); setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       ['queue', 'frontdesk', 'timeline'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      qc.invalidateQueries({ queryKey: ['print', id] }); // print never shows what was there before this save
       if (complete && held) { toast('Consultation completed'); openPrint({ title: 'Results sheet', rx: id, mode: 'results' }); nav('/today', { viewTransition: true }); }
       else if (complete) { toast(willHold ? 'Prescription issued · held open for the reports' : 'Consultation completed'); openPrint({ title: 'Prescription', rx: id }); nav(isDoctor ? '/today' : '/queue', { viewTransition: true }); }
       else if (back && held) { toast('Kept open for the rest of the reports'); nav('/today', { viewTransition: true }); }
       else if (back) { toast('Intake saved · ready for the doctor'); nav('/queue', { viewTransition: true }); }
     },
-    onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else toast(errText(e), 'err'); },
+    onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else { setSaveFailed(true); toast(errText(e), 'err'); } },
   });
   // findings already ticked on this visit's skin-map pins belong in this visit's exam lists too (once, when the pad opens)
   const pinsSynced = useRef(false);
@@ -342,6 +337,8 @@ export function Encounter() {
   useEffect(() => { if (justLoaded.current) { justLoaded.current = false; return; } if (loaded.current) dirty.current = true; }, [data, rx, recs]);
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate({ complete: false }); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
   useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('app:save-now', f); return () => window.removeEventListener('app:save-now', f); }, [enc.data?.status]);
+  // closing the tab with changes not yet saved asks first
+  useEffect(() => { const f = (ev: BeforeUnloadEvent) => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') { ev.preventDefault(); ev.returnValue = ''; } }; window.addEventListener('beforeunload', f); return () => window.removeEventListener('beforeunload', f); }, [enc.data?.status]);
 
   // --- section templates: an "auto" one is added when its complaint or diagnosis comes up; nothing is added twice ---
   const cNames = complaintTexts(enc.data?.visit?.details, data.complaint?.chief_complaint);
@@ -405,7 +402,7 @@ export function Encounter() {
   const inline = view === 'stacked'; // every card on screen: each keeps its own search line; otherwise the toolbar's search serves the open section
   const QUICK = inline ? 8 : 3; // quick picks per card; the whole list is in the search
   const onHand = (i: RxItem) => (i.medicineId && stock.data ? stock.data[i.medicineId] ?? 0 : null);
-  const addRx = (item: RxItem) => setRx((cur) => [...cur.filter((r) => r.name), withQty(item)]);
+  const addRx = (item: RxItem) => { if (rx.some((r) => r.name && r.name.trim().toLowerCase() === item.name.trim().toLowerCase())) return toast('Already on the prescription', 'info'); setRx((cur) => [...cur.filter((r) => r.name), withQty(item)]); };
   const addRxByName = (name: string) => { const m = meds.find((x: any) => x.name === name); addRx({ name, medicineId: m?.id ?? null, dose: m?.defaults?.dose, route: m?.defaults?.route, frequency: m?.defaults?.frequency, durationDays: m?.defaults?.durationDays, instructions: m?.defaults?.instructions }); };
   const applyTpl = (t: any) => {
     undo.current = { data, rx, recs };
@@ -444,7 +441,11 @@ export function Encounter() {
     else if (kind === 'advice') addAdvice([v]); else addSyms([{ name: symOpt ?? (m ? m[1].trim() : v), ...(m ? { since: m[2] } : {}) }]);
     setLine(''); setPendingLine(null);
   };
-  const allergyWarnings = rx.filter((i) => i.name).map((i) => [i.name, allergyHit(p.allergies, i.name)] as const).filter(([, w]) => w);
+  // the medicine name plus its generic when the catalogue has one, so a brand is caught by what it is
+  const medText = (i: RxItem) => `${i.name} ${meds.find((m: any) => m.id && m.id === i.medicineId)?.generic ?? ''}`;
+  const allergyWarnings = rx.filter((i) => i.name).map((i) => [i.name, allergyHit(p.allergies, medText(i))] as const).filter(([, w]) => w);
+  const pregnant = pregnancyFlag(p.history);
+  const warnings = isDoctor ? rxWarnings(rx.filter((i) => i.name).map((i) => ({ name: i.name, generic: meds.find((m: any) => m.id && m.id === i.medicineId)?.generic })), { name: String(p.fullName ?? '').split(' ')[0], allergies: p.allergies, pregnant }) : [];
   const followup = recs.find((r) => r.kind === 'followup');
   const setFollowup = (d: number | null) => setRecs([...recs.filter((r) => r.kind !== 'followup'), ...(d ? [{ kind: 'followup' as const, intervalDays: d }] : [])]);
   const addTest = (name: string) => { setTestDraft(''); addTestNamed(name); };
@@ -481,13 +482,28 @@ export function Encounter() {
     if (!dxs.length) out.push({ path: 'assessment.diagnosis', message: 'Diagnosis is required' });
     if (padOf('exam').required && !Object.values(data.exam ?? {}).some((v: any) => (Array.isArray(v) ? v.length : v))) out.push({ path: 'exam._', message: 'Examination is required' });
     if (padOf('medicines').required && !rx.some((i) => i.name)) out.push({ path: 'medicines._', message: 'Medicines is required' });
+    // a medicine line must say how often and for how long, or it prints as a bare name
+    if (isDoctor) rx.forEach((i, k) => { if (!i.name || i._issued) return; const gap = [!i.frequency?.trim() && 'how often', !i.durationDays && 'for how many days'].filter(Boolean).join(' and '); if (gap) out.push({ path: `medicines.${k}`, message: `Add ${gap} for ${i.name}` }); });
     for (const s of formSections as any[]) for (const f of (s.fields ?? []) as Field[]) { const v = data[s.key]?.[f.key]; if (f.required && !(Array.isArray(v) ? v.length : v) && !out.some((x) => x.path === `${s.key}.${f.key}`)) out.push({ path: `${s.key}.${f.key}`, message: `${(s.fields as Field[]).filter((x) => x.required).length > 1 ? `${s.title} › ${f.label}` : f.label} is required` }); }
     return out;
   };
   const finish = () => {
     const missing = missingNow();
     if (missing.length) { setShowMissing(true); goTo(secOf(missing[0].path)); if (viewRef.current === 'stacked') toast(`Cannot finish yet: ${missing.map((m) => m.message.replace(/ is required$/, '')).join(', ')}`, 'err'); return; } // Focused and Review: the bar lists it, no toast on top
-    save.mutate({ complete: true });
+    if (!warnings.length) return save.mutate({ complete: true });
+    // allergy, pregnancy or interaction: stop and ask for the reason; it is kept in the private notes (saved, never printed)
+    void ask({ title: 'Check before finishing', tone: 'danger', confirmLabel: 'Prescribe anyway', body: <div className="space-y-1">{warnings.map((w) => <div key={w} className="font-semibold text-rose">{w}</div>)}<div>Remove it, or give a reason to prescribe.</div></div>, field: { label: 'Reason to prescribe', required: true, maxLength: 300 } }).then((r) => {
+      if (!r?.value?.trim()) { goTo('medicines'); return; }
+      const line = `Prescribed despite: ${warnings.join(' ')} Reason: ${r.value.trim()}`;
+      const d = { ...data, notes: { ...(data.notes ?? {}), private: [data.notes?.private, line].filter(Boolean).join('\n') } };
+      setData(d); save.mutate({ complete: true, d });
+    });
+  };
+  /** Preview prints what is saved: save first and wait for it; a failed save does not open a preview of older data. */
+  const preview = async () => {
+    if (dirty.current) { try { await save.mutateAsync({ complete: false }); } catch { return; } }
+    await qc.invalidateQueries({ queryKey: ['print', id] });
+    openPrint({ title: 'Prescription preview', rx: id });
   };
   // what the footer lists: the live check once Finish was tried, plus anything the server still rejected
   const live = showMissing ? missingNow() : [];
@@ -559,7 +575,7 @@ export function Encounter() {
         </>}
         {inline && err('assessment', 'diagnosis') && <div className="mt-1 text-xs text-rose">Diagnosis is required</div>}
         {otherFields('assessment', []).map((f: Field) => <div key={f.key} className="mt-2"><CompactField f={f} value={data.assessment?.[f.key]} onChange={(v) => set('assessment', f.key, v)} disabled={readOnly} /></div>)}
-        {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{inline && p.allergies ? (allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ` ${p.allergies} allergy checked: no clash found.`) : ''} <button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
+        {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ''}<button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
       </div></Card>,
     exam: <Card key="exam" id="exam" title="Examination findings" required={isDoctor && padOf('exam').required} invalid={bad('exam')} actions={cardActs('exam')}>
       {/* a small map beside the lists; the full map opens on top (it is where pins are added) */}
@@ -573,18 +589,19 @@ export function Encounter() {
         <table className="w-full min-w-[760px] table-fixed border-collapse text-[13px]" onKeyDown={(ev) => { if (ev.key !== "Enter" || ev.defaultPrevented) return; /* Enter goes down to the same column, like a sheet */ const td = (ev.target as HTMLElement).closest("td"); const next = td?.parentElement?.nextElementSibling?.children[td.cellIndex]?.querySelector("input"); if (next) { ev.preventDefault(); (next as HTMLInputElement).focus(); } }}>
           <colgroup><col className="w-7" /><col /><col className="w-[84px]" /><col className="w-[112px]" /><col className="w-[116px]" /><col className="w-[64px]" /><col className="w-[64px]" /><col className="w-[17%]" /><col className="w-[96px]" /><col className="w-9" /></colgroup>
           <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted">{['#', 'Medicine', 'Dose', 'Frequency', 'Timing', 'Days', 'Qty', 'Instructions', 'Stock', ''].map((h, n) => <th key={n} scope="col" className="px-2 py-2 font-semibold">{h}</th>)}</tr></thead>
-          <tbody>{rx.map((i, k) => { const n = onHand(i); const hit = allergyHit(p.allergies, i.name); const off = readOnly || i._issued; const cell = 'p-0 align-middle'; return (
+          <tbody>{rx.map((i, k) => { const n = onHand(i); const hit = allergyHit(p.allergies, medText(i)); const off = readOnly || i._issued; const cell = 'p-0 align-middle'; return (
             <tr key={k} className={hit ? 'bg-rose-soft/40' : i.name ? 'pick-tr' : ''}>
               <td className={`${cell} px-1 text-center text-xs font-semibold text-muted`}>{k + 1}</td>
               <td className={cell}><Combo id={`rx-${i.name}`} label="Medicine" className={`cell-in font-semibold ${hit ? '!text-rose' : ''}`} value={i.name} disabled={off} options={meds.map((m: any) => m.name)} placeholder="Medicine"
                 detail={(o) => { const m = meds.find((x: any) => x.name === o); const c = m && stock.data ? stock.data[m.id] ?? 0 : null; return c === null ? null : c ? `${c} in stock` : 'out of stock'; }}
                 onChange={(v) => { const m = meds.find((x: any) => x.name === v); upd(k, { name: v, medicineId: m?.id ?? null, ...(m ? { dose: m.defaults?.dose, route: m.defaults?.route, frequency: m.defaults?.frequency, durationDays: m.defaults?.durationDays, instructions: m.defaults?.instructions } : {}) }); }} /></td>
-              <td className={cell}><input aria-label="Dose" className="cell-in" placeholder="1 tab" value={i.dose ?? ''} disabled={off} onChange={(ev) => upd(k, { dose: ev.target.value })} /></td>
-              <td className={cell}><Combo label="Frequency" className="cell-in" placeholder="1-0-1" value={i.frequency ?? ''} options={FREQ} disabled={off} onChange={(v) => upd(k, { frequency: v })} /></td>
-              <td className={cell}><Combo label="Timing" className="cell-in" placeholder="after food" value={i.timing ?? ''} options={TIMING} disabled={off} onChange={(v) => upd(k, { timing: v || null })} /></td>
-              <td className={cell}><NumInput aria-label="Days" max={365} placeholder="days" className="cell-in" value={i.durationDays ?? ''} disabled={off} onChange={(ev) => upd(k, { durationDays: ev.target.value ? Number(ev.target.value) : undefined })} /></td>
-              <td className={cell}><NumInput aria-label="Quantity" max={9999} placeholder="qty" className="cell-in" value={i.qty ?? ''} disabled={off} onChange={(ev) => upd(k, { qty: ev.target.value ? Number(ev.target.value) : null })} /></td>
-              <td className={cell}><input aria-label="Instructions" className="cell-in" placeholder="if any" value={i.instructions ?? ''} disabled={off} onChange={(ev) => upd(k, { instructions: ev.target.value })} /></td>
+              {/* empty cells read as examples, faded and in italics, never as values */}
+              <td className={cell}><input aria-label="Dose" className={`cell-in ${PH}`} placeholder="e.g. 1 tab" value={i.dose ?? ''} disabled={off} onChange={(ev) => upd(k, { dose: ev.target.value })} /></td>
+              <td className={cell}><Combo label="Frequency" className={`cell-in ${PH}`} placeholder="e.g. 1-0-1" value={i.frequency ?? ''} options={FREQ} disabled={off} onChange={(v) => upd(k, { frequency: v })} /></td>
+              <td className={cell}><Combo label="Timing" className={`cell-in ${PH}`} placeholder="e.g. after food" value={i.timing ?? ''} options={TIMING} disabled={off} onChange={(v) => upd(k, { timing: v || null })} /></td>
+              <td className={cell}><NumInput aria-label="Days" max={365} placeholder="e.g. 7" className={`cell-in ${PH}`} value={i.durationDays ?? ''} disabled={off} onChange={(ev) => upd(k, { durationDays: ev.target.value ? Number(ev.target.value) : undefined })} /></td>
+              <td className={cell}><NumInput aria-label="Quantity" max={9999} placeholder="—" className={`cell-in ${PH}`} value={i.qty ?? ''} disabled={off} onChange={(ev) => upd(k, { qty: ev.target.value ? Number(ev.target.value) : null })} /></td>
+              <td className={cell}><input aria-label="Instructions" className={`cell-in ${PH}`} placeholder="if any" value={i.instructions ?? ''} disabled={off} onChange={(ev) => upd(k, { instructions: ev.target.value })} /></td>
               <td className={`${cell} truncate px-2 text-[11.5px] font-semibold ${hit ? 'text-rose' : n === 0 ? 'text-amber' : 'text-muted'}`}>{hit ? `allergy: ${hit}` : n === null ? (i.name && !i.medicineId ? 'not in list' : '') : n === 0 ? 'out of stock' : `${n} in stock`}</td>
               <td className={`${cell} text-center`}>{!readOnly && !i._issued ? <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove ${i.name || 'line'}`} onClick={() => setRx(rx.filter((_, j) => j !== k))}><Icon name="x" className="h-3.5 w-3.5" /></button> : i._issued ? <span className="text-[11px] text-muted" title="Issued at the counter; it stays as written">issued</span> : null}</td>
             </tr>); })}</tbody>
@@ -595,7 +612,6 @@ export function Encounter() {
         {inline && <SearchLine placeholder='Start typing a medicine · “itra 100 1-0-1 7d after food”' options={meds.map((m: any) => m.name)} invalid={bad('medicines')} onAdd={(t) => smartAdd(t, 'medicine')} />}
       </>}
       {leaflets.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted"><span>Sent with the Rx on WhatsApp:</span>{leaflets.map((m: any) => <Chip key={m.id} tone="sage">{m.name}: how to use</Chip>)}</div>}
-      {inline && allergyWarnings.length > 0 && <div className="mt-2 rounded-lg bg-rose-soft px-3 py-2 text-xs text-rose">Allergy: {p.allergies}. Check {allergyWarnings.map(([n]) => n).join(', ')}.</div>}
     </Card> : null,
     advice: isDoctor ? <Card key="advice" id="advice" title="Advice" meta="standard lines print in Telugu too" actions={cardActs('advice')}>
       {adviceLines.map((a) => <Row key={a} label={a} onRemove={readOnly ? null : () => toggleAdvice(a)}><b className="text-[13.5px]">{a}</b></Row>)}
@@ -754,7 +770,7 @@ export function Encounter() {
     if (ev.code === 'KeyL') return bar(() => document.getElementById('pad-loadprev')?.click());
     if (ev.code === 'KeyT') return bar(() => document.getElementById('pad-templates')?.click());
     if (ev.code === 'KeyA') return bar(() => { setAnywhere(!!scope); setTimeout(() => document.getElementById('pad-search')?.focus(), 30); });
-    if (ev.code === 'KeyP') return go(() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); });
+    if (ev.code === 'KeyP') return go(() => { void preview(); });
     if (view === 'review' && /^Digit[1-4]$/.test(ev.code)) return go(() => set('review', 'response', RESPONSES[Number(ev.code.slice(5)) - 1]));
     if (view === 'review' && ev.code === 'KeyC') return go(() => document.getElementById('pad-continue-all')?.click());
   };
@@ -789,7 +805,9 @@ export function Encounter() {
       <span className="pt-0.5 text-xs font-semibold text-muted">{v ? 'Edit' : 'Add'}</span>
     </button>); };
   const layoutValue = layout === 'review' && !isReview ? 'stacked' : layout;
-  const patientLine = [p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
+  const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">Not saved — check the internet. Your notes are still here.</span>;
+  const age = ageText(p);
+  const patientLine = [age ? `${age} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
 
   return (
     <div className="space-y-3 pb-4">
@@ -800,6 +818,7 @@ export function Encounter() {
           <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-[16px] font-semibold leading-tight">{p.fullName}<FlagChips flags={p.flags} /></div>
             <div className="truncate text-xs text-muted" title={patientLine}>{patientLine}</div></div>
           {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
+          {pregnant && <span className="chip chip-rose shrink-0 !py-1">{pregnant}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}
             {isDoctor && !readOnly && <Segmented<'stacked' | 'focused' | 'review'> size="sm" value={layoutValue} onChange={(v) => { setLayout(v); setPeek(false); }} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'focused', label: 'Focused' }, ...(isReview ? [{ value: 'review' as const, label: 'Review' }] : [])]} />}
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden />Templates</button>
@@ -843,6 +862,8 @@ export function Encounter() {
         </> : toolbar}
         {held && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status"><b>Held for reports.</b><span>Prescription issued {fmtDate(e.completedAt)}. {testsIn} of {testRecs.length} reports in{testsOpen ? `; pending: ${testRecs.filter((r: any) => r.status !== 'done').map((r: any) => `${r.notes}${r.expectedOn ? ` (expected ${fmtDate(r.expectedOn)})` : ''}`).join(', ')}` : ''}.</span>{isDoctor && <span className="text-muted">Add or change what the results call for, then Complete. Issued medicines stay as written.</span>}</div>}
         {setNote && !readOnly && <div className="rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status">{setNote}</div>}
+        {/* allergy, pregnancy and interaction: above the pad in every layout, not only beside the medicines table */}
+        {warnings.length > 0 && !readOnly && <div className="rounded-[12px] bg-rose-soft px-4 py-2.5 text-[12.5px] text-rose anim-fade-in" role="alert"><b>Check the prescription.</b> {warnings.join(' ')} Finish asks for a reason.</div>}
 
         {!isDoctor && (!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <div className="card !p-0"><ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open /></div>}
         {!isDoctor && !padOf('history').show && cards.history}
@@ -858,6 +879,7 @@ export function Encounter() {
             <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">Leaves with</div>
             <div>{sheet.diagnosis ?? <span className="font-medium text-rose">Diagnosis is required</span>}</div>
             <div>{sheet.medicines ?? <span className="text-muted">No medicines</span>}</div>
+            {warnings.map((w) => <div key={w} className="text-[12.5px] font-semibold text-rose">{w}</div>)}
             {sheet.followup && <div className="text-muted">{sheet.followup}</div>}
             {sheet.procedures && <div className="text-muted">{sheet.procedures}</div>}
             {leaflets.length > 0 && <div className="text-xs text-sage">WhatsApp with {leaflets.length} how-to-use {leaflets.length === 1 ? 'leaflet' : 'leaflets'}</div>}
@@ -923,14 +945,14 @@ export function Encounter() {
         {!readOnly && isDoctor && <button type="button" className={B} onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
         {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-paper/80">Cannot finish yet · missing:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose px-2 py-0.5 font-semibold text-white hover:bg-rose/80" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
-          : <span className="text-xs text-paper/60">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves every 15 s'}</span>}
+          : saveFailed && !readOnly ? notSaved : <span className="text-xs text-paper/60">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves every 15 s'}</span>}
         <span className="ml-auto" />
         {!readOnly && !isDoctor && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>
           {can(perms, 'config.write') && <button type="button" className={B} onClick={() => nav('/settings?tab=pad')}><Icon name="print" className="h-4 w-4" />Print settings</button>}
           <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className={B} title="Save this whole Rxpad as a template" onClick={askTpl}><Save className="h-4 w-4" aria-hidden />Save template</button>
-          <button type="button" className={B} onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}>Preview</button>
+          <button type="button" className={B} onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
           <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
@@ -941,13 +963,13 @@ export function Encounter() {
       <div className="card flex flex-wrap items-center gap-2 !px-4 !py-3 anim-fade-up">
         {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet · missing:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
-          : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
+          : saveFailed && !readOnly && !save.isPending ? notSaved : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
         {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-muted/80 xl:inline">{view === 'review' ? 'Alt 1–4 how is it · Alt C continue all · ' : 'Alt ↑↓ section · '}/ search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
         <span className="ml-auto" />
         {!readOnly && !isDoctor && <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>
           <button type="button" className="btn btn-sm" title="Save this whole Rxpad as a template" onClick={askTpl}><Save className="h-3.5 w-3.5" aria-hidden />Save template</button>
-          <button type="button" className="btn btn-sm" onClick={() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); }}>Preview</button>
+          <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
           <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}

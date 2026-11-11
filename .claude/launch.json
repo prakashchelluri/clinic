@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "cubott", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3000, "autoPort": true }
+    { "name": "cubott", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3000, "autoPort": true },
+    { "name": "cubott-review", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3010, "autoPort": true, "env": { "PGLITE_DIR": "./data/pglite-review", "PORT": "3010" } }
   ]
 }

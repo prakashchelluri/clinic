@@ -54,6 +54,16 @@ aside.bg-sidebar { background: var(--g-glass-2); -webkit-backdrop-filter: var(--
 .menu, .pop { background: var(--color-surface); }
 
 @media (prefers-reduced-motion: reduce) { .app-orbs i { animation: none; } }
+/* a theme that turns the orbs off (--g-orb: 0) removes them, so the blur and the drift cost nothing */
+@container style(--g-orb: 0) { .app-orbs { display: none; } }
+/* people who ask for less transparency get solid panels and no blur */
+@media (prefers-reduced-transparency: reduce) {
+  .app-orbs { display: none; }
+  .card, .card-flat, .glass, .dark-card, aside.bg-sidebar, .table.sticky-head th, .modal-back, .app-top { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  .card, .card-flat, .glass, .dark-card, .table.sticky-head th { background: var(--color-surface); }
+  aside.bg-sidebar { background: var(--color-sidebar); }
+  .app-top { background: var(--color-paper) !important; }
+}
 @media print { .app-orbs { display: none; } html { background: #fff; } }
 
 /* ---------- The same motion everywhere ---------- */

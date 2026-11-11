@@ -87,7 +87,7 @@ export function Followups() {
       <PageHeader title="Follow-ups" subtitle="Everyone who needs a call, and what happened the last time" />
       <DataTable
         id="followups" exportName={`follow-ups-${tab}-${today()}`} rows={rows} rowKey={(r) => r.key} columns={columns}
-        loading={q.isLoading} empty={{ title: 'Nobody to call here', hint: TABS.find((t) => t[0] === tab)![2] }}
+        loading={q.isLoading} error={q.error} onRetry={() => q.refetch()} empty={{ title: 'Nobody to call here', hint: TABS.find((t) => t[0] === tab)![2] }}
         tabs={TABS.map(([v, l]) => ({ value: v, label: l, count: counts[v] }))} tab={tab}
         onTab={(v) => setSp((p) => { const n = new URLSearchParams(p); v === 'reviews' ? n.delete('tab') : n.set('tab', v); return n; }, { replace: true })}
         search={{ placeholder: 'Find a follow-up: name, phone or patient no.', text: (r) => [r.patient.fullName, r.patient.phone, r.patient.patientNo] }}

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useOutletContext } from 'react-router';
 import { get, today } from '../api';
+import { can } from '../App';
 import { Chip, PageHeader, Skeleton, fmtDate, money, Filter } from '../ui';
 
 type Range = 'today' | 'week' | 'month';
@@ -16,6 +18,9 @@ const delta = (now: number | null, before: number | null, unit: string, lowerIsB
 /** One tile per doctor, the daily trend with its average, and the times that matter, each against the period before. */
 export function Dashboard() {
   const [range, setRange] = useState<Range>('month');
+  // Revenue per doctor is for the owner and admins (finance.read). A doctor sees only their own takings.
+  const { me, perms } = useOutletContext<any>(); const allMoney = can(perms ?? me?.perms ?? [], 'finance.read');
+  const seesMoney = (t: any) => allMoney || (!!me?.practitionerId && t.id === me.practitionerId);
   const { from, to } = span(range);
   const q = useQuery({ queryKey: ['dashboard', from, to], queryFn: () => get(`/dashboard?from=${from}&to=${to}`) });
   const d = q.data;
@@ -30,8 +35,8 @@ export function Dashboard() {
         {d.tiles.map((t: any) => (
           <div key={t.id} className="card">
             <div className="text-sm font-medium">{t.name}</div>
-            <div className="mt-1 flex items-end gap-4"><div>{!d.moneyHidden && <div className="text-[24px] font-semibold tracking-tight">{money(t.revenuePaise)}</div>}<div className="text-sm text-muted">{t.patients} patients</div></div></div>
-            {!d.moneyHidden && t.revenuePaise > 0 && <div className="mt-3"><div className="flex h-2 overflow-hidden rounded-full bg-paper-2"><i className="block bg-sage" style={{ width: `${Math.round((t.paidPaise / t.revenuePaise) * 100)}%` }} /></div><div className="mt-1 text-xs text-muted">paid {Math.round((t.paidPaise / t.revenuePaise) * 100)}% · pending {money(t.pendingPaise)}</div></div>}
+            <div className="mt-1 flex items-end gap-4"><div>{!d.moneyHidden && seesMoney(t) && t.revenuePaise !== undefined && <div className="text-[24px] font-semibold tracking-tight">{money(t.revenuePaise)}</div>}<div className="text-sm text-muted">{t.patients} patients</div></div></div>
+            {!d.moneyHidden && seesMoney(t) && t.revenuePaise > 0 && <div className="mt-3"><div className="flex h-2 overflow-hidden rounded-full bg-paper-2"><i className="block bg-sage" style={{ width: `${Math.round((t.paidPaise / t.revenuePaise) * 100)}%` }} /></div><div className="mt-1 text-xs text-muted">paid {Math.round((t.paidPaise / t.revenuePaise) * 100)}% · pending {money(t.pendingPaise)}</div></div>}
             {t.patients > 0 && <div className="mt-3"><div className="flex h-2 overflow-hidden rounded-full bg-paper-2"><i className="block bg-clay" style={{ width: `${Math.round((t.newPatients / t.patients) * 100)}%` }} /></div><div className="mt-1 text-xs text-muted">new {t.newPatients} · review {t.reviews}</div></div>}
           </div>))}
       </div>

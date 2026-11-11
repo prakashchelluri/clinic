@@ -50,6 +50,22 @@ const OWNER_ONLY = new Set<Tab>(['privacy', 'testdata']);
 const TABS: TabDef[] = GROUPS.flatMap(([, , t]) => t);
 /** The topic's name for the breadcrumb: Settings › Privacy and security. */
 export const settingsTopic = (k: string | null) => TABS.find((t) => t[0] === k)?.[1] ?? null;
+/** Server refusals on this page, as sentences. */
+const SAY: Record<string, string> = {
+  OWNER_ONLY_GRANT: 'Only an owner can make someone an owner, or take the owner role away.',
+  OWNER_ONLY_EDIT: "Only an owner can change an owner's email, password or whether they are active.",
+  LAST_OWNER: 'The clinic needs at least one active owner. Make someone else an owner first.',
+  CANNOT_DEACTIVATE_SELF: 'You cannot switch off your own account.',
+  WRONG_CURRENT_PASSWORD: 'Your current password is not right.',
+  SAME_PASSWORD: 'Pick a new password that is different from the current one.',
+  NOT_A_TEST_CLINIC: 'This clinic has real patients, so test data is switched off.',
+};
+const say = (e: any) => SAY[e?.body?.code] ?? errText(e);
+/** Switched-off doctors, fees, procedures and rooms, fetched only when "Show inactive" is ticked. */
+function useInactive(on: boolean) { return useQuery({ queryKey: ['inactive'], queryFn: () => get('/admin/inactive'), enabled: on }); }
+function ShowInactive({ on, set, n }: { on: boolean; set: (v: boolean) => void; n?: number }) {
+  return <label className="flex items-center gap-1.5 text-xs font-normal text-muted"><input type="checkbox" className="accent-clay" checked={on} onChange={(e) => set(e.target.checked)} />Show inactive{on && n !== undefined ? ` (${n})` : ''}</label>;
+}
 const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'Long text'], ['number', 'Number'], ['select', 'Pick one'], ['multiselect', 'Pick many'], ['tags', 'List (type several)'], ['diagnoses', 'Diagnoses with severity'], ['date', 'Date']];
 
 /** Owner's control panel. Everything here is data: no deploy needed to change it.
@@ -57,12 +73,12 @@ const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'L
 export function Settings() {
   const { cfg, me } = useOutletContext<any>();
   const owner = (me?.roles ?? []).includes('owner');
-  const visible = (k: Tab) => owner || !OWNER_ONLY.has(k);
+  const visible = (k: Tab) => (owner || !OWNER_ONLY.has(k)) && (k !== 'testdata' || !!cfg?.testData);
   const [params, setParams] = useSearchParams();
   const tab = TABS.find((t) => t[0] === params.get('tab') && visible(t[0]))?.[0] ?? null;
   // from the cards to a topic is a step of its own (Back returns to the cards); topic to topic replaces it
   const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: tab !== null && k !== null }); window.scrollTo({ top: 0 }); };
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); };
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['inactive'] }); };
   // the header's search box finds a setting by its name or what it is for
   const [find] = usePageSearch('Search settings', !tab);
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
@@ -130,8 +146,8 @@ const NARROW = new Set<Tab>(['clinic', 'day', 'people', 'rooms', 'availability',
 /* ---------------- Clinic: what prints, how tokens count ---------------- */
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
-  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope } } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', upiId: s.upiId ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope }, upiId: f.upiId.trim() } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="space-y-4">
@@ -140,6 +156,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div><label className="label">Clinic name</label><input className="input" value={f.name} onChange={set('name')} /></div>
         <div><label className="label">Address</label><input className="input" value={f.address} onChange={set('address')} /></div>
         <div className="grid grid-cols-2 gap-3"><div><label className="label">Phone</label><input className="input" value={f.phone} onChange={set('phone')} /></div><div><label className="label">Line at the bottom</label><input className="input" value={f.footer} onChange={set('footer')} placeholder="e.g. Get well soon" /></div></div>
+        <div><label className="label">UPI ID for payments (e.g. clinic@okhdfc)</label><input className="input" value={f.upiId} onChange={set('upiId')} placeholder="clinic@okhdfc" /><div className="mt-1 text-xs text-muted">The pharmacy shows a QR code with the amount filled in.</div></div>
       </div>
       <div className="card space-y-3">
         <div className="card-title">Token numbers</div>
@@ -192,16 +209,24 @@ function DisplayLinkCard() {
 
 /* ---------------- People: users (many roles each) + doctors ---------------- */
 function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const { me } = useOutletContext<any>(); const iAmOwner = (me?.roles ?? []).includes('owner');
   const users = useQuery({ queryKey: ['users'], queryFn: () => get('/users') });
-  const roleList: { key: string; name: string }[] = (useRoles().data ?? []).map((r: any) => ({ key: r.key, name: r.name })); const ROLES: [string, string][] = roleList.map((r) => [r.key, r.name]);
+  // only an owner hands out the owner role
+  const roleList: { key: string; name: string }[] = (useRoles().data ?? []).map((r: any) => ({ key: r.key, name: r.name })); const ROLES: [string, string][] = roleList.filter((r) => iAmOwner || r.key !== 'owner').map((r) => [r.key, r.name]);
+  const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const doctors = [...cfg.practitioners, ...(showOff ? off.data?.practitioners ?? [] : [])];
+  const [pw, setPw] = useState<null | { cur: string; next: string; again: string }>(null);
+  const changePw = useMutation({ mutationFn: () => patch('/me/password', { currentPassword: pw!.cur, newPassword: pw!.next }), onSuccess: () => { setPw(null); toast('Your password is changed'); }, onError: (e: any) => toast(say(e), 'err') });
   const roleName = (k: string) => roleList.find((r) => r.key === k)?.name ?? k;
   const [edit, setEdit] = useState<any>(null); const [doc, setDoc] = useState<any>(null);
   useAddFromNew((w) => { if (w === 'user') setEdit({ name: '', email: '', password: '', roles: ['receptionist'], practitionerId: null, active: true }); if (w === 'doctor') setDoc({ name: '', regNo: '', qualification: '', active: true }); });
-  const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
-  const saveDoc = useMutation({ mutationFn: async ({ routine, ...p }: any) => { const row = p.id ? await patch(`/admin/practitioners/${p.id}`, p) : await post('/admin/practitioners', p); if (routine) await api('PUT', `/calendar/routine/${row.id}`, routine); return row; }, onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); } });
+  const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
+  const saveDoc = useMutation({ mutationFn: async ({ routine, ...p }: any) => { const row = p.id ? await patch(`/admin/practitioners/${p.id}`, p) : await post('/admin/practitioners', p); if (routine) await api('PUT', `/calendar/routine/${row.id}`, routine); return row; }, onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
+  // an admin cannot change an owner's sign-in or switch them off
+  const lockedOwner = !!edit?.id && !iAmOwner && !!(users.data ?? []).find((u: any) => u.id === edit.id)?.roles?.includes('owner');
   const toggleRole = (r: string) => setEdit({ ...edit, roles: edit.roles.includes(r) ? edit.roles.filter((x: string) => x !== r) : [...edit.roles, r] });
   return (
     <div className="space-y-4">
+      <div className="flex justify-end"><button className="btn btn-sm" onClick={() => setPw({ cur: '', next: '', again: '' })}><Icon name="lock" className="h-3.5 w-3.5" />Change my password</button></div>
       <Section title="Staff accounts">
         {(users.data ?? []).map((u: any) => (
           <div key={u.id} className={`row ${u.active ? '' : 'opacity-50'}`}>
@@ -211,20 +236,32 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
           </div>
         ))}
       </Section>
-      <Section title="Doctors (practitioners)">
-        {cfg.practitioners.map((p: any) => <div key={p.id} className="row"><div className="flex-1"><div className="text-sm font-medium">{p.name}</div><div className="text-xs text-muted">{[p.qualification, p.regNo && `Reg. ${p.regNo}`].filter(Boolean).join(' · ')}</div></div><Chip tone={p.routine ? 'sage' : 'amber'}>{routineSummary(p.routine)}</Chip><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setDoc({ ...p, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" /></button></div>)}
+      <Section title="Doctors (practitioners)" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.practitioners?.length} />}>
+        {doctors.map((p: any) => <div key={p.id} className={`row ${p.active === false ? 'opacity-50' : ''}`}><div className="flex-1"><div className="text-sm font-medium">{p.name}</div><div className="text-xs text-muted">{[p.qualification, p.regNo && `Reg. ${p.regNo}`].filter(Boolean).join(' · ')}</div></div>{p.active === false && <Chip tone="rose">inactive</Chip>}<Chip tone={p.routine ? 'sage' : 'amber'}>{routineSummary(p.routine)}</Chip><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setDoc({ ...p, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" /></button></div>)}
         <div className="px-4 py-2 text-xs text-muted">A doctor who also signs in needs a user account linked to their practitioner record (People → user → "Signs prescriptions as").</div>
       </Section>
       {edit && (
         <Modal title={edit.id ? 'Edit user' : 'New user'} subtitle="One person can hold several roles; permissions add up" onClose={() => setEdit(null)} width="max-w-md">
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
-            <div><label className="label">Email (used to sign in)</label><input className="input" type="email" value={edit.email} onChange={(e) => setEdit({ ...edit, email: e.target.value })} /></div>
-            <div><label className="label">{edit.id ? 'New password (leave blank to keep)' : 'Password'}</label><input className="input" type="password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} /></div>
+            {lockedOwner && <div className="rounded-xl bg-amber-soft px-3 py-2 text-sm text-[#6E4D10]">This person is an owner. Only an owner can change their email, password or whether they are active.</div>}
+            <div><label className="label">Email (used to sign in)</label><input className="input" type="email" disabled={lockedOwner} value={edit.email} onChange={(e) => setEdit({ ...edit, email: e.target.value })} /></div>
+            {!lockedOwner && <div><label className="label">{edit.id ? 'New password (leave blank to keep)' : 'Password (at least 8 characters)'}</label><input className="input" type="password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} />{edit.password && edit.password.length < 8 && <div className="mt-1 text-xs text-rose">At least 8 characters.</div>}</div>}
             <div><label className="label">Roles</label><div className="flex flex-wrap gap-1">{ROLES.map(([r, l]) => <button key={r} className={`toggle-opt ${edit.roles.includes(r) ? 'on' : ''}`} onClick={() => toggleRole(r)}>{l}</button>)}</div></div>
             {(edit.roles.includes('doctor') || edit.roles.includes('owner')) && <div><label className="label">Signs prescriptions as</label><select className="input" value={edit.practitionerId ?? ''} onChange={(e) => setEdit({ ...edit, practitionerId: e.target.value || null })}><option value="">Not a consulting doctor</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
-            {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active (uncheck when staff leave)</label>}
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name || !edit.email || !edit.roles.length || (!edit.id && !edit.password)} onClick={() => save.mutate({ id: edit.id, name: edit.name, email: edit.email, roles: edit.roles, practitionerId: edit.practitionerId, active: edit.active, ...(edit.password ? { password: edit.password } : {}) })}>Save</button></div>
+            {edit.id && !lockedOwner && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active (uncheck when staff leave)</label>}
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.name || !edit.email || !edit.roles.length || (!edit.id && !edit.password) || (!!edit.password && edit.password.length < 8)} onClick={() => save.mutate({ id: edit.id, name: edit.name, email: edit.email, roles: edit.roles, practitionerId: edit.practitionerId, active: edit.active, ...(edit.password ? { password: edit.password } : {}) })}>Save</button></div>
+          </div>
+        </Modal>
+      )}
+      {pw && (
+        <Modal title="Change my password" subtitle="At least 8 characters. You stay signed in." onClose={() => setPw(null)} width="max-w-sm" submitOnEnter>
+          <div className="space-y-3">
+            <div><label className="label" htmlFor="pw-cur">Current password</label><input id="pw-cur" className="input" type="password" autoComplete="current-password" value={pw.cur} onChange={(e) => setPw({ ...pw, cur: e.target.value })} /></div>
+            <div><label className="label" htmlFor="pw-new">New password</label><input id="pw-new" className="input" type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} /></div>
+            <div><label className="label" htmlFor="pw-again">New password again</label><input id="pw-again" className="input" type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} /></div>
+            {pw.next && pw.next.length < 8 ? <div className="text-xs text-rose">At least 8 characters.</div> : pw.again && pw.again !== pw.next ? <div className="text-xs text-rose">The two new passwords are not the same.</div> : null}
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setPw(null)}>Cancel</button><button className="btn btn-primary" disabled={changePw.isPending || !pw.cur || pw.next.length < 8 || pw.next !== pw.again} onClick={() => changePw.mutate()}>Change password</button></div>
           </div>
         </Modal>
       )}
@@ -324,12 +361,19 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Fees ---------------- */
 function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
+  const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const rows = [...cfg.feeCategories, ...(showOff ? off.data?.feeCategories ?? [] : [])];
+  // a new amount applies to every check-in from now, so it is asked first
+  const confirmSave = async (c: any) => {
+    const was = rows.find((x: any) => x.id === c.id);
+    if (was && was.amountPaise !== c.amountPaise && !(await ask({ title: `Change ${c.name} from ${money(was.amountPaise)} to ${money(c.amountPaise)}?`, body: 'It applies to check-ins from now. Patients already checked in keep the fee they were charged.', confirmLabel: 'Change the fee' }))) return;
+    save.mutate(c);
+  };
   useAddFromNew(() => setEdit({ code: '', name: '', amount: '', priority: 0, affectsCapacity: true, active: true }));
   const save = useMutation({ mutationFn: (c: any) => c.id ? patch(`/admin/fee-categories/${c.id}`, c) : post('/admin/fee-categories', c), onSuccess: () => { toast('Fee saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
-    <Section title="Visit categories & fees">
+    <Section title="Visit categories & fees" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.feeCategories?.length} />}>
       <table className="table"><thead><tr><th className="pl-4">Code</th><th>Name</th><th className="text-right">Fee</th><th>Rule</th><th>Queue</th><th /></tr></thead>
-        <tbody>{cfg.feeCategories.map((c: any) => <tr key={c.id}><td className="pl-4 font-mono text-xs">{c.code}</td><td>{c.name}</td><td className="text-right">{money(c.amountPaise)}</td><td className="text-xs text-muted">{c.eligibilityNote ?? (c.eligibility ? 'auto-suggested by rule' : 'manual')}</td><td>{c.priority > 0 && <Chip tone="amber">jumps queue</Chip>}</td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...c, amount: c.amountPaise / 100 })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
+        <tbody>{rows.map((c: any) => <tr key={c.id} className={c.active === false ? 'opacity-50' : ''}><td className="pl-4 font-mono text-xs">{c.code}</td><td>{c.name}{c.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-right">{money(c.amountPaise)}</td><td className="text-xs text-muted">{c.eligibilityNote ?? (c.eligibility ? 'auto-suggested by rule' : 'manual')}</td><td>{c.priority > 0 && <Chip tone="amber">jumps queue</Chip>}</td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...c, amount: c.amountPaise / 100 })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
         <Modal title={edit.id ? `Edit ${edit.code}` : 'New category'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
@@ -338,7 +382,7 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             <div><label className="label">Rule note (shown to reception)</label><input className="input" value={edit.eligibilityNote ?? ''} onChange={(e) => setEdit({ ...edit, eligibilityNote: e.target.value })} /></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.affectsCapacity} onChange={(e) => setEdit({ ...edit, affectsCapacity: e.target.checked })} /> Counts against window capacity</label>
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.code || !edit.name} onClick={() => save.mutate({ id: edit.id, code: edit.code, name: edit.name, amountPaise: Math.round(Number(edit.amount || 0) * 100), priority: edit.priority, affectsCapacity: edit.affectsCapacity, eligibilityNote: edit.eligibilityNote || null, active: edit.active })}>Save</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.code || !edit.name} onClick={() => confirmSave({ id: edit.id, code: edit.code, name: edit.name, amountPaise: Math.round(Number(edit.amount || 0) * 100), priority: edit.priority, affectsCapacity: edit.affectsCapacity, eligibilityNote: edit.eligibilityNote || null, active: edit.active })}>Save</button></div>
           </div>
         </Modal>
       )}
@@ -350,7 +394,7 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null); const [q, setQ] = useState('');
   useAddFromNew(() => setEdit({ name: '', form: 'tab', scheduleClass: 'H', defaults: {}, packSize: 10, reorderLevel: 5 }));
-  const save = useMutation({ mutationFn: ({ mrp, id, ...m }: any) => { const b = { ...m, mrpPaise: mrp !== undefined ? toPaise(mrp || '0') : m.mrpPaise, gstBp: m.gstBp ?? 1200, hsn: m.hsn || null }; delete b.createdAt; delete b.tenantId; return id ? patch(`/admin/medicines/${id}`, b) : post('/admin/medicines', b); }, onSuccess: () => { toast('Medicine saved'); setEdit(null); onSaved(); } });
+  const save = useMutation({ mutationFn: ({ mrp, id, ...m }: any) => { const b = { ...m, mrpPaise: mrp !== undefined ? toPaise(mrp || '0') : m.mrpPaise, gstBp: m.gstBp ?? 1200, hsn: m.hsn || null }; delete b.createdAt; delete b.tenantId; return id ? patch(`/admin/medicines/${id}`, b) : post('/admin/medicines', b); }, onSuccess: () => { toast('Medicine saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
   const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/admin/medicines/${id}`), onSuccess: () => { toast('Removed', 'info'); setEdit(null); onSaved(); }, onError: () => toast('In use by a prescription; cannot delete', 'err') });
   const list = cfg.medicines.filter((m: any) => m.name.toLowerCase().includes(q.toLowerCase()));
   return (
@@ -422,11 +466,12 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
   useAddFromNew(() => setEdit({ name: '', typicalMinutes: 30, bufferMinutes: 0, typicalSittings: 1, price: '', requiresMainDoctor: false, requiresReview: false, requiredCapability: '', taxRateBp: 0, active: true }));
   const caps = [...new Set<string>(cfg.rooms.flatMap((r: any) => r.capabilities))];
-  const save = useMutation({ mutationFn: (p: any) => p.id ? patch(`/admin/procedures/${p.id}`, p) : post('/admin/procedures', p), onSuccess: () => { toast('Procedure saved'); setEdit(null); onSaved(); } });
+  const save = useMutation({ mutationFn: (p: any) => p.id ? patch(`/admin/procedures/${p.id}`, p) : post('/admin/procedures', p), onSuccess: () => { toast('Procedure saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
+  const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const rows = [...cfg.procedures, ...(showOff ? off.data?.procedures ?? [] : [])];
   return (
-    <Section title="Procedure catalogue">
+    <Section title="Procedure catalogue" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.procedures?.length} />}>
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Typical</th><th>Sittings</th><th>Needs room with</th><th className="text-right">Price</th><th>GST</th><th>Rules</th><th /></tr></thead>
-        <tbody>{cfg.procedures.map((p: any) => <tr key={p.id}><td className="pl-4 font-medium">{p.name}</td><td className="text-muted">{p.typicalMinutes} min{p.bufferMinutes ? ` +${p.bufferMinutes}` : ''}</td><td>{p.typicalSittings}</td><td>{p.requiredCapability ? <Chip>{p.requiredCapability}</Chip> : <span className="text-muted text-xs">any</span>}</td><td className="text-right">{p.pricePaise != null ? money(p.pricePaise) : '—'}</td><td className="text-xs text-muted">{p.taxRateBp ? `${p.taxRateBp / 100}%` : 'exempt'}</td><td><div className="flex gap-1 flex-wrap">{p.requiresMainDoctor && <Chip tone="clay">doctor</Chip>}{p.requiresReview && <Chip tone="amber">review</Chip>}</div></td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...p, price: p.pricePaise != null ? p.pricePaise / 100 : '', requiredCapability: p.requiredCapability ?? '' })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
+        <tbody>{rows.map((p: any) => <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}><td className="pl-4 font-medium">{p.name}{p.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-muted">{p.typicalMinutes} min{p.bufferMinutes ? ` +${p.bufferMinutes}` : ''}</td><td>{p.typicalSittings}</td><td>{p.requiredCapability ? <Chip>{p.requiredCapability}</Chip> : <span className="text-muted text-xs">any</span>}</td><td className="text-right">{p.pricePaise != null ? money(p.pricePaise) : '—'}</td><td className="text-xs text-muted">{p.taxRateBp ? `${p.taxRateBp / 100}%` : 'exempt'}</td><td><div className="flex gap-1 flex-wrap">{p.requiresMainDoctor && <Chip tone="clay">doctor</Chip>}{p.requiresReview && <Chip tone="amber">review</Chip>}</div></td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...p, price: p.pricePaise != null ? p.pricePaise / 100 : '', requiredCapability: p.requiredCapability ?? '' })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
         <Modal title={edit.id ? 'Edit procedure' : 'New procedure'} onClose={() => setEdit(null)} width="max-w-lg">
           <div className="space-y-3">
@@ -455,10 +500,11 @@ function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
   useAddFromNew(() => setEdit({ name: '', capabilities: ['procedure'], active: true, newCap: '' }));
   const allCaps = [...new Set<string>([...cfg.rooms.flatMap((r: any) => r.capabilities), 'procedure', 'laser', 'cryo', 'minor_ot'])];
-  const save = useMutation({ mutationFn: (r: any) => r.id ? patch(`/admin/rooms/${r.id}`, r) : post('/admin/rooms', r), onSuccess: () => { toast('Room saved'); setEdit(null); onSaved(); } });
+  const save = useMutation({ mutationFn: (r: any) => r.id ? patch(`/admin/rooms/${r.id}`, r) : post('/admin/rooms', r), onSuccess: () => { toast('Room saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
+  const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const rows = [...cfg.rooms, ...(showOff ? off.data?.rooms ?? [] : [])];
   return (
-    <Section title={<>Rooms <span className="text-muted font-normal">· {cfg.rooms.length}</span></>}>
-      {cfg.rooms.map((r: any) => <div key={r.id} className="row"><div className="flex-1"><div className="text-sm font-medium">{r.name}</div></div><div className="flex gap-1 flex-wrap">{r.capabilities.map((c: string) => <Chip key={c}>{c}</Chip>)}</div><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...r, newCap: '' })}><Icon name="edit" /></button></div>)}
+    <Section title={<>Rooms <span className="text-muted font-normal">· {cfg.rooms.length}</span></>} aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.rooms?.length} />}>
+      {rows.map((r: any) => <div key={r.id} className={`row ${r.active === false ? 'opacity-50' : ''}`}><div className="flex-1"><div className="text-sm font-medium">{r.name}{r.active === false && <> <Chip tone="rose">inactive</Chip></>}</div></div><div className="flex gap-1 flex-wrap">{r.capabilities.map((c: string) => <Chip key={c}>{c}</Chip>)}</div><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...r, newCap: '' })}><Icon name="edit" /></button></div>)}
       <div className="px-4 py-2 text-xs text-muted">A capability is a tag such as "laser" or "minor_ot". Procedures declare which tag they need; scheduling only offers rooms that have it. Rooms cannot be treated as interchangeable.</div>
       {edit && (
         <Modal title={edit.id ? 'Edit room' : 'New room'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
@@ -478,7 +524,7 @@ function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /** Owner-only: wipe everything this clinic has done and load realistic test data from scratch (patients, a week of bookings, requests, messages, courses with photos). */
 function TestDataCard() {
   const [result, setResult] = useState<any>(null);
-  const load = useMutation({ mutationFn: () => post('/dev/reset-sample', { confirm: 'RESET' }), onSuccess: (r: any) => { setResult(r); qc.clear(); qc.invalidateQueries(); toast('Cleared and loaded fresh test data'); }, onError: (e: any) => toast(errText(e), 'err') });
+  const load = useMutation({ mutationFn: () => post('/dev/reset-sample', { confirm: 'RESET' }), onSuccess: (r: any) => { setResult(r); qc.clear(); qc.invalidateQueries(); toast('Cleared and loaded fresh test data'); }, onError: (e: any) => toast(say(e), 'err') });
   const run = async () => {
     const r = await ask({
       title: 'Clear everything and load fresh test data?',

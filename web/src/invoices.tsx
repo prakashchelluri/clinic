@@ -24,10 +24,11 @@ export async function printReceipt(no: string) {
 /** Each invoice with what was paid on it and a menu for the rare things: discount, cancel, refund, leave out of tax reports. Every one asks why. */
 export function Invoices({ charges, payments, canRefund, canDiscount }: { charges: any[]; payments: any[]; canRefund: boolean; canDiscount: boolean }) {
   if (!charges.length) return null;
-  const run = async (path: string, body: object, done: string) => { try { await post(path, body); refresh(); toast(done); } catch (e) { toast(errText(e), 'err'); } };
-  const why = (title: string, body?: string) => ask({ title, body, confirmLabel: 'Save', field: { label: 'Why', required: true, maxLength: 200 } });
-  const cancel = async (c: any) => { const a = await why('Cancel this invoice?', 'It stays in the list, marked cancelled.'); if (a?.value) run(`/charges/${c.id}/cancel`, { reason: a.value }, 'Invoice cancelled'); };
-  const refund = async (c: any) => { const a = await why(`Refund ${money(c.amountPaise)}?`, 'The invoice stays in the list, marked refunded.'); if (a?.value) run(`/charges/${c.id}/adjust`, { kind: 'refunded', reason: a.value }, 'Refund recorded'); };
+  const run = async (path: string, body: object, done: string) => { try { await post(path, body); refresh(); toast(done); } catch (e: any) { toast(e?.body?.code === 'DAY_CLOSED' ? 'Today has been closed: no money can be given back today.' : errText(e), 'err'); } };
+  // every reason is at least 3 letters (the server asks the same)
+  const why = async (title: string, body?: string, confirmLabel = 'Save') => { const a = await ask({ title, body, confirmLabel, field: { label: 'Why', placeholder: 'At least 3 letters', required: true, maxLength: 200 } }); if (a && a.value.trim().length < 3) { toast('Say why in at least 3 letters', 'err'); return null; } return a; };
+  const cancel = async (c: any) => { const a = await why('Cancel this invoice?', 'It stays in the list, marked cancelled.', 'Cancel invoice'); if (a?.value) run(`/charges/${c.id}/cancel`, { reason: a.value }, 'Invoice cancelled'); };
+  const refund = async (c: any) => { const paid = payments.filter((p) => p.chargeId === c.id).reduce((s, p) => s + p.amountPaise, 0); const a = await why(`Refund ${money(paid)}?`, 'The money must be handed back, the same way it was paid. The invoice stays in the list, marked refunded.', `Refund ${money(paid)}`); if (a?.value) run(`/charges/${c.id}/adjust`, { kind: 'refunded', reason: a.value }, `Refunded ${money(paid)}`); };
   const exclude = async (c: any) => { const a = await why('Leave this out of the tax reports?', 'It is kept and marked. This cannot be undone.'); if (a?.value) run(`/charges/${c.id}/exclude`, { reason: a.value }, 'Left out of the tax reports'); };
   const discount = async (c: any) => {
     const amt = await ask({ title: 'Discount', body: `${c.description} · ${money(c.amountPaise)}`, confirmLabel: 'Next', field: { label: 'Rupees off', required: true, maxLength: 9 } });

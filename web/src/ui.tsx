@@ -303,15 +303,22 @@ function useDialogFocus(panel: React.RefObject<HTMLDivElement | null>, active = 
     return () => { if (prev && document.contains(prev)) prev.focus({ preventScroll: true }); };
   }, [active]);
 }
-const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]', 'max-w-6xl': 'sm:max-w-[1160px]' };
+const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]', 'max-w-4xl': 'sm:max-w-[900px]', 'max-w-5xl': 'sm:max-w-[1040px]', 'max-w-6xl': 'sm:max-w-[1160px]' };
 
-export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean }) {
+/** A dialog. A click on the dim area does nothing (a stray click must not lose a form); Esc and × close it.
+ *  With `dirty`, Esc and × first ask "Discard changes?". */
+export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false, dirty = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean; dirty?: boolean }) {
   const panel = useRef<HTMLDivElement>(null); const close = useRef(onClose); close.current = onClose; const id = useId();
+  const isDirty = useRef(dirty); isDirty.current = dirty;
+  const tryClose = useRef(async () => {
+    if (isDirty.current && !(await ask({ title: 'Discard changes?', body: 'What you typed in this window will be lost.', confirmLabel: 'Discard', cancelLabel: 'Keep editing', tone: 'danger' }))) return;
+    close.current();
+  }).current;
   useScrollLock(); useDialogFocus(panel);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const p = panel.current; if (!p) return;
-      if (e.key === 'Escape') close.current();
+      if (e.key === 'Escape') { if (!pending) tryClose(); }
       else if (e.key === 'Tab') trapTab(p, e);
       else if (e.key === 'Enter' && submitOnEnter && e.target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'submit'].includes(e.target.type)) {
         const go = p.querySelector<HTMLButtonElement>('.modal-foot .btn-primary:not(:disabled),.modal-foot .btn-accent:not(:disabled)'); if (go) { e.preventDefault(); go.click(); }
@@ -320,10 +327,10 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, [submitOnEnter]);
   return createPortal(
-    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby={id} onClick={onClose}>
-      <div ref={panel} tabIndex={-1} className={`modal-panel ${SIZE[width] ?? 'sm:max-w-[720px]'}`} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby={id}>
+      <div ref={panel} tabIndex={-1} className={`modal-panel ${SIZE[width] ?? 'sm:max-w-[720px]'}`}>
         <span className="modal-grab" aria-hidden />
-        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={onClose} aria-label="Close"><Icon name="x" /></button></div>
+        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={tryClose} aria-label="Close"><Icon name="x" /></button></div>
         <div className="modal-body">{children}</div>
       </div>
     </div>,
@@ -368,8 +375,9 @@ export function DialogHost() {
           {p.field && <div className="mt-4"><label className="label" htmlFor={id + 'f'}>{p.field.label}{p.field.required ? '' : ' (optional)'}</label>
             <input id={id + 'f'} data-autofocus className="input" maxLength={p.field.maxLength ?? 200} placeholder={p.field.placeholder} value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !bad) done({ value: val.trim() }); }} /></div>}
           <div className="modal-foot">
-            <button className="btn" onClick={() => done(null)}>{p.cancelLabel ?? 'Cancel'}</button>
-            <button data-autofocus={p.field ? undefined : ''} className={danger ? 'btn !border-[#F0B8B3] !text-rose' : 'btn btn-primary'} disabled={bad} onClick={() => done({ value: val.trim() })}>{p.confirmLabel ?? 'OK'}</button>
+            {/* a danger confirm starts on Cancel, so a stray Enter never deletes */}
+            <button data-autofocus={danger && !p.field ? '' : undefined} className="btn" onClick={() => done(null)}>{p.cancelLabel ?? 'Cancel'}</button>
+            <button data-autofocus={p.field || danger ? undefined : ''} className={danger ? 'btn !bg-rose-soft !text-rose' : 'btn btn-primary'} disabled={bad} onClick={() => done({ value: val.trim() })}>{p.confirmLabel ?? 'OK'}</button>
           </div>
         </div>
       </div>
@@ -379,13 +387,18 @@ export function DialogHost() {
 }
 
 /* ---------- Toasts (module store, no provider needed) ---------- */
+type ToastAction = { label: string; run?: () => void; onClick?: () => void };
 type Toast = { id: number; msg: string; tone: 'ok' | 'err' | 'info'; action?: { label: string; run: () => void } };
 let toasts: Toast[] = []; const subs = new Set<() => void>(); let nextId = 1;
 const notify = () => subs.forEach((s) => s());
-/** A short message; with an action (e.g. Undo) it stays longer so there is time to press it. */
-export function toast(msg: string, tone: Toast['tone'] = 'ok', action?: Toast['action']) {
+/** A short message; with an action (e.g. Undo) it stays longer so there is time to press it. Errors stay longer too.
+ *  The action can be passed as `{ label, run }` or as `{ action: { label, onClick } }`. */
+export function toast(msg: string, tone: Toast['tone'] = 'ok', opt?: ToastAction | { action: ToastAction }) {
+  const a = opt && 'action' in opt ? opt.action : opt;
+  const fn = a?.run ?? a?.onClick;
+  const action = a && fn ? { label: a.label, run: fn } : undefined;
   const id = nextId++; toasts = [...toasts, { id, msg, tone, action }]; notify();
-  setTimeout(() => dismiss(id), action ? 7000 : 3200);
+  setTimeout(() => dismiss(id), action ? 7000 : tone === 'err' ? 8000 : 3200);
 }
 const dismiss = (id: number) => { toasts = toasts.filter((t) => t.id !== id); notify(); };
 export function ToastHost() {
@@ -393,9 +406,9 @@ export function ToastHost() {
   return (
     <>
     <DialogHost />
-    <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2 pointer-events-none">
+    <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-2 pointer-events-none">
       {list.map((t) => (
-        <div key={t.id} className="pointer-events-auto flex items-center gap-2.5 rounded-full bg-[#141C18] py-2.5 pl-4 pr-2.5 text-[13.5px] font-semibold text-[#F2F6F3] shadow-[0_18px_40px_-18px_rgba(16,22,40,.7)]" style={{ animation: 'toast-in 0.5s var(--spring) both' }}>
+        <div key={t.id} role={t.tone === 'err' ? 'alert' : undefined} className="pointer-events-auto flex items-center gap-2.5 rounded-full bg-[#141C18] py-2.5 pl-4 pr-2.5 text-[13.5px] font-semibold text-[#F2F6F3] shadow-[0_18px_40px_-18px_rgba(16,22,40,.7)]" style={{ animation: 'toast-in 0.5s var(--spring) both' }}>
           <Icon name={t.tone === 'err' ? 'x' : 'check'} className={`h-3.5 w-3.5 ${t.tone === 'err' ? 'text-[#FCA5A5]' : 'text-[#86EFAC]'}`} />{t.msg}
           {t.action && <button className="-my-1 ml-1 rounded-full bg-white/12 px-3 py-1 text-xs font-semibold hover:bg-white/20" onClick={() => { dismiss(t.id); t.action!.run(); }}>{t.action.label}</button>}
         </div>
@@ -407,7 +420,17 @@ export function ToastHost() {
 
 /** ₹1,250, or ₹1,250.50 when there are paise: never rounded away. */
 export const money = (paise: number) => { const d = paise % 100 ? 2 : 0; return '₹' + (paise / 100).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }); };
-export const fmtDate = (d: string) => new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+/** "10 Nov", or "10 Nov 2025" when it is not this year, so an old record never reads as this year's. */
+export const fmtDate = (d: string) => {
+  const x = new Date(d.length === 10 ? d + 'T00:00:00' : d);
+  return x.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', ...(x.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+};
+/** The app's one time format: 12-hour "10:30 am" in clinic time. Takes an ISO time stamp or a plain "14:30". */
+export const fmtTime = (t: string) => {
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(t);
+  if (m) { const h = Number(m[1]); return `${h % 12 || 12}:${m[2]} ${h < 12 ? 'am' : 'pm'}`; }
+  return new Date(t).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }).replace(/\s?([AaPp])\.?[Mm]\.?/, (_, a: string) => ` ${a.toLowerCase()}m`);
+};
 
 /** Rupee amount input: only digits and one decimal point, at most 2 decimals and 7 whole digits. Letters and symbols never get in, even when pasted. */
 export function cleanMoney(raw: string) {
@@ -424,6 +447,11 @@ export function MoneyInput({ value, onChange, className = '', placeholder = '0',
       <input id={id} autoFocus={autoFocus} className="input !pl-8" inputMode="decimal" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(cleanMoney(e.target.value))} aria-label={label ?? 'Amount in rupees'} />
     </div>
   );
+}
+
+/** Is the browser online? Follows the online/offline events. */
+export function useOnline() {
+  return useSyncExternalStore((cb) => { window.addEventListener('online', cb); window.addEventListener('offline', cb); return () => { window.removeEventListener('online', cb); window.removeEventListener('offline', cb); }; }, () => navigator.onLine, () => true);
 }
 
 export function NoAccess({ what }: { what?: string }) {

@@ -1,4 +1,5 @@
 import { QueryClient, useQuery } from '@tanstack/react-query';
+import { toast } from './ui';
 
 export const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000 } } });
 
@@ -9,28 +10,41 @@ export async function api<T = any>(method: string, url: string, body?: unknown):
   if (r.status === 204) return undefined as T;
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    if (r.status === 401 && location.pathname !== '/login') location.href = '/login';
+    if (r.status === 401) toLogin();
     // Outside the clinic's internet: the sign-in page explains it.
     if (r.status === 403 && data?.code === 'IP_NOT_ALLOWED' && location.pathname !== '/login') location.href = `/login?blocked=${encodeURIComponent(data.ip ?? '')}`;
     throw new ApiError(r.status, data);
   }
   return data;
 }
+/** Signed out (401): let open forms save what they can, then go to sign-in. Public screens (TV, patient link) never redirect. */
+let leaving = false;
+function toLogin() {
+  if (leaving || /^\/(login|display|a)(\/|$)/.test(location.pathname)) return;
+  leaving = true; window.dispatchEvent(new Event('app:save-now'));
+  setTimeout(() => { location.href = '/login'; }, 400);
+}
 export const get = <T = any>(url: string) => api<T>('GET', url);
 export const post = <T = any>(url: string, body?: unknown) => api<T>('POST', url, body);
 export const patch = <T = any>(url: string, body?: unknown) => api<T>('PATCH', url, body);
 
 export const useConfig = () => useQuery({ queryKey: ['config'], queryFn: () => get('/config'), staleTime: 5 * 60_000 });
-export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => get('/me'), retry: false });
+/** Who is signed in. A dropped connection is retried (3 tries, then every 10 s) instead of being read as "signed out"; only a 401/403 stops. */
+export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => get('/me'),
+  retry: (n, e) => !(e instanceof ApiError && (e.status === 401 || e.status === 403)) && n < 3,
+  retryDelay: (n) => Math.min(1000 * 2 ** n, 8000),
+  refetchInterval: (q) => (q.state.status === 'error' && !(q.state.error instanceof ApiError && (q.state.error.status === 401 || q.state.error.status === 403)) ? 10_000 : false) });
 
 export const rupees = (paise: number) => '₹' + (paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 export const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
-export const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+export { fmtTime } from './ui'; // one time format for the app: "10:30 am", clinic time
 export const uuid = () => crypto.randomUUID();
 export const del = <T = any>(url: string) => api<T>('DELETE', url);
 
 const MESSAGES: Record<string, string> = {
-  WINDOW_FULL: 'That window is full.', SESSION_NOT_FOUND: 'That window no longer exists. Refresh and pick again.', PAST_WINDOW: 'You cannot move a booking into the past.', NOT_MOVABLE: 'Only bookings that have not arrived can be moved.',  ALREADY_ARRIVED: 'This patient has already arrived.', SERVICE_NOT_FOUND: 'That visit type is not available.', SERVICE_NOT_OFFERED: 'That doctor does not offer this visit type.',  NOT_OPEN: 'This booking is already closed.', ONLINE_BOOKING_OFF: 'Online booking is not open right now. Please call the clinic.', SLOT_TAKEN: 'That time was just taken. Please pick another.',  TOO_MANY_OPEN_BOOKINGS: 'You already have two upcoming bookings. Please call the clinic to book more.', TOO_MANY_REQUESTS: 'Too many tries. Please wait a few minutes.', TOO_LATE_TO_CANCEL: 'It is too close to the visit to change it online. Please call the clinic.',  CANNOT_CONFIRM: 'This booking cannot be confirmed now.', CANNOT_RESCHEDULE: 'This booking cannot be changed online. Please call the clinic.', CLINIC_NOT_FOUND: 'Clinic not found. Check the link.',
+  NEEDS_PRESCRIPTION: "This medicine needs a doctor's prescription. Open the patient's prescription, or remove it from the bill.",
+  MORE_THAN_PRESCRIBED: 'That is more than the doctor prescribed. Say why more is given.',
+  WINDOW_FULL: 'That time is full.', SESSION_NOT_FOUND: 'That window no longer exists. Refresh and pick again.', PAST_WINDOW: 'You cannot move a booking into the past.', NOT_MOVABLE: 'Only bookings that have not arrived can be moved.',  ALREADY_ARRIVED: 'This patient has already arrived.', SERVICE_NOT_FOUND: 'That visit type is not available.', SERVICE_NOT_OFFERED: 'That doctor does not offer this visit type.',  NOT_OPEN: 'This booking is already closed.', ONLINE_BOOKING_OFF: 'Online booking is not open right now. Please call the clinic.', SLOT_TAKEN: 'That time was just taken. Please pick another.',  TOO_MANY_OPEN_BOOKINGS: 'You already have two upcoming bookings. Please call the clinic to book more.', TOO_MANY_REQUESTS: 'Too many tries. Please wait a few minutes.', TOO_LATE_TO_CANCEL: 'It is too close to the visit to change it online. Please call the clinic.',  CANNOT_CONFIRM: 'This booking cannot be confirmed now.', CANNOT_RESCHEDULE: 'This booking cannot be changed online. Please call the clinic.', CLINIC_NOT_FOUND: 'Clinic not found. Check the link.',
   ALREADY_BOOKED: 'This patient is already booked in this window.',
   SAMPLE_ALREADY_LOADED: 'Test data is already loaded in this clinic.', LOAD_BASE_SAMPLE_FIRST: 'Load the sample patients first.',
   PHOTO_CONSENT_REQUIRED: "Record the patient's photo consent first.", SITTING_NOT_FOR_PATIENT: 'That procedure sitting belongs to another patient.', TOO_LARGE: 'That file is too large (10 MB at most).', UNSUPPORTED_TYPE: 'Only JPG, PNG, WebP and PDF files can be added.',
@@ -46,6 +60,10 @@ const MESSAGES: Record<string, string> = {
   CANNOT_GRANT: 'You can only give a role permissions you have yourself.',
   ROLE_IN_USE: 'Some staff still have this role. Change their role first.',
   UNKNOWN_ROLE: 'That role does not exist.',
+  OWNER_ONLY_GRANT: 'Only an owner can make someone an owner.', OWNER_ONLY_EDIT: 'Only an owner can change an owner’s account.', LAST_OWNER: 'The clinic must keep at least one active owner.',
+  NOT_A_TEST_CLINIC: 'Test data can only be used on a test clinic.', WRONG_CURRENT_PASSWORD: 'Your current password is not right.', SAME_PASSWORD: 'Pick a new password that is different from the old one.',
+  NO_VALUES: 'Enter at least one value, or attach the report.', PRICE_NEEDED: 'Set a price first.', DISCOUNT_ABOVE_CAP_NEEDS_OWNER: 'That discount is above the clinic’s limit. The owner must approve it.',
+  MORE_THAN_DUE: 'That is more than what is due.', MORE_THAN_FEE: 'That is more than the fee.', DAY_CLOSED: 'That day is closed. Ask the owner to reopen it.', ALREADY_REFUNDED: 'This was already refunded.',
   OWNER_IS_FIXED: 'The owner always has full access and cannot be changed.',
   CANNOT_DEACTIVATE_SELF: 'You cannot deactivate your own account.',
   NOT_FOUND: 'That record was not found. It may have been removed.',
@@ -93,6 +111,6 @@ export function errText(e: any): string {
 
 /** A list of patients leaving the app (print or download): recorded in the audit log first; refused for roles the owner has not allowed. */
 export const listOut = (what: string, count: number | undefined, act: () => void) =>
-  post('/audit/event', { kind: 'print', what, count }).then(act, (e) => alert(errText(e)));
+  post('/audit/event', { kind: 'print', what, count }).then(act, (e) => toast(errText(e), 'err'));
 /** A number the app may dial: hidden numbers (98••• ••345) cannot be called from this account. */
 export const dialable = (phone?: string | null) => !!phone && !phone.includes('•');

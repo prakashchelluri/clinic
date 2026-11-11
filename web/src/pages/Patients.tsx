@@ -41,7 +41,7 @@ export function Patients() {
       {id ? <Timeline key={id} id={id} /> : canMsg && view === 'sent' ? <SentMessages /> : <div className="space-y-3">
         <DataTable
           id="patients" exportName={`patients-${new Date().toISOString().slice(0, 10)}`} rows={list.data?.rows ?? []} rowKey={(p: any) => p.id}
-          server={{ total: list.data?.total ?? 0 }} loading={list.isLoading} onRow={(p: any) => nav(`/patients/${p.id}`, { viewTransition: true })}
+          server={{ total: list.data?.total ?? 0 }} loading={list.isLoading} error={list.error} onRetry={() => list.refetch()} onRow={(p: any) => nav(`/patients/${p.id}`, { viewTransition: true })}
           search={{ placeholder: 'Find a patient: name, phone or ID' }} sort={{ key: 'registered', dir: -1 }} filters={[SEEN, FLAG]}
           empty={{ title: 'No patients found', hint: q ? 'Try part of the name, the phone number or the patient number.' : undefined }}
           columns={[
@@ -73,7 +73,7 @@ function Timeline({ id }: { id: string }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const [flagging, setFlagging] = useState(false); const [filter, setFilter] = useState<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'>('all');
   const show = (...k: string[]) => filter === 'all' || k.includes(filter); const [paying, setPaying] = useState(false);
-  const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); } });
+  const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); }, onError: (e: any) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
   const { patient: p, encounters, recommendations, charges, outstandingPaise, visits, guardian, sharingPhone } = t.data;

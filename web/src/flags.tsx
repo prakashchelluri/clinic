@@ -5,13 +5,15 @@ import { Chip, Icon, Modal, toast, fmtDate } from './ui';
 
 export type Flags = { vip?: boolean; family?: boolean; careful?: { note: string; by: string; at: string } };
 
-/** VIP, Family and friends, Handle carefully: a chip beside the name wherever the patient appears. The reason shows on hover and on the record. */
+/** VIP, Family and friends, Handle carefully: a chip beside the name wherever the patient appears.
+ *  The reason is written on the chip (first 40 letters; the whole of it on hover and on the record), so touch screens see it too. */
 export function FlagChips({ flags }: { flags?: Flags | null }) {
   if (!flags) return null;
+  const why = flags.careful?.note ?? '';
   return <>
     {flags.vip && <Chip tone="sage">VIP</Chip>}
     {flags.family && <Chip tone="sky">Family and friends</Chip>}
-    {flags.careful && <span title={`Why: ${flags.careful.note}`}><Chip tone="amber">Handle carefully</Chip></span>}
+    {flags.careful && <span title={`Why: ${why}`}><Chip tone="amber" className="!max-w-[22rem] overflow-hidden"><span className="truncate">Handle carefully{why && <span className="font-semibold">: {why.length > 40 ? why.slice(0, 39) + '…' : why}</span>}</span></Chip></span>}
   </>;
 }
 
@@ -51,5 +53,5 @@ export function GuardianPick({ value, onChange, selfId }: { value: { id: string;
   const res = useQuery({ queryKey: ['guardian-pick', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
   if (value) return <div className="flex items-center gap-2 text-sm"><b>{value.fullName}</b><button type="button" className="underline text-muted" onClick={() => onChange(null)}>change</button></div>;
   return <div><input className="input" placeholder="Search the parent by name, phone or ID" value={q} onChange={(e) => setQ(e.target.value)} />
-    {q.trim().length >= 2 && <div className="mt-1 max-h-40 overflow-auto rounded-xl border border-line bg-white">{(res.data ?? []).filter((p: any) => p.id !== selfId).slice(0, 6).map((p: any) => <button key={p.id} type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-clay-soft/50" onClick={() => onChange({ id: p.id, fullName: p.fullName })}>{p.fullName} <span className="text-xs text-muted">{p.patientNo} · {p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></button>)}</div>}</div>;
+    {q.trim().length >= 2 && <div className="mt-1 max-h-40 overflow-auto rounded-xl border border-line bg-surface">{(res.data ?? []).filter((p: any) => p.id !== selfId).slice(0, 6).map((p: any) => <button key={p.id} type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-clay-soft/50" onClick={() => onChange({ id: p.id, fullName: p.fullName })}>{p.fullName} <span className="text-xs text-muted">{p.patientNo} · {p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></button>)}</div>}</div>;
 }

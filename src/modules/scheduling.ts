@@ -7,6 +7,24 @@ import { route } from '../lib/route.js';
 import { emit, sent, todayIn, nextNumber, addDays } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { newToken, queueMessage, planReminders, dropReminders, originOf, bookingSettings } from '../lib/booking.js';
+import { whatsappReady } from '../lib/messaging.js';
+
+/** Same rule as web/src/phone.ts: "+91 98765 43210" or "098765 43210" → "9876543210". */
+export function normPhone(raw: string): string {
+  const s = String(raw ?? '').trim();
+  let d = s.replace(/\D/g, '');
+  let intl = s.startsWith('+');
+  if (d.startsWith('00')) { d = d.slice(2); intl = true; }
+  if (d.startsWith('91') && (intl || d.length > 10)) d = d.slice(2);
+  d = d.replace(/^0+/, '');
+  return d.slice(0, 10);
+}
+/** Whether a patient message really went in the queue, so screens never say "the patient is told" when they are not. */
+export type WhatsApp = 'queued' | 'no_phone' | 'off' | 'not_connected' | 'none';
+export const msgOutcome = (m: { status: string; error?: string | null } | null | undefined): WhatsApp =>
+  !m ? 'none' : m.status === 'skipped' ? (m.error === 'no mobile number' ? 'no_phone' : 'off') : whatsappReady() ? 'queued' : 'not_connected';
+/** "Meena  R" and "meena r" are one name. */
+const sameName = sql`lower(regexp_replace(trim(${patient.fullName}), '\\s+', ' ', 'g'))`;
 
 export const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 export const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
@@ -325,7 +343,7 @@ export function schedulingRoutes(app: FastifyInstance) {
       .then((rows) => rows.map((r) => ({ ...r.a, patient: r.p, window: r.s, service: r.svc?.name ? r.svc : null })));
   });
 
-  const ApptIn = z.object({ sessionId: z.string().uuid(), patientId: z.string().uuid().optional(), newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^\d{10}$/).optional() }).optional(),
+  const ApptIn = z.object({ sessionId: z.string().uuid(), patientId: z.string().uuid().optional(), newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.preprocess((v) => (typeof v === 'string' ? normPhone(v) || undefined : v), z.string().regex(/^\d{10}$/).optional()) }).optional(),
     serviceId: z.string().uuid().nullable().optional(), note: z.string().trim().max(500).optional(), source: z.enum(['phone', 'walk_in', 'online', 'repeat']).default('phone'), overbook: z.boolean().default(false), idempotencyKey: z.string().max(100).optional(),
     repeat: z.object({ everyWeeks: z.number().int().min(1).max(12), count: z.number().int().min(2).max(26) }).optional(), notify: z.boolean().default(true) });
 
@@ -359,11 +377,17 @@ export function schedulingRoutes(app: FastifyInstance) {
     if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
     const svc = await serviceFor(tx, t, body.serviceId, s.practitionerId);
     const { w, full } = await takePlace(tx, req, s, svc?.places ?? 1, body.overbook);
-    if (body.patientId) {
-      const twice = await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, body.patientId), eq(appointment.sessionId, s.id), inArray(appointment.status, [...OPEN_STATUSES]))).limit(1);
+    let patientId = body.patientId; let reusedPatient = false;
+    // A "new" caller with the same mobile and the same name (case and spaces aside) is the patient we already have: no second record.
+    if (!patientId && body.newPatient?.phone) {
+      const nm = body.newPatient.fullName.trim().replace(/\s+/g, ' ').toLowerCase();
+      const same = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, body.newPatient.phone), sql`${sameName} = ${nm}`)).orderBy(asc(patient.createdAt)).limit(1);
+      if (same.length) { patientId = same[0].id; reusedPatient = true; }
+    }
+    if (patientId) {
+      const twice = await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), eq(appointment.sessionId, s.id), inArray(appointment.status, [...OPEN_STATUSES]))).limit(1);
       if (twice.length) throw new HttpError(409, 'ALREADY_BOOKED');
     }
-    let patientId = body.patientId;
     if (!patientId) {
       if (!body.newPatient) throw new HttpError(400, 'PATIENT_REQUIRED');
       const num = await nextNumber(tx, t, 'patient_no', 'tenant');
@@ -391,9 +415,9 @@ export function schedulingRoutes(app: FastifyInstance) {
       }
     }
     const cfg = bookingSettings((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings);
-    if (body.notify && cfg.messages.sendConfirmation) await queueMessage(tx, t, row.id, 'confirmation', origin);
+    const conf = body.notify && cfg.messages.sendConfirmation ? await queueMessage(tx, t, row.id, 'confirmation', origin) : null;
     await planReminders(tx, t, row.id, origin);
-    return { ...row, seriesId: body.repeat ? row.id : null, series: body.repeat ? series : undefined, window: { day: s.day, startTime: s.startTime, endTime: s.endTime }, arriveEarlyMinutes: cfg.arriveEarlyMinutes, capacity: { allocated: w.allocated + (svc?.places ?? 1), limit: w.effectiveCapacity } };
+    return { ...row, whatsapp: msgOutcome(conf), reusedPatient, seriesId: body.repeat ? row.id : null, series: body.repeat ? series : undefined, window: { day: s.day, startTime: s.startTime, endTime: s.endTime }, arriveEarlyMinutes: cfg.arriveEarlyMinutes, capacity: { allocated: w.allocated + (svc?.places ?? 1), limit: w.effectiveCapacity } };
   });
 
   /** Change status, move to another window (drag), or edit the note. Cancelling can take the rest of a repeat series with it. */
@@ -412,7 +436,8 @@ export function schedulingRoutes(app: FastifyInstance) {
       if (!(OPEN_STATUSES as readonly string[]).includes(cur.status)) throw new HttpError(409, 'NOT_MOVABLE', { status: cur.status });
       const s = await tx.select().from(session).where(and(eq(session.id, body.sessionId), eq(session.tenantId, t))).for('update').then((r) => r[0]);
       if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
-      if (s.day < todayIn(req.ctx.timezone)) throw new HttpError(409, 'PAST_WINDOW');
+      const today = todayIn(req.ctx.timezone);
+      if (s.day < today || (s.day === today && s.endTime <= nowHHMM(req.ctx.timezone))) throw new HttpError(409, 'PAST_WINDOW');
       const svc = cur.serviceId ? await tx.select().from(service).where(eq(service.id, cur.serviceId)).then((r) => r[0]) : null;
       const { full } = await takePlace(tx, req, s, svc?.places ?? 1, body.overbook);
       changes.sessionId = s.id; changes.overbooked = full; moved = true;
@@ -427,7 +452,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     await emit(tx, req.ctx, moved ? 'appointment.moved' : 'appointment.updated', 'appointment', row.id, { ...body, from: moved ? cur.sessionId : undefined });
 
     const closed = ['cancelled', 'no_show'].includes(row.status);
-    let alsoCancelled = 0;
+    let alsoCancelled = 0; let msg: any = null;
     if (closed) {
       await dropReminders(tx, t, [row.id]);
       if (row.status === 'cancelled' && body.series === 'future' && cur.seriesId) {
@@ -438,12 +463,12 @@ export function schedulingRoutes(app: FastifyInstance) {
         if (ids.length) { await tx.update(appointment).set({ status: 'cancelled', cancelReason: body.cancelReason ?? 'series cancelled' }).where(inArray(appointment.id, ids)); await dropReminders(tx, t, ids); }
         alsoCancelled = ids.length;
       }
-      if (row.status === 'cancelled' && body.notify && (OPEN_STATUSES as readonly string[]).includes(cur.status)) await queueMessage(tx, t, row.id, 'cancelled', origin);
+      if (row.status === 'cancelled' && body.notify && (OPEN_STATUSES as readonly string[]).includes(cur.status)) msg = await queueMessage(tx, t, row.id, 'cancelled', origin);
     } else if (moved || body.status === 'booked' || body.status === 'confirmed') {
       await planReminders(tx, t, row.id, origin);
-      if (moved && body.notify) await queueMessage(tx, t, row.id, 'moved', origin);
+      if (moved && body.notify) msg = await queueMessage(tx, t, row.id, 'moved', origin);
     }
-    return { ...row, alsoCancelled };
+    return { ...row, alsoCancelled, whatsapp: msgOutcome(msg) };
   });
 
   /** Send a reminder now (reception's "nudge"). */
@@ -452,7 +477,8 @@ export function schedulingRoutes(app: FastifyInstance) {
     const cur = await tx.select().from(appointment).where(and(eq(appointment.id, id), eq(appointment.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
     if (!(OPEN_STATUSES as readonly string[]).includes(cur.status)) throw new HttpError(409, 'NOT_OPEN');
-    return queueMessage(tx, t, id, 'reminder', originOf(req));
+    const m = await queueMessage(tx, t, id, 'reminder', originOf(req));
+    return { ...m, whatsapp: msgOutcome(m) };
   });
 
   /** One booking with everything the drawer shows: patient history, visit type, series position, messages. */

@@ -4,14 +4,16 @@ import { post, qc, ApiError } from '../api';
 import { Icon } from '../ui';
 import { useTheme } from '../App';
 
-const DEMO = [
+/** Demo accounts show only on a development build, or a demo build made with VITE_DEMO_LOGIN=1. Never on a real clinic's sign-in. */
+const SHOW_DEMO = import.meta.env.DEV || import.meta.env.VITE_DEMO_LOGIN === '1';
+const DEMO = SHOW_DEMO ? [
   ['owner@demo.clinic', 'Owner and doctor', 'Everything, with finance'],
   ['reception@demo.clinic', 'Reception', 'Front desk and booking'],
   ['procedures@demo.clinic', 'Coordinator', 'Procedures and rooms'],
   ['assistant@demo.clinic', 'Junior doctor', 'Screening before the doctor'],
   ['pharmacy@demo.clinic', 'Pharmacy', 'Dispense and bill'],
-  ['superadmin@cubott.in', 'CUBOTT admin', 'Onboard clinics'],
-];
+  ...(import.meta.env.DEV ? [['superadmin@cubott.in', 'CUBOTT admin', 'Onboard clinics']] : []), // the platform account: development only
+] : [];
 
 // Role colours come from the app palette: amber, the green action, sky, and ink for admin. Top face = the pastel tile.
 const ROLE = {
@@ -75,7 +77,7 @@ const STEPS: [string, string, string, string][] = [
 export function Login() {
   useTheme(); // the login follows the light or dark choice kept on this device
   const nav = useNavigate();
-  const [f, setF] = useState({ email: '', password: 'demo1234', tenant: '' });
+  const [f, setF] = useState({ email: '', password: SHOW_DEMO ? 'demo1234' : '', tenant: '' }); // never a pre-filled password outside a demo build
   const [clinics, setClinics] = useState<{ slug: string; name: string }[] | null>(null);
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   const sp = new URLSearchParams(location.search);
@@ -87,6 +89,7 @@ export function Login() {
     catch (x: any) {
       if (x instanceof ApiError && x.body.code === 'CHOOSE_CLINIC') setClinics(x.body.clinics);
       else if (x instanceof ApiError && x.body.code === 'IP_NOT_ALLOWED') setBlocked(x.body.ip ?? '');
+      else if (!(x instanceof ApiError)) setErr("Can't reach the server. Check the internet and try again."); // offline is not a wrong password
       else setErr(x instanceof ApiError && x.body.code === 'TOO_MANY_ATTEMPTS' ? `Too many wrong attempts. Try again in ${Math.ceil((x.body.retryAfterSeconds ?? 600) / 60)} minutes.` : 'That email or password is not right.');
     } finally { setBusy(false); }
   };
@@ -132,7 +135,7 @@ export function Login() {
           <button className="btn btn-primary w-full !py-3.5 !text-[15px]" disabled={busy || !f.email}>{busy ? 'Signing in…' : 'Take my step'}<Icon name="chevR" /></button>
           <p className="text-[12.5px] leading-relaxed text-muted">Auto sign-out after a quiet spell. Every record opened is logged against your role.</p>
 
-          <div className="mt-3">
+          {DEMO.length > 0 && <div className="mt-3">
             <div className="label">Demo accounts · password demo1234</div>
             <div className="grid grid-cols-2 gap-2 stagger">
               {DEMO.map(([e, role, hint], i) => (
@@ -140,7 +143,7 @@ export function Login() {
                   <div className="text-sm font-semibold">{role}</div><div className="text-[11.5px] text-muted mt-0.5">{hint}</div>
                 </button>))}
             </div>
-          </div>
+          </div>}
         </form>
       </main>
     </div>

@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, api, qc, errText, post } from '../api';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast, Filter, usePageSearch } from '../ui';
+import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast, Filter, usePageSearch, ask, money } from '../ui';
 
 const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Junior doctor', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const IP_RE = /^(\d{1,3}\.){3}\d{1,3}$|^[0-9a-f:]{2,39}$/i;
+/** Same rule as the server: one address, or an IPv4 range from–to. */
+const v4 = (ip: string) => { const p = ip.trim().replace(/^::ffff:/, '').split('.').map(Number); return p.length === 4 && p.every((n) => Number.isInteger(n) && n >= 0 && n <= 255) ? ((p[0] * 256 + p[1]) * 256 + p[2]) * 256 + p[3] : null; };
+const covers = (ip: string, list: { from: string; to?: string | null }[]) => list.some((x) => { if (!x.to) return x.from.trim() === ip.trim(); const n = v4(ip), lo = v4(x.from), hi = v4(x.to); return n !== null && lo !== null && hi !== null && n >= Math.min(lo, hi) && n <= Math.max(lo, hi); });
 
 /** Settings → Privacy & access (owner only): work only from the clinic, sign out when idle, phone numbers, lists of patients. */
 export function PrivacyTab() {
@@ -20,6 +23,18 @@ export function PrivacyTab() {
   const toggle = (list: string[], v: string) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const allow = (label: string, from: string, to?: string) => put({ ipLock: { allowed: [...s.ipLock.allowed, { label, from, to: to || null }] } });
   const addBad = adding && (!adding.label.trim() || !IP_RE.test(adding.from.trim()) || (adding.range && !/^(\d{1,3}\.){3}\d{1,3}$/.test(adding.to.trim())));
+  // Turning the lock on is asked first, and never done while this computer is outside the list; removing this computer's address while it is on is refused.
+  const setLock = async () => {
+    if (s.ipLock.enabled) return put({ ipLock: { enabled: false } });
+    if (!d.myIpAllowed) return toast("Add this computer's address first. Otherwise staff using this computer are stopped as soon as it is on.", 'err');
+    if (await ask({ title: 'Work only from the clinic?', body: `From now on staff can sign in and use the app only from the addresses in the list (${s.ipLock.allowed.length}). Staff working from home or a phone network are stopped until you allow them. The owner and admins can still work from anywhere.`, confirmLabel: 'Turn it on' })) put({ ipLock: { enabled: true } });
+  };
+  const removeAddress = async (i: number) => {
+    const left = s.ipLock.allowed.filter((_: any, j: number) => j !== i); const a = s.ipLock.allowed[i];
+    if (s.ipLock.enabled && covers(d.myIp, s.ipLock.allowed) && !covers(d.myIp, left)) return toast(`"${a.label}" is this computer's address. Turn off "Work only from the clinic" first, or add another address that covers this computer.`, 'err');
+    if (s.ipLock.enabled && !(await ask({ title: `Remove "${a.label}"?`, body: 'Staff on this connection are stopped at their next click.', confirmLabel: 'Remove' }))) return;
+    put({ ipLock: { allowed: left } });
+  };
   const staff = d.users.filter((u: any) => !u.roles.some((r: string) => r === 'owner' || r === 'admin'));
 
   return (
@@ -27,7 +42,7 @@ export function PrivacyTab() {
       <div className="space-y-4">
         <section className="card-flat p-5">
           <div className="flex items-center gap-3"><b className="text-[16px]">Work only from the clinic</b>
-            <button role="switch" aria-checked={s.ipLock.enabled} aria-label="Work only from the clinic" disabled={save.isPending} onClick={() => put({ ipLock: { enabled: !s.ipLock.enabled } })}
+            <button role="switch" aria-checked={s.ipLock.enabled} aria-label="Work only from the clinic" disabled={save.isPending} onClick={setLock}
               className={`relative ml-auto h-6 w-11 rounded-full transition-colors ${s.ipLock.enabled ? 'bg-sage' : 'bg-ink/20'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${s.ipLock.enabled ? 'left-[22px]' : 'left-0.5'}`} /></button></div>
           <div className="mt-1 text-sm text-muted">Staff can sign in and use the app only from the clinic's internet. The owner and admins can work from anywhere.</div>
           <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2.5 text-sm ${d.myIpAllowed ? 'bg-sage-soft text-sage' : 'bg-paper'}`}>
@@ -38,7 +53,7 @@ export function PrivacyTab() {
           {s.ipLock.allowed.length === 0 ? <div className="py-2 text-sm text-muted">None yet. Add the clinic's address before turning this on.</div> : s.ipLock.allowed.map((a: any, i: number) => (
             <div key={i} className="flex flex-wrap items-center gap-3 border-t border-line/60 py-2.5 text-sm first:border-t-0">
               <b className="min-w-0 flex-1">{a.label}</b><span className="font-mono text-[13px]">{a.from}{a.to ? ` – ${a.to}` : ''}</span>
-              <button className="btn btn-sm" disabled={save.isPending} aria-label={`Remove ${a.label}`} onClick={() => put({ ipLock: { allowed: s.ipLock.allowed.filter((_: any, j: number) => j !== i) } })}>Remove</button>
+              <button className="btn btn-sm" disabled={save.isPending} aria-label={`Remove ${a.label}`} onClick={() => removeAddress(i)}>Remove</button>
             </div>))}
           <div className="mt-3 flex flex-wrap gap-2">
             {!d.myIpAllowed && <button className="btn btn-primary btn-sm" disabled={save.isPending} onClick={() => allow('Clinic internet', d.myIp)}><Icon name="plus" className="h-3.5 w-3.5" />Add this computer's address</button>}
@@ -172,12 +187,13 @@ export function AuditLog() {
 function Changes({ before, after }: { before: any; after: any }) {
   if (!before && !after) return null;
   const keys = [...new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})])];
-  const show = (v: any) => (v === undefined || v === null || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  // amounts are stored in paise; an owner reads ₹500, never 50000
+  const show = (v: any, k = '') => (v === undefined || v === null || v === '' ? '—' : /Paise$/.test(k) && typeof v === 'number' ? money(v) : typeof v === 'object' ? JSON.stringify(v) : String(v));
   return (
     <div className="overflow-x-auto rounded-xl border border-line"><table className="table">
       <thead><tr><th>Field</th>{before && <th>Before</th>}<th>{before ? 'After' : 'Sent'}</th></tr></thead>
-      <tbody>{keys.map((k) => { const b = before?.[k], a = after?.[k]; const changed = before && show(b) !== show(a); return (
-        <tr key={k}><td className="font-semibold">{k}</td>{before && <td className="max-w-[260px] break-words text-muted">{show(b)}</td>}<td className={`max-w-[300px] break-words ${changed ? 'font-semibold text-ink' : ''}`}>{show(a)}</td></tr>); })}</tbody>
+      <tbody>{keys.map((k) => { const b = before?.[k], a = after?.[k]; const changed = before && show(b, k) !== show(a, k); return (
+        <tr key={k}><td className="font-semibold">{k.replace(/Paise$/, '')}</td>{before && <td className="max-w-[260px] break-words text-muted">{show(b, k)}</td>}<td className={`max-w-[300px] break-words ${changed ? 'font-semibold text-ink' : ''}`}>{show(a, k)}</td></tr>); })}</tbody>
     </table></div>
   );
 }

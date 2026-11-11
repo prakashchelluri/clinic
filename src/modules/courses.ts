@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, sql, inArray } from 'drizzle-orm';
+import { and, desc, eq, sql, inArray, notInArray } from 'drizzle-orm';
 import { course, charge, payment, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -10,6 +10,7 @@ import { assertDayOpen } from './dayclose.js';
 
 type Course = typeof course.$inferSelect;
 const sum = (rows: { n: number }[]) => rows[0]?.n ?? 0;
+const VOID = ['cancelled', 'waived']; // charges that no longer count
 
 /** Where the course stands in money: what was paid ahead, what sittings used, what is left to give back. */
 async function standing(tx: Tx, t: string, c: Course) {
@@ -17,7 +18,7 @@ async function standing(tx: Tx, t: string, c: Course) {
   const advancePaise = pays.filter((p) => p.amount > 0).reduce((s, p) => s + p.amount, 0);
   const refundedPaise = -pays.filter((p) => p.amount < 0).reduce((s, p) => s + p.amount, 0);
   const sittingCharges = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.courseId, c.id)));
-  const drawnPaise = sittingCharges.filter((x) => x.prepaid).reduce((s, x) => s + x.amountPaise, 0);
+  const drawnPaise = sittingCharges.filter((x) => x.prepaid && !VOID.includes(x.status)).reduce((s, x) => s + x.amountPaise, 0); // a cancelled sitting gives its share back to the advance
   const paidOnDayPaise = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, sittingCharges.length ? sittingCharges.map((x) => x.id) : ['00000000-0000-4000-8000-000000000000']))));
   const done = sum(await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))));
   const perSittingPaise = Math.round(c.totalPaise / c.sittings);
@@ -26,21 +27,50 @@ async function standing(tx: Tx, t: string, c: Course) {
     stillToPayPaise: Math.max(0, c.totalPaise - (advancePaise - refundedPaise) - paidOnDayPaise) };
 }
 
-/** A sitting was done: invoice it, from the advance when there is enough, otherwise due on the day. One invoice per sitting. */
-export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommendationId: string; patientId: string }) {
+/** A sitting was done: invoice it, from the advance when there is enough, otherwise due on the day. One invoice per sitting.
+ *  With no agreed course it is still billed, at the procedure's list price, so a done sitting never goes out unbilled. */
+export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommendationId: string; patientId: string; procedureId?: string | null; sittingNo?: number }) {
   const t = ctx.tenantId;
+  if (await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID))).then((r) => r.length)) return;
   const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
-  if (!c) return;
-  if (await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id))).then((r) => r.length)) return;
+  if (!c) {
+    const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
+    if (!proc?.pricePaise) return; // no price anywhere: nothing to bill
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc.name} sitting ${ps.sittingNo ?? 1}`, amountPaise: proc.pricePaise, taxRateBp: proc.taxRateBp, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
+    await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: proc.pricePaise, listPrice: true });
+    return;
+  }
   const st = await standing(tx, t, c);
   const n = st.doneSittings; const isLast = n >= c.sittings;
-  const before = await tx.select({ s: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.courseId, c.id)));
+  const before = await tx.select({ s: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.courseId, c.id), notInArray(charge.status, VOID)));
   const amount = isLast ? Math.max(0, c.totalPaise - (before[0]?.s ?? 0)) : st.perSittingPaise; // the last sitting takes the rounding
   if (amount <= 0) return;
   const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.name) : null;
   const prepaid = st.unusedPaise >= amount;
   const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}`, amountPaise: amount, courseId: c.id, sessionId: ps.id, prepaid, status: prepaid ? 'paid' : 'due' }).returning();
   await emit(tx, ctx, prepaid ? 'course.sitting_drawn' : 'course.sitting_due', 'charge', row.id, { courseId: c.id, amountPaise: amount });
+}
+
+/** A done sitting was undone (cancelled, or moved back): its charge is cancelled so a rebooked sitting is not billed twice. A prepaid one goes back to the advance.
+ *  A charge the patient already paid at the desk is left alone: that needs a refund from the invoice menu. */
+export async function reverseSitting(tx: Tx, ctx: Ctx, sessionId: string, reason: string) {
+  const rows = await tx.select().from(charge).where(and(eq(charge.tenantId, ctx.tenantId), eq(charge.sessionId, sessionId), notInArray(charge.status, VOID)));
+  for (const ch of rows) {
+    const paid = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, ch.id)));
+    if (paid > 0) continue;
+    await tx.update(charge).set({ status: 'cancelled', adjustmentReason: reason, adjustedBy: ctx.userId }).where(eq(charge.id, ch.id));
+    await emit(tx, ctx, 'charge.cancelled', 'charge', ch.id, { reason, amountPaise: ch.amountPaise, sessionId });
+  }
+}
+
+/** What a sitting means for the patient's money on the day: prepaid from the course, due, already paid, or no price at all. */
+export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommendationId: string; procedureId: string | null }): Promise<{ kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number }> {
+  const ch = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID))).then((r) => r[0]);
+  if (ch) return { kind: ch.prepaid ? 'prepaid' : ch.status === 'paid' ? 'paid' : 'due', amountPaise: ch.amountPaise };
+  const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
+  if (c) { const st = await standing(tx, t, c); return { kind: st.unusedPaise >= st.perSittingPaise ? 'prepaid' : 'due', amountPaise: st.perSittingPaise }; }
+  const price = ps.procedureId ? await tx.select({ p: procedureCatalog.pricePaise }).from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]?.p ?? null) : null;
+  return price ? { kind: 'due', amountPaise: price } : { kind: 'none', amountPaise: 0 };
 }
 
 export function courseRoutes(app: FastifyInstance) {

@@ -9,7 +9,15 @@ import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
-import { drawSitting } from './courses.js';
+import { drawSitting, reverseSitting, sittingMoney } from './courses.js';
+
+/** True when the patient has never had this procedure started before: the first sitting is when the consent form is signed. */
+async function firstOfProcedure(tx: Tx, t: string, ps: { id: string; patientId: string; procedureId: string | null }) {
+  if (!ps.procedureId) return false;
+  const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, ps.patientId), eq(procedureSession.procedureId, ps.procedureId),
+    sql`${procedureSession.state} in ('in_progress','completed')`, sql`${procedureSession.id} <> ${ps.id}`));
+  return n === 0;
+}
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -70,7 +78,8 @@ export function procedureRoutes(app: FastifyInstance) {
     const endTime = toHHMM(toMin(body.startTime) + body.minutes + (proc?.bufferMinutes ?? 0));
     const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId);
     if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
-    const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), sql`${procedureSession.state} in ('completed')`));
+    // the next number after every sitting still on the plan (done or booked ahead), so two booked ahead never share a number
+    const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), sql`${procedureSession.state} <> 'cancelled'`));
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
       sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes }).returning();
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${n + 1}`, procedureSessionId: ps.id });
@@ -136,7 +145,10 @@ export function procedureRoutes(app: FastifyInstance) {
       .then(async (rows) => {
         const ids = [...new Set(rows.map((r) => r.ps.supervisorId).filter(Boolean))] as string[];
         const names = new Map((ids.length ? await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(inArray(practitioner.id, ids)) : []).map((x) => [x.id, x.name]));
-        return rows.map((r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor, supervisor: r.ps.supervisorId ? names.get(r.ps.supervisorId) ?? null : null, of: r.of, requiresMainDoctor: r.mainDoctor, requiresReview: r.review }));
+        // detail=1 (the Schedule tab): what the patient pays on the day and whether this is the first sitting (consent), per row
+        const fees = can(req.perms, 'fees.see'); const detail = !!q.detail;
+        return Promise.all(rows.map(async (r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor, supervisor: r.ps.supervisorId ? names.get(r.ps.supervisorId) ?? null : null, of: r.of, requiresMainDoctor: r.mainDoctor, requiresReview: r.review,
+          ...(detail ? { money: fees && !['cancelled', 'postponed'].includes(r.ps.state) ? await sittingMoney(tx, t, r.ps) : null, firstSitting: r.ps.state === 'confirmed' ? await firstOfProcedure(tx, t, r.ps) : false } : {}) })));
       });
   });
 
@@ -155,7 +167,8 @@ export function procedureRoutes(app: FastifyInstance) {
     const sittings = await tx.select({ id: procedureSession.id, sittingNo: procedureSession.sittingNo, day: procedureSession.day, startTime: procedureSession.startTime, state: procedureSession.state, notes: procedureSession.notes, outcome: procedureSession.outcome, stateReason: procedureSession.stateReason })
       .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, r.ps.recommendationId))).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
     const supervisor = r.ps.supervisorId ? await tx.select({ name: practitioner.name }).from(practitioner).where(eq(practitioner.id, r.ps.supervisorId)).then((x) => x[0]?.name ?? null) : null;
-    return { ...r.ps, patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor,
+    const money = can(req.perms, 'fees.see') && !['cancelled', 'postponed'].includes(r.ps.state) ? await sittingMoney(tx, t, r.ps) : null;
+    return { ...r.ps, patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor, money, firstSitting: r.ps.state === 'confirmed' ? await firstOfProcedure(tx, t, r.ps) : false,
       plan: r.rec ? { notes: r.rec.notes, sittings: r.rec.sittings, plannedOn: enc?.at ?? null, diagnosis: names((enc?.data as any)?.assessment?.diagnosis) } : null, sittings };
   });
 
@@ -187,12 +200,13 @@ export function procedureRoutes(app: FastifyInstance) {
   /** State changes keep history: postponing records the reason and frees the doctor's time; the course stays open. */
   // The desk changes any state; a doctor (from the Calendar's sitting drawer) only starts a scheduled sitting and finishes one in progress.
   route(app, 'patch', '/procedure-sessions/:id', null, async (req, tx) => {
-    const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional() }).parse(req.body);
+    // consent: on starting, whether the patient signed the procedure consent form (asked on the first sitting of a procedure)
+    const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional(), consent: z.boolean().optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const cur = await tx.select({ state: procedureSession.state }).from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
     if (!can(req.perms, 'worklist.write')) {
       if (!can(req.perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:worklist.write');
-      const cur = await tx.select({ state: procedureSession.state }).from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
-      if (!cur) throw new HttpError(404, 'NOT_FOUND');
       const from = { in_progress: 'confirmed', completed: 'in_progress' }[body.state as string];
       if (!from) throw new HttpError(403, 'FORBIDDEN:worklist.write');
       if (cur.state !== from) throw new HttpError(409, 'NOT_CHANGEABLE', { state: cur.state });
@@ -208,7 +222,8 @@ export function procedureRoutes(app: FastifyInstance) {
       await tx.update(recommendation).set({ status: newStatus, contactLog: log }).where(eq(recommendation.id, rec.id));
     }
     if (body.state === 'completed') await drawSitting(tx, req.ctx, ps);
-    await emit(tx, req.ctx, `procedure_session.${body.state}`, 'procedure_session', id, { reason: body.reason });
+    else if (cur.state === 'completed') await reverseSitting(tx, req.ctx, id, body.state === 'cancelled' ? 'Sitting cancelled' : `Sitting moved back to ${body.state.replace('_', ' ')}`);
+    await emit(tx, req.ctx, `procedure_session.${body.state}`, 'procedure_session', id, { reason: body.reason, ...(body.state === 'in_progress' && body.consent !== undefined ? { consent: body.consent } : {}) });
     return ps;
   });
 }

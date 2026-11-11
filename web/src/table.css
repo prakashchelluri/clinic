@@ -6,7 +6,7 @@
 .dt-tabs button { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0; border: 0; background: none; font-size: 13.5px; font-weight: 600; color: var(--color-muted); white-space: nowrap; cursor: pointer; }
 .dt-tabs button:hover, .dt-tabs button.on { color: var(--color-ink); }
 .dt-tabs button.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--color-clay); animation: tab-line .25s var(--ease); }
-.dt-tabs .c { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 6px; background: var(--color-surface-2); color: var(--color-ink-2); font-size: 11px; font-weight: 700; }
+.dt-tabs .c { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 6px; background: var(--color-surface-2); color: var(--color-ink-2); font-size: 12px; font-weight: 700; }
 .dt-tabs button.on .c { background: var(--color-clay-soft); color: var(--color-clay-ink); }
 
 .dt-tool { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 20px; border-bottom: 1px solid var(--color-line); min-height: 52px; box-sizing: border-box; }
@@ -30,7 +30,7 @@
 .dt-bulk .dt-link { color: var(--color-clay-soft); }
 
 .dt-table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
-.dt-table th { background: var(--color-surface-2); padding: 10px 12px; border-bottom: 1px solid var(--color-line); text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--color-muted); white-space: nowrap; }
+.dt-table th { background: var(--color-surface-2); padding: 10px 12px; border-bottom: 1px solid var(--color-line); text-align: left; font-size: 12.5px; font-weight: 700; letter-spacing: .02em; text-transform: none; color: var(--color-muted); white-space: nowrap; }
 .dt-table th button { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; cursor: pointer; }
 .dt-table th button:hover, .dt-table th button.on { color: var(--color-ink); }
 .dt-table td { padding: 9px 12px; border-bottom: 1px solid var(--color-line); vertical-align: middle; }
@@ -69,6 +69,13 @@
   .dt-table td.dt-act > * { justify-content: flex-start; }
   .dt-table td.dt-act > * > :first-child { flex: 1; justify-content: center; height: 38px; }
   .dt-tool, .dt-foot, .dt-bulk { padding-left: 16px; padding-right: 16px; }
+}
+/* touch screens at any width: 44 px targets for the filter tokens, buttons, pager and row ticks */
+@media (pointer: coarse) {
+  .dt-tok, .dt-ghost, .dt-select { height: 44px; }
+  .dt-pg { min-width: 44px; height: 44px; }
+  .dt-tok .x { padding: 0 14px; }
+  .dt-cb { width: 22px; height: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .dt-tabs button.on::after { animation: none; } }
 @media print { .dt-tool, .dt-foot, .dt-tabs, .dt-table .chk { display: none; } }

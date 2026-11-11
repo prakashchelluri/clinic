@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
 import { type PatientFlags, appointment, callback, patient, practitioner, procedureCatalog, procedureSession, session, visit, encounter, prescriptionItem, recommendation, charge, payment } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
@@ -32,6 +32,9 @@ export function withHistory(sentH: any, stored: any, by: string) {
   return { history: h, allergies: allergyText(h) };
 }
 
+/** Diagnoses are for clinical roles (doctor, junior doctor). Reception, pharmacy and coordinators do not get them. */
+export const clinical = (perms: string[]) => can(perms, 'encounter.complete') || can(perms, 'encounter.intake');
+
 export function patientRoutes(app: FastifyInstance) {
   // Search by phone digits, name prefix or patient number. Family members sharing a phone come back as separate rows.
   route(app, 'get', '/patients', 'patient.read', async (req, tx) => {
@@ -43,7 +46,7 @@ export function patientRoutes(app: FastifyInstance) {
     // Without ?page= it is the quick search other screens use: the newest 25 matches, as a plain list.
     const pg = z.object({ page: z.coerce.number().int().min(1).optional(), size: z.coerce.number().int().min(1).max(100).default(25), sort: z.enum(['new', 'name', 'name_desc', 'old']).default('new'),
       seen: z.enum(['', 'month', 'quarter', 'year_plus', 'never']).default(''), flag: z.enum(['', 'vip', 'family', 'careful']).default('') }).parse(req.query);
-    const conds: any[] = [where];
+    const conds: any[] = [where, ne(patient.patientNo, 'WALKIN')]; // the pharmacy's shared walk-in record is not a patient
     const lastVisit = sql`(select max(e.created_at) from encounter e where e.patient_id = ${patient.id} and e.tenant_id = ${patient.tenantId})`;
     if (pg.seen === 'never') conds.push(sql`${lastVisit} is null`);
     if (pg.seen === 'month') conds.push(sql`${lastVisit} >= now() - interval '30 days'`);
@@ -57,8 +60,9 @@ export function patientRoutes(app: FastifyInstance) {
     const encs = rows.length ? await tx.select({ patientId: encounter.patientId, at: encounter.createdAt, data: encounter.data }).from(encounter)
       .where(and(eq(encounter.tenantId, req.ctx.tenantId), inArray(encounter.patientId, rows.map((r) => r.id)))).orderBy(desc(encounter.createdAt)) : [];
     const names = (x: any) => (Array.isArray(x) ? x.map((d) => (typeof d === 'string' ? d : d?.name)).filter(Boolean).join(', ') : '');
+    const dx = clinical(req.perms);
     const out = rows.map((p) => { const e = encs.find((x) => x.patientId === p.id); const d: any = e?.data ?? {};
-      return { ...p, lastVisitAt: e?.at ?? null, mainProblem: names(d.assessment?.diagnosis) || names(d.complaint?.chief_complaint) || null }; });
+      return { ...p, lastVisitAt: e?.at ?? null, mainProblem: dx ? names(d.assessment?.diagnosis) || names(d.complaint?.chief_complaint) || null : null }; });
     if (!paged) return out;
     const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(...conds));
     return { rows: out, total: n };
@@ -140,6 +144,6 @@ export function patientRoutes(app: FastifyInstance) {
     const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
     // roles without 'See fees and payments' see no prices, payments or amounts due
     const fees = can(req.perms, 'fees.see');
-    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
+    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, ...(clinical(req.perms) ? {} : { data: { ...(e.data as any), assessment: undefined } }), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
   });
 }

@@ -3,16 +3,18 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, errText, fmtTime } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, fmtDate, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, ask, fmtDate, toast } from '../ui';
+import { LoadError } from '../procBoard';
 import { openViewer } from '../viewer';
 import { saveLabValues, findParam, flagFor, rangeText, isOut, type LabDraft } from '../labs';
 
-type Test = { id: string; name: string; params: string[]; expectedOn: string | null; receivedAt: string | null; reviewedAt: string | null; late: boolean; called: string | null; docs: any[] };
-type Order = { key: string; encounterId: string; orderNo: number; patient: { id: string; fullName: string; patientNo: string; phone: string | null }; doctor: string | null; tests: Test[]; state: 'pending' | 'partial' | 'ready' | 'reviewed' | 'doctor_call' | 'closed'; got: number;
+type Val = { id: string; test: string; value: string; unit: string | null; low: number | null; high: number | null; flag: 'low' | 'normal' | 'high' | 'abnormal' | null };
+type Test = { id: string; name: string; params: string[]; expectedOn: string | null; receivedAt: string | null; reviewedAt: string | null; late: boolean; called: string | null; docs: any[]; values?: Val[] };
+type Order = { key: string; encounterId: string; orderNo: number; patient: { id: string; fullName: string; patientNo: string; phone: string | null }; doctor: string | null; tests: Test[]; state: 'pending' | 'partial' | 'ready' | 'reviewed' | 'doctor_call' | 'closed'; got: number; abnormal?: number;
   outcome: string | null; note: string | null; reviewedBy: string | null; informedHow: string | null; late: string[]; nextDue: string | null };
 type Tab = 'review' | 'collect' | 'explain' | 'done';
 
-const OUTCOMES: [string, string][] = [['normal', 'Normal · explain to the patient'], ['change_medicines', 'Change medicines'], ['needs_visit', 'Needs a visit'], ['will_call', 'I’ll call the patient']];
+const OUTCOMES: [string, string][] = [['normal', 'Normal · explain to the patient'], ['change_medicines', 'Abnormal · change medicines'], ['needs_visit', 'Abnormal · needs a visit'], ['will_call','I’ll call the patient']];
 const OUTCOME_SAYS: Record<string, string> = { normal: 'Normal. Explain to the patient.', change_medicines: 'Medicines are changing. Explain and book a visit if needed.', needs_visit: 'Needs a visit. Book one and explain.', will_call: 'The doctor will call the patient.' };
 const SHORT: Record<string, string> = { normal: 'reviewed: normal', change_medicines: 'medicines changed', needs_visit: 'needs a visit', will_call: 'the doctor phoned' };
 const HOW: [string, string][] = [['in_person', 'In person'], ['phone', 'Phone'], ['whatsapp', 'WhatsApp']];
@@ -45,12 +47,16 @@ function ReportDialog({ order, testId, onClose }: { order: Order; testId: string
       for (const f of files) { const x = await prepare(f); const d: any = await post('/documents', { patientId: order.patient.id, encounterId: order.encounterId, recommendationIds: ids, kind: 'report', note: note.trim() || undefined, ...x }); firstDoc ??= d?.id ?? null; }
       // the numbers the doctor will compare, typed from the page in hand; the pages are saved either way
       let saved = 0; for (const t of ticked) saved += (await saveLabValues({ patientId: order.patient.id, encounterId: order.encounterId, recommendationId: t.id, documentId: firstDoc, rows: rowsFor(t) })).length;
+      // values with no file (read out on the phone, a WhatsApp text): the values mark the tests received
+      if (!files.length) await post('/orders/received', { ids: ticked.map((t) => t.id), note: note.trim() || undefined });
       return saved;
     },
     onSuccess: (n: number) => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['documents'] }); toast(`Saved for ${ids.map((i) => order.tests.find((t) => t.id === i)?.name).join(', ')}${n ? ` · ${n} value${n === 1 ? '' : 's'}` : ''}`); onClose(); },
     onError: (e: any) => toast(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF files can be added.' : e?.body?.code === 'TOO_LARGE' ? 'That file is too large (10 MB at most).' : errText(e), 'err'),
   });
-  const blocker = !ids.length ? 'Pick which tests this is for' : !files.length ? 'Add at least one page' : '';
+  // a file, or typed values for every ticked test (values alone are fine: labs often send them on WhatsApp)
+  const typed = (t: Test) => rowsFor(t).some((r) => r.test.trim() && r.value.trim());
+  const blocker = !ids.length ? 'Pick which tests this is for' : !files.length && !ticked.every(typed) ? 'Add a page, or type the values for each test' : '';
   return (
     <Modal title={`Report for ${order.patient.fullName}`} subtitle={`Order ${order.orderNo} · ${order.tests.map((t) => t.name).join(', ')}`} onClose={onClose} width="max-w-xl">
       <div className="space-y-4">
@@ -60,8 +66,8 @@ function ReportDialog({ order, testId, onClose }: { order: Order; testId: string
             {files.map((f, i) => <span key={i} className="inline-flex items-center gap-2 rounded-xl border border-line bg-white px-2.5 py-1.5 text-sm">{f.type.startsWith('image/') ? <img src={URL.createObjectURL(f)} alt="" className="h-9 w-9 rounded-md object-cover" /> : <span className="grid h-9 w-9 place-items-center rounded-md bg-clay-soft text-[10px] font-bold text-clay">PDF</span>}<span className="max-w-32 truncate">{f.name}</span><button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button></span>)}
             <button type="button" className="btn !min-h-12" onClick={() => input.current?.click()}><Icon name="plus" className="h-4 w-4" />{files.length ? 'Another page' : 'Photo or file'}</button>
           </div>
-          <input ref={input} type="file" accept="image/*,application/pdf" capture="environment" multiple className="hidden" onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])].slice(0, 12)); e.target.value = ''; }} />
-          <div className="mt-1.5 text-xs text-muted">On a phone this opens the camera. Keep the whole page in view, flat. JPG, PNG, WebP or PDF.</div>
+          <input ref={input} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])].slice(0, 12)); e.target.value = ''; }} />
+          <div className="mt-1.5 text-xs text-muted">A PDF or photo from WhatsApp, or take a photo with the camera. JPG, PNG, WebP or PDF. No file? Type the values below.</div>
         </div>
         <div><span className="label">Which tests is this for</span><div className="flex flex-wrap gap-1.5">{open.map((t) => <button key={t.id} type="button" aria-pressed={ids.includes(t.id)} className={`toggle-opt !py-2 ${ids.includes(t.id) ? 'on' : ''}`} onClick={() => setIds(ids.includes(t.id) ? ids.filter((x) => x !== t.id) : [...ids, t.id])}>{t.name}</button>)}</div></div>
         {ticked.length > 0 && <div>
@@ -90,8 +96,19 @@ function ReportDialog({ order, testId, onClose }: { order: Order; testId: string
 
 /** The doctor looks at the whole order once and says what happens next: about fifteen seconds. */
 function ReviewDialog({ order, onClose }: { order: Order; onClose: () => void }) {
-  const [outcome, setOutcome] = useState('normal'); const [note, setNote] = useState('');
+  // no default: the doctor picks what happens next, after seeing the values
+  const [outcome, setOutcome] = useState(''); const [note, setNote] = useState('');
   const docs = order.tests.flatMap((t) => t.docs.map((d) => ({ ...d, test: t.name })));
+  const vals = order.tests.flatMap((t) => (t.values ?? []).map((v) => ({ ...v, of: t.name }))).sort((a, b) => Number(isOut(b.flag)) - Number(isOut(a.flag)) || a.of.localeCompare(b.of));
+  const outOf = vals.filter((v) => isOut(v.flag));
+  const pick = async (k: string) => {
+    if (k === 'normal' && outOf.length) {
+      const v = outOf[0]; const say = v.flag === 'low' ? 'is below range' : v.flag === 'high' ? 'is above range' : 'is not the expected result';
+      const more = outOf.length > 1 ? ` (and ${outOf.length - 1} more out of range)` : '';
+      if (!(await ask({ title: `${v.test} ${v.value} ${say}${more}. Mark as normal anyway?`, confirmLabel: 'Mark as normal', cancelLabel: 'Go back' }))) return;
+    }
+    setOutcome(k);
+  };
   const save = useMutation({
     mutationFn: () => post('/orders/review', { encounterId: order.encounterId, orderNo: order.orderNo, outcome, note: note.trim() || undefined }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['documents', order.patient.id] }); toast('Reviewed · the front desk can explain it'); onClose(); },
@@ -100,6 +117,18 @@ function ReviewDialog({ order, onClose }: { order: Order; onClose: () => void })
   return (
     <Modal title={`${order.patient.fullName} · ${order.tests.map((t) => t.name).join(', ')}`} subtitle={`${order.patient.patientNo} · all ${order.tests.length} received${order.doctor ? ` · ordered by ${order.doctor}` : ''}`} onClose={onClose} width="max-w-2xl">
       <div className="space-y-4">
+        {vals.length > 0 ? <div>
+          <span className="label">Values{outOf.length > 0 && <b className="ml-1.5 text-rose">· {outOf.length} out of range</b>}</span>
+          <div className="grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto] items-center gap-x-3 text-[13.5px]">
+            {vals.map((v) => { const bad = isOut(v.flag); return (
+              <div key={v.id} className="contents">
+                <span className={`truncate border-t border-line/60 py-1.5 ${bad ? 'font-semibold text-rose' : ''}`}>{v.test}{order.tests.length > 1 && <span className="font-normal text-muted"> · {v.of}</span>}</span>
+                <span className={`border-t border-line/60 py-1.5 ${bad ? 'font-semibold text-rose' : ''}`}>{v.value}{v.unit ? <span className="text-xs font-normal text-muted"> {v.unit}</span> : ''}</span>
+                <span className="truncate border-t border-line/60 py-1.5 text-xs text-muted">{rangeText(v) ? `normal ${rangeText(v)}` : ''}</span>
+                <span className="border-t border-line/60 py-1.5">{v.flag && v.flag !== 'normal' ? <Chip tone="rose">{v.flag}</Chip> : v.flag === 'normal' ? <Chip tone="sage">ok</Chip> : null}</span>
+              </div>); })}
+          </div>
+        </div> : <div className="text-sm text-muted">No values were typed for this order. Open the report below.</div>}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {docs.map((d, i) => (
             <button key={d.id} type="button" className="card card-hover !p-2 flex items-center gap-2 text-left" aria-label={`Open ${d.title}`} onClick={() => openViewer({ docs, index: i, who: order.patient.fullName, canDelete: false })}>
@@ -108,9 +137,9 @@ function ReviewDialog({ order, onClose }: { order: Order; onClose: () => void })
             </button>))}
           {docs.length === 0 && <div className="col-span-full text-sm text-muted">No files were attached.</div>}
         </div>
-        <div><span className="label">What now</span><div className="flex flex-wrap gap-1.5" role="radiogroup">{OUTCOMES.map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={outcome === k} className={`toggle-opt !py-2 ${outcome === k ? 'on' : ''}`} onClick={() => setOutcome(k)}>{l}</button>)}</div></div>
+        <div><span className="label">What now</span><div className="flex flex-wrap gap-1.5" role="radiogroup">{OUTCOMES.map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={outcome === k} className={`toggle-opt !py-2 ${outcome === k ? 'on' : ''}`} onClick={() => pick(k)}>{l}</button>)}</div></div>
         <div><label className="label" htmlFor="rev-note">Note for the front desk (optional)</label><input id="rev-note" className="input" maxLength={300} placeholder="“LFT slightly high, repeat in a month”" value={note} onChange={(e) => setNote(e.target.value)} /></div>
-        <div className="modal-foot"><span className="mr-auto text-xs text-muted">The front desk sees your choice at once.</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Reviewed</button></div>
+        <div className="modal-foot"><span className="mr-auto text-xs text-muted">{outcome ? 'The front desk sees your choice at once.' : 'Pick what happens next.'}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !outcome} onClick={() => save.mutate()}><Icon name="check" />Reviewed</button></div>
       </div>
     </Modal>
   );
@@ -127,13 +156,14 @@ function OrderCard({ o, perms, isDoctor, onAdd, onReview }: { o: Order; perms: s
   const [how, setHow] = useState(false);
   const refresh = () => qc.invalidateQueries({ queryKey: ['orders'] });
   const called = useMutation({ mutationFn: (id: string) => post('/orders/called', { id }), onSuccess: () => { refresh(); toast('Noted: lab called', 'info'); }, onError: (e) => toast(errText(e), 'err') });
-  const inform = useMutation({ mutationFn: (h: string) => post('/orders/inform', { encounterId: o.encounterId, orderNo: o.orderNo, how: h }), onSuccess: () => { refresh(); toast('Done · report closed'); }, onError: (e: any) => toast(e?.body?.code === 'DOCTOR_WILL_CALL' ? 'The doctor said she will call this patient.' : errText(e), 'err') });
+  const inform = useMutation({ mutationFn: (h: string) => post('/orders/inform', { encounterId: o.encounterId, orderNo: o.orderNo, how: h }), onSuccess: () => { refresh(); toast('Patient told · closed'); }, onError: (e: any) => toast(e?.body?.code === 'DOCTOR_WILL_CALL' ? 'The doctor said she will call this patient.' : errText(e), 'err') });
   const split = useMutation({ mutationFn: () => post('/orders/split', { ids: o.tests.filter((t) => !t.receivedAt).map((t) => t.id) }), onSuccess: () => { refresh(); toast('Reviewing what is in · the rest is its own order'); }, onError: (e) => toast(errText(e), 'err') });
   const day = (d: string | null) => (d ? fmtDate(d) : '');
   return (
     <div className="mt-2.5 rounded-2xl bg-white/70 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <b className="text-[15px]">Order {o.orderNo}</b><span className="min-w-0 flex-1 text-sm text-ink-2">{o.tests.map((t) => t.name).join(', ')}</span>
+        {(o.abnormal ?? 0) > 0 && <Chip tone="rose">Abnormal · {o.abnormal} out of range</Chip>}
         {o.state === 'partial' && <Chip tone="amber">{o.got} of {o.tests.length} received</Chip>}
         {o.state === 'pending' && (o.late.length ? <Chip tone="rose">overdue · {o.late.join(', ')}</Chip> : o.nextDue ? <Chip tone="sky">expected {day(o.nextDue)}</Chip> : null)}
         {o.state === 'partial' && o.late.length > 0 && <Chip tone="rose">late · {o.late.join(', ')}</Chip>}
@@ -178,14 +208,15 @@ export function TestReports() {
   const tabOf = (o: Order): Tab => (o.state === 'pending' || o.state === 'partial' ? 'collect' : o.state === 'ready' ? 'review' : o.state === 'closed' ? 'done' : 'explain');
   const rows = (data.data?.orders ?? []).filter((o) => tabOf(o) === tab);
   const waiting = tab === 'review' ? (data.data?.orders ?? []).filter((o) => o.state === 'partial') : [];
-  const groups = [...[...rows, ...waiting].reduce((m, o) => m.set(o.patient.id, [...(m.get(o.patient.id) ?? []), o]), new Map<string, Order[]>())];
+  // a patient with any out-of-range value comes first (the server already sorts orders that way; groups keep it)
+  const groups = [...[...rows, ...waiting].sort((a, b) => Number(!!b.abnormal) - Number(!!a.abnormal)).reduce((m, o) => m.set(o.patient.id, [...(m.get(o.patient.id) ?? []), o]), new Map<string, Order[]>())];
   const c = data.data?.counts;
   return (
     <div>
       <PageHeader title="Test reports" subtitle={tab === 'review' ? 'Reports the doctor has not looked at yet' : tab === 'collect' ? 'Tests ordered that have not come back' : tab === 'explain' ? 'The doctor has reviewed these. Tell the patient.' : 'Closed today'}>
         <Segmented<Tab> value={tab} onChange={(t) => setSp({ tab: t }, { replace: true })} options={[...(isDoctor ? [{ value: 'review' as Tab, label: 'To review', count: c?.review || undefined }] : []), { value: 'collect', label: 'To collect', count: c?.collect || undefined }, { value: 'explain', label: 'To explain', count: c?.explain || undefined }, { value: 'done', label: 'Done today', count: c?.done || undefined }]} />
       </PageHeader>
-      {data.isLoading ? <div className="card"><Skeleton rows={4} /></div> : groups.length === 0 ? <div className="card"><Empty icon="check" title={tab === 'review' ? 'Nothing to review' : tab === 'collect' ? 'No reports to collect' : tab === 'explain' ? 'Nobody to explain to' : 'Nothing closed yet today'} hint={tab === 'collect' ? 'When the doctor orders tests, each order shows here until every report is in.' : tab === 'review' ? 'An order appears here when every report in it has been added.' : undefined} /></div> : (
+      {data.isLoading ? <div className="card"><Skeleton rows={4} /></div> : data.isError && !data.data ? <LoadError onRetry={() => data.refetch()} /> : groups.length === 0 ? <div className="card"><Empty icon="check" title={tab === 'review' ? 'Nothing to review' : tab === 'collect' ? 'No reports to collect' : tab === 'explain' ? 'Nobody to explain to' : 'Nothing closed yet today'} hint={tab === 'collect' ? 'When the doctor orders tests, each order shows here until every report is in.' : tab === 'review' ? 'An order appears here when every report in it has been added.' : undefined} /></div> : (
         <div className="space-y-3 anim-fade-up">
           {tab === 'review' && rows.length === 0 && <div className="text-sm text-muted">Nothing is complete yet. These are waiting for reports:</div>}
           {groups.map(([pid, os]) => (

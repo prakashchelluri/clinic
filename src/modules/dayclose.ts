@@ -26,6 +26,7 @@ export async function dayFigures(tx: Tx, t: string, tz: string, day: string) {
   const { start, end } = dayBounds(day, tz);
   const pays = await tx.select({ p: payment, c: charge }).from(payment).leftJoin(charge, eq(charge.id, payment.chargeId)).where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
   const money = { consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), total: empty() };
+  // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
   for (const { p, c } of pays) {
     const bucket = p.courseId || c?.courseId ? money.procedure : c?.visitId ? money.consultation : money.other;
     put(bucket, p.method, p.amountPaise); put(money.total, p.method, p.amountPaise);
@@ -84,7 +85,7 @@ export function dayCloseRoutes(app: FastifyInstance) {
 
   /** Per-doctor tiles, a daily trend, and the times that matter, each against the month before rather than an outside benchmark. */
   route(app, 'get', '/dashboard', 'report.read', async (req, tx) => {
-    const t = req.ctx.tenantId; const tz = req.ctx.timezone; const money = can(req.perms, 'fees.see');
+    const t = req.ctx.tenantId; const tz = req.ctx.timezone; const money = can(req.perms, 'fees.see'); const allMoney = can(req.perms, 'finance.read'); // a doctor sees only their own revenue
     const q = req.query as any; const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to) ? q.to : todayIn(tz); const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from) ? q.from : addDays(to, -29);
     const span = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1; const pFrom = addDays(from, -span); const pTo = addDays(from, -1);
     const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
@@ -97,7 +98,7 @@ export function dayCloseRoutes(app: FastifyInstance) {
       const paid = cs.filter((c) => c.status === 'paid').reduce((s, c) => s + c.amountPaise, 0); const pending = cs.filter((c) => c.status === 'due').reduce((s, c) => s + c.amountPaise, 0);
       const types = mine.map((m) => visitType(m.code, m.name));
       return { id: d.id, name: d.name, patients: mine.length, newPatients: types.filter((x) => x === 'General' || x === 'Relatives and friends').length, reviews: types.filter((x) => x === 'Review' || x === 'Procedure follow-up').length,
-        ...(money ? { revenuePaise: paid + pending, paidPaise: paid, pendingPaise: pending } : {}) };
+        ...(money && (allMoney || d.id === req.ctx.practitionerId) ? { revenuePaise: paid + pending, paidPaise: paid, pendingPaise: pending } : {}) };
     });
     const byDay = new Map<string, number>(); for (const x of cur) byDay.set(x.v.day, (byDay.get(x.v.day) ?? 0) + 1);
     const trend = Array.from({ length: Math.min(span, 31) }, (_, i) => { const d = addDays(to, -(Math.min(span, 31) - 1 - i)); return { day: d, patients: byDay.get(d) ?? 0 }; });

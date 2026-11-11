@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { api, qc } from './api';
+import { api, qc, errText } from './api';
 import { Icon, Modal, toast, NumInput } from './ui';
 
 export type Routine = { days: Record<string, [string, string][]>; capacity: number; windowMinutes: number };
@@ -58,7 +58,7 @@ export function RoutineEditor({ value, onChange }: { value: Routine; onChange: (
 
 export function RoutineModal({ practitionerId, name, initial, onClose }: { practitionerId: string; name: string; initial?: Routine | null; onClose: () => void }) {
   const [r, setR] = useState<Routine>(initial && Object.keys(initial.days ?? {}).length ? initial : DEFAULT_ROUTINE);
-  const save = useMutation({ mutationFn: () => api('PUT', `/calendar/routine/${practitionerId}`, r), onSuccess: () => { toast('Routine saved · windows follow it from today'); qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); onClose(); }, onError: (e: any) => toast(e?.body?.code ?? 'Could not save', 'err') });
+  const save = useMutation({ mutationFn: () => api('PUT', `/calendar/routine/${practitionerId}`, r), onSuccess: () => { toast('Routine saved · windows follow it from today'); qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); onClose(); }, onError: (e: any) => toast(String(e?.body?.code ?? '').startsWith('FORBIDDEN') ? 'Only the owner can change weekly hours.' : errText(e), 'err') });
   return (
     <Modal title="Weekly routine" subtitle={`${name} · set once; every day's OP windows are made from this`} onClose={onClose} width="max-w-xl">
       <RoutineEditor value={r} onChange={setR} />

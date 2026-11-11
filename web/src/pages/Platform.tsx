@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { get, post, qc } from '../api';
+import { get, post, qc, errText } from '../api';
 import { Chip, Empty, Icon, Modal, PageHeader, Section, Skeleton, fmtDate, toast } from '../ui';
 
 /** CUBOTT staff: every clinic on the platform, and onboarding of a new one in under a minute. */
@@ -28,8 +28,9 @@ export function Platform() {
 function OnboardModal({ onClose }: { onClose: () => void }) {
   const [f, setF] = useState({ name: '', slug: '', address: '', phone: '', ownerName: '', ownerEmail: '', password: '', regNo: '', qualification: '', isDoctor: true });
   const [done, setDone] = useState<any>(null);
+  const [slugTouched, setSlugTouched] = useState(false); // follows the clinic name until typed by hand
   const save = useMutation({ mutationFn: () => post('/platform/tenants', { name: f.name, slug: f.slug, address: f.address || undefined, phone: f.phone || undefined, owner: { name: f.ownerName, email: f.ownerEmail, password: f.password, regNo: f.regNo || undefined, qualification: f.qualification || undefined, isDoctor: f.isDoctor } }),
-    onSuccess: (r) => { setDone(r); toast('Clinic created'); }, onError: (e: any) => toast(e?.body?.code === 'SLUG_TAKEN' ? 'That sign-in name is taken' : (e?.body?.code ?? 'Failed'), 'err') });
+    onSuccess: (r) => { setDone(r); toast('Clinic created'); }, onError: (e: any) => toast(e?.body?.code === 'SLUG_TAKEN' ? 'That sign-in name is taken' : errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   if (done) return (
     <Modal title="Clinic is live" onClose={onClose} width="max-w-md">
@@ -41,11 +42,11 @@ function OnboardModal({ onClose }: { onClose: () => void }) {
     </Modal>
   );
   return (
-    <Modal title="Onboard a clinic" subtitle="Creates the clinic, its owner account and the dermatology starter pack" onClose={onClose} width="max-w-lg">
+    <Modal title="Onboard a clinic" subtitle="Creates the clinic, its owner account and the dermatology starter pack" onClose={onClose} width="max-w-lg" dirty={!!(f.name || f.ownerName || f.ownerEmail || f.password)}>
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2"><label className="label">Clinic name</label><input autoFocus className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, slug: f.slug || e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 30) })} /></div>
-          <div><label className="label">Sign-in name</label><input className="input font-mono" value={f.slug} onChange={set('slug')} /></div>
+          <div className="col-span-2"><label className="label">Clinic name</label><input autoFocus className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value, slug: slugTouched ? f.slug : e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 30) })} /></div>
+          <div><label className="label">Sign-in name</label><input className="input font-mono" value={f.slug} onChange={(e) => { setSlugTouched(!!e.target.value); setF({ ...f, slug: e.target.value }); }} /></div>
           <div className="col-span-2"><label className="label">Address</label><input className="input" value={f.address} onChange={set('address')} /></div>
           <div><label className="label">Phone</label><input className="input" value={f.phone} onChange={set('phone')} /></div>
         </div>

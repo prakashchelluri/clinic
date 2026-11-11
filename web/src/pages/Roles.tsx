@@ -59,7 +59,7 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
           {role.builtin && !locked && <button className="btn btn-sm" disabled={reset.isPending} onClick={() => reset.mutate()}>Reset to standard</button>}
           {!role.builtin && <button className="btn btn-sm !text-rose" disabled={role.users > 0 || reset.isPending} title={role.users > 0 ? 'Move these people to another role first' : ''} onClick={() => reset.mutate()}>Delete role</button>}
         </div>
-        <p className="text-sm text-muted mb-4">{locked ? 'The owner always has full access. This cannot be changed, so you can never lock yourself out.' : 'Tick what people with this role can do. Staff can hold several roles; their permissions add up.'}</p>
+        <p className="text-sm text-muted mb-4">{locked ? 'The owner always has full access. This cannot be changed, and the clinic always keeps at least one active owner: the last owner cannot be switched off or lose the role.' : 'Tick what people with this role can do. Staff can hold several roles; their permissions add up.'}</p>
         <div className="mb-4 flex flex-wrap items-center gap-1.5 text-xs"><span className="text-muted mr-1">Pages they will see:</span>{pages.length ? pages.map((p: string) => <Chip key={p} tone="sage">{p}</Chip>) : <span className="text-muted">none yet</span>}</div>
         <div className="space-y-5">
           {Object.entries(groups).map(([g, items]) => (

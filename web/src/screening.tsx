@@ -13,8 +13,8 @@ export function checklists(complaints: string[], all: Tmpl[]) {
   return mine.map((t) => ({ name: t.name, questions: (t.payload.questions ?? []).filter((q: any) => !seen.has(q.q) && seen.add(q.q)) as { q: string; detail?: string }[] })).filter((c) => c.questions.length);
 }
 
-const YesNo = ({ value, onChange, disabled }: { value?: 'yes' | 'no'; onChange: (v: 'yes' | 'no' | undefined) => void; disabled?: boolean }) => (
-  <span className="inline-flex gap-1.5" role="radiogroup">
+const YesNo = ({ value, onChange, disabled, label }: { value?: 'yes' | 'no'; onChange: (v: 'yes' | 'no' | undefined) => void; disabled?: boolean; label?: string }) => (
+  <span className="inline-flex gap-1.5" role="radiogroup" aria-label={label}>
     {(['yes', 'no'] as const).map((v) => <button key={v} type="button" role="radio" aria-checked={value === v} disabled={disabled} className={`toggle-opt !py-1 !px-3.5 ${value === v ? (v === 'yes' ? 'on !bg-clay-soft !text-clay !border-clay/40' : 'on') : ''}`} onClick={() => onChange(value === v ? undefined : v)}>{v === 'yes' ? 'Yes' : 'No'}</button>)}
   </span>
 );
@@ -27,7 +27,6 @@ export function ScreenBlock({ lists, answers, onAnswers, history, onHistory, dis
   // Medical history moved to the six chips on the pad (kept on the patient); `history`/`onHistory` stay in the signature for old callers.
   void history; void onHistory;
   const set = (q: string, v: { a: 'yes' | 'no'; detail?: string } | undefined) => { const n = { ...answers }; if (v) n[q] = v; else delete n[q]; onAnswers(n); };
-  const rest = () => { const n = { ...answers }; for (const l of lists) for (const q of l.questions) if (!n[q.q]) n[q.q] = { a: 'no' }; onAnswers(n); };
   return (
     <div className="border-b border-line/70 px-4 py-3" id="sec-screen">
       <button type="button" className="flex w-full items-center gap-2 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
@@ -38,11 +37,12 @@ export function ScreenBlock({ lists, answers, onAnswers, history, onHistory, dis
       {open && <div className="mt-2 space-y-4 anim-fade-up">
         {lists.map((l) => (
           <div key={l.name}>
-            <div className="mb-1 flex items-center gap-2"><b className="text-[15px]">{l.name}</b>{!disabled && <button type="button" className="btn btn-sm ml-auto" onClick={rest}>All the rest: No</button>}</div>
+            {/* no "All the rest: No": a question nobody asked must reach the doctor as Not asked, never as a clinical No */}
+            <div className="mb-1 flex items-center gap-2"><b className="text-[15px]">{l.name}</b></div>
             {l.questions.map((q) => { const a = answers[q.q]; return (
               <div key={q.q} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line/60 py-2 text-[14.5px] first:border-t-0">
                 <span className="min-w-0 flex-1">{q.q}</span>
-                <YesNo value={a?.a} disabled={disabled} onChange={(v) => set(q.q, v ? { a: v, ...(v === 'yes' && a?.detail ? { detail: a.detail } : {}) } : undefined)} />
+                <YesNo label={q.q} value={a?.a} disabled={disabled} onChange={(v) => set(q.q, v ? { a: v, ...(v === 'yes' && a?.detail ? { detail: a.detail } : {}) } : undefined)} />
                 {a?.a === 'yes' && q.detail && <input aria-label={`${q.q} ${q.detail}`} className="input !py-1.5 text-sm basis-full" maxLength={120} placeholder={q.detail} value={a.detail ?? ''} disabled={disabled} onChange={(e) => set(q.q, { a: 'yes', detail: e.target.value })} />}
               </div>); })}
           </div>))}

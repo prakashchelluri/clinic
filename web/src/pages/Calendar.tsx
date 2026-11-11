@@ -5,8 +5,9 @@ import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } f
 import { can } from '../App';
 import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, usePageSearch, useAddFromNew } from '../ui';
 import { RoutineModal } from '../routine';
-import { BookForm } from './Booking';
-import { AppointmentDrawer } from '../apptDrawer';
+import { BookForm, OnNumber, useOnNumber, whoLine, SEARCH_FAILED } from './Booking';
+import { AppointmentDrawer, told } from '../apptDrawer';
+import { normPhone, searchText, looksLikePhone } from '../phone';
 import { ProcedureDrawer } from '../procDrawer';
 import { ChangeMyDay } from '../dayChange';
 
@@ -57,10 +58,10 @@ export function Calendar() {
   const refresh = () => ['calendar', 'sessions', 'appointments', 'queue', 'calendar-attention'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
   const move = useMutation({
     mutationFn: ({ appt, to, overbook }: any) => patch(`/appointments/${appt.id}`, { sessionId: to.id, overbook }),
-    onSuccess: (_r, { appt, to }: any) => { refresh(); toast(`${appt.name} moved to ${to.startTime}. The patient is told.`); },
+    onSuccess: (r: any, { appt, to }: any) => { refresh(); toast(`${appt.name} moved to ${to.startTime}. ${told(r?.whatsapp)}`); },
     onError: (e: any, vars: any) => {
       if (e instanceof ApiError && e.body?.code === 'WINDOW_FULL' && can(perms, 'appointment.overbook') && !vars.overbook) {
-        ask({ title: `${vars.to.startTime} is full`, body: `Move ${vars.appt.name} into it anyway? It will go over the places set for that window.`, confirmLabel: 'Overbook', cancelLabel: 'Leave it' }).then((r) => { if (r) move.mutate({ ...vars, overbook: true }); });
+        ask({ title: `${vars.to.startTime} is full`, body: `Move ${vars.appt.name} into it anyway? It will go over the places set for that window.`, confirmLabel: 'Add anyway (over the limit)', cancelLabel: 'Leave it' }).then((r) => { if (r) move.mutate({ ...vars, overbook: true }); });
         return;
       }
       toast(errText(e), 'err');
@@ -79,6 +80,8 @@ export function Calendar() {
   const roomCount = (rid: string) => (a ? String(a.procedures.filter((p: any) => p.roomId === rid).length) : '');
   const title = view === 'week' ? `${label(weekStart, { day: 'numeric', month: 'short' })} – ${label(shift(weekStart, 5), { day: 'numeric', month: 'short' })}` : fullDay(day);
   const canChangeDoc = (pid?: string) => !!pid && (canBook || me.practitionerId === pid);
+  // Weekly hours: the server lets only the owner (config.write) or the doctor themself save them, so nobody else sees the button.
+  const canRoutine = (pid?: string) => !!pid && (can(perms, 'config.write') || me.practitionerId === pid);
 
   const zoom = ({ small: 0.92, normal: 1, large: 1.15 } as Record<string, number>)[cfg?.tenant?.settings?.calendarTextSize ?? 'normal'] ?? 1;
   const keyed = (cfg?.services ?? []).filter((s: any) => s.color);
@@ -105,7 +108,7 @@ export function Calendar() {
 
       {canBook && <AttentionStrip onOpen={setOpenId} onBook={(patient) => setPanel({ patient })} />}
 
-      {view === 'day' && pick.k === 'doc' && pick.id && <DayDoc day={day} doc={docs.find((d) => d.id === pick.id)} grid={grid} onChange={canChangeDoc(pick.id) ? () => setChange(pick.id!) : undefined} onRoutine={canChangeDoc(pick.id) ? () => setRoutine(pick.id!) : undefined} />}
+      {view === 'day' && pick.k === 'doc' && pick.id && <DayDoc day={day} doc={docs.find((d) => d.id === pick.id)} grid={grid} onChange={canChangeDoc(pick.id) ? () => setChange(pick.id!) : undefined} onRoutine={canRoutine(pick.id) ? () => setRoutine(pick.id!) : undefined} />}
       {view === 'day' && pick.k === 'room' && <RoomsDay day={day} cfg={{ ...cfg, rooms: rooms.filter((r) => r.id === pick.id) }} grid={grid} canEdit={canBook} />}
       {view === 'day' && pick.k === 'all' && <AllCards day={day} data={a} docs={docs} rooms={rooms} onPick={setPick} />}
       {view === 'week' && pick.k === 'room' && pick.id && <RoomWeek from={weekStart} roomId={pick.id} cfg={cfg} grid={grid} canEdit={canBook} onOpenDay={(d) => { setDay(d); setView('day'); }} />}
@@ -118,7 +121,7 @@ export function Calendar() {
           <BookForm session={booking} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { refresh(); setBooking(null); }} />
         </Modal>)}
       {panel && <BookPanel initialPatient={panel.patient} defaultDoc={pick.k === 'doc' ? pick.id : undefined} docs={docs} services={cfg?.services ?? []} onClose={() => setPanel(null)} onDone={() => { refresh(); setPanel(null); }} />}
-      {change && <ChangeMyDay practitionerId={change} name={docs.find((d) => d.id === change)?.name ?? 'Doctor'} initialKind="away" initialDay={day < today() ? today() : day} onClose={() => setChange(null)} onRoutine={() => { setRoutine(change); setChange(null); }} />}
+      {change && <ChangeMyDay practitionerId={change} name={docs.find((d) => d.id === change)?.name ?? 'Doctor'} initialKind="away" initialDay={day < today() ? today() : day} onClose={() => setChange(null)} onRoutine={canRoutine(change) ? () => { setRoutine(change); setChange(null); } : undefined} />}
       {routine && <RoutineModal practitionerId={routine} name={docs.find((d) => d.id === routine)?.name ?? 'Doctor'} initial={docs.find((d) => d.id === routine)?.routine} onClose={() => setRoutine(null)} />}
     </div>
   );
@@ -146,18 +149,18 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
       <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <b className="text-[16px]">{doc.name}</b>
         <span className="text-sm text-muted">{away ? away.note : ws.length ? <><Num value={booked} /> booked · <Num value={free} /> free{d.procedures.length ? ` · ${d.procedures.length} procedure${d.procedures.length === 1 ? '' : 's'}` : ''} · {hoursOf(ws)}</> : 'not working this day'}{notes.length ? ` · ${notes.join(', ')}` : ''}</span>
-        <span className="ml-auto flex gap-2">{onChange && !past && <button className="btn btn-sm" onClick={onChange}>Change this day</button>}{onRoutine && <button className="btn btn-ghost btn-sm" onClick={onRoutine}>Weekly hours</button>}</span>
+        <span className="ml-auto flex gap-2">{onChange && !past && <button className="btn btn-sm" onClick={onChange}>Doctor late / away / leaving early</button>}{onRoutine && <button className="btn btn-ghost btn-sm" onClick={onRoutine}>Weekly hours</button>}</span>
       </div>
-      {rows.length === 0 ? <Empty icon="calendar" title={away ? 'Away this day' : doc.routine ? 'Not a working day' : 'No weekly hours set for this doctor'} hint={onRoutine && !doc.routine ? 'Set the weekly hours once; the calendar fills itself.' : undefined} /> : rows.map((r, i) => {
+      {rows.length === 0 ? <Empty icon="calendar" title={away ? 'Away this day' : doc.routine ? 'Not a working day' : 'No weekly hours set for this doctor'} hint={doc.routine ? undefined : onRoutine ? 'Set the weekly hours once; the calendar fills itself.' : 'Ask the doctor or the owner to set weekly hours.'} /> : rows.map((r, i) => {
         const w = r.w; const closed = w && w.effectiveCapacity === 0 && (w.reductions ?? []).length > 0;
         const gap = i > 0 && toMin(r.time) - toMin(rows[i - 1].end) >= 30 ? `${rows[i - 1].end}–${r.time} · not working` : null;
         return (
           <div key={r.time + i} className="anim-fade-up">
             {i === nowIdx && <NowLine at={now} />}
             {gap && <div className="grid grid-cols-[56px_1fr] border-t border-line/60"><span /><div className="my-1.5 rounded-xl px-3 py-2 text-xs font-semibold text-muted" style={stripe}>{gap}</div></div>}
-            <div className={`grid min-h-[52px] grid-cols-[56px_1fr_64px] items-start border-t border-line/60 ${over === w?.id ? 'bg-white' : ''}`}
-              onDragOver={w && grid.canBook && !past ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(w.id); } } : undefined}
-              onDragLeave={() => setOver(null)} onDrop={w && grid.canBook && !past ? (e) => drop(e, w) : undefined}>
+            <div className={`grid min-h-[52px] grid-cols-[56px_1fr_92px] items-start border-t border-line/60 ${over === w?.id ? 'bg-white' : ''}`}
+              onDragOver={w && grid.canBook && !past && (!isToday || w.endTime > now) ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(w.id); } } : undefined}
+              onDragLeave={() => setOver(null)} onDrop={w && grid.canBook && !past && (!isToday || w.endTime > now) ? (e) => drop(e, w) : undefined}>
               <b className="pt-2.5 text-xs text-muted">{r.time}</b>
               <div className="flex flex-wrap items-center gap-1.5 py-2">
                 {closed && <span className="rounded-xl px-3 py-1.5 text-xs font-semibold text-muted" style={stripe}>{w.reductions.map((x: any) => x.note ?? x.kind).join(', ')}</span>}
@@ -165,18 +168,18 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
                   <button key={ap.id} draggable={grid.canBook && OPEN.includes(ap.status) && !past} title={[ap.phone, ap.service, ap.note, ap.status.replace('_', '-')].filter(Boolean).join(' · ')}
                     onDragStart={(e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: ap.id, sessionId: w.id, name: ap.name })); e.dataTransfer.effectAllowed = 'move'; }}
                     onClick={() => grid.onOpen(ap.id)} className={`inline-flex items-center gap-1.5 rounded-[10px] border px-2.5 py-1 text-[12.5px] font-semibold ${PILL[ap.status] ?? PILL.booked}`}>
-                    {ap.color && <i className="h-2 w-2 rounded-[3px]" style={{ background: ap.color }} />}{ap.name}{ap.status === 'arrived' ? ' · arrived' : ap.status === 'no_show' ? ' · no-show' : ap.status === 'confirmed' ? ' ✓' : ''}
+                    {ap.color && <i className="h-2 w-2 rounded-[3px]" style={{ background: ap.color }} />}{ap.name}{ap.status === 'arrived' ? ' · arrived' : ap.status === 'no_show' ? ' · did not come' : ap.status === 'confirmed' ? ' ✓' : ''}
                   </button>))}
                 {r.procs.map((p) => <button key={p.id} type="button" title={p.room ?? ''} onClick={() => grid.onOpenProc?.(p.id)} className="rounded-[10px] bg-sky-soft px-2.5 py-1 text-[12.5px] font-semibold text-sky hover:underline">{p.startTime} {p.patient} · {p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.state === 'completed' ? ' ✓' : ''}</button>)}
                 {w && !closed && w.free > 0 && !past && (!isToday || w.endTime > now) && (grid.canBook
                   ? <button className="rounded-[10px] border-[1.5px] border-dashed border-sage/40 px-2.5 py-1 text-[12.5px] font-semibold text-sage hover:bg-sage-soft" onClick={() => grid.onBook({ ...w, day })}>{w.free} free</button>
                   : <span className="text-xs text-muted">{w.free} free</span>)}
               </div>
-              <span className={`pt-2.5 text-right text-xs font-bold ${w && w.allocated >= w.effectiveCapacity ? 'text-rose' : 'text-muted'}`}>{w ? `${w.allocated} / ${w.effectiveCapacity}` : ''}</span>
+              <span className={`pt-2.5 text-right text-xs font-bold ${w && w.allocated >= w.effectiveCapacity ? 'text-rose' : 'text-muted'}`}>{w ? `${w.allocated} of ${w.effectiveCapacity} booked` : ''}</span>
             </div>
           </div>);
       })}
-      {rows.length > 0 && <div className="mt-2 text-xs text-muted">Click a name to open the booking (move, call, cancel). Click a dashed “free” to book it. Drag a name to another hour to move it; the patient is told.</div>}
+      {rows.length > 0 && <div className="mt-2 text-xs text-muted">Click a name to open the booking (move, remind, cancel). Click a dashed “free” to book it. Drag a name to another hour to move it; the patient gets a WhatsApp if they have a phone and WhatsApp is connected.</div>}
     </section>
   );
 }
@@ -261,15 +264,16 @@ function SearchBox({ onOpen, onBook }: { onOpen: (id: string) => void; onBook?: 
   const [q, setQ] = usePageSearch('Find a patient’s bookings: name, phone or OP no.');
   const [sel, setSel] = useState<any>(null);
   useEffect(() => { setSel(null); }, [q]);
-  const found = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 && !sel });
+  const qs = searchText(q);
+  const found = useQuery({ queryKey: ['patients', qs], queryFn: () => get(`/patients?q=${encodeURIComponent(qs)}`), enabled: qs.length >= 2 && !sel });
   const appts = useQuery({ queryKey: ['appointments', 'patient', sel?.id], queryFn: () => get(`/appointments?patientId=${sel.id}`), enabled: !!sel });
   if (q.trim().length < 2) return null;
   return (
     <div className="card-flat anim-fade-up w-full max-w-xl !p-1.5" aria-label="Patients found">
-      {!sel ? (found.isLoading ? <div className="p-3 text-sm text-muted">Searching…</div> : (found.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No patient found.</div>
-        : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{p.fullName}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
+      {!sel ? (found.isLoading ? <div className="p-3 text-sm text-muted">Searching…</div> : found.isError ? <div className="p-3 text-sm text-rose" role="alert">{SEARCH_FAILED}</div> : (found.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No patient found.</div>
+        : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{whoLine(p)}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
         : <div className="p-1.5">
-          <div className="flex items-baseline gap-2 px-1 pb-1.5"><b className="text-sm">{sel.fullName}</b><span className="text-xs text-muted">{[sel.patientNo, sel.phone].filter(Boolean).join(' · ')}</span><button className="ml-auto text-xs text-muted hover:text-ink" onClick={() => setSel(null)}>Other matches</button></div>
+          <div className="flex items-baseline gap-2 px-1 pb-1.5"><b className="text-sm">{sel.fullName}</b><span className="text-xs text-muted">{[sel.patientNo, sel.phone].filter(Boolean).join(' · ')}</span><button className="ml-auto text-xs text-muted hover:text-ink" onClick={() => setSel(null)}>← Back to results</button></div>
           {appts.isLoading ? <div className="p-2 text-sm text-muted">…</div> : (appts.data ?? []).length === 0 ? <div className="px-1 py-2 text-sm text-muted">No upcoming bookings.</div>
             : appts.data.map((x: any) => <button key={x.id} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-paper" onClick={() => { onOpen(x.id); setQ(''); }}><b className="w-28 shrink-0">{label(x.window.day, { weekday: 'short', day: 'numeric', month: 'short' })}</b><span>{x.window.startTime}{x.service ? ` · ${x.service.name}` : ''}</span></button>)}
           {onBook && <button className="btn btn-sm mt-1.5 w-full justify-center" onClick={() => { onBook(sel); setQ(''); }}><Icon name="plus" className="h-3.5 w-3.5" />Book {sel.fullName.split(' ')[0]}</button>}
@@ -284,8 +288,8 @@ function AttentionStrip({ onOpen, onBook }: { onOpen: (id: string) => void; onBo
   const [show, setShow] = useState<null | 'call' | 'wait'>(null);
   const d = q.data; if (!d) return null;
   const items: ReactNode[] = [];
-  if (d.toCall.length) items.push(<div key="c" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-white/75 px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-amber" /><b>{d.toCall.length} to call</b><span className="text-xs text-muted">{[...new Set(d.toCall.map((x: any) => x.why))].slice(0, 2).join(' · ')}</span><button className="btn btn-sm" onClick={() => setShow('call')}>See</button></div>);
-  if (d.waiting) items.push(<div key="w" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-white/75 px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-sage" /><b>Waiting list · {d.waiting}</b>{d.openToday > 0 && <span className="text-xs text-muted">{d.openToday} place{d.openToday === 1 ? '' : 's'} free today</span>}<button className="btn btn-sm" onClick={() => setShow('wait')}>See</button></div>);
+  if (d.toCall.length) items.push(<div key="c" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-white/75 px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-amber" /><b>{d.toCall.length} to call</b><span className="text-xs text-muted">{[...new Set(d.toCall.map((x: any) => x.why))].slice(0, 2).join(' · ')}</span><button className="btn btn-sm" onClick={() => setShow('call')}>Call list ({d.toCall.length})</button></div>);
+  if (d.waiting) items.push(<div key="w" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-white/75 px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-sage" /><b>Waiting list · {d.waiting}</b>{d.openToday > 0 && <span className="text-xs text-muted">{d.openToday} place{d.openToday === 1 ? '' : 's'} free today</span>}<button className="btn btn-sm" onClick={() => setShow('wait')}>Waiting list ({d.waiting})</button></div>);
   return (<>
     {items.length > 0 && <div className="flex flex-wrap gap-2">{items}</div>}
     {show === 'call' && <Modal title="Patients to call" subtitle="Their doctor is away or leaves early when they are booked" onClose={() => setShow(null)} width="max-w-xl">
@@ -315,13 +319,20 @@ function WaitlistModal({ onClose, onBook }: { onClose: () => void; onBook: (pati
 function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone }: { initialPatient?: any; defaultDoc?: string; docs: any[]; services: any[]; onClose: () => void; onDone: () => void }) {
   const [q, setQ] = useState(''); const [patient, setPatient] = useState<any>(initialPatient ?? null);
   const [newName, setNewName] = useState(''); const [newPhone, setNewPhone] = useState('');
+  const [newOk, setNewOk] = useState(false); // "Someone new": chosen on purpose, never by typing a name and pressing Book
   const [doc, setDoc] = useState<string>(defaultDoc || docs[0]?.id || ''); const [part, setPart] = useState<'am' | 'pm'>('am');
   const [from, setFrom] = useState(today());
   const [slot, setSlot] = useState<any>(null); const [svc, setSvc] = useState(''); const [note, setNote] = useState('');
-  const typedPhone = /^\d{10}$/.test(q.trim()) ? q.trim() : '';
+  const qn = searchText(q);
+  const typedPhone = looksLikePhone(q) && /^\d{10}$/.test(qn) ? qn : '';
   const typedName = /\d/.test(q) ? '' : q.trim(); // a name typed in the search is the new patient's name: never asked twice
   const name = typedName || newName.trim();
-  const found = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q.trim())}`), enabled: q.trim().length >= 3 && !patient });
+  const found = useQuery({ queryKey: ['patients', qn], queryFn: () => get(`/patients?q=${encodeURIComponent(qn)}`), enabled: qn.length >= 3 && !patient });
+  const onNum = useOnNumber(!patient && !typedPhone ? newPhone : '');
+  const hits: any[] = found.data ?? []; const family: any[] = onNum.data ?? [];
+  const searchErr = !patient && (found.isError || onNum.isError);
+  const checking = !patient && (found.isFetching || onNum.isFetching);
+  const needChoice = !patient && !newOk && (hits.length > 0 || family.length > 0);
   const free = useQuery({ queryKey: ['calendar-free', doc, from], queryFn: () => get(`/calendar/free?from=${from}&days=7${doc ? `&practitionerId=${doc}` : ''}`) });
   const slots: any[] = (free.data ?? []).filter((s: any) => (part === 'am' ? s.startTime < '14:00' : s.startTime >= '14:00'));
   const byDay = slots.reduce((m: Record<string, any[]>, s: any) => { (m[s.day] ??= []).push(s); return m; }, {});
@@ -329,30 +340,36 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
   const svcId = svc || svcs[0]?.id || '';
   const phoneBad = !patient && newPhone !== '' && !/^\d{10}$/.test(newPhone);
   const who = patient ? patient.fullName : name;
+  const pickP = (p: any) => { setPatient(p); setNewOk(false); };
   const book = useMutation({
     mutationFn: () => post('/appointments', { sessionId: slot.sessionId, patientId: patient?.id, newPatient: patient ? undefined : { fullName: name, phone: (typedPhone || newPhone) || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined, idempotencyKey: uuid() }),
-    onSuccess: (r: any) => { toast(`${who} booked ${label(r.window.day, { weekday: 'short', day: 'numeric', month: 'short' })} ${r.window.startTime}. Confirmation sent.`); onDone(); },
+    onSuccess: (r: any) => { toast(`${who} booked ${label(r.window.day, { weekday: 'short', day: 'numeric', month: 'short' })} ${r.window.startTime}${r.reusedPatient ? ' (existing record)' : ''}. ${told(r.whatsapp)}`); onDone(); },
     onError: (e) => { toast(errText(e), 'err'); qc.invalidateQueries({ queryKey: ['calendar-free'] }); },
   });
   const wait = useMutation({ mutationFn: () => post('/waitlist', { patientId: patient.id, practitionerId: doc || null, note: note.trim() || (part === 'am' ? 'mornings' : 'evenings') }),
     onSuccess: () => { ['waitlist', 'calendar-attention'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`${patient.fullName} is on the waiting list`); onClose(); }, onError: (e) => toast(errText(e), 'err') });
-  const sameNumber = patient?.phone ? (found.data ?? []).filter((p: any) => p.phone === patient.phone && p.id !== patient.id) : [];
+  // Others on the chosen patient's number, fetched by phone, so a pre-selected patient shows the family too.
+  const fam = useOnNumber(patient?.phone && /^\d{10}$/.test(patient.phone) ? patient.phone : '');
+  const sameNumber = patient ? (fam.data ?? []).filter((p: any) => p.id !== patient.id) : [];
   return (
-    <Modal title="Book" subtitle="Who, when, for what. The patient gets a WhatsApp." onClose={onClose} width="max-w-2xl">
+    <Modal title="Book" subtitle="Who, when, which visit type." onClose={onClose} width="max-w-2xl">
       <div className="space-y-4">
         <div><div className="label">1 · Who</div>
-          {patient ? <div className="flex items-center gap-2 rounded-xl bg-sage-soft px-3 py-2 text-sm text-sage"><Icon name="check" className="h-4 w-4" /><b>{patient.fullName}</b><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
+          {patient ? <div className="flex items-center gap-2 rounded-xl bg-sage-soft px-3 py-2 text-sm text-sage"><Icon name="check" className="h-4 w-4" /><b>{whoLine(patient)}</b><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
             : <>
-              <input autoFocus aria-label="Phone number or name" inputMode="search" className="input" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => setQ(e.target.value)} />
-              {(found.data ?? []).length > 0 && <div className="mt-1.5 max-h-40 overflow-y-auto rounded-xl border border-line">{found.data.slice(0, 6).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-paper" onClick={() => setPatient(p)}><b>{p.fullName}</b><span className="text-xs text-muted">{[p.patientNo, p.phone, p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null].filter(Boolean).join(' · ')}</span></button>)}</div>}
-              {q.trim().length >= 3 && !found.isLoading && <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_170px]">
+              <input autoFocus aria-label="Phone number or name" inputMode="search" className="input" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setNewOk(false); }} />
+              {searchErr && <div className="mt-1.5 rounded-xl bg-rose-soft px-3 py-2 text-sm text-rose" role="alert">{SEARCH_FAILED}</div>}
+              {hits.length > 0 && <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-line">{hits.slice(0, 6).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-paper" onClick={() => pickP(p)}><b>{whoLine(p)}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>)}
+                <button type="button" aria-pressed={newOk} className={`flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm font-semibold ${newOk ? 'bg-sage-soft text-sage' : 'hover:bg-paper'}`} onClick={() => setNewOk(true)}><Icon name="plus" className="h-4 w-4" />{typedPhone ? 'Someone new on this number' : 'Someone new (not in this list)'}</button></div>}
+              {qn.length >= 3 && !found.isLoading && !searchErr && <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_170px]">
                 {typedName ? <div className="input !bg-paper text-muted">New patient: {typedName}</div>
                   : <input aria-label="New patient name" className="input" maxLength={100} placeholder="New patient: name" value={newName} onChange={(e) => setNewName(e.target.value)} />}
-                {typedPhone ? <div className="input !bg-paper text-muted">{typedPhone}</div> : <input aria-label="New patient mobile" inputMode="numeric" className={`input ${phoneBad ? '!border-rose' : ''}`} maxLength={10} placeholder="Mobile (10 digits)" value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} />}
+                {typedPhone ? <div className="input !bg-paper text-muted">{typedPhone}</div> : <input aria-label="New patient mobile" inputMode="tel" className={`input ${phoneBad ? '!border-rose' : ''}`} maxLength={20} placeholder="Mobile (10 digits)" value={newPhone} onChange={(e) => { setNewPhone(normPhone(e.target.value)); setNewOk(false); }} />}
               </div>}
+              {family.length > 0 && <div className="mt-2"><OnNumber list={family} newOk={newOk} onPick={pickP} onNew={() => setNewOk(true)} /></div>}
               {phoneBad && <div className="mt-1 text-xs text-rose">Mobile must be 10 digits.</div>}
             </>}
-          {sameNumber.length > 0 && <div className="mt-1 text-xs text-muted">Same number: {sameNumber.map((p: any) => <button key={p.id} className="underline" onClick={() => setPatient(p)}>{p.fullName}</button>)}</div>}
+          {sameNumber.length > 0 && <div className="mt-1 text-xs text-muted">Others on this number: {sameNumber.map((p: any, i: number) => <span key={p.id}>{i > 0 && ' · '}<button className="underline" onClick={() => setPatient(p)}>{whoLine(p)}</button></span>)}</div>}
         </div>
 
         <div><div className="label">2 · When</div>
@@ -364,27 +381,28 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
             <label className="ml-2 flex items-center gap-1.5 text-xs text-muted">from<input type="date" aria-label="From date" min={today()} className="input !w-auto !py-1" value={from} onChange={(e) => e.target.value >= today() && (setFrom(e.target.value), setSlot(null))} /></label>
           </div>
           <div className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
-            {free.isLoading ? <Skeleton rows={2} /> : Object.keys(byDay).length === 0 ? <div className="text-sm text-muted">No free places in these 7 days. Try {part === 'am' ? 'Evening' : 'Morning'}, another date, another doctor, or the waiting list.</div>
+            {free.isLoading ? <Skeleton rows={2} /> : free.isError ? <div className="text-sm text-rose">{errText(free.error)}</div> : Object.keys(byDay).length === 0 ? <div className="text-sm text-muted">No free time in these 7 days. Try {part === 'am' ? 'Evening' : 'Morning'}, another date, another doctor, or the waiting list.</div>
               : Object.entries(byDay).map(([d, list]) => <div key={d} className="flex gap-2"><b className="w-24 shrink-0 pt-2 text-xs text-muted">{label(d, { weekday: 'short', day: 'numeric', month: 'short' })}</b>
-                <div className="flex flex-wrap gap-1.5">{list.map((s) => { const on = slot?.sessionId === s.sessionId; return <button key={s.sessionId} role="radio" aria-checked={on} onClick={() => setSlot(s)} className={`rounded-xl border px-3 py-1.5 text-left text-sm font-bold ${on ? 'border-sage bg-sage-soft text-sage' : 'border-line bg-white hover:bg-paper'}`}>{s.startTime}<span className={`block text-[11px] font-medium ${s.free <= 1 ? 'text-clay' : 'text-muted'}`}>{s.free} left</span></button>; })}</div></div>)}
+                <div className="flex flex-wrap gap-1.5">{list.map((s) => { const on = slot?.sessionId === s.sessionId; return <button key={s.sessionId} role="radio" aria-checked={on} onClick={() => setSlot(s)} className={`rounded-xl border px-3 py-1.5 text-left text-sm font-bold ${on ? 'border-sage bg-sage-soft text-sage' : 'border-line bg-white hover:bg-paper'}`}>{s.startTime}<span className={`block text-[11px] font-medium ${s.free <= 1 ? 'text-clay' : 'text-muted'}`}>{s.free} place{s.free === 1 ? '' : 's'} left</span></button>; })}</div></div>)}
           </div>
           {patient && <button className="mt-1.5 text-xs font-semibold underline" disabled={wait.isPending} onClick={() => wait.mutate()}>Put {patient.fullName.split(' ')[0]} on the waiting list for an earlier place</button>}
         </div>
 
-        <div><div className="label">3 · For</div>
+        <div><div className="label">3 · Visit type</div>
           {svcs.length > 0 && <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Visit type">{svcs.map((s: any) => <button key={s.id} role="radio" aria-checked={svcId === s.id} className={`toggle-opt inline-flex items-center gap-1.5 !py-1 ${svcId === s.id ? 'on' : ''}`} onClick={() => setSvc(s.id)}><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</button>)}</div>}
           <input aria-label="Note" className="input mt-2" maxLength={500} placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
 
         <div className="modal-foot">
-          <span className="text-xs text-muted">{slot ? `WhatsApp confirmation now; reminder before the visit.` : 'Pick a free place.'}</span>
+          <span className="text-xs text-muted">{!slot ? 'Pick a time.' : (patient ? patient.phone : (typedPhone || newPhone)) ? 'WhatsApp confirmation now (if WhatsApp is connected); reminder before the visit.' : 'No phone: no WhatsApp. Tell the caller the time now.'}</span>
           <span className="ml-auto" /><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={!slot || book.isPending || (!patient && name.length < 2) || phoneBad} onClick={() => book.mutate()}><Icon name="check" />{slot ? `Book ${label(slot.day, { weekday: 'short' })} ${slot.startTime}` : 'Book'}</button>
+          <button className="btn btn-primary" disabled={!slot || book.isPending || (!patient && (name.length < 2 || needChoice || searchErr || checking)) || phoneBad} onClick={() => book.mutate()}><Icon name="check" />{needChoice ? 'Pick a patient or “Someone new”' : slot ? `Book ${label(slot.day, { weekday: 'short' })} ${slot.startTime}` : 'Book'}</button>
         </div>
       </div>
     </Modal>
   );
 }
+
 
 type Show = 'all' | 'appts' | 'procs';
 type Grid = { svc: string; setSvc: (s: string) => void; status: string; setStatus: (s: string) => void; services: any[]; show: Show; setShow: (s: Show) => void; canBook: boolean; onRemoveBlock?: (b: any) => void; onOpen: (id: string) => void; onOpenProc?: (id: string) => void; onBook: (w: any) => void; onMove: (a: any, w: any) => void };

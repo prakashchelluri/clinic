@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, inArray, ne, sql, desc } from 'drizzle-orm';
-import { recommendation, document, patient, encounter, practitioner } from '../db/schema.js';
+import { recommendation, document, patient, encounter, practitioner, labResult } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -30,15 +30,20 @@ export function orderRoutes(app: FastifyInstance) {
         sql`(${recommendation.informedAt} is null or (${recommendation.informedAt} at time zone ${req.ctx.timezone})::date = ${today}::date)`));
     const ids = rows.map((x) => x.r.id);
     const docs = ids.length ? await tx.select().from(document).where(and(eq(document.tenantId, t), eq(document.kind, 'report'), sql`${document.recommendationIds} && ${sql.raw(`ARRAY['${ids.join("','")}']::uuid[]`)}`)).orderBy(desc(document.createdAt)) : [];
+    // the values typed from each report, so the doctor reviews numbers, not only thumbnails
+    const vals = ids.length ? await tx.select().from(labResult).where(and(eq(labResult.tenantId, t), inArray(labResult.recommendationId, ids))) : [];
+    const OUT = ['low', 'high', 'abnormal'];
     const byKey = new Map<string, typeof rows>();
     for (const x of rows) { const k = `${x.r.encounterId}:${x.r.orderNo}`; byKey.set(k, [...(byKey.get(k) ?? []), x]); }
     const orders = [...byKey.entries()].map(([key, xs]) => {
       const first = xs[0]; const tests = xs.map((x) => ({ id: x.r.id, name: x.r.notes ?? 'Test', params: paramsForTest(x.r.notes ?? ''), expectedOn: x.r.expectedOn, receivedAt: x.r.receivedAt, reviewedAt: x.r.reviewedAt, reviewOutcome: x.r.reviewOutcome, informedAt: x.r.informedAt,
         late: !x.r.receivedAt && !!x.r.expectedOn && x.r.expectedOn < today, called: [...x.r.contactLog].reverse().find((c) => c.outcome === 'Called the lab')?.at ?? null,
-        docs: docs.filter((d) => d.recommendationIds.includes(x.r.id)).map((d) => ({ id: d.id, title: d.title, mime: d.mime, kind: d.kind, sizeBytes: d.sizeBytes, createdAt: d.createdAt, note: d.note, reviewedAt: d.reviewedAt })) })).sort((a, b) => a.name.localeCompare(b.name));
+        docs: docs.filter((d) => d.recommendationIds.includes(x.r.id)).map((d) => ({ id: d.id, title: d.title, mime: d.mime, kind: d.kind, sizeBytes: d.sizeBytes, createdAt: d.createdAt, note: d.note, reviewedAt: d.reviewedAt })),
+        values: vals.filter((v) => v.recommendationId === x.r.id).map((v) => ({ id: v.id, test: v.test, value: v.value, unit: v.unit, low: v.low, high: v.high, flag: v.flag })).sort((a, b) => Number(OUT.includes(b.flag ?? '')) - Number(OUT.includes(a.flag ?? '')) || a.test.localeCompare(b.test)) })).sort((a, b) => a.name.localeCompare(b.name));
       const state = stateOf(tests);
+      const abnormal = tests.reduce((n, x) => n + x.values.filter((v) => OUT.includes(v.flag ?? '')).length, 0);
       const o = tests.find((x) => x.reviewOutcome);
-      return { key, encounterId: first.r.encounterId, orderNo: first.r.orderNo, patient: first.p, doctor: first.doctor, orderedAt: first.r.createdAt, tests, state, got: tests.filter((x) => x.receivedAt).length,
+      return { key, encounterId: first.r.encounterId, orderNo: first.r.orderNo, patient: first.p, doctor: first.doctor, orderedAt: first.r.createdAt, tests, state, abnormal, got: tests.filter((x) => x.receivedAt).length,
         outcome: o?.reviewOutcome ?? null, note: xs.find((x) => x.r.reviewNote)?.r.reviewNote ?? null, reviewedBy: xs.find((x) => x.r.reviewedBy)?.r.reviewedBy ?? null,
         informedHow: xs.find((x) => x.r.informedHow)?.r.informedHow ?? null, receivedLast: tests.map((x) => x.receivedAt).filter(Boolean).sort().pop() ?? null,
         late: tests.filter((x) => x.late).map((x) => x.name), nextDue: tests.filter((x) => !x.receivedAt && x.expectedOn).map((x) => x.expectedOn as string).sort()[0] ?? null };
@@ -46,7 +51,8 @@ export function orderRoutes(app: FastifyInstance) {
     const tabOf = (o: { state: OrderState }) => o.state === 'pending' || o.state === 'partial' ? 'collect' : o.state === 'ready' ? 'review' : o.state === 'closed' ? 'done' : 'explain';
     const counts = { collect: 0, review: 0, explain: 0, done: 0 };
     for (const o of orders) counts[tabOf(o)]++;
-    const list = orders.filter((o) => !tab || tabOf(o) === tab).sort((a, b) => (a.late.length ? 0 : 1) - (b.late.length ? 0 : 1) || String(a.nextDue ?? a.orderedAt).localeCompare(String(b.nextDue ?? b.orderedAt)));
+    // out-of-range values first, then late, then by date
+    const list = orders.filter((o) => !tab || tabOf(o) === tab).sort((a, b) => (a.abnormal ? 0 : 1) - (b.abnormal ? 0 : 1) || (a.late.length ? 0 : 1) - (b.late.length ? 0 : 1) ||String(a.nextDue ?? a.orderedAt).localeCompare(String(b.nextDue ?? b.orderedAt)));
     return { counts, orders: list };
   });
 
@@ -94,6 +100,19 @@ export function orderRoutes(app: FastifyInstance) {
     await tx.update(recommendation).set({ orderNo: max + 1 }).where(inArray(recommendation.id, b.ids));
     await emit(tx, req.ctx, 'order.split', 'encounter', encId, { ids: b.ids, orderNo: max + 1, patientId: recs[0].patientId });
     return { ok: true, orderNo: max + 1 };
+  });
+
+  /** Values with no file (read out on the phone, or a WhatsApp text): the tests count as received once their values are saved. */
+  route(app, 'post', '/orders/received', 'document.write', async (req, tx) => {
+    const b = z.object({ ids: z.array(z.string().uuid()).min(1).max(20), note: z.string().trim().max(200).optional() }).parse(req.body); const t = req.ctx.tenantId;
+    const recs = await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), inArray(recommendation.id, b.ids), eq(recommendation.kind, 'investigation')));
+    if (recs.length !== b.ids.length) throw new HttpError(404, 'NOT_FOUND');
+    const has = new Set((await tx.select({ id: labResult.recommendationId }).from(labResult).where(and(eq(labResult.tenantId, t), inArray(labResult.recommendationId, b.ids)))).map((x) => x.id));
+    if (recs.some((r) => !has.has(r.id))) throw new HttpError(400, 'NO_VALUES');
+    const now = new Date().toISOString();
+    for (const r of recs) if (!r.receivedAt) await tx.update(recommendation).set({ status: 'done', receivedAt: now, contactLog: [...r.contactLog, { at: now, by: req.ctx.name, outcome: 'Result received', note: b.note || 'Values typed, no file' }] }).where(eq(recommendation.id, r.id));
+    await emit(tx, req.ctx, 'order.values_received', 'recommendation', recs[0].id, { ids: b.ids, patientId: recs[0].patientId });
+    return { ok: true };
   });
 
   /** Reception chased the lab: logged, and shown so nobody rings twice in a row. */

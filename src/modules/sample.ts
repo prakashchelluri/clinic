@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
 import { patient, session, appointment, visit, encounter, prescriptionItem, recommendation, charge, payment, expense, feeCategory, medicine, procedureCatalog, formDefinition, practitioner, branch, room, calendarBlock, procedureSession, TENANT_TABLES } from '../db/schema.js';
@@ -26,21 +26,37 @@ export async function clearClinicData(tx: Tx, t: string) {
   return order.length;
 }
 
-/** Demo data for a dermatology OP day in Rajahmundry. Owner-only; refuses to run twice. */
+/** Test data only where it cannot hurt: a clinic whose patients are all sample ones (none real yet), or a server started with ALLOW_TEST_RESET=1.
+ *  The test suite counts as a test server unless it sets ALLOW_TEST_RESET=0 to check this rule. */
+export async function testDataAllowed(tx: Tx, t: string, tenantKind?: string) {
+  if (tenantKind === 'platform') return false;
+  const flag = process.env.ALLOW_TEST_RESET;
+  if (flag === '1' || (process.env.NODE_ENV === 'test' && flag !== '0')) return true;
+  const real = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), sql`coalesce(${patient.legacyId}, '') <> 'SAMPLE'`, sql`${patient.patientNo} <> 'WALKIN'`)).limit(1); // WALKIN: the shared counter-sale record, not a person
+  return real.length === 0;
+}
+/** Every /dev route: the owner only, and only on a test clinic. */
+async function guard(req: FastifyRequest, tx: Tx) {
+  if (!req.ctx.roles.includes('owner')) throw new HttpError(403, 'FORBIDDEN:owner');
+  if (!(await testDataAllowed(tx, req.ctx.tenantId, req.ctx.tenantKind))) throw new HttpError(403, 'NOT_A_TEST_CLINIC');
+}
+
+/** Demo data for a dermatology OP day in Rajahmundry. Owner-only, test clinics only; refuses to run twice. */
 export function sampleRoutes(app: FastifyInstance) {
   /** Clear everything this clinic has done, then load the test data fresh. Owner only, and only when the caller types the word. */
   route(app, 'post', '/dev/reset-sample', 'config.*', async (req, tx) => {
-    if (!req.ctx.roles.includes('owner')) throw new HttpError(403, 'FORBIDDEN:owner');
+    await guard(req, tx);
     if ((req.body as any)?.confirm !== 'RESET') throw new HttpError(400, 'CONFIRM_BY_TYPING_RESET');
     const t = req.ctx.tenantId;
     const cleared = await clearClinicData(tx, t);
     const base = await loadSample(tx, t, req.ctx.userId, req.ctx.timezone);
     return { cleared, base, ...(await loadBookingSample(tx, t, req.ctx.userId, req.ctx.timezone, originOf(req))) };
   });
-  route(app, 'post', '/dev/sample-data', 'config.*', async (req, tx) => loadSample(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
-  route(app, 'post', '/dev/sample-collections', 'config.*', async (req, tx) => backfillCollections(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone));
+  route(app, 'post', '/dev/sample-data', 'config.*', async (req, tx) => { await guard(req, tx); return loadSample(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone); });
+  route(app, 'post', '/dev/sample-collections', 'config.*', async (req, tx) => { await guard(req, tx); return backfillCollections(tx, req.ctx.tenantId, req.ctx.userId, req.ctx.timezone); });
   /** Everything at once for testers: the base sample if missing, then bookings, requests, series, messages, courses and photos. */
   route(app, 'post', '/dev/sample-bookings', 'config.*', async (req, tx) => {
+    await guard(req, tx);
     const t = req.ctx.tenantId;
     const base = (await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.legacyId, 'SAMPLE'))).limit(1)).length ? null : await loadSample(tx, t, req.ctx.userId, req.ctx.timezone);
     return { base, ...(await loadBookingSample(tx, t, req.ctx.userId, req.ctx.timezone, originOf(req))) };

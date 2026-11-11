@@ -69,7 +69,7 @@ export function Expenses() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 mt-5 items-start">
           <DataTable
-            id="expenses" exportName={`expenses-${d.from}-to-${d.to}`} rows={rows} rowKey={(r: any) => r.id} sort={{ key: 'day', dir: -1 }}
+            id="expenses" exportName={`expenses-${d.from}-to-${d.to}`} rows={rows} rowKey={(r: any) => r.id} sort={{ key: 'day', dir: -1 }} error={q.error} onRetry={() => q.refetch()}
             search={{ placeholder: 'Find an expense: what, category or who', text: (r: any) => [r.description, r.category, r.enteredByName, r.note] }}
             empty={{ title: 'No expenses in this period', hint: canWrite ? 'Add one with New at the top.' : undefined }}
             filters={[

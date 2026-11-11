@@ -169,6 +169,13 @@
       "when": 1794230000000,
       "tag": "0023_no_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794359265220,
+      "tag": "0024_pharmacy_guards",
+      "breakpoints": true
     }
   ]
 }

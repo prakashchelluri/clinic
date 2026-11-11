@@ -128,11 +128,11 @@ test('counter: issue a prescription in full, short or not at all; split payment;
   const total = mrp(itIso) + mrp(itSun);
   const sale = { patientId: p.id, encounterId: e.id, items: [{ medicineId: iso.id, qty: 1, prescriptionItemId: itIso.id }, { medicineId: sun.id, qty: 1, prescriptionItemId: itSun.id }],
     notIssued: [{ prescriptionItemId: itIso.id, reason: 'Will buy later' }, { prescriptionItemId: itAda.id, reason: 'Out of stock' }] };
-  assert.equal((await P('POST', '/pharmacy/sale', { ...sale, payments: [{ method: 'upi', amountPaise: 50000 }, { method: 'cash', amountPaise: total - 50000 }] })).json().code, 'REFERENCE_REQUIRED');
+  // UPI without a transaction number is allowed now (it is on the patient's phone); see pharmacyGuards.test.ts
   assert.equal((await P('POST', '/pharmacy/sale', { ...sale, payments: [{ method: 'upi', amountPaise: 50000, reference: 'UTR123456' }, { method: 'cash', amountPaise: 100 }] })).json().code, 'PAYMENTS_DO_NOT_ADD_UP');
   assert.equal((await P('POST', '/pharmacy/sale', { ...sale, discountPaise: Math.round(total * 0.2), method: 'cash' })).json().code, 'DISCOUNT_NEEDS_OWNER', 'above 10% needs the owner');
   assert.equal((await P('POST', '/pharmacy/sale', { ...sale, items: [{ medicineId: ada.id, qty: 1, prescriptionItemId: itAda.id }], method: 'cash' })).json().code, 'NOT_ENOUGH_STOCK');
-  assert.equal((await P('POST', '/pharmacy/sale', { ...sale, items: [{ medicineId: iso.id, qty: 1, batchId: '00000000-0000-4000-8000-000000000000' }], method: 'cash' })).json().code, 'BATCH_NOT_SELLABLE');
+  assert.equal((await P('POST', '/pharmacy/sale', { ...sale, items: [{ medicineId: iso.id, qty: 1, prescriptionItemId: itIso.id, batchId: '00000000-0000-4000-8000-000000000000' }], method: 'cash' })).json().code, 'BATCH_NOT_SELLABLE');
   const pays = [{ method: 'upi', amountPaise: 50000, reference: 'UTR123456' }, { method: 'cash', amountPaise: total - 50000 }];
   assert.equal((await P('POST', '/pharmacy/sale', { ...sale, payments: pays, receivedPaise: 1 })).json().code, 'RECEIVED_TOO_LOW');
   const s = await P('POST', '/pharmacy/sale', { ...sale, payments: pays, receivedPaise: total - 50000 + 2700, whatsapp: true });
@@ -161,7 +161,7 @@ test('counter: issue a prescription in full, short or not at all; split payment;
   const before = (await P('GET', `/stock/medicines/${sun.id}`)).json().onHand;
   assert.equal((await P('POST', `/pharmacy/sale/${bill.id}/return`, { lines: [{ line: sunLine, qty: 2 }], reason: 'unopened', method: 'cash' })).json().code, 'MORE_THAN_SOLD');
   assert.equal((await P('POST', `/pharmacy/sale/${bill.id}/return`, { lines: [{ line: sunLine, qty: 1 }], reason: 'x', method: 'cash' })).statusCode, 400, 'a reason is needed');
-  const ret = (await P('POST', `/pharmacy/sale/${bill.id}/return`, { lines: [{ line: sunLine, qty: 1 }], reason: 'Already had one, unopened', method: 'cash' })).json();
+  const ret = (await P('POST', `/pharmacy/sale/${bill.id}/return`, { lines: [{ line: sunLine, qty: 1, restock: true }], reason: 'Already had one, unopened', method: 'cash' })).json();
   assert.equal(ret.creditNoteNo, 'CN-0001'); assert.equal(ret.refundPaise, bill.items[sunLine].amountPaise);
   assert.equal((await P('GET', `/stock/medicines/${sun.id}`)).json().onHand, before + 1);
   assert.equal((await P('GET', `/pharmacy/rx/${e.id}`)).json().items[1].issuedQty, 0, 'returned means not issued');
@@ -194,20 +194,20 @@ test('counter: issue a prescription in full, short or not at all; split payment;
   assert.equal(rt.statusCode, 200, rt.body); assert.equal(rt.json().docNo, 'RT-0001');
   assert.equal((await P('POST', '/stock/returns', { vendorId: v.id, reason: 'too many', lines: [{ batchId: sunBatch.id, qty: 9999 }] })).json().code, 'NOT_ENOUGH_STOCK');
 
-  // walk-in sale with the older single-payment shape still works
-  const w = await P('POST', '/pharmacy/sale', { newPatient: { fullName: 'Walk In', phone: '9876500001' }, items: [{ medicineId: iso.id, qty: 1 }], method: 'cash' });
+  // walk-in sale (an OTC item: Schedule H needs a prescription) with the older single-payment shape still works
+  const w = await P('POST', '/pharmacy/sale', { newPatient: { fullName: 'Walk In', phone: '9876500001' }, items: [{ medicineId: sun.id, qty: 1 }], method: 'cash' });
   assert.equal(w.statusCode, 200, w.body); assert.equal(w.json().encounterId, null);
 
   // void: the person who took the bill undoes it at once; everything goes back, the money is refunded, once only
-  const isoBefore = (await P('GET', `/stock/medicines/${iso.id}`)).json().onHand;
-  const v1 = await P('POST', '/pharmacy/sale', { newPatient: { fullName: 'Void Test', phone: '9876500002' }, items: [{ medicineId: iso.id, qty: 2 }], method: 'upi', reference: 'UPI12345' });
+  const sunBefore = (await P('GET', `/stock/medicines/${sun.id}`)).json().onHand;
+  const v1 = await P('POST', '/pharmacy/sale', { newPatient: { fullName: 'Void Test', phone: '9876500002' }, items: [{ medicineId: sun.id, qty: 2 }], method: 'upi', reference: 'UPI12345' });
   assert.equal(v1.statusCode, 200, v1.body); const vs = v1.json();
-  assert.equal((await P('GET', `/stock/medicines/${iso.id}`)).json().onHand, isoBefore - 2);
+  assert.equal((await P('GET', `/stock/medicines/${sun.id}`)).json().onHand, sunBefore - 2);
   const vd = await P('POST', `/pharmacy/sale/${vs.id}/void`, {}); assert.equal(vd.statusCode, 200, vd.body);
   assert.equal(vd.json().refundPaise, vs.totalPaise); assert.equal(vd.json().method, 'upi');
-  assert.equal((await P('GET', `/stock/medicines/${iso.id}`)).json().onHand, isoBefore, 'stock is back');
+  assert.equal((await P('GET', `/stock/medicines/${sun.id}`)).json().onHand, sunBefore, 'stock is back');
   assert.equal((await P('POST', `/pharmacy/sale/${vs.id}/void`, {})).json().code, 'ALREADY_RETURNED', 'only once');
-  const v2 = (await O('POST', '/pharmacy/sale', { newPatient: { fullName: 'Void Two', phone: '9876500003' }, items: [{ medicineId: iso.id, qty: 1 }], method: 'cash' })).json();
+  const v2 = (await O('POST', '/pharmacy/sale', { newPatient: { fullName: 'Void Two', phone: '9876500003' }, items: [{ medicineId: sun.id, qty: 1 }], method: 'cash' })).json();
   assert.equal((await P('POST', `/pharmacy/sale/${v2.id}/void`, {})).statusCode, 403, 'only whoever took the bill, or the owner');
   await db.update(S.pharmacySale).set({ createdAt: new Date(Date.now() - 11 * 60_000).toISOString() }).where(eq(S.pharmacySale.id, v2.id));
   assert.equal((await O('POST', `/pharmacy/sale/${v2.id}/void`, {})).json().code, 'VOID_TOO_LATE', 'ten minutes, then it is a return');
