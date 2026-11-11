@@ -40,6 +40,24 @@ test('accounts: income matches End of day, expenses and dues line up, reception 
   assert.ok(owe && owe.totalPaise > 0, 'the part-paid fee is still owed');
   assert.ok(f.body.prevFrom < f.body.from && f.body.prevTo < f.body.from, 'the comparison period is before the period');
 
+  // a pharmacy sale and a return count once, as pharmacy, not again as "other" through the bill's payment rows
+  const P = as(await login('pharmacy@demo.clinic'));
+  const cet = (await O('GET', '/config')).body.medicines.find((m: any) => m.name === 'Cetirizine 10 mg');
+  const exp = new Date(); exp.setUTCMonth(exp.getUTCMonth() + 18);
+  assert.equal((await P('POST', '/stock/receipts', { lines: [{ medicineId: cet.id, qty: 20, ratePaise: 1000, batchNo: 'F1', expiry: exp.toISOString().slice(0, 7) }] })).status, 200);
+  const before = (await O('GET', '/dayclose')).body.money;
+  const sale = await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' });
+  assert.equal(sale.status, 200, JSON.stringify(sale.body));
+  const ret = await P('POST', `/pharmacy/sale/${sale.body.id}/return`, { lines: [{ line: 0, qty: 1 }], reason: 'Patient brought it back', method: 'cash' });
+  assert.equal(ret.status, 200, JSON.stringify(ret.body));
+  const after = (await O('GET', '/dayclose')).body.money;
+  const net = sale.body.totalPaise - ret.body.refundPaise;
+  assert.equal(after.pharmacy.total - before.pharmacy.total, net, 'pharmacy is up by the sale less the return');
+  assert.equal(after.other.total, before.other.total, 'the bill does not count a second time as other');
+  assert.equal(after.total.total - before.total.total, net, 'the day total moves by the sale once');
+  const f2 = (await O('GET', '/finance')).body;
+  assert.ok(f2.pharmacy.soldPaise >= net && f2.pharmacy.costPaise >= 1000, 'the margin card has the sale and its batch cost');
+
   assert.equal((await O('GET', '/finance?from=2026-05-02&to=2026-05-01')).status, 400, 'from after to is refused');
   assert.equal((await O('GET', '/finance?from=2024-01-01&to=2026-05-01')).status, 400, 'more than a year is refused');
   assert.equal((await R('GET', '/finance')).status, 403, 'reception does not see the owner figures');

@@ -35,11 +35,14 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
     const m = (days[todayIn(tz, new Date(at))] ??= emptyMoney());
     put(m[key], method, amount); put(m.total, method, amount); put(total[key], method, amount); put(total.total, method, amount);
   };
-  const pays = await tx.select({ p: payment, c: charge, vDoc: visit.practitionerId, sDoc: procedureSession.practitionerId }).from(payment).leftJoin(charge, eq(charge.id, payment.chargeId))
+  const pays = await tx.select({ p: payment, c: charge, vDoc: visit.practitionerId, sDoc: procedureSession.practitionerId, sale: pharmacySale.id }).from(payment).leftJoin(charge, eq(charge.id, payment.chargeId))
     .leftJoin(visit, eq(visit.id, charge.visitId)).leftJoin(procedureSession, eq(procedureSession.id, charge.sessionId))
+    .leftJoin(pharmacySale, and(eq(pharmacySale.tenantId, t), eq(pharmacySale.chargeId, payment.chargeId)))
     .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
   // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
-  for (const { p, c, vDoc, sDoc } of pays) {
+  for (const { p, c, vDoc, sDoc, sale } of pays) {
+    if (sale) continue; // a pharmacy bill's payment and refund rows mirror the sale; the sale and its returns below are what count, once
+
     add(p.receivedAt, p.courseId || c?.courseId ? 'procedure' : c?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
     const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
