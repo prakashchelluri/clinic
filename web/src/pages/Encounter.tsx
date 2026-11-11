@@ -577,7 +577,9 @@ export function Encounter() {
     if (!r) return;
     const reason = r.value.trim(); if (reason.length < 3) return toast('Give a reason of at least 3 letters.', 'err');
     try { await post(`/encounters/${id}/amend`, { reason }); loaded.current = false; pinsSynced.current = false; await qc.invalidateQueries({ queryKey: ['encounter', id] }); qc.invalidateQueries({ queryKey: ['print', id] }); toast('Open for changes. Finish signs it again.'); }
-    catch (err) { toast(errText(err), 'err'); }
+    catch (err) { // already open for changes (a second click, or another computer amended it): just show the open pad
+      if (err instanceof ApiError && err.body?.code === 'NOT_SIGNED') { loaded.current = false; await qc.invalidateQueries({ queryKey: ['encounter', id] }); return; }
+      toast(errText(err), 'err'); }
   };
   /** Preview prints what is saved: save first and wait for it; a failed save does not open a preview of older data. */
   const preview = async () => {
