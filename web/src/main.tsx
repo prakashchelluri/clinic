@@ -4,6 +4,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route } from 'react-router';
 import './index.css';
 import './glass.css';
+import './oat.css'; // trial theme (cream/slate/teal): delete this line to revert
 import { qc } from './api';
 import { App, Home } from './App';
 import { Today } from './pages/Today';
