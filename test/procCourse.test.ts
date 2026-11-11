@@ -111,3 +111,24 @@ test('a patient who asked for no WhatsApp gets no reminder, only the calls', asy
   const m = await withTenant(p.tenantId, SYS, (tx) => tx.select().from(message).where(eq(message.procedureSessionId, s.id)));
   assert.equal(p.noWhatsapp, true); assert.equal(m.length, 1); assert.equal(m[0].status, 'skipped'); assert.match(m[0].error ?? '', /no WhatsApp/);
 });
+
+test('menu badges: calls due today and today\'s sittings, amber while one is not confirmed', async () => {
+  const O = as(await login('owner@demo.clinic')); const R = as(await login('reception@demo.clinic'));
+  const peel = (await O('GET', '/config')).body.procedures.find((x: any) => x.name === 'Chemical peel');
+  const p = (await R('POST', '/patients', { fullName: 'Badge Patient', phone: '9848011204' })).body;
+  const v = (await O('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
+  const e = (await O('POST', `/visits/${v.id}/encounter`, {})).body;
+  await O('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Acne'] }, assessment: { diagnosis: [{ name: 'Acne' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 2, gapDays: 21 }] });
+  const rec = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
+  const before = (await R('GET', '/followups/menu-counts')).body;
+  // booked at the desk for today: counted, already confirmed
+  const s = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(today(), 3), startTime: '19:30', minutes: 30, force: true })).body;
+  await R('POST', `/procedure-sessions/${s.id}/reschedule`, { day: today(), startTime: '19:30', minutes: 30, force: true }); // moved by the clinic: not confirmed
+  const mid = (await R('GET', '/followups/menu-counts')).body;
+  assert.equal(mid.sittings, before.sittings + 1); assert.equal(mid.unconfirmed, before.unconfirmed + 1);
+  assert.equal(mid.calls, before.calls, 'booked: off the to-book list, onto the day call (same count)');
+  await R('POST', '/followups/log', { kind: 'confirm_day', refId: s.id, patientId: p.id, outcome: 'confirmed' });
+  const after = (await R('GET', '/followups/menu-counts')).body;
+  assert.equal(after.unconfirmed, before.unconfirmed); assert.equal(after.calls, before.calls - 1);
+  assert.equal((await as(await login('pharmacy@demo.clinic'))('GET', '/followups/menu-counts')).status, 403, 'only those who see the lists');
+});

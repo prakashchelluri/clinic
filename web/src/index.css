@@ -244,6 +244,12 @@ h1 { letter-spacing: -0.025em; }
   .nav-item { @apply flex items-center gap-2.5 rounded-full px-3 text-[13.5px] font-semibold text-ink-2; min-height: 38px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
   .nav-item:hover { @apply bg-ink/6 text-ink; }
   .nav-item.active { @apply bg-nav-active; color: var(--color-paper); }
+  /* a count beside a menu item (Calls to make, today's sittings); amber while something there still needs doing */
+  .nav-badge { @apply min-w-[22px] shrink-0 rounded-full bg-ink/8 px-1.5 text-center text-[11.5px] font-bold leading-[20px] tabular-nums text-ink-2; }
+  .nav-badge.warn { @apply bg-amber-soft text-amber; }
+  .nav-item.active .nav-badge { background: color-mix(in srgb, var(--color-paper) 22%, transparent); color: var(--color-paper); }
+  .rail-dot { @apply absolute right-[9px] top-[9px] h-2 w-2 rounded-full bg-ink-2; box-shadow: 0 0 0 2px var(--color-sidebar, var(--color-paper)); }
+  .rail-dot.warn { @apply bg-amber; }
   /* the rail (Mendo): one icon per section in a 52 px square, the open one on a grey tile, the name in a tooltip */
   .rail-item { @apply relative grid h-[44px] w-[44px] place-items-center rounded-full text-ink-2; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .rail-item:hover { @apply bg-ink/6 text-ink; }

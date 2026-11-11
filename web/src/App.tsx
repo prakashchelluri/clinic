@@ -17,6 +17,9 @@ export function can(perms: string[] | undefined, needed: string) {
 }
 
 export type NavItem = { to: string; label: string; icon: string; show: (c: (p: string) => boolean) => boolean };
+/** A count beside a menu item; warn = something there still needs doing today (amber). */
+type Badge = { n: number; warn?: boolean; hint: string };
+type Badges = Record<string, Badge | undefined>;
 export const NAV: NavItem[] = [
   { to: '/clinic', label: 'Clinic', icon: 'home', show: (c) => c('finance.read') },
   { to: '/accounts', label: 'Accounts', icon: 'wallet', show: (c) => c('finance.read') },
@@ -76,15 +79,15 @@ export function useNav() {
 }
 
 /** The collapsed rail: one icon per section with its name in a tooltip, for people who know the icons and want the width. */
-function Rail({ items, active, clinic, me, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; onSignOut: () => void; onExpand: () => void }) {
+function Rail({ items, active, clinic, me, badges = {}, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; badges?: Badges; onSignOut: () => void; onExpand: () => void }) {
   return (
     <div className="flex h-full flex-col items-center px-3 pb-3.5 pt-4">
       <Link to="/" title={clinic} className="mb-2 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
       <button type="button" onClick={onExpand} aria-label="Show menu names" data-tip="Show menu names" className="tip rail-item mb-2 !h-8"><Icon name="chevR" className="h-4 w-4" /></button>
       <nav className="flex w-full flex-col items-center gap-1 overflow-y-auto no-scrollbar" aria-label="Sections">
         {items.map((n) => <span key={n.to} className="contents">
-          <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} aria-label={n.label} data-tip={n.label} className={`tip rail-item ${active?.to === n.to ? 'active' : ''}`}>
-            <Icon name={n.icon} className="h-[18px] w-[18px]" />
+          <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} aria-label={badges[n.to] ? `${n.label}, ${badges[n.to]!.hint}` : n.label} data-tip={badges[n.to] ? `${n.label} · ${badges[n.to]!.hint}` : n.label} className={`tip rail-item ${active?.to === n.to ? 'active' : ''}`}>
+            <Icon name={n.icon} className="h-[18px] w-[18px]" />{badges[n.to] && <span className={`rail-dot ${badges[n.to]!.warn ? 'warn' : ''}`} aria-hidden="true" />}
           </Link></span>)}
       </nav>
       <Link to="/help" aria-label="Help" data-tip="Help" className="tip rail-item mt-auto"><Icon name="help" className="h-[18px] w-[18px]" /></Link>
@@ -96,10 +99,11 @@ function Rail({ items, active, clinic, me, onSignOut, onExpand }: { items: NavIt
   );
 }
 
-function Sidebar({ items, active, clinic, me, roles, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
+function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
+      {badges[n.to] && <span className={`nav-badge ${badges[n.to]!.warn ? 'warn' : ''}`} title={badges[n.to]!.hint}><span className="sr-only">{badges[n.to]!.hint}: </span>{badges[n.to]!.n}</span>}
     </Link>
   );
   return (
@@ -156,6 +160,8 @@ export function App() {
   const [theme, toggleTheme] = useTheme();
   const [navOpen, toggleNav] = useNav();
   const online = useOnline(); const offlineAt = useOffline();
+  // menu badges (a hook: above the early returns), under the Calls list's own key so logging a call refreshes them too
+  const counts = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: c('worklist.read') && !platform, refetchInterval: 30000 });
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((o) => !o); } };
@@ -205,13 +211,18 @@ export function App() {
   const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? (perms.includes('encounter.complete') || perms.includes('*') ? '/today' : '/queue') : seg[0] === 'help' ? '/' : null;
   const goBack = () => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(parent ?? '/', { viewTransition: true }));
   const roles: string[] = me.data.roles ?? [me.data.role];
-  const side = { items, active, clinic, me: me.data, roles, onSignOut: signOut };
+  const mc = counts.data;
+  const badges: Badges = mc ? {
+    '/calls': mc.calls ? { n: mc.calls, hint: `${mc.calls} to call today` } : undefined,
+    '/worklist': mc.sittings ? { n: mc.sittings, warn: mc.unconfirmed > 0, hint: mc.unconfirmed ? `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today, ${mc.unconfirmed} not confirmed` : `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today` } : undefined,
+  } : {};
+  const side = { items, active, clinic, me: me.data, roles, badges, onSignOut: signOut };
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
       <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
-        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} onSignOut={signOut} onExpand={toggleWide} />}
+        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} badges={badges} onSignOut={signOut} onExpand={toggleWide} />}
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>

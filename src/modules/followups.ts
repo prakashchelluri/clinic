@@ -118,6 +118,16 @@ export function followupRoutes(app: FastifyInstance) {
     return { counts, rows: all.filter((r) => (TABS[tab] as readonly string[]).includes(r.kind)) };
   });
 
+  /** The side menu's badges. Calls: what the Calls page lists by default (overdue, due today, or no date; not waiting for a call-back).
+   *  Procedures: today's sittings still to happen, and how many of them nobody has confirmed with the patient. */
+  route(app, 'get', '/followups/menu-counts', 'worklist.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
+    const calls = (await build(tx, t, req.ctx.timezone, false)).filter((r) => !r.waiting && (!r.dueOn || r.dueOn <= today || (!!r.lastCall?.callbackOn && r.lastCall.callbackOn <= today))).length;
+    const [s] = await tx.select({ n: sql<number>`count(*)::int`, unconfirmed: sql<number>`count(*) filter (where ${procedureSession.state} = 'confirmed' and ${procedureSession.patientConfirmedAt} is null)::int` })
+      .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, today), inArray(procedureSession.state, ['confirmed', 'in_progress'])));
+    return { calls, sittings: s.n, unconfirmed: s.unconfirmed };
+  });
+
   /** One call attempt. Call later needs a date (a Sunday asks to be confirmed); Not interested needs a reason; No answer can send a short message. */
   route(app, 'post', '/followups/log', 'worklist.write', async (req, tx) => {
     const b = z.object({ kind: z.enum(KINDS), refId: z.string().uuid(), patientId: z.string().uuid(),
