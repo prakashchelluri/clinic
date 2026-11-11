@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
-import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, feeCategory, type FormSchema } from '../db/schema.js';
+import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, feeCategory, medicine, type FormSchema } from '../db/schema.js';
+import { rxProblems, needsReason, pregnancyFlag, firstName } from '../lib/rxSafety.js';
 import { queueRxMessage } from './rxpad.js';
 import { padConfig, printSettings, localPhrase } from '../lib/pad.js';
 import { normHistory } from '../lib/history.js';
@@ -108,6 +109,13 @@ export function clinicalRoutes(app: FastifyInstance) {
     if (body.complete) {
       const errors = validate(form.schema, data);
       if (errors.length) throw new HttpError(422, 'FORM_INVALID', { errors });
+      // allergy, pregnancy or a serious interaction: Finish needs the doctor's reason for each (data.overrides), the same check the pad runs
+      const pat = await tx.select({ fullName: patient.fullName, allergies: patient.allergies, history: patient.history }).from(patient).where(eq(patient.id, enc.patientId)).then((r) => r[0]);
+      const ids = body.prescription.map((i) => i.medicineId).filter(Boolean) as string[];
+      const ms = ids.length ? await tx.select({ id: medicine.id, generic: medicine.generic, allergyClass: medicine.allergyClass }).from(medicine).where(and(eq(medicine.tenantId, t), inArray(medicine.id, ids))) : [];
+      const meds = body.prescription.map((i) => { const m = ms.find((x) => x.id === i.medicineId); return { name: i.name, generic: m?.generic, allergyClass: m?.allergyClass }; });
+      const open = needsReason(rxProblems(meds, { name: firstName(pat?.fullName), allergies: pat?.allergies, pregnant: pregnancyFlag(normHistory(pat?.history)) }), data.overrides);
+      if (open.length) throw new HttpError(409, 'RX_NEEDS_REASON', { warnings: open });
     }
     const today = todayIn(req.ctx.timezone);
     let newRx = 0;
@@ -150,7 +158,7 @@ export function clinicalRoutes(app: FastifyInstance) {
       }
     }
     // Medical history lives on the patient as six categories (PUT /patients/:id/history); nothing here writes it any more.
-    const set: any = { data, provenance: { ...enc.provenance, lastEditedBy: req.ctx.userId, lastEditedRole: req.ctx.role } };
+    const set: any = { data, provenance: { ...enc.provenance, lastEditedBy: req.ctx.userId, lastEditedRole: req.ctx.role, lastEditedAt: new Date().toISOString() } };
     // Tests ordered keep the consultation open: the patient leaves with the prescription, the doctor finishes when the reports are in.
     const testsPending = !held && body.complete && (await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.status} not in ('done','cancelled')`)))[0].n > 0;
     if (body.complete) {
