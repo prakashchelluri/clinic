@@ -15,30 +15,68 @@ export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
 }
 
-export type NavItem = { to: string; label: string; icon: string; group?: 'clinic'; show: (c: (p: string) => boolean) => boolean };
+export type NavItem = { to: string; label: string; icon: string; show: (c: (p: string) => boolean) => boolean };
 export const NAV: NavItem[] = [
-  { to: '/clinic', label: 'Clinic', icon: 'home', group: 'clinic', show: (c) => c('finance.read') },
-  { to: '/dashboard', label: 'Dashboard', icon: 'chart', group: 'clinic', show: (c) => c('report.read') || c('finance.read') },
+  { to: '/clinic', label: 'Clinic', icon: 'home', show: (c) => c('finance.read') },
+  { to: '/dashboard', label: 'Dashboard', icon: 'chart', show: (c) => c('report.read') || c('finance.read') },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
-  { to: '/calendar', label: 'Calendar', icon: 'calendar', show: (c) => c('appointment.read') },
-  { to: '/bookings', label: 'Bookings', icon: 'inbox', show: (c) => c('appointment.read') },
+  { to: '/appointments', label: 'Appointments', icon: 'calendar', show: (c) => c('appointment.read') },
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', icon: 'clock', show: (c) => c('worklist.read') },
-  { to: '/followups', label: 'Follow-ups', icon: 'phone', show: (c) => c('worklist.read') },
+  { to: '/calls', label: 'Calls', icon: 'phone', show: (c) => c('worklist.read') },
   { to: '/tests', label: 'Test reports', icon: 'inbox', show: (c) => c('worklist.read') || c('encounter.complete') },
-  { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', group: 'clinic', show: (c) => c('pharmacy.read') },
-  { to: '/inventory', label: 'Inventory', icon: 'inbox', group: 'clinic', show: (c) => c('stock.read') },
-  { to: '/reports', label: 'Reports', icon: 'chart', group: 'clinic', show: (c) => c('report.daily') || c('finance.read') },
-  { to: '/expenses', label: 'Expenses', icon: 'wallet', group: 'clinic', show: (c) => c('expense.read') },
-  { to: '/settings', label: 'Settings', icon: 'gear', group: 'clinic', show: (c) => c('config.write') },
-  { to: '/audit', label: 'Audit log', icon: 'lock', group: 'clinic', show: (c) => c('user.write') },
+  { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', show: (c) => c('pharmacy.read') },
+  { to: '/inventory', label: 'Inventory', icon: 'inbox', show: (c) => c('stock.read') },
+  { to: '/reports', label: 'Reports', icon: 'chart', show: (c) => c('report.daily') || c('finance.read') },
+  { to: '/expenses', label: 'Expenses', icon: 'wallet', show: (c) => c('expense.read') },
+  { to: '/settings', label: 'Settings', icon: 'gear', show: (c) => c('config.write') },
+  { to: '/audit', label: 'Audit log', icon: 'lock', show: (c) => c('user.write') },
   { to: '/platform', label: 'Clinics', icon: 'home', show: (c) => c('platform.read') },
 ];
 
-/** Where each role lands: the page that answers their first question of the day. */
-export function homeFor(c: (p: string) => boolean, platform = false) {
+/** How someone is working right now. Each way has at most five menu items (audit 5.4) and its own home page; the rest of what they may open sits under More. */
+export type Mode = 'owner' | 'doctor' | 'desk' | 'junior' | 'coordinator' | 'pharmacy';
+const MODE_LABEL: Record<Mode, string> = { owner: 'Owner', doctor: 'Doctor', desk: 'Desk', junior: 'Junior doctor', coordinator: 'Procedures', pharmacy: 'Pharmacy' };
+const MENU: Record<Mode, string[]> = {
+  owner: ['/clinic', '/dashboard', '/reports', '/settings', '/audit'],
+  doctor: ['/today', '/appointments', '/patients', '/tests', '/worklist'],
+  desk: ['/queue', '/appointments', '/patients', '/calls', '/reports'],
+  junior: ['/queue', '/patients'],
+  coordinator: ['/worklist', '/calls', '/appointments', '/patients', '/tests'],
+  pharmacy: ['/pharmacy', '/inventory', '/patients'],
+};
+const MODE_HOME: Record<Mode, string> = { owner: '/clinic', doctor: '/today', desk: '/queue', junior: '/queue', coordinator: '/worklist', pharmacy: '/pharmacy' };
+const ROLE_MODE: Record<string, Mode> = { owner: 'owner', admin: 'owner', doctor: 'doctor', receptionist: 'desk', assistant: 'junior', coordinator: 'coordinator', pharmacist: 'pharmacy' };
+
+/** The ways this person can work: one per role. An owner or admin can also work the desk, and as a doctor when they see patients. */
+export function modesOf(me: any): Mode[] {
+  const roles: string[] = me?.roles?.length ? me.roles : me?.role ? [me.role] : [];
+  const ms = new Set<Mode>(roles.map((r) => ROLE_MODE[r]).filter(Boolean));
+  if (ms.has('owner')) { if (me.practitionerId) ms.add('doctor'); ms.add('desk'); }
+  return (Object.keys(MODE_LABEL) as Mode[]).filter((m) => ms.has(m));
+}
+const wkKey = (me: any) => `workingAs:${me?.userId ?? ''}`;
+/** "Working as", kept per computer. An owner who sees patients starts as Doctor; one who does not, as Owner. */
+export function useWorkingAs(me: any) {
+  const [, bump] = useState(0);
+  const modes = modesOf(me);
+  let stored: string | null = null; try { stored = localStorage.getItem(wkKey(me)); } catch { /* private mode */ }
+  const mode: Mode | null = modes.includes(stored as Mode) ? (stored as Mode) : modes.includes('doctor') ? 'doctor' : modes[0] ?? null;
+  const set = (m: Mode) => { try { localStorage.setItem(wkKey(me), m); } catch { /* private mode */ } bump((n) => n + 1); };
+  return { mode, modes, set, owner: modes.includes('owner'), switchable: modes.includes('owner') && modes.length > 1 };
+}
+/** This mode's menu first (five at most); everything else this person may open goes under More. */
+export function splitNav(items: NavItem[], modes: Mode[], mode: Mode | null) {
+  const want = mode && modes.includes('owner') ? MENU[mode] : [...new Set(modes.flatMap((m) => MENU[m]))];
+  const main = (want.length ? want.map((to) => items.find((n) => n.to === to)).filter((n): n is NavItem => !!n) : items).slice(0, 5);
+  return { main, more: items.filter((n) => !main.includes(n)) };
+}
+
+/** Where each role lands: the page that answers their first question of the day. An owner or admin lands on the home of the way they are working. */
+export function homeFor(c: (p: string) => boolean, platform = false, ownerMode: Mode | null = null) {
   if (platform) return '/platform';
+  if (ownerMode) return MODE_HOME[ownerMode];
   if (c('encounter.complete')) return '/today';
   if (c('visit.write')) return '/queue';
   if (c('encounter.intake')) return '/queue';
@@ -49,10 +87,10 @@ export function homeFor(c: (p: string) => boolean, platform = false) {
 }
 
 export function Home() {
-  const me = useMe();
+  const me = useMe(); const wk = useWorkingAs(me.data);
   if (me.isLoading) return null;
   const c = (p: string) => can(me.data?.perms, p);
-  return <Navigate to={homeFor(c, me.data?.tenantKind === 'platform')} replace />;
+  return <Navigate to={homeFor(c, me.data?.tenantKind === 'platform', wk.owner ? wk.mode : null)} replace />;
 }
 
 /** Left navigation: a quiet rail with counts; the active item is one filled row. */
@@ -75,14 +113,14 @@ export function useNav() {
 }
 
 /** The collapsed rail: one icon per section with its name in a tooltip, for people who know the icons and want the width. */
-function Rail({ items, active, clinic, me, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; onSignOut: () => void; onExpand: () => void }) {
+function Rail({ items, more, active, clinic, me, onSignOut, onExpand }: { items: NavItem[]; more: NavItem[]; active: NavItem | null; clinic: string; me: any; onSignOut: () => void; onExpand: () => void }) {
   return (
     <div className="flex h-full flex-col items-center px-3 pb-3.5 pt-4">
       <Link to="/" title={clinic} className="mb-2 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
       <button type="button" onClick={onExpand} aria-label="Show menu names" data-tip="Show menu names" className="tip rail-item mb-2 !h-8"><Icon name="chevR" className="h-4 w-4" /></button>
       <nav className="flex w-full flex-col items-center gap-1 overflow-y-auto no-scrollbar" aria-label="Sections">
-        {items.map((n, i) => <span key={n.to} className="contents">
-          {i > 0 && n.group === 'clinic' && items[i - 1].group !== 'clinic' && <span className="my-1.5 w-6 border-t border-line-2" />}
+        {[...items, ...more].map((n, i) => <span key={n.to} className="contents">
+          {i === items.length && i > 0 && <span className="my-1.5 w-6 border-t border-line-2" aria-label="More" />}
           <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} aria-label={n.label} data-tip={n.label} className={`tip rail-item ${active?.to === n.to ? 'active' : ''}`}>
             <Icon name={n.icon} className="h-[18px] w-[18px]" />
           </Link></span>)}
@@ -96,24 +134,28 @@ function Rail({ items, active, clinic, me, onSignOut, onExpand }: { items: NavIt
   );
 }
 
-function Sidebar({ items, active, clinic, me, roles, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
+function Sidebar({ items, more, active, clinic, me, roles, wk, onWork, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; more: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; wk: ReturnType<typeof useWorkingAs>; onWork: (m: Mode) => void; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
-      
     </Link>
   );
-  const main = items.filter((n) => !n.group); const clinicItems = items.filter((n) => n.group === 'clinic');
+  const moreActive = more.some((n) => n === active);
+  const [showMore, setShowMore] = useState(moreActive);
   return (
     <div className="flex h-full flex-col px-2.5 py-3">
       <div className="flex items-center gap-1 pb-3 pt-1">
         <Link to="/" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5 px-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
         {onCollapse && <button type="button" onClick={onCollapse} aria-label="Collapse menu to icons" title="Collapse menu" className="btn btn-ghost btn-icon !h-8 !w-8 shrink-0"><Icon name="chevL" className="h-4 w-4" /></button>}
       </div>
+      {wk.switchable && wk.mode && <div className="mb-3 px-1" role="radiogroup" aria-label="Working as">
+        <div className="px-1.5 pb-1.5 text-[11px] font-semibold text-muted">Working as</div>
+        <div className="flex flex-wrap gap-1">{wk.modes.map((m) => <button key={m} type="button" role="radio" aria-checked={wk.mode === m} className={`toggle-opt ${wk.mode === m ? 'on' : ''}`} onClick={() => onWork(m)}>{MODE_LABEL[m]}</button>)}</div>
+      </div>}
       <nav className="flex flex-col gap-px overflow-y-auto no-scrollbar" aria-label="Sections">
-        {main.map(link)}
-        {clinicItems.length > 0 && <div className="px-2.5 pb-1 pt-3.5 text-[11px] font-semibold uppercase tracking-[.06em] text-muted">Clinic</div>}
-        {clinicItems.map(link)}
+        {items.map(link)}
+        {more.length > 0 && <button type="button" className="nav-item mt-2 text-muted" aria-expanded={showMore || moreActive} onClick={() => setShowMore((o) => !o)}><Icon name="dots" className="h-4 w-4 shrink-0" /><span className="flex-1 text-left">More</span><Icon name="chevR" className={`h-3.5 w-3.5 transition-transform ${showMore || moreActive ? 'rotate-90' : ''}`} /></button>}
+        {(showMore || moreActive) && more.map(link)}
       </nav>
       <Link to="/help" onClick={onNavigate} className="nav-item mt-auto"><Icon name="help" className="h-4 w-4" /><span>Help</span></Link>
       <div className="mt-1.5 flex items-center gap-2.5 border-t border-line px-2 pt-3">
@@ -149,6 +191,9 @@ export function App() {
   const c = (p: string) => can(perms, p);
   const platform = me.data?.tenantKind === 'platform';
   const items = NAV.filter((n) => (n.to === '/platform' ? platform : !platform) && n.show(c));
+  const wk = useWorkingAs(me.data);
+  const { main, more } = platform ? { main: items, more: [] } : splitNav(items, wk.modes, wk.mode);
+  const onWork = (m: Mode) => { wk.set(m); nav(MODE_HOME[m], { viewTransition: true }); };
   const fit = false; // every page scrolls; the desk's check-in panel sticks on its own
   // A page you cannot use is not shown, and typing its address gets a clear "no access" instead of an empty screen.
   const sub = loc.pathname.split('/')[1] ?? '';
@@ -208,13 +253,13 @@ export function App() {
   const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? (perms.includes('encounter.complete') || perms.includes('*') ? '/today' : '/queue') : seg[0] === 'help' ? '/' : null;
   const goBack = () => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(parent ?? '/', { viewTransition: true }));
   const roles: string[] = me.data.roles ?? [me.data.role];
-  const side = { items, active, clinic, me: me.data, roles, onSignOut: signOut };
+  const side = { items: main, more, active, clinic, me: me.data, roles, wk, onWork, onSignOut: signOut };
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
       <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
-        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} onSignOut={signOut} onExpand={toggleWide} />}
+        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={main} more={more} active={active} clinic={clinic} me={me.data} onSignOut={signOut} onExpand={toggleWide} />}
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>

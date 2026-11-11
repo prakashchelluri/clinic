@@ -55,7 +55,7 @@ export function NewBooking({ cfg, me, initialPatient, initialDay, initialDoc, on
             {windows.map((w) => {
               const tone = w.free <= 0 ? 'rose' : w.free <= 2 ? 'amber' : 'sage';
               return (
-                <button key={w.id} role="radio" aria-checked={win?.id === w.id} onClick={() => setWin(w)} className={`rounded-2xl border px-2 py-2.5 text-left transition-shadow ${win?.id === w.id ? 'border-ink bg-white ring-1 ring-ink' : 'border-white/90 bg-white/70 hover:bg-white'} ${w.effectiveCapacity === 0 ? 'opacity-50' : ''}`}>
+                <button key={w.id} role="radio" aria-checked={win?.id === w.id} onClick={() => setWin(w)} className={`tap rounded-2xl border px-2 py-2.5 text-left transition-shadow ${win?.id === w.id ? 'border-ink bg-surface ring-1 ring-ink' : 'border-line bg-surface hover:bg-surface-2'} ${w.effectiveCapacity === 0 ? 'opacity-50' : ''}`}>
                   <div className="font-semibold">{w.startTime}</div>
                   <Chip tone={tone as any} className="mt-1 !text-[10.5px]">{w.free > 0 ? `${w.free} free` : 'full'}</Chip>
                 </button>

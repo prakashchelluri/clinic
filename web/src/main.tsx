@@ -16,25 +16,30 @@ import { Encounter } from './pages/Encounter';
 import { Worklist } from './pages/Worklist';
 import { Reports } from './pages/Reports';
 import { TestReports } from './pages/TestReports';
-import { Followups } from './pages/Followups';
+import { Calls } from './pages/Followups';
 import { Help } from './pages/Help';
 import { Dashboard } from './pages/Dashboard';
 import { Clinic } from './pages/Clinic';
 import { PrintRx } from './pages/PrintRx';
 import { Pharmacy, InventoryPage } from './pages/Pharmacy';
 import { Settings } from './pages/Settings';
-import { Calendar } from './pages/Calendar';
 import { Platform } from './pages/Platform';
 import { AuditLog } from './pages/Privacy';
 import { Expenses } from './pages/Expenses';
-import { Bookings } from './pages/Bookings';
+import { Appointments } from './pages/Bookings';
 import { PatientLink } from './pages/PatientLink';
 import { Display } from './pages/Display';
 import { NotFound } from './ui';
-import { useParams } from 'react-router';
+import { useLocation, useParams } from 'react-router';
 
 /** A fresh pad per patient: keyed on the id, nothing from patient A's pad can carry over (or autosave) into patient B's. */
 function EncounterById() { return <Encounter key={useParams().id} />; }
+/** An old address (Calendar, Bookings, Follow-ups) goes to the page that replaced it, keeping its query (?day=, ?book=1…). */
+function Moved({ to, add = '' }: { to: string; add?: string }) {
+  const q = new URLSearchParams(useLocation().search); new URLSearchParams(add).forEach((v, k) => q.set(k, v));
+  const s = q.toString();
+  return <Navigate to={s ? `${to}?${s}` : to} replace />;
+}
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -51,22 +56,24 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/overview" element={<Navigate to="/dashboard" replace />} />
             <Route path="/today" element={<Today />} />
             <Route path="/queue" element={<FrontDesk />} />
-            <Route path="/booking" element={<Navigate to="/calendar?book=1" replace />} />
+            <Route path="/booking" element={<Moved to="/appointments" add="book=1" />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:id" element={<Patients />} />
             <Route path="/encounter/:id" element={<EncounterById />} />
             <Route path="/worklist" element={<Worklist />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/tests" element={<TestReports />} />
-            <Route path="/followups" element={<Followups />} />
+            <Route path="/calls" element={<Calls />} />
+            <Route path="/followups" element={<Moved to="/calls" />} />
             <Route path="/help" element={<Help />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/clinic" element={<Clinic />} />
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/calendar" element={<Calendar />} />
-            <Route path="/bookings" element={<Bookings />} />
+            <Route path="/appointments" element={<Appointments />} />
+            <Route path="/calendar" element={<Moved to="/appointments" />} />
+            <Route path="/bookings" element={<Moved to="/appointments" add="view=list" />} />
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/platform" element={<Platform />} />
             <Route path="/audit" element={<AuditLog />} />

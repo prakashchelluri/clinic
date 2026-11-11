@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, errText, ApiError, today, dialable } from './api';
-import { Chip, Icon, Skeleton, toast, useScrollLock } from './ui';
+import { Chip, Icon, Skeleton, toast } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
   booked: { label: 'booked', tone: '' }, confirmed: { label: 'confirmed', tone: 'sage' },
@@ -24,17 +24,16 @@ const pron = (sex?: string | null) => (sex === 'F' ? 'her' : sex === 'M' ? 'him'
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 const minus = (hhmm: string, min: number) => { const [h, m] = hhmm.split(':').map(Number); const t = h * 60 + m - min; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
-export const refreshBookings = () => ['calendar', 'sessions', 'appointments', 'queue', 'bookings', 'appointment'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+export const refreshBookings = () => ['calendar', 'sessions', 'appointments', 'queue', 'bookings', 'appointment', 'followups'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
 /** One booking, opened from anywhere (calendar, bookings list). Every action on a booking lives here. */
 export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id: string; cfg: any; canWrite: boolean; onClose: () => void; onArrive?: (a: any) => void }) {
-  useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['appointment', id], queryFn: () => get(`/appointments/${id}`) });
   const [mode, setMode] = useState<null | 'cancel' | 'move'>(null);
   const [reason, setReason] = useState('');
   const [seriesToo, setSeriesToo] = useState(false);
-  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
+  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.modal-back') && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   const done = (msg: string) => { refreshBookings(); toast(msg); setMode(null); setReason(''); };
   const fail = (e: any) => toast(errText(e), 'err');
   const update = useMutation({ mutationFn: (b: any) => patch(`/appointments/${id}`, b), onSuccess: (r: any, b: any) => done(b.status === 'cancelled' ? `Cancelled${r.alsoCancelled ? ` with ${r.alsoCancelled} later visit${r.alsoCancelled === 1 ? '' : 's'}` : ''}. ${told(r.whatsapp)}` : b.status === 'confirmed' ? 'Marked confirmed' : b.status === 'no_show' ? 'Marked as did not come' : b.sessionId ? `Moved. ${told(r.whatsapp)}` : 'Updated'), onError: fail });
@@ -45,8 +44,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
   const warnAt = cfg?.tenant.settings.booking?.noShowWarnAt ?? 2;
 
   return createPortal(
-    <div className="fixed inset-0 z-40 anim-fade-in" style={{ background: 'rgba(28,27,25,.28)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <aside role="dialog" aria-label="Booking details" className="absolute inset-y-0 right-0 flex w-full max-w-[420px] flex-col gap-4 overflow-y-auto bg-surface p-5 anim-slide-in sm:p-6" style={{ boxShadow: '-30px 0 60px -30px rgba(40,30,20,.45)' }} onClick={(e) => e.stopPropagation()}>
+      <aside role="dialog" aria-label="Booking details" className="side-drawer">
         {!a ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
             <StatusChip s={a.status} />
@@ -107,7 +105,6 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
         </>)}
         {q.isError && <div className="text-sm text-rose">{errText(q.error)}</div>}
       </aside>
-    </div>
   , document.body);
 }
 
@@ -125,7 +122,7 @@ function MovePicker({ appt, onPick, onClose, busy }: { appt: any; onPick: (sessi
       <div className="flex items-center gap-2"><label className="label !mb-0" htmlFor="mv-day">Move to</label><input id="mv-day" type="date" className="input !w-auto" min={today()} value={day} onChange={(e) => { if (e.target.value) { setDay(e.target.value); setSel(null); } }} /></div>
       {ws.isLoading ? <Skeleton rows={2} /> : ws.isError ? <div className="text-sm text-rose">{errText(ws.error)}</div> : opts.length === 0 ? <div className="text-sm text-muted">No time free for this doctor on that day.</div> : (
         <div className="grid grid-cols-3 gap-2">{opts.map((w: any) => (
-          <button key={w.id} disabled={busy || w.free < places} aria-pressed={sel?.id === w.id} onClick={() => setSel(w)} className={`rounded-xl border px-2 py-2 text-sm font-semibold ${w.free < places ? 'border-transparent text-muted line-through' : sel?.id === w.id ? 'border-ink bg-white ring-1 ring-ink' : 'border-line bg-white hover:border-ink'}`}>{w.startTime}<div className="text-[11px] font-normal text-muted">{w.free} free</div></button>
+          <button key={w.id} disabled={busy || w.free < places} aria-pressed={sel?.id === w.id} onClick={() => setSel(w)} className={`tap rounded-xl border px-2 py-2 text-sm font-semibold ${w.free < places ? 'border-transparent text-muted line-through' : sel?.id === w.id ? 'border-ink bg-surface ring-1 ring-ink' : 'border-line bg-surface hover:border-ink'}`}>{w.startTime}<div className="text-[11px] font-normal text-muted">{w.free} free</div></button>
         ))}</div>
       )}
       {sel && <div className="rounded-xl bg-paper px-3 py-2.5 text-sm anim-fade-in" role="status">

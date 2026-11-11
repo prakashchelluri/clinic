@@ -6,22 +6,18 @@ import { can } from '../App';
 import { PhotoCapture } from '../photos';
 import { ProcSchedule } from './ProcSchedule';
 import { ProcedureBoard, LoadError, clashLabel } from '../procBoard';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast, ask, Tabs } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast, ask } from '../ui';
 
-const OUTCOMES = ['Will come', 'Wants another date', 'No answer', 'Wrong number', 'Declined', 'Done elsewhere'];
-type Kind = 'procedure' | 'followup';
 /** Plan status in the desk's words. */
 const STATUS: Record<string, string> = { open: 'Not called', contacted: 'Called', scheduled: 'Booked', cancelled: 'Declined', done: 'Done' };
 
-/** Procedure and follow-up worklists: what used to be the procedure book and the follow-up book. Test reports have their own page. */
+/** Procedures: sittings by day, the board, and plans to schedule. Calls about plans (and reviews) are logged on the one Calls list. */
 export function Worklist() {
   const { perms } = useOutletContext<any>();
-  const [kind, setKind] = useState<Kind>('procedure');
   const [sp, setSp] = useSearchParams();
   const view: 'schedule' | 'plans' | 'board' = sp.get('tab') === 'plans' ? 'plans' : sp.get('tab') === 'board' ? 'board' : 'schedule'; // the schedule by date is the first thing you see
   const setView = (v: 'schedule' | 'plans' | 'board') => setSp((p) => { p.set('tab', v); return p; }, { replace: true });
   const proc = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), refetchInterval: 15000 });
-  const fu = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), refetchInterval: 15000 });
   const sessions = useQuery({ queryKey: ['psessions-upcoming'], queryFn: () => get(`/procedure-sessions?day=${today()}`), refetchInterval: 30000 });
   const nav = useNavigate();
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: () => { qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
@@ -31,25 +27,24 @@ export function Worklist() {
   const t = today();
   // plans the doctor made today that nobody has acted on yet
   const isNew = (r: any) => r.status === 'open' && new Date(r.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === t;
-  const newPlans = [...(proc.data ?? []), ...(fu.data ?? [])].filter(isNew).length;
-  const list = kind === 'procedure' ? proc : fu;
+  const newPlans = (proc.data ?? []).filter(isNew).length;
+  const list = proc;
   const rows: any[] = list.data ?? [];
   const overdue = rows.filter((r) => r.dueOn && r.dueOn < t && r.status !== 'scheduled');
   return (
     <div>
       <PageHeader title="Procedures" subtitle={view === 'schedule' ? 'Sittings by day' : overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Plans not booked yet'}>
         <Segmented<'schedule' | 'plans' | 'board'> value={view} onChange={setView} options={[{ value: 'schedule', label: 'Schedule' }, { value: 'board', label: 'Board' }, { value: 'plans', label: newPlans ? `Plans to schedule · ${newPlans} new` : 'Plans to schedule', count: (proc.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length || undefined }]} />
-        {view === 'plans' && <Tabs className="w-full" value={kind} onChange={setKind} options={[{ value: 'procedure', label: 'Procedures', count: proc.data?.length }, { value: 'followup', label: 'Follow-ups', count: fu.data?.length }]} />}
       </PageHeader>
       {view === 'schedule' ? <ProcSchedule onPlans={() => setView('plans')} /> : view === 'board' ? <ProcedureBoard /> : (<>
-      {kind === 'procedure' && (sessions.data ?? []).length > 0 && (
+      {(sessions.data ?? []).length > 0 && (
         <div className="card anim-fade-up mb-4 flex items-center gap-3 flex-wrap text-sm"><Icon name="stetho" className="h-4 w-4 text-sky" /><span className="font-medium">Today in the rooms:</span>
           {(sessions.data ?? []).map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><Chip tone="sky">{s.startTime} {s.patient.fullName} · {s.room ?? 'no room'}</Chip>{can(perms, 'document.write') && !['cancelled', 'postponed'].includes(s.state) && <button className="btn btn-ghost btn-icon !h-8 !w-8" aria-label={`Take photos for ${s.patient.fullName}`} data-tip="Photos" onClick={() => setCap(s)}><Icon name="spark" className="h-3.5 w-3.5" /></button>}</span>)}
-          <a className="btn btn-sm ml-auto" href="/calendar">Open calendar<Icon name="chevR" className="h-3.5 w-3.5" /></a></div>
+          <a className="btn btn-sm ml-auto" href="/appointments">Open appointments<Icon name="chevR" className="h-3.5 w-3.5" /></a></div>
       )}
       {list.isError && !list.data ? <LoadError onRetry={() => list.refetch()} /> : <Section>
         {list.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <Empty icon="check" title="Nothing pending" hint="When the doctor plans a procedure, it shows here." /> :
-          rows.map((r, i) => <Row key={r.id} r={r} i={i} today={t} canWrite={can(perms, 'worklist.write')} onUpdate={(b) => upd.mutate({ id: r.id, ...b })} onOpen={() => nav(`/patients/${r.patient.id}`, { viewTransition: true })} onBook={() => nav(`?book=1&patient=${r.patient.id}&pname=${encodeURIComponent(r.patient.fullName)}&rec=${r.id}${r.dueOn ? `&day=${r.dueOn}` : ''}`)} onSchedule={() => setScheduling(r)} onReschedule={() => setRescheduling(r)} onCancelSitting={async () => { const a = await ask({ title: 'Cancel the booked sitting?', body: `${r.patient.fullName} · ${r.procedure ?? 'procedure'} on ${fmtDate(r.next.day)} ${r.next.startTime}. The room and doctor are freed and it goes back to Plans to schedule.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { try { await patch(`/procedure-sessions/${r.next.id}`, { state: 'cancelled', reason: a.value || undefined }); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); toast('Sitting cancelled', 'info'); } catch (e: any) { toast(errText(e), 'err'); } } }} />)}
+          rows.map((r, i) => <Row key={r.id} r={r} i={i} today={t} canWrite={can(perms, 'worklist.write')} onUpdate={(b) => upd.mutate({ id: r.id, ...b })} onOpen={() => nav(`/patients/${r.patient.id}`, { viewTransition: true })} onCalls={() => nav('/calls?tab=procedures')} onSchedule={() => setScheduling(r)} onReschedule={() => setRescheduling(r)} onCancelSitting={async () => { const a = await ask({ title: 'Cancel the booked sitting?', body: `${r.patient.fullName} · ${r.procedure ?? 'procedure'} on ${fmtDate(r.next.day)} ${r.next.startTime}. The room and doctor are freed and it goes back to Plans to schedule.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { try { await patch(`/procedure-sessions/${r.next.id}`, { state: 'cancelled', reason: a.value || undefined }); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); toast('Sitting cancelled', 'info'); } catch (e: any) { toast(errText(e), 'err'); } } }} />)}
       </Section>}
       {cap && <PhotoCapture patient={{ id: cap.patient.id, fullName: cap.patient.fullName }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
       {rescheduling && <ScheduleModal rec={rescheduling} sitting={rescheduling.next} onClose={() => { setRescheduling(null); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
@@ -59,8 +54,7 @@ export function Worklist() {
   );
 }
 
-function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onReschedule, onCancelSitting, onBook }: { r: any; i: number; today: string; canWrite: boolean; onUpdate: (b: any) => void; onOpen: () => void; onSchedule: () => void; onReschedule: () => void; onCancelSitting: () => void; onBook: () => void }) {
-  const [outcome, setOutcome] = useState(OUTCOMES[0]); const [note, setNote] = useState(''); const [due, setDue] = useState(r.dueOn ?? ''); const [open, setOpen] = useState(false);
+function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onReschedule, onCancelSitting, onCalls }: { r: any; i: number; today: string; canWrite: boolean; onUpdate: (b: any) => void; onOpen: () => void; onSchedule: () => void; onReschedule: () => void; onCancelSitting: () => void; onCalls: () => void }) {
   const late = r.dueOn && r.dueOn < today && r.status !== 'scheduled';
   return (
     <div className="border-t border-line first:border-t-0 anim-fade-up" style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
@@ -79,20 +73,11 @@ function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onReschedule
         </div>
         {canWrite && (
           <div className="flex items-center gap-1.5">
-            {r.kind === 'procedure' ? (r.next ? <button className="btn btn-sm btn-primary" onClick={onReschedule}><Icon name="calendar" className="h-3.5 w-3.5" />Reschedule</button> : <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />{r.status === 'scheduled' ? 'Schedule next' : 'Schedule'}</button>)
-              : r.status === 'scheduled' ? <Chip tone="sage">Booked</Chip> : <button className="btn btn-sm btn-primary" onClick={onBook}><Icon name="calendar" className="h-3.5 w-3.5" />Book visit</button>}
-            <MoreMenu items={[{ label: 'Schedule another sitting', hidden: !(r.kind === 'procedure' && r.next), onClick: onSchedule }, { label: 'Cancel the booked sitting', danger: true, hidden: !(r.kind === 'procedure' && r.next), onClick: onCancelSitting }, { label: 'Log a call', onClick: () => setOpen(!open) }, { label: 'Done at another clinic', hidden: r.kind === 'procedure' || r.status === 'scheduled', onClick: () => onUpdate({ status: 'scheduled' }) }, { label: 'Mark done', onClick: () => onUpdate({ status: 'done' }) }]} />
+            {r.next ? <button className="btn btn-sm btn-primary" onClick={onReschedule}><Icon name="calendar" className="h-3.5 w-3.5" />Reschedule</button> : <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />{r.status === 'scheduled' ? 'Schedule next' : 'Schedule'}</button>}
+            <MoreMenu items={[{ label: 'Schedule another sitting', hidden: !r.next, onClick: onSchedule }, { label: 'Cancel the booked sitting', danger: true, hidden: !r.next, onClick: onCancelSitting }, { label: 'Log a call (on Calls)', onClick: onCalls }, { label: 'Mark done', onClick: () => onUpdate({ status: 'done' }) }]} />
           </div>
         )}
       </div>
-      {open && (
-        <div className="px-4 pb-3 pl-[64px] flex flex-wrap items-center gap-2 anim-fade-up">
-          <div className="flex flex-wrap gap-1">{OUTCOMES.map((o) => <button key={o} className={`toggle-opt ${outcome === o ? 'on' : ''}`} onClick={() => setOutcome(o)}>{o}</button>)}</div>
-          <input className="input !w-44 !py-1.5" placeholder="note" value={note} onChange={(e) => setNote(e.target.value)} />
-          <input type="date" className="input !w-auto !py-1.5" value={due} onChange={(e) => setDue(e.target.value)} />
-          <button className="btn btn-sm btn-primary" onClick={() => { onUpdate({ status: outcome === 'Done elsewhere' ? 'done' : outcome === 'Declined' ? 'cancelled' : 'contacted', contact: { outcome, note: note || undefined }, ...(due !== (r.dueOn ?? '') ? { dueOn: due || null } : {}) }); setNote(''); setOpen(false); }}>Save</button>
-        </div>
-      )}
     </div>
   );
 }

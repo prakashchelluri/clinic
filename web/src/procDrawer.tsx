@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, qc, today, errText } from './api';
-import { Chip, Icon, Skeleton, ask, money, toast, useScrollLock } from './ui';
+import { Chip, Icon, Skeleton, ask, money, toast } from './ui';
 import { FlagChips } from './flags';
 
 // prepaidPaise: a partly used advance covers that much; amountPaise is then the balance due
@@ -43,21 +43,19 @@ const outcomeText = (o: any) => (o && typeof o === 'object' ? Object.entries(o).
 
 /** One procedure sitting, opened from the Calendar: only what the doctor needs for this procedure. The full record is one click away. */
 export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; canAct: boolean; onClose: () => void; extra?: React.ReactNode }) {
-  useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean }) => patch(`/procedure-sessions/${id}`, b),
     onSuccess: (_r, b) => { ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Sitting marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Sitting started'); },
     onError: (e) => toast(errText(e), 'err') });
-  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
+  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.modal-back') && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   const s = q.data;
   const p = s?.patient;
   const conditions: any[] = p?.history?.conditions ?? [];
   const asked = conditions.length > 0 || (p?.history?.none ?? []).includes('conditions');
 
   return createPortal(
-    <div className="fixed inset-0 z-40 anim-fade-in" style={{ background: 'rgba(28,27,25,.28)', backdropFilter: 'blur(3px)' }} onClick={onClose}>
-      <aside role="dialog" aria-label="Procedure sitting" className="absolute inset-y-0 right-0 flex w-full max-w-[420px] flex-col gap-4 overflow-y-auto bg-surface p-5 anim-slide-in sm:p-6" style={{ boxShadow: '-30px 0 60px -30px rgba(40,30,20,.45)' }} onClick={(e) => e.stopPropagation()}>
+      <aside role="dialog" aria-label="Procedure sitting" className="side-drawer">
         {q.isError ? <div className="text-sm text-rose">Couldn't load. {errText(q.error)} <button className="btn btn-sm ml-1" onClick={() => q.refetch()}>Retry</button></div> :!s ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
             <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>
@@ -116,6 +114,5 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           </div>
         </>)}
       </aside>
-    </div>
   , document.body);
 }
