@@ -9,7 +9,9 @@ import { Avatar, Chip, Floating, Icon, Modal, Segmented, Skeleton, Tabs, fmtDate
 import { openPrint } from '../printPreview';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
-import { parseRxLine, qtyFor, allergyHit, rxWarnings, pregnancyFlag, ageText } from '../rxLine';
+import { parseRxLine, qtyFor, ageText } from '../rxLine';
+import { allergyHit, rxProblems, needsReason, pregnancyFlag, firstName, type Override } from '../rxSafety';
+import { PrintRx } from './PrintRx';
 import { FlagChips, CarefulBanner } from '../flags';
 import { useTemplates, suggests, norm, uniq, type Tmpl, type TmplKind } from '../templates';
 import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, type History } from '../screening';
@@ -32,7 +34,7 @@ const REVIEW_IN: [number | null, string][] = [[7, '7d'], [14, '14d'], [30, '1 m'
 const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
 const DX_STATUS = ['Provisional', 'Confirmed'];
 const DX_OPTIONS = ['Acne vulgaris', 'Melasma', 'Tinea corporis', 'Tinea cruris', 'Psoriasis vulgaris', 'Alopecia areata', 'Androgenetic alopecia', 'Verruca vulgaris', 'Atopic dermatitis', 'Seborrheic dermatitis', 'Contact dermatitis', 'Acute urticaria', 'Chronic urticaria', 'Vitiligo', 'Post-inflammatory hyperpigmentation', 'Scabies', 'Pityriasis versicolor', 'Lichen planus', 'Rosacea', 'Molluscum contagiosum', 'Impetigo', 'Herpes zoster'];
-// ponytail: the allergy, pregnancy and interaction word lists live in rxLine.ts (tested there); a proper drug database is the upgrade path.
+// ponytail: the allergy, pregnancy and interaction word lists live in src/lib/rxSafety.ts (tested in rxSafety2.test.ts); a proper drug database is the upgrade path.
 const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, _issued, ...i }: any): RxItem => i;
 /** The pad's own lines keep their id so a held-open consultation updates them instead of re-issuing; issued lines are locked. */
 const own = (i: any): RxItem => ({ ...strip(i), id: i.id, _issued: !!(i.dispensed || i.issuedQty > 0) });
@@ -257,6 +259,22 @@ function Combo({ value, options, onChange, placeholder, label, className, disabl
   );
 }
 
+/** Finish stopped on allergy, pregnancy or a serious interaction: one short reason for each, or back to the pad to change it. */
+function ReasonSheet({ warnings, onCancel, onDone }: { warnings: string[]; onCancel: () => void; onDone: (reasons: Record<string, string>) => void }) {
+  const [r, setR] = useState<Record<string, string>>({});
+  const ok = warnings.every((w) => (r[w] ?? '').trim().length >= 3);
+  return (
+    <Modal title="Check before finishing" width="max-w-lg" onClose={onCancel}>
+      <form className="space-y-3" onSubmit={(ev) => { ev.preventDefault(); if (ok) onDone(r); }}>
+        <div className="text-[13px] text-muted">Take the medicine off, or say in a few words why it is right for this patient. The reason stays with the consultation; it is not printed.</div>
+        {warnings.map((w, k) => <div key={w}><div className="mb-1 text-[13px] font-semibold text-rose">{w}</div>
+          <input autoFocus={k === 0} className="input" aria-label={`Reason to prescribe: ${w}`} maxLength={300} placeholder="Reason to prescribe" value={r[w] ?? ''} onChange={(ev) => setR({ ...r, [w]: ev.target.value })} /></div>)}
+        <div className="modal-foot"><button type="button" className="btn btn-ghost" onClick={onCancel}>Back to the pad</button><button type="submit" className="btn btn-primary" disabled={!ok}>Prescribe anyway</button></div>
+      </form>
+    </Modal>
+  );
+}
+
 /** The consultation on one pad: section cards in the clinic's order, templates in every card header, type anything on top, finish and call the next patient. */
 export function Encounter() {
   const { id } = useParams(); const nav = useNavigate(); const { cfg, perms, me } = useOutletContext<any>();
@@ -301,6 +319,13 @@ export function Encounter() {
   };
   const [capture, setCapture] = useState(false); const [compare, setCompare] = useState<[any, any] | null>(null);
   const loaded = useRef(false); const dirty = useRef(false); const justLoaded = useRef(false);
+  const edits = useRef(0); // counts changes, so a save that was on its way while the doctor kept typing does not mark the pad saved
+  const [signing, setSigning] = useState(false); // Finish → the sign-off sheet, showing the paper as it prints
+  const [checking, setChecking] = useState<string[] | null>(null); // serious warnings waiting for the doctor's reasons
+  // a draft save that never reached the server is kept on this computer per pad, and offered back when the pad opens again
+  const localKey = `pad-draft:${id}`;
+  type Kept = { at: number; data: Record<string, any>; rx: RxItem[]; recs: Rec[] };
+  const [restore, setRestore] = useState<Kept | null>(null);
   const previous = (timeline.data?.encounters ?? []).filter((x: any) => x.id !== id);
   const lastDone = previous.find((x: any) => x.status === 'completed');
   useEffect(() => {
@@ -314,15 +339,25 @@ export function Encounter() {
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
       setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
+      // a copy kept on this computer that is newer than the server's: offer it back; an older one, or one for a signed pad, goes
+      let kept: Kept | null = null; try { kept = JSON.parse(localStorage.getItem(localKey) ?? 'null'); } catch { kept = null; }
+      if (kept) {
+        const server = Date.parse(enc.data.provenance?.lastEditedAt ?? '') || 0;
+        if (enc.data.status === 'completed' || !(kept.at > server)) { try { localStorage.removeItem(localKey); } catch { /* private mode */ } }
+        else setRestore(kept);
+      }
     }
   }, [enc.data, timeline.data]);
   const cleanRx = () => rx.filter((i) => i.name).map(({ _qtyTouched, _issued, ...i }) => i);
-  const [saveFailed, setSaveFailed] = useState(false); // the last save did not reach the server: say so, the notes stay on screen
+  // the last save did not reach the server: 'kept' when a copy is on this computer and will be sent again, 'failed' for anything else
+  const [saveFailed, setSaveFailed] = useState<false | 'kept' | 'failed'>(false);
   const save = useMutation({
     // d: the data to send when it was changed in the same tick (the reason given at Finish), before React has re-rendered
     mutationFn: ({ complete, d, back }: { complete: boolean; back?: boolean; d?: Record<string, any> }) => patch(`/encounters/${id}`, { data: d ?? data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete, screened: !!back && !canFinish }),
-    onSuccess: (_e, { complete, back }) => {
-      if (complete) { setErrors([]); setShowMissing(false); } dirty.current = false; setSaveFailed(false); setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+    onMutate: () => edits.current,
+    onSuccess: (_e, { complete, back }, sentAt) => {
+      if (!restore) try { localStorage.removeItem(localKey); } catch { /* private mode */ } // still offered back: the copy stays until the doctor picks
+      if (complete) { setErrors([]); setShowMissing(false); setSigning(false); } if (sentAt === edits.current) dirty.current = false; setSaveFailed(false); setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
       ['queue', 'frontdesk', 'timeline'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       qc.invalidateQueries({ queryKey: ['print', id] }); // print never shows what was there before this save
       if (complete && held) { toast('Consultation completed'); openPrint({ title: 'Results sheet', rx: id, mode: 'results' }); nav('/today', { viewTransition: true }); }
@@ -330,7 +365,16 @@ export function Encounter() {
       else if (back && held) { toast('Kept open for the rest of the reports'); nav('/today', { viewTransition: true }); }
       else if (back) { toast('Intake saved · ready for the doctor'); nav('/queue', { viewTransition: true }); }
     },
-    onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); } else { setSaveFailed(true); toast(errText(e), 'err'); } },
+    onError: (e: any, vars) => {
+      if (e instanceof ApiError && e.body.code === 'FORM_INVALID') { setSigning(false); setErrors(e.body.errors); toast(`Please fill in: ${e.body.errors.map((x: any) => x.message?.replace(/ is required$/, '') || x.path.split('.')[1]).slice(0, 3).join(', ')}`, 'err'); setTimeout(() => document.querySelector('[data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 80); return; }
+      if (e instanceof ApiError && e.body.code === 'RX_NEEDS_REASON') { setSigning(false); setChecking(e.body.warnings ?? []); return; } // the server's own check: ask for the reasons it named
+      // only a draft is ever kept and sent again, never Finish; kept when the internet or the server is down (or the sign-in ran out)
+      const transient = !(e instanceof ApiError) || e.status === 0 || e.status === 401 || e.status >= 500;
+      if (!vars.complete && transient) { try { localStorage.setItem(localKey, JSON.stringify({ at: Date.now(), data: vars.d ?? data, rx, recs })); } catch { /* private mode */ } }
+      const kept = !vars.complete && transient ? 'kept' : 'failed';
+      if (saveFailed !== kept) toast(kept === 'kept' ? 'Not saved — kept on this computer, will send when the internet is back.' : errText(e), 'err'); // once, not every 15 seconds
+      setSaveFailed(kept);
+    },
   });
   // findings already ticked on this visit's skin-map pins belong in this visit's exam lists too (once, when the pad opens)
   const pinsSynced = useRef(false);
@@ -344,7 +388,9 @@ export function Encounter() {
       return changed ? { ...d, exam: ex } : d; });
   }, [pinsQ.data, enc.data, data]);
   // opening the pad is not an edit: the first render after loading does not mark it dirty, so nothing is saved until something changes
-  useEffect(() => { if (justLoaded.current) { justLoaded.current = false; return; } if (loaded.current) dirty.current = true; }, [data, rx, recs]);
+  useEffect(() => { if (justLoaded.current) { justLoaded.current = false; return; } if (loaded.current) { dirty.current = true; edits.current++; } }, [data, rx, recs]);
+  // back online: send what was kept at once instead of waiting for the next 15-second save
+  useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('online', f); return () => window.removeEventListener('online', f); }, [enc.data?.status]);
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate({ complete: false }); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
   useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('app:save-now', f); return () => window.removeEventListener('app:save-now', f); }, [enc.data?.status]);
   // closing the tab with changes not yet saved asks first
@@ -451,10 +497,17 @@ export function Encounter() {
     setLine(''); setPendingLine(null);
   };
   // the medicine name plus its generic when the catalogue has one, so a brand is caught by what it is
-  const medText = (i: RxItem) => `${i.name} ${meds.find((m: any) => m.id && m.id === i.medicineId)?.generic ?? ''}`;
+  const medOf = (i: RxItem) => meds.find((m: any) => m.id && m.id === i.medicineId);
+  const medText = (i: RxItem) => `${i.name} ${medOf(i)?.generic ?? ''} ${medOf(i)?.allergyClass ?? ''}`;
   const allergyWarnings = rx.filter((i) => i.name).map((i) => [i.name, allergyHit(p.allergies, medText(i))] as const).filter(([, w]) => w);
   const pregnant = pregnancyFlag(p.history);
-  const warnings = isDoctor ? rxWarnings(rx.filter((i) => i.name).map((i) => ({ name: i.name, generic: meds.find((m: any) => m.id && m.id === i.medicineId)?.generic })), { name: String(p.fullName ?? '').split(' ')[0], allergies: p.allergies, pregnant }) : [];
+  // allergy, same medicine twice, pregnancy, interactions; the serious ones stop Finish until the doctor gives a reason (the server checks the same)
+  const problems = isDoctor ? rxProblems(rx.filter((i) => i.name).map((i) => ({ name: i.name, generic: medOf(i)?.generic, allergyClass: medOf(i)?.allergyClass })), { name: firstName(p.fullName), allergies: p.allergies, pregnant }) : [];
+  const warnings = problems.map((x) => x.text);
+  const allOverrides: Override[] = Array.isArray(data.overrides) ? data.overrides : [];
+  const unanswered = needsReason(problems, allOverrides);
+  const overrides = allOverrides.filter((o) => o.warnings.some((w) => warnings.includes(w))); // the reasons that still apply, listed on the sign-off sheet
+  const amended = e.status === 'draft' && (e.amendments ?? []).length > 0;
   const followup = recs.find((r) => r.kind === 'followup');
   const setFollowup = (d: number | null) => setRecs([...recs.filter((r) => r.kind !== 'followup'), ...(d ? [{ kind: 'followup' as const, intervalDays: d }] : [])]);
   const addTest = (name: string) => { setTestDraft(''); addTestNamed(name); };
@@ -497,16 +550,34 @@ export function Encounter() {
     return out;
   };
   const finish = () => { if (!canFinish) return;
+    if (signing) return sign(); // Ctrl+Enter again on the sign-off sheet signs
     const missing = missingNow();
     if (missing.length) { setShowMissing(true); goTo(secOf(missing[0].path)); if (viewRef.current === 'stacked') toast(`Cannot finish yet: ${missing.map((m) => m.message.replace(/ is required$/, '')).join(', ')}`, 'err'); return; } // Focused and Review: the bar lists it, no toast on top
-    if (!warnings.length) return save.mutate({ complete: true });
-    // allergy, pregnancy or interaction: stop and ask for the reason; it is kept in the private notes (saved, never printed)
-    void ask({ title: 'Check before finishing', tone: 'danger', confirmLabel: 'Prescribe anyway', body: <div className="space-y-1">{warnings.map((w) => <div key={w} className="font-semibold text-rose">{w}</div>)}<div>Remove it, or give a reason to prescribe.</div></div>, field: { label: 'Reason to prescribe', required: true, maxLength: 300 } }).then((r) => {
-      if (!r?.value?.trim()) { goTo('medicines'); return; }
-      const line = `Prescribed despite: ${warnings.join(' ')} Reason: ${r.value.trim()}`;
-      const d = { ...data, notes: { ...(data.notes ?? {}), private: [data.notes?.private, line].filter(Boolean).join('\n') } };
-      setData(d); save.mutate({ complete: true, d });
-    });
+    // allergy, pregnancy or a serious interaction: a reason for each first (kept in data.overrides, never printed)
+    if (unanswered.length) { setChecking(unanswered); return; }
+    if (held) return save.mutate({ complete: true }); // after the reports: the prescription was signed when it went out
+    void toSheet(data);
+  };
+  /** Save first, so the sign-off sheet shows exactly what will print; a failed save does not open it. */
+  const toSheet = async (d: Record<string, any>) => {
+    try { await save.mutateAsync({ complete: false, d }); } catch { return; }
+    await qc.invalidateQueries({ queryKey: ['print', id] });
+    setSigning(true);
+  };
+  const sign = () => save.mutate({ complete: true });
+  const giveReasons = (reasons: Record<string, string>) => {
+    const at = new Date().toISOString();
+    const d = { ...data, overrides: [...allOverrides, ...(checking ?? []).map((w) => ({ at, warnings: [w], reason: reasons[w].trim() }))] };
+    setData(d); setChecking(null);
+    if (held) save.mutate({ complete: true, d }); else void toSheet(d);
+  };
+  /** Amend after signing: a reason is required; it is audited and prints on the prescription. */
+  const amend = async () => {
+    const r = await ask({ title: 'Amend the signed prescription', body: 'The pad opens again for changes. The reason prints on the prescription as “Amended” and is kept in the audit log.', confirmLabel: 'Amend', field: { label: 'Reason for the change', required: true, maxLength: 300 } });
+    if (!r) return;
+    const reason = r.value.trim(); if (reason.length < 3) return toast('Give a reason of at least 3 letters.', 'err');
+    try { await post(`/encounters/${id}/amend`, { reason }); loaded.current = false; pinsSynced.current = false; await qc.invalidateQueries({ queryKey: ['encounter', id] }); qc.invalidateQueries({ queryKey: ['print', id] }); toast('Open for changes. Finish signs it again.'); }
+    catch (err) { toast(errText(err), 'err'); }
   };
   /** Preview prints what is saved: save first and wait for it; a failed save does not open a preview of older data. */
   const preview = async () => {
@@ -742,6 +813,8 @@ export function Encounter() {
   const tpl = scope ? SECTION_TPL[scope] : null;
   const pin = () => { if (scope && active !== scope) setActive(scope); }; // once she adds to a section it stays open; it does not jump to the next empty one
   keys.current = (ev) => {
+    if (checking) return; // the reasons sheet has the keyboard
+    if (signing) { if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') { ev.preventDefault(); sign(); } return; } // the sign-off sheet: Ctrl+Enter signs
     if (view === 'stacked') return stackedKeys(ev);
     if (readOnly || !isDoctor || tab !== 'pad' || ev.defaultPrevented) return;
     const t = ev.target as HTMLElement | null; const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
@@ -810,7 +883,10 @@ export function Encounter() {
       <span className={`min-w-0 text-[14px] leading-relaxed ${v ? 'text-ink' : bad(k) ? 'font-medium text-rose' : 'text-muted'}`}>{v ?? (bad(k) ? `${TITLE[k] ?? k} is required` : EMPTY[k] ?? 'Tap to add')}</span>
       <span className="pt-0.5 text-xs font-semibold text-muted">{v ? 'Edit' : 'Add'}</span>
     </button>); };
-  const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">Not saved — check the internet. Your notes are still here.</span>;
+  const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">{saveFailed === 'kept' ? 'Not saved — kept on this computer, will send when the internet is back' : 'Not saved — your notes are still here. Try Save again.'}</span>;
+  const restoreAt = restore ? new Date(restore.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
+  const doRestore = () => { if (!restore) return; setData(restore.data); setRx(restore.rx); setRecs(restore.recs); setRestore(null); setSaveFailed('kept'); toast(`Restored what you typed at ${restoreAt}. It saves now.`); setTimeout(() => window.dispatchEvent(new Event('app:save-now')), 50); };
+  const dropRestore = () => { try { localStorage.removeItem(localKey); } catch { /* private mode */ } setRestore(null); };
   const age = ageText(p);
   const patientLine = [age ? `${age} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
 
@@ -868,7 +944,10 @@ export function Encounter() {
         {held && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status"><b>Held for reports.</b><span>Prescription issued {fmtDate(e.completedAt)}. {testsIn} of {testRecs.length} reports in{testsOpen ? `; pending: ${testRecs.filter((r: any) => r.status !== 'done').map((r: any) => `${r.notes}${r.expectedOn ? ` (expected ${fmtDate(r.expectedOn)})` : ''}`).join(', ')}` : ''}.</span>{canFinish && <span className="text-muted">Add or change what the results call for, then Complete. Issued medicines stay as written.</span>}</div>}
         {setNote && !readOnly && <div className="rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status">{setNote}</div>}
         {/* allergy, pregnancy and interaction: above the pad in every layout, not only beside the medicines table */}
-        {warnings.length > 0 && !readOnly && <div className="rounded-[12px] bg-rose-soft px-4 py-2.5 text-[12.5px] text-rose anim-fade-in" role="alert"><b>Check the prescription.</b> {warnings.join(' ')} Finish asks for a reason.</div>}
+        {warnings.length > 0 && !readOnly && <div className="rounded-[12px] bg-rose-soft px-4 py-2.5 text-[12.5px] text-rose anim-fade-in" role="alert"><b>Check the prescription.</b> {warnings.join(' ')} {unanswered.length ? 'Finish asks for a reason.' : problems.some((x) => x.serious) ? 'Reason given.' : ''}</div>}
+        {restore && !readOnly && <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="alert"><span><b>This computer has a newer copy of this pad</b> that did not reach the server.</span>
+          <button type="button" className="btn btn-sm" onClick={doRestore}>Restore what you typed at {restoreAt}</button><button type="button" className="btn btn-ghost btn-sm" onClick={dropRestore}>Keep the saved pad</button></div>}
+        {amended && <div className="rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status"><b>Amending the signed prescription:</b> {e.amendments[e.amendments.length - 1].reason}. Finish signs it again; the print says Amended.</div>}
 
         {!canFinish && (!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <div className="card !p-0"><ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open /></div>}
         {!canFinish && !padOf('history').show && cards.history}
@@ -941,8 +1020,9 @@ export function Encounter() {
           <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className={B} onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
-          <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+          <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
+        {readOnly && canFinish && e.status === 'completed' && <button type="button" className={B} onClick={() => { void amend(); }}>Amend</button>}
         {readOnly && <button type="button" className={BP} onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
       </div>
       </> : <>
@@ -958,13 +1038,22 @@ export function Encounter() {
           <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
-          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
+        {readOnly && canFinish && e.status === 'completed' && <button type="button" className="btn btn-sm" onClick={() => { void amend(); }}>Amend</button>}
         {readOnly && <button type="button" className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
       </div>
       </>}
       {mapOpen && <Modal title="Skin map" subtitle={p.fullName} width="max-w-4xl" onClose={() => setMapOpen(false)}><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => { const s = siteFor(a, formSections.find((x) => x.key === 'complaint')?.fields.find((x: Field) => x.key === 'site')?.options ?? []); if (s) set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), s])); }} onFinding={onPinFinding} /></Modal>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
+      {checking && <ReasonSheet warnings={checking} onCancel={() => { setChecking(null); goTo('medicines'); }} onDone={giveReasons} />}
+      {signing && <Modal title={amended ? 'Sign the amended prescription' : 'Sign the prescription'} subtitle={p.fullName} width="max-w-2xl" onClose={() => setSigning(false)}>
+        {overrides.length > 0 && <div className="mb-3 rounded-[12px] bg-rose-soft px-4 py-2.5 text-[12.5px] text-rose" role="alert"><b>Prescribed despite these checks:</b>{overrides.map((o, k) => <div key={k} className="mt-1">{o.warnings.join(' ')} <span className="text-ink">Reason: {o.reason}</span></div>)}</div>}
+        <div className="overflow-auto rounded-xl border border-line bg-paper p-3" style={{ maxHeight: 'min(60vh, 700px)' }}><div className="mx-auto w-fit shadow-md"><PrintRx id={id} embed /></div></div>
+        <div className="mt-2 text-xs text-muted">This is the paper exactly as it prints{willHold ? '; the visit stays open for the test reports' : ''}. Ctrl + Enter signs.</div>
+        <div className="modal-foot"><button type="button" className="btn btn-ghost" onClick={() => setSigning(false)}>Back to the pad</button>
+          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={sign}><Icon name="print" className="h-4 w-4" />Sign and finish</button></div>
+      </Modal>}
       {capture && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} onClose={() => setCapture(false)} />}
       {compare && <PhotoCompare name={p.fullName} a={compare[0]} b={compare[1]} onClose={() => setCompare(null)} />}
     </div>

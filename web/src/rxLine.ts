@@ -40,45 +40,8 @@ export function unitsPerDose(dose: string | null | undefined): number {
   return m ? Number(m[1]) || 1 : 1;
 }
 
-// --- safety checks on the prescription: allergy, pregnancy and one interaction ---
-// ponytail: hand-kept word lists matched at the start of each word of the medicine name (and its generic, when the catalogue has one);
-// a proper allergy / interaction database is the upgrade path. Stems are long enough not to catch minoxidil, doxylamine or levocetirizine.
-export const ALLERGY_CLASSES: Record<string, string[]> = {
-  sulfa: ['sulfa', 'sulpha', 'cotrimoxazole', 'dapsone', 'sulfasalazine'],
-  penicillin: ['penicillin', 'amox', 'augmentin', 'moxclav', 'clavam', 'ampi', 'cloxa', 'flucloxa'],
-  cephalosporin: ['cephalosporin', 'ceph', 'cef'],
-  tetracycline: ['tetracycl', 'doxycyc', 'minocyc', 'lymecyc'],
-  'local anaesthetic': ['anaesthe', 'anesthe', 'lidocaine', 'lignocaine', 'prilocaine', 'benzocaine', 'emla'],
-  macrolide: ['macrolide', 'azithro', 'clarithro', 'erythro', 'roxithro'],
-  quinolone: ['quinolone', 'fluoroquin', 'cipro', 'levoflox', 'oflox', 'moxiflox', 'norflox'],
-  nsaid: ['nsaid', 'ibuprofen', 'diclofenac', 'aceclofenac', 'aspirin', 'naproxen', 'mefenamic', 'nimesulide', 'etoricoxib', 'ketorolac'],
-};
-const words = (s: string) => s.toLowerCase().split(/[^a-z]+/).filter(Boolean);
-const starts = (text: string, stems: string[]) => words(text).some((w) => stems.some((x) => w.startsWith(x)));
-const FILLER = new Set(['drug', 'drugs', 'allergy', 'allergic', 'local', 'tablets', 'medicine', 'medicines', 'hair', 'food', 'other']);
-/** The allergy a medicine clashes with ("penicillin" for Amoxyclav), or null. med is the name, plus the generic when known. */
-export function allergyHit(allergies: string | null | undefined, med: string): string | null {
-  if (!allergies || !med) return null;
-  for (const word of words(allergies).filter((w) => w.length >= 4 && !FILLER.has(w))) {
-    const cls = Object.entries(ALLERGY_CLASSES).find(([, v]) => v.some((x) => word.startsWith(x) || (x.length >= 5 && x.startsWith(word))));
-    if (cls ? starts(med, cls[1]) : starts(med, [word])) return cls ? cls[0] : word;
-  }
-  return null;
-}
-const ISO = ['isotret', 'isotroin'];
-const PREGNANCY_AVOID = [...ISO, 'methotrex', 'finaster', 'dutaster', ...ALLERGY_CLASSES.tetracycline];
-type Med = { name: string; generic?: string | null };
-/** What Finish stops on, as sentences: allergy clashes, medicines unsafe in pregnancy or breastfeeding, isotretinoin with a tetracycline. */
-export function rxWarnings(meds: Med[], p: { name: string; allergies?: string | null; pregnant?: string | null }): string[] {
-  const out: string[] = []; const text = (m: Med) => `${m.name} ${m.generic ?? ''}`;
-  for (const m of meds) { const a = allergyHit(p.allergies, text(m)); if (a) out.push(`${p.name} is allergic to ${a}: ${m.name}.`); }
-  if (p.pregnant) for (const m of meds) if (starts(text(m), PREGNANCY_AVOID)) out.push(`${p.name} is ${p.pregnant.toLowerCase()}: ${m.name} can harm the baby.`);
-  const iso = meds.find((m) => starts(text(m), ISO)); const tet = meds.find((m) => starts(text(m), ALLERGY_CLASSES.tetracycline));
-  if (iso && tet) out.push(`${iso.name} with ${tet.name}: both raise the pressure inside the head; do not give together.`);
-  return out;
-}
-/** "Pregnant" or "Breastfeeding" when the patient's history chips say so. */
-export const pregnancyFlag = (history: any): string | null => (history?.conditions ?? []).map((x: any) => x?.name).find((n: any) => /pregnan|breastfeed|lactat/i.test(String(n))) ?? null;
+// The safety checks (allergy, same medicine twice, pregnancy, interactions) live in rxSafety.ts; re-exported for older imports.
+export { ALLERGY_CLASSES, allergyHit, rxWarnings, pregnancyFlag } from './rxSafety.js';
 /** "0 y"; "7 m" under two years when the date of birth is known; else the age in years; null when neither is known. */
 export function ageText(p: { ageYears?: number | null; dob?: string | null }, now = new Date()): string | null {
   if (p.dob) { const b = new Date(p.dob); const m = (now.getFullYear() - b.getFullYear()) * 12 + now.getMonth() - b.getMonth() - (now.getDate() < b.getDate() ? 1 : 0); if (m >= 0) return m < 24 ? `${m} m` : `${Math.floor(m / 12)} y`; }

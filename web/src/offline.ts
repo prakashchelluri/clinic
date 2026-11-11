@@ -36,7 +36,7 @@ export function startOfflineCache(qc: QueryClient) {
 
 /** Signing out (or another person signing in) leaves no patient data on this computer. */
 export function clearOfflineCache() {
-  try { for (const k of Object.keys(localStorage)) if (k.startsWith(PREFIX)) localStorage.removeItem(k); } catch { /* blocked */ }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith(PREFIX) || k.startsWith('pad-draft:')) localStorage.removeItem(k); } catch { /* blocked */ }
 }
 
 /** null when online; otherwise the time the shown data was loaded ("10:42"), or '' when nothing was. */
