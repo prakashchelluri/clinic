@@ -47,7 +47,7 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
     <div className="grid grid-cols-1 md:grid-cols-[230px_minmax(0,1fr)] gap-4 items-start">
       <div className="card-flat overflow-hidden">
         {list.map((r) => (
-          <button key={r.key} onClick={() => setSel(r.key)} className={'w-full text-left px-4 py-3 border-b border-ink/8 last:border-0 transition-colors ' + (r.key === role.key ? 'bg-white' : 'hover:bg-white/50')}>
+          <button key={r.key} onClick={() => setSel(r.key)} className={'w-full text-left px-4 py-3 border-b border-ink/8 last:border-0 transition-colors ' + (r.key === role.key ? 'bg-surface' : 'hover:bg-surface/50')}>
             <div className="flex items-center gap-2"><span className="text-sm font-medium">{r.name}</span>{!r.builtin && <Chip tone="sky">custom</Chip>}</div>
             <div className="text-xs text-muted">{r.users} {r.users === 1 ? 'person' : 'people'}{r.builtin && !r.locked && [...r.perms].sort().join() !== [...(r.defaultPerms ?? [])].sort().join() ? ' · changed' : ''}</div>
           </button>))}

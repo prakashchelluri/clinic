@@ -165,7 +165,7 @@ export function AuditLog() {
           <div className="overflow-x-auto"><table className="table min-w-[760px]">
             <thead><tr><th>When</th><th>Who</th><th>What</th><th>Patient</th><th>From</th></tr></thead>
             <tbody>{rows.map((r) => (
-              <tr key={r.id} className="cursor-pointer hover:bg-white/60" onClick={() => setOpen(r)}>
+              <tr key={r.id} className="cursor-pointer hover:bg-surface/60" onClick={() => setOpen(r)}>
                 <td className="whitespace-nowrap font-semibold">{when(r.at)}</td>
                 <td className="whitespace-nowrap">{r.userName ?? '—'}<span className="block text-xs text-muted">{ROLE_NAMES[r.role] ?? r.role ?? ''}</span></td>
                 <td><span className="flex flex-wrap items-center gap-1.5">{r.kind !== 'change' && r.kind !== 'signin' && <Chip tone={KIND_TONE[r.kind] ?? ''}>{KINDS.find((k) => k[0] === r.kind)?.[1].split(' /')[0].toLowerCase()}</Chip>}{r.summary}{r.unusual && <Chip tone="amber">unusual</Chip>}</span></td>

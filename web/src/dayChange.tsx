@@ -63,7 +63,7 @@ export function ChangeMyDay({ practitionerId, name, initialKind = 'late', initia
         <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="What changes">
           {OPTIONS.map((o) => (
             <button key={o.k} type="button" role="radio" aria-checked={kind === o.k} onClick={() => { setKind(o.k); setTime(''); setMinutes(null); }}
-              className={`flex items-start gap-3 rounded-2xl border p-3 text-left transition-colors ${kind === o.k ? 'border-sage bg-sage-soft' : 'border-line bg-white/60 hover:bg-white'}`}>
+              className={`flex items-start gap-3 rounded-2xl border p-3 text-left transition-colors ${kind === o.k ? 'border-sage bg-sage-soft' : 'border-line bg-surface/60 hover:bg-surface'}`}>
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-paper"><Icon name={o.icon} className="h-4 w-4" /></span>
               <span><b className="text-sm">{o.title}</b><span className="block text-xs text-muted">{o.hint}</span></span>
             </button>))}

@@ -8,6 +8,7 @@ import './oat.css'; // trial theme (cream/slate/teal): delete this line to rever
 import { qc } from './api';
 import { App, Home } from './App';
 import { Today } from './pages/Today';
+import { MyWeek } from './pages/MyWeek';
 import { Login } from './pages/Login';
 import { FrontDesk } from './pages/FrontDesk';
 import { Navigate } from 'react-router';
@@ -55,6 +56,7 @@ createRoot(document.getElementById('root')!).render(
             {/* ponytail: the old Overview (pages/Overview.tsx) is parked; its address goes to the Dashboard */}
             <Route path="/overview" element={<Navigate to="/dashboard" replace />} />
             <Route path="/today" element={<Today />} />
+            <Route path="/today/week" element={<MyWeek />} />
             <Route path="/queue" element={<FrontDesk />} />
             <Route path="/booking" element={<Moved to="/appointments" add="book=1" />} />
             <Route path="/patients" element={<Patients />} />

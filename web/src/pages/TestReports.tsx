@@ -63,7 +63,7 @@ export function ReportDialog({ order, testId, onClose }: { order: Order; testId:
         <div>
           <span className="label">Pages</span>
           <div className="flex flex-wrap gap-2">
-            {files.map((f, i) => <span key={i} className="inline-flex items-center gap-2 rounded-xl border border-line bg-white px-2.5 py-1.5 text-sm">{f.type.startsWith('image/') ? <img src={URL.createObjectURL(f)} alt="" className="h-9 w-9 rounded-md object-cover" /> : <span className="grid h-9 w-9 place-items-center rounded-md bg-clay-soft text-[10px] font-bold text-clay">PDF</span>}<span className="max-w-32 truncate">{f.name}</span><button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button></span>)}
+            {files.map((f, i) => <span key={i} className="inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 py-1.5 text-sm">{f.type.startsWith('image/') ? <img src={URL.createObjectURL(f)} alt="" className="h-9 w-9 rounded-md object-cover" /> : <span className="grid h-9 w-9 place-items-center rounded-md bg-clay-soft text-[10px] font-bold text-clay">PDF</span>}<span className="max-w-32 truncate">{f.name}</span><button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles(files.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button></span>)}
             <button type="button" className="btn !min-h-12" onClick={() => input.current?.click()}><Icon name="plus" className="h-4 w-4" />{files.length ? 'Another page' : 'Photo or file'}</button>
           </div>
           <input ref={input} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])].slice(0, 12)); e.target.value = ''; }} />
@@ -160,7 +160,7 @@ function OrderCard({ o, perms, isDoctor, onAdd, onReview }: { o: Order; perms: s
   const split = useMutation({ mutationFn: () => post('/orders/split', { ids: o.tests.filter((t) => !t.receivedAt).map((t) => t.id) }), onSuccess: () => { refresh(); toast('Reviewing what is in · the rest is its own order'); }, onError: (e) => toast(errText(e), 'err') });
   const day = (d: string | null) => (d ? fmtDate(d) : '');
   return (
-    <div className="mt-2.5 rounded-2xl bg-white/70 px-3.5 py-3">
+    <div className="mt-2.5 rounded-2xl bg-surface/70 px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <b className="text-[15px]">Order {o.orderNo}</b><span className="min-w-0 flex-1 text-sm text-ink-2">{o.tests.map((t) => t.name).join(', ')}</span>
         {(o.abnormal ?? 0) > 0 && <Chip tone="rose">Abnormal · {o.abnormal} out of range</Chip>}
@@ -184,7 +184,7 @@ function OrderCard({ o, perms, isDoctor, onAdd, onReview }: { o: Order; perms: s
       {o.state === 'ready' && <div className="mt-2 flex flex-wrap items-center gap-2 text-sm"><span className="text-muted">All {o.tests.length} received{o.tests.some((t) => t.docs.length) ? ` · ${o.tests.reduce((n, t) => n + t.docs.length, 0)} files` : ''}.</span>
         {o.tests.some((t) => t.docs.length) && <button className="btn btn-sm" onClick={() => { const docs = o.tests.flatMap((t) => t.docs); openViewer({ docs, index: 0, who: o.patient.fullName, canDelete: false }); }}>View</button>}
         <span className="ml-auto" />{isDoctor ? <button className="btn btn-sm btn-primary !min-h-11" onClick={() => onReview(o)}>Review</button> : <Chip>waiting for the doctor</Chip>}</div>}
-      {(o.state === 'reviewed' || o.state === 'doctor_call') && <div className={`mt-2 rounded-xl px-3 py-2.5 text-sm ${o.state === 'doctor_call' ? 'bg-[#FFF6DD]' : 'bg-sage-soft'}`}>
+      {(o.state === 'reviewed' || o.state === 'doctor_call') && <div className={`mt-2 rounded-xl px-3 py-2.5 text-sm ${o.state === 'doctor_call' ? 'bg-amber-soft' : 'bg-sage-soft'}`}>
         <div className="text-[11px] font-bold uppercase tracking-wider text-muted">{o.reviewedBy ?? 'Doctor'} says</div>
         <div className="font-semibold">{OUTCOME_SAYS[o.outcome ?? 'normal']}</div>{o.note && <div className="mt-0.5 text-ink-2">{o.note}</div>}
         {(o.state === 'reviewed' || isDoctor) && canDesk && <div className="mt-2 flex flex-wrap items-center gap-1.5">

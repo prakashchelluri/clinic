@@ -346,7 +346,7 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
   const Opt = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button type="button" onClick={onClick} className={on ? '!font-semibold' : ''}><span className="flex-1">{children}</span>{on && <Icon name="check" className="h-4 w-4" />}</button>;
   const controls = (
     <>
-      <button ref={fbtn} type="button" className={`btn ${open ? '!bg-white' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="filter" className="h-4 w-4" />{periodLabel}{filter !== 'all' && <span className="text-muted font-medium">· {showLabel}</span>}<Icon name="chevR" className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? '-rotate-90' : 'rotate-90'}`} /></button>
+      <button ref={fbtn} type="button" className={`btn ${open ? '!bg-surface' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="filter" className="h-4 w-4" />{periodLabel}{filter !== 'all' && <span className="text-muted font-medium">· {showLabel}</span>}<Icon name="chevR" className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? '-rotate-90' : 'rotate-90'}`} /></button>
       <Floating anchor={fbtn} open={open} onClose={() => setOpen(false)} width={300}>
         <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Period</div>
         {PERIODS.map(([k, l]) => <Opt key={k} on={period === k} onClick={() => { setPeriod(k); if (k !== 'custom') setOpen(false); }}>{l}</Opt>)}
@@ -713,7 +713,7 @@ function CheckoutList({ visits, canDesk, canForce, bare = false }: { visits: any
           const pending = rs.filter((r) => r.status === 'open'); const ids = pending.map((r) => r.id);
           return pending.length === 0
             ? <div className="flex items-center gap-2 rounded-2xl px-3 py-2 text-sm opacity-60"><Chip>done</Chip><span className="flex-1">{title} · {doneLabel(rs[0])}</span><Icon name="check" className="h-4 w-4" /></div>
-            : <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-white/70 px-3 py-2.5 text-sm"><Chip tone={tone}>{tag}</Chip><span className="min-w-0 flex-1"><b>{title}</b>{sub && <span className="text-muted"> · {sub}</span>}</span>
+            : <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface/70 px-3 py-2.5 text-sm"><Chip tone={tone}>{tag}</Chip><span className="min-w-0 flex-1"><b>{title}</b>{sub && <span className="text-muted"> · {sub}</span>}</span>
               {canDesk && <>{extra}<button className="btn btn-sm btn-primary" disabled={upd.isPending} onClick={onAction}>{action}</button>
                 <MoreMenu items={[{ label: 'Patient declined', danger: true, onClick: () => decline(ids, tag) }, { label: 'Do later', onClick: () => later(ids) }]} /></>}</div>;
         };
@@ -724,7 +724,7 @@ function CheckoutList({ visits, canDesk, canForce, bare = false }: { visits: any
               {procs.map((r) => <Item key={r.id} tag="procedure" tone="sky" title={r.procedure ?? 'Procedure'} sub={r.sittings ? `${r.sittings} sittings planned` : undefined} rs={[r]} action={r.procedureId ? 'Plan' : 'Schedule'} onAction={() => r.procedureId ? setCourse({ rec: { ...r, patient: v.patient }, patient: v.patient }) : setSched({ rec: { ...r, patient: v.patient }, patient: v.patient })} />)}
               {tests.length > 0 && <Item tag="tests" tone="clay" title={tests.map((r) => r.notes).filter(Boolean).join(', ') || 'Tests'} sub="explain to the patient" rs={tests} action="Explained" onAction={() => act(tests.filter((r) => r.status === 'open').map((r) => r.id), 'contacted', 'Explained').then(() => toast('Marked: tests explained', 'info'))} />}
               {fus.map((r) => <Item key={r.id} tag="follow-up" tone="amber" title={r.dueOn ? `Review around ${fmtDate(r.dueOn)}` : 'Review'} rs={[r]} action="Book visit" onAction={() => nav(`?book=1&patient=${v.patient.id}&pname=${encodeURIComponent(v.patient.fullName)}&rec=${r.id}${r.dueOn ? `&day=${r.dueOn}` : ''}${v.practitionerId ? `&doc=${v.practitionerId}` : ''}`)} />)}
-              {waitingRep && <div className="flex items-center gap-2 rounded-2xl bg-white/70 px-3 py-2.5 text-sm"><Chip tone="amber">reports</Chip><span className="min-w-0 flex-1"><b>{got} of {tst.length} received</b><span className="text-muted"> · carries on in Awaiting reports, it does not hold up closing</span></span></div>}
+              {waitingRep && <div className="flex items-center gap-2 rounded-2xl bg-surface/70 px-3 py-2.5 text-sm"><Chip tone="amber">reports</Chip><span className="min-w-0 flex-1"><b>{got} of {tst.length} received</b><span className="text-muted"> · carries on in Awaiting reports, it does not hold up closing</span></span></div>}
             </div>
             {canDesk && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-3"><span className="text-xs text-muted">{open.length ? 'Close visit unlocks when nothing above is pending.' : 'Nothing pending.'}</span><span className="ml-auto" />
               {v.encounterId && !bare && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Print Rx</button>}

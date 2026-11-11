@@ -10,6 +10,7 @@ import { AppointmentDrawer, told } from '../apptDrawer';
 import { normPhone, searchText, looksLikePhone } from '../phone';
 import { ProcedureDrawer } from '../procDrawer';
 import { ChangeMyDay } from '../dayChange';
+import '../frontdesk.css';
 
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
@@ -25,10 +26,8 @@ const OPEN = ['booked', 'confirmed'];
 type View = 'day' | 'week';
 type Pick = { k: 'doc' | 'room' | 'all'; id?: string };
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } } };
-const PILL: Record<string, string> = {
-  booked: 'bg-surface border-line', confirmed: 'bg-surface border-line',
-  arrived: 'bg-amber-soft text-[var(--color-amber)] border-transparent', no_show: 'border-dashed border-rose/50 text-rose line-through',
-};
+// the front desk's calm chips (frontdesk.css fd-k-*): booked is a thin outline, here is warm grey, didn't come is red text
+const PILL: Record<string, string> = { booked: 'fd-k-booked', confirmed: 'fd-k-booked', arrived: 'fd-k-waiting', no_show: 'fd-k-noshow' };
 const stripe = { background: 'repeating-linear-gradient(45deg,rgba(0,0,0,.05) 0 6px,transparent 6px 12px)' };
 
 /** Calendar for the front desk: one doctor or room at a time (or all as cards), day or week, book on a phone call, what needs handling. */
@@ -87,7 +86,7 @@ export function Calendar() {
   const keyed = (cfg?.services ?? []).filter((s: any) => s.color);
   return (
     <div className="space-y-3" style={{ zoom }}>
-      {keyed.length > 0 && <div className="flex flex-wrap items-center gap-3 text-xs text-muted anim-fade-up" aria-label="Colour key"><span className="font-semibold">Colour key</span>{keyed.map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</span>)}<span className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px] bg-sky" />Procedure</span></div>}
+      {keyed.length > 0 && <div className="flex flex-wrap items-center gap-3 text-xs text-muted anim-fade-up" aria-label="Colour key"><span className="font-semibold">Colour key</span>{keyed.map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</span>)}<span className="inline-flex items-center gap-1"><i className="fd-k-proc h-2.5 w-2.5 rounded-[3px]" />Procedure</span></div>}
       <div className="flex flex-wrap items-center gap-2.5 anim-fade-up">
         <SearchBox onOpen={setOpenId} onBook={canBook ? (patient) => setPanel({ patient }) : undefined} />
         <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -167,12 +166,12 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
                 {(w?.appointments ?? []).map((ap: any) => (
                   <button key={ap.id} draggable={grid.canBook && OPEN.includes(ap.status) && !past} title={[ap.phone, ap.service, ap.note, ap.status.replace('_', '-')].filter(Boolean).join(' · ')}
                     onDragStart={(e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: ap.id, sessionId: w.id, name: ap.name })); e.dataTransfer.effectAllowed = 'move'; }}
-                    onClick={() => grid.onOpen(ap.id)} className={`inline-flex items-center gap-1.5 rounded-[10px] border px-2.5 py-1 text-[12.5px] font-semibold ${PILL[ap.status] ?? PILL.booked}`}>
-                    {ap.color && <i className="h-2 w-2 rounded-[3px]" style={{ background: ap.color }} />}{ap.name}{ap.status === 'arrived' ? ' · arrived' : ap.status === 'no_show' ? ' · did not come' : ap.status === 'confirmed' ? ' ✓' : ''}
+                    onClick={() => grid.onOpen(ap.id)} className={`fd-pc ${PILL[ap.status] ?? PILL.booked}`}>
+                    {ap.color && <i className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: ap.color }} />}<span className="truncate">{ap.name}</span>{ap.status === 'arrived' ? <span className="tg">here</span> : ap.status === 'no_show' ? <span className="tg">didn't come</span> : ap.status === 'confirmed' ? <span className="tg">✓</span> : null}
                   </button>))}
-                {r.procs.map((p) => <button key={p.id} type="button" title={p.room ?? ''} onClick={() => grid.onOpenProc?.(p.id)} className="rounded-[10px] bg-sky-soft px-2.5 py-1 text-[12.5px] font-semibold text-sky hover:underline">{p.startTime} {p.patient} · {p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.state === 'completed' ? ' ✓' : ''}</button>)}
+                {r.procs.map((p) => <button key={p.id} type="button" title={p.room ?? ''} onClick={() => grid.onOpenProc?.(p.id)} className={`fd-pc fd-sit ${p.state === 'completed' ? 'fd-k-done' : 'fd-k-proc'}`}><b>{p.state === 'completed' ? '✓ ' : ''}{p.patient}</b><span>{p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''} · {p.startTime}{p.room ? ` · ${p.room}` : ''}</span></button>)}
                 {w && !closed && w.free > 0 && !past && (!isToday || w.endTime > now) && (grid.canBook
-                  ? <button className="rounded-[10px] border-[1.5px] border-dashed border-sage/40 px-2.5 py-1 text-[12.5px] font-semibold text-sage hover:bg-sage-soft" onClick={() => grid.onBook({ ...w, day })}>{w.free} free</button>
+                  ? <button className="fd-sch-free" onClick={() => grid.onBook({ ...w, day })}>+ Book · {w.free} free</button>
                   : <span className="text-xs text-muted">{w.free} free</span>)}
               </div>
               <span className={`pt-2.5 text-right text-xs font-bold ${w && w.allocated >= w.effectiveCapacity ? 'text-rose' : 'text-muted'}`}>{w ? `${w.allocated} of ${w.effectiveCapacity} booked` : ''}</span>
@@ -185,7 +184,7 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
 }
 
 function NowLine({ at }: { at: string }) {
-  return <div className="relative ml-[56px] h-0 border-t-2 border-clay"><span className="absolute -left-[56px] -top-2.5 rounded-full bg-clay px-1.5 py-0.5 text-[10.5px] font-bold text-white">{at}</span></div>;
+  return <div className="relative ml-[56px] h-0 border-t-2 border-clay"><span className="absolute -left-[56px] -top-2.5 rounded-full bg-clay px-1.5 py-0.5 text-[10.5px] font-bold text-paper">{at}</span></div>;
 }
 
 /** "All": one card per doctor and room, with the next free place, so 10 doctors still fit on one screen. */
@@ -209,7 +208,7 @@ function AllCards({ day, data, docs, rooms, onPick }: { day: string; data: any; 
         const ps = data.procedures.filter((p: any) => p.roomId === r.id);
         const cur = day === today() ? ps.find((p: any) => p.startTime <= now && now < p.endTime) : null;
         return (
-          <button key={r.id} onClick={() => onPick({ k: 'room', id: r.id })} className="card card-hover !p-4 text-left" style={{ background: 'var(--color-sky-soft)' }}>
+          <button key={r.id} onClick={() => onPick({ k: 'room', id: r.id })} className="card card-hover !p-4 text-left">
             <b className="text-[14px]">{r.name}</b>
             <div className="mt-1 text-xs text-muted">{ps.length} sitting{ps.length === 1 ? '' : 's'}</div>
             <div className="text-xs text-muted">{cur ? `busy until ${cur.endTime}` : day === today() ? 'free now' : ''}</div>
@@ -232,19 +231,19 @@ function WeekGrid({ from, docs, onOpenDay }: { from: string; docs: any[]; onOpen
     if (!ws.length) return { text: '—', sub: part ? '' : 'not working', cls: 'text-muted', style: {} };
     const a = ws.reduce((n: number, w: any) => n + w.allocated, 0); const c = ws.reduce((n: number, w: any) => n + w.effectiveCapacity, 0);
     const r = c ? a / c : 1; const notes = d.blocks.filter((b: any) => b.practitionerId === pid && ['other', 'stop'].includes(b.kind) && ws.some((w: any) => w.startTime < b.endTime && w.endTime > b.startTime)).map((b: any) => b.note);
-    return { text: `${a} / ${c}`, sub: notes[0] ?? (c - a > 0 ? `${c - a} free` : 'full'), cls: r >= 0.95 ? 'bg-rose-soft text-rose' : r >= 0.6 ? 'bg-amber-soft text-amber' : 'bg-sage-soft text-sage', style: {}, r };
+    return { text: `${a} / ${c}`, sub: notes[0] ?? (c - a > 0 ? `${c - a} free` : 'full'), cls: r >= 0.95 ? 'fd-k-booked !text-rose' : 'fd-k-booked', style: {}, r };
   };
   const rows: { key: string; head: ReactNode; cell: (d: any) => ReactNode }[] = [];
   for (const doc of docs) {
     const cell = (part?: 'am' | 'pm') => (d: any) => { const b = box(d, doc.id, part); return (
       <button onClick={() => onOpenDay(d.day, doc.id)} className={`w-full rounded-xl px-2.5 py-2 text-left text-[13px] font-bold ${b.cls}`} style={b.style} aria-label={`${doc.name} ${d.day}`}>
         {b.text}<span className="block text-[11px] font-medium">{b.sub}</span>
-        {b.r !== undefined && <span className="mt-1 block h-1 overflow-hidden rounded bg-black/5"><i className="block h-full bg-current opacity-50" style={{ width: `${Math.min(100, b.r * 100)}%` }} /></span>}
+        {b.r !== undefined && <span className="mt-1 block h-1 overflow-hidden rounded bg-black/5"><i className="block h-full bg-clay" style={{ width: `${Math.min(100, b.r * 100)}%` }} /></span>}
       </button>); };
     if (one) {
       rows.push({ key: doc.id + 'am', head: <><b className="text-[13px]">Morning</b><span className="block text-[11px] text-muted">before 14:00</span></>, cell: cell('am') });
       rows.push({ key: doc.id + 'pm', head: <><b className="text-[13px]">Evening</b><span className="block text-[11px] text-muted">from 14:00</span></>, cell: cell('pm') });
-      rows.push({ key: doc.id + 'pr', head: <><b className="text-[13px]">Procedures</b><span className="block text-[11px] text-muted">{doc.name}</span></>, cell: (d: any) => { const n = d.procedures.filter((p: any) => p.practitionerId === doc.id).length; return n ? <button onClick={() => onOpenDay(d.day, doc.id)} className="w-full rounded-xl bg-sky-soft px-2.5 py-2 text-left text-[13px] font-bold text-sky">{n} sitting{n === 1 ? '' : 's'}</button> : <span className="px-2.5 text-muted">—</span>; } });
+      rows.push({ key: doc.id + 'pr', head: <><b className="text-[13px]">Procedures</b><span className="block text-[11px] text-muted">{doc.name}</span></>, cell: (d: any) => { const n = d.procedures.filter((p: any) => p.practitionerId === doc.id).length; return n ? <button onClick={() => onOpenDay(d.day, doc.id)} className="fd-k-proc w-full rounded-xl px-2.5 py-2 text-left text-[13px] font-bold">{n} sitting{n === 1 ? '' : 's'}</button> : <span className="px-2.5 text-muted">—</span>; } });
     } else rows.push({ key: doc.id, head: <b className="text-[13px]">{doc.name}</b>, cell: cell() });
   }
   return (
@@ -254,7 +253,7 @@ function WeekGrid({ from, docs, onOpenDay }: { from: string; docs: any[]; onOpen
           <button key={d.day} onClick={() => onOpenDay(d.day, one ? docs[0].id : undefined)} className={`pb-2 text-left text-sm font-bold ${d.day === today() ? 'text-clay' : ''}`}>{label(d.day, { weekday: 'short', day: 'numeric' })}{d.day === today() ? ' · today' : ''}<span className="block text-[11px] font-medium text-muted">{n} booked</span></button>); })}
         {rows.map((r) => [<div key={r.key} className="border-t border-line/60 py-2.5 pr-2">{r.head}</div>, ...days.map((d) => <div key={r.key + d.day} className="border-t border-line/60 py-1.5">{r.cell(d)}</div>)])}
       </div>
-      <div className="mt-3 text-xs text-muted">Green has room, sand is filling, peach is full. Click any box to open that day. Away days and early leaves come from the doctor's “Change my day”.</div>
+      <div className="mt-3 text-xs text-muted">Booked of the places; red means full. Click any box to open that day. Away days and early leaves come from the doctor's “Change my day”.</div>
     </div>
   );
 }
@@ -288,8 +287,8 @@ function AttentionStrip({ onOpen, onBook }: { onOpen: (id: string) => void; onBo
   const [show, setShow] = useState<null | 'call' | 'wait'>(null);
   const d = q.data; if (!d) return null;
   const items: ReactNode[] = [];
-  if (d.toCall.length) items.push(<div key="c" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-surface px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-amber" /><b>{d.toCall.length} to call</b><span className="text-xs text-muted">{[...new Set(d.toCall.map((x: any) => x.why))].slice(0, 2).join(' · ')}</span><button className="btn btn-sm" onClick={() => setShow('call')}>Call list ({d.toCall.length})</button></div>);
-  if (d.waiting) items.push(<div key="w" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-surface px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-sage" /><b>Waiting list · {d.waiting}</b>{d.openToday > 0 && <span className="text-xs text-muted">{d.openToday} place{d.openToday === 1 ? '' : 's'} free today</span>}<button className="btn btn-sm" onClick={() => setShow('wait')}>Waiting list ({d.waiting})</button></div>);
+  if (d.toCall.length) items.push(<div key="c" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-surface px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-rose" /><b>{d.toCall.length} to call</b><span className="text-xs text-muted">{[...new Set(d.toCall.map((x: any) => x.why))].slice(0, 2).join(' · ')}</span><button className="btn btn-sm" onClick={() => setShow('call')}>Call list ({d.toCall.length})</button></div>);
+  if (d.waiting) items.push(<div key="w" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-surface px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-clay" /><b>Waiting list · {d.waiting}</b>{d.openToday > 0 && <span className="text-xs text-muted">{d.openToday} place{d.openToday === 1 ? '' : 's'} free today</span>}<button className="btn btn-sm" onClick={() => setShow('wait')}>Waiting list ({d.waiting})</button></div>);
   return (<>
     {items.length > 0 && <div className="flex flex-wrap gap-2">{items}</div>}
     {show === 'call' && <Modal title="Patients to call" subtitle="Their doctor is away or leaves early when they are booked" onClose={() => setShow(null)} width="max-w-xl">
@@ -355,12 +354,12 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
     <Modal title="Book" subtitle="Who, when, which visit type." onClose={onClose} width="max-w-2xl">
       <div className="space-y-4">
         <div><div className="label">1 · Who</div>
-          {patient ? <div className="flex items-center gap-2 rounded-xl bg-sage-soft px-3 py-2 text-sm text-sage"><Icon name="check" className="h-4 w-4" /><b>{whoLine(patient)}</b><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
+          {patient ? <div className="flex items-center gap-2 rounded-xl bg-clay-soft px-3 py-2 text-sm text-clay-ink"><Icon name="check" className="h-4 w-4" /><b>{whoLine(patient)}</b><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
             : <>
               <input autoFocus aria-label="Phone number or name" inputMode="search" className="input" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setNewOk(false); }} />
               {searchErr && <div className="mt-1.5 rounded-xl bg-rose-soft px-3 py-2 text-sm text-rose" role="alert">{SEARCH_FAILED}</div>}
               {hits.length > 0 && <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-line">{hits.slice(0, 6).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-paper" onClick={() => pickP(p)}><b>{whoLine(p)}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>)}
-                <button type="button" aria-pressed={newOk} className={`flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm font-semibold ${newOk ? 'bg-sage-soft text-sage' : 'hover:bg-paper'}`} onClick={() => setNewOk(true)}><Icon name="plus" className="h-4 w-4" />{typedPhone ? 'Someone new on this number' : 'Someone new (not in this list)'}</button></div>}
+                <button type="button" aria-pressed={newOk} className={`flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm font-semibold ${newOk ? 'bg-clay-soft text-clay-ink' : 'hover:bg-paper'}`} onClick={() => setNewOk(true)}><Icon name="plus" className="h-4 w-4" />{typedPhone ? 'Someone new on this number' : 'Someone new (not in this list)'}</button></div>}
               {qn.length >= 3 && !found.isLoading && !searchErr && <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_170px]">
                 {typedName ? <div className="input !bg-paper text-muted">New patient: {typedName}</div>
                   : <input aria-label="New patient name" className="input" maxLength={100} placeholder="New patient: name" value={newName} onChange={(e) => setNewName(e.target.value)} />}
@@ -383,7 +382,7 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
           <div className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
             {free.isLoading ? <Skeleton rows={2} /> : free.isError ? <div className="text-sm text-rose">{errText(free.error)}</div> : Object.keys(byDay).length === 0 ? <div className="text-sm text-muted">No free time in these 7 days. Try {part === 'am' ? 'Evening' : 'Morning'}, another date, another doctor, or the waiting list.</div>
               : Object.entries(byDay).map(([d, list]) => <div key={d} className="flex gap-2"><b className="w-24 shrink-0 pt-2 text-xs text-muted">{label(d, { weekday: 'short', day: 'numeric', month: 'short' })}</b>
-                <div className="flex flex-wrap gap-1.5">{list.map((s) => { const on = slot?.sessionId === s.sessionId; return <button key={s.sessionId} role="radio" aria-checked={on} onClick={() => setSlot(s)} className={`tap rounded-xl border px-3 py-1.5 text-left text-sm font-bold ${on ? 'border-sage bg-sage-soft text-sage' : 'border-line bg-surface hover:bg-paper'}`}>{s.startTime}<span className={`block text-[11px] font-medium ${s.free <= 1 ? 'text-clay' : 'text-muted'}`}>{s.free} place{s.free === 1 ? '' : 's'} left</span></button>; })}</div></div>)}
+                <div className="flex flex-wrap gap-1.5">{list.map((s) => { const on = slot?.sessionId === s.sessionId; return <button key={s.sessionId} role="radio" aria-checked={on} onClick={() => setSlot(s)} className={`tap rounded-xl border px-3 py-1.5 text-left text-sm font-bold ${on ? 'border-clay bg-clay-soft text-clay-ink' : 'border-line bg-surface hover:bg-paper'}`}>{s.startTime}<span className={`block text-[11px] font-medium ${s.free <= 1 ? 'text-clay' : 'text-muted'}`}>{s.free} place{s.free === 1 ? '' : 's'} left</span></button>; })}</div></div>)}
           </div>
           {patient && <button className="mt-1.5 text-xs font-semibold underline" disabled={wait.isPending} onClick={() => wait.mutate()}>Put {patient.fullName.split(' ')[0]} on the waiting list for an earlier place</button>}
         </div>
@@ -444,7 +443,7 @@ function TimeGrid({ cols: allCols, grid, px = 1.15, minCol = 140, wide = false, 
                   <div key={b.id} className="absolute left-1 right-1 flex items-start gap-1 rounded-lg px-2 py-0.5 text-[11px] text-muted overflow-hidden" style={{ top: y(b.startTime) + 1, height: h(b.startTime, b.endTime) - 2, background: 'repeating-linear-gradient(135deg, rgba(23,25,26,.06) 0 6px, rgba(23,25,26,.015) 6px 12px)', border: '1px dashed var(--color-line-2)', zIndex: 1 }}><span className="min-w-0 flex-1 truncate"><b className="text-ink-2">{b.note ?? b.kind}</b> {b.startTime}–{b.endTime}</span>{grid.onRemoveBlock && <button className="grid h-5 w-5 shrink-0 place-items-center rounded-full hover:bg-ink/10" aria-label={`Remove ${b.note ?? b.kind}`} data-tip="Remove" onClick={() => grid.onRemoveBlock!(b)}><Icon name="x" className="h-3 w-3" /></button>}</div>
                 ))}
                 {c.procs.map((p) => (
-                  <div key={p.id} role="button" tabIndex={0} onClick={() => grid.onOpenProc?.(p.id)} onKeyDown={(e) => e.key === 'Enter' && grid.onOpenProc?.(p.id)} title={`${p.procedure ?? 'Procedure'} · ${p.patient} · ${p.startTime}–${p.endTime}${p.room ? ` · ${p.room}` : ''}`} className="absolute cursor-pointer rounded-lg px-2 py-1 text-[11px] overflow-hidden hover:shadow-md" style={{ top: y(p.startTime) + 2, height: h(p.startTime, p.endTime) - 4, left: c.windows.length && !c.tint ? '60%' : 4, right: 4, background: 'var(--color-sky-soft)', border: '1px solid #c7d4e0', color: 'var(--color-sky)' }}>
+                  <div key={p.id} role="button" tabIndex={0} onClick={() => grid.onOpenProc?.(p.id)} onKeyDown={(e) => e.key === 'Enter' && grid.onOpenProc?.(p.id)} title={`${p.procedure ?? 'Procedure'} · ${p.patient} · ${p.startTime}–${p.endTime}${p.room ? ` · ${p.room}` : ''}`} className="fd-k-proc absolute cursor-pointer rounded-lg px-2 py-1 text-[11px] overflow-hidden hover:shadow-md" style={{ top: y(p.startTime) + 2, height: h(p.startTime, p.endTime) - 4, left: c.windows.length && !c.tint ? '60%' : 4, right: 4, zIndex: 1 }}>
                     <div className="font-semibold truncate">{p.procedure ?? 'Procedure'}</div><div className="truncate">{p.patient}{c.tint ? (p.doctor ? ` · ${p.doctor}` : '') : (p.room ? ` · ${p.room}` : '')}</div>
                   </div>
                 ))}
@@ -526,14 +525,14 @@ function RoomsDay({ day, cfg, grid, canEdit }: { day: string; cfg: any; grid: Gr
   };
   const wantS = toMin(at); const wantE = wantS + mins;
   const freeFor = rooms.filter((r) => (!cap || (r.capabilities ?? []).includes(cap)) && !busy(r.id).some((x) => x.s < wantE && x.e > wantS));
-  const cols: Col[] = rooms.map((r: any) => ({ key: r.id, day, windows: [], blocks: d.blocks.filter((b: any) => b.roomId === r.id && !b.practitionerId), tint: 'rgba(221,231,242,.18)', procs: d.procedures.filter((p: any) => p.roomId === r.id),
-    head: (<><span className="h-8 w-8 rounded-full grid place-items-center text-[11px] font-bold shrink-0 bg-sky-soft text-sky">R</span><div className="min-w-0"><div className="text-sm font-semibold truncate">{r.name}</div><div className="text-[11px] text-muted truncate">{(r.capabilities ?? []).join(' · ') || 'room'} · {busy(r.id).length} booked</div></div></>) }));
+  const cols: Col[] = rooms.map((r: any) => ({ key: r.id, day, windows: [], blocks: d.blocks.filter((b: any) => b.roomId === r.id && !b.practitionerId), tint: 'transparent', procs: d.procedures.filter((p: any) => p.roomId === r.id),
+    head: (<><span className="h-8 w-8 rounded-full grid place-items-center text-[11px] font-bold shrink-0 bg-paper-2 text-ink-2">R</span><div className="min-w-0"><div className="text-sm font-semibold truncate">{r.name}</div><div className="text-[11px] text-muted truncate">{(r.capabilities ?? []).join(' · ') || 'room'} · {busy(r.id).length} booked</div></div></>) }));
   if (rooms.length === 0) return <div className="card"><Empty icon="door" title="No rooms yet" hint="Add procedure rooms under Settings → Rooms." /></div>;
   return (
     <div className="space-y-3">
       <div className="glass p-4 space-y-3 anim-fade-up">
         <div className="flex items-center gap-2"><div className="text-[11px] uppercase tracking-wider text-muted">{isToday ? `Right now · ${toHHMM(nowMin())}` : 'Rooms on this day'}</div><span className="ml-auto" />{canEdit && <button className="btn btn-sm" onClick={() => setBlocking(true)}><Icon name="door" className="h-3.5 w-3.5" />Block a room</button>}</div>
-        <div className="flex flex-wrap gap-2">{rooms.map((r) => { const st = status(r); return <span key={r.id} className={`chip !text-[13px] !px-3 !py-2 ${st.free ? 'chip-sage' : 'chip-rose'}`}><i className="h-2 w-2 rounded-full bg-current" />{r.name} · {st.text}</span>; })}</div>
+        <div className="flex flex-wrap gap-2">{rooms.map((r) => { const st = status(r); return <span key={r.id} className={`chip !text-[13px] !px-3 !py-2 ${st.free ? '' : 'chip-clay'}`}><i className="h-2 w-2 rounded-full bg-current" />{r.name} · {st.text}</span>; })}</div>
         <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <b className="text-sm">Find a room</b>
           <select aria-label="How long" className="input !w-auto !py-1.5" value={mins} onChange={(e) => setMins(Number(e.target.value))}>{[15, 30, 45, 60, 90, 120].map((m) => <option key={m} value={m}>{m} min</option>)}</select>
@@ -593,7 +592,7 @@ function RoomWeek({ from, roomId, cfg, grid, canEdit, onOpenDay }: { from: strin
   return (
     <div className="space-y-3">
       <div className="glass p-4 flex flex-wrap items-center gap-3 anim-fade-up">
-        <span className="h-9 w-9 rounded-full grid place-items-center text-xs font-bold shrink-0 bg-sky-soft text-sky">R</span>
+        <span className="h-9 w-9 rounded-full grid place-items-center text-xs font-bold shrink-0 bg-paper-2 text-ink-2">R</span>
         <div className="min-w-0 flex-1"><div className="font-semibold">{room.name}</div><div className="text-sm text-muted">{(room.capabilities ?? []).join(' · ') || 'room'} · {total} procedure{total === 1 ? '' : 's'} this week</div></div>
         {canEdit && <button className="btn btn-sm" onClick={() => setBlocking(true)}><Icon name="door" className="h-3.5 w-3.5" />Block this room</button>}
       </div>
