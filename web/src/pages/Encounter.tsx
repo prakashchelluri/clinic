@@ -82,7 +82,7 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
         <div className="p-1.5">
           <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{what} templates</div>
           {mine.length > 6 && <input autoFocus aria-label="Search templates" className="input mb-1.5 !py-1.5" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} />}
-          {list.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{q ? 'Nothing by that name.' : `No ${what} templates yet. Fill the section, then press Save template on it.`}</div>
+          {list.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{q ? 'Nothing by that name.' : `No ${what} templates yet. Fill the section, then press Save on it.`}</div>
             : <div className="max-h-56 overflow-y-auto">{list.slice(0, 20).map((t) => <button key={t.id} type="button" className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[13px] hover:bg-paper-2" onClick={() => { onPick(t); setOpen(false); }}><span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>{t.uses > 0 && <span className="text-[11px] text-muted" title="How many times this template has been used">used {t.uses === 1 ? 'once' : `${t.uses} times`}</span>}</button>)}</div>}
           {(onSave || onClear) && <div className="mt-1 flex items-center gap-1 border-t border-line pt-1.5">
             {onSave && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setOpen(false); onSave(); }}><Icon name="plus" className="h-3.5 w-3.5" />Save {what} as template</button>}
@@ -193,7 +193,7 @@ function LoadPrevious({ previous, onLoad, part, compact, id }: { previous: any[]
   const [parts, setParts] = useState<Record<string, boolean>>({ dx: true, rx: true, advice: false, tests: false });
   const done = previous.filter((x) => x.status === 'completed' && (!part || partItems(x, part).length > 0)); const e = done.find((x) => x.id === sel?.id) ?? done[0];
   const what = part ? PART_LABEL[part].toLowerCase() : 'anything';
-  if (!done.length) return <button type="button" className={compact ? 'btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted' : 'btn btn-sm'} disabled title={`No earlier visit with ${what} to load`}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>;
+  if (!done.length) return compact ? null : <button type="button" className="btn btn-sm" disabled title={`No earlier visit with ${what} to load`}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>;
   return (
     <>
       {compact ? <button ref={btn} type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" title={`Load ${what} from an earlier visit`} aria-expanded={open} onClick={() => setOpen(!open)}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>
@@ -293,7 +293,7 @@ export function Encounter() {
       const arrival: Sym[] = (enc.data.visit?.details?.complaints ?? []).map((c: any) => ({ name: c.text, ...(c.duration ? { since: c.duration } : {}) }));
       let d = { ...(enc.data.data ?? {}) };
       if (!asSym(d.complaint?.chief_complaint).length && arrival.length) d = { ...d, complaint: { ...(d.complaint ?? {}), chief_complaint: arrival } };
-      if (isDoctor && enc.data.status === 'draft' && isReviewVisit(enc.data.visit, cfg) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
+      if (isDoctor && enc.data.status === 'draft' && (isReviewVisit(enc.data.visit, cfg) || (lastDone?.prescription ?? []).length > 0) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
       loaded.current = true; justLoaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
       setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
@@ -535,7 +535,7 @@ export function Encounter() {
     else if (!others.some((o) => o.encounterId === id && pinFindings(o).includes(f))) set('exam', fl.key, fl.type === 'select' ? (data.exam?.[fl.key] === opt ? undefined : data.exam?.[fl.key]) : cur.filter((x) => x !== opt));
   };
   const cardActs = (k: string): ReactNode => { if (readOnly || !isDoctor) return undefined; const t = SECTION_TPL[k]; if (!t) return undefined;
-    return <>{inline && <LoadPrevious compact part={PART[k]} previous={previous} onLoad={loadPrevious} />}{inline && <SectionTemplates compact kind={t[0]} sub={t[1]} what={t[2]} sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={t[3]} />}<SaveTemplate what={t[2]} onSave={() => saveSection(t[0])} />{inline && <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" disabled={!t[3]} title={t[3] ? `Clear the ${t[2]}` : `No ${t[2]} to clear`} onClick={t[3] ?? undefined}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}</>; };
+    return <>{inline && <LoadPrevious compact part={PART[k]} previous={previous} onLoad={loadPrevious} />}{inline && <SectionTemplates compact kind={t[0]} sub={t[1]} what={t[2]} sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={t[3]} />}<SaveTemplate what={t[2]} onSave={() => saveSection(t[0])} />{inline && t[3] && <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" title={`Clear the ${t[2]}`} onClick={t[3]}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}</>; };
   const cards: Record<string, ReactNode> = {
     vitals: <Card key="vitals" id="vitals" title="Vitals" meta="from check-in · tap a value to change it"><VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} settings={cfg?.tenant?.settings} /></Card>,
     history: <Card key="history" id="history" title="Medical history"><HistoryChips patientId={p.id} history={p.history ?? {}} categories={cfg?.historyCategories ?? []} readOnly={readOnly} /></Card>,
@@ -790,7 +790,7 @@ export function Encounter() {
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={540}>
                 <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-2 p-1.5">
                   <div><input autoFocus aria-label="Search templates" className="input mb-1.5 !py-1.5" placeholder="Search" value={tplQ} onChange={(ev) => setTplQ(ev.target.value)} />
-                    <div className="max-h-64 space-y-0.5 overflow-y-auto">{tplList.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{tplQ ? 'No template by that name.' : 'No templates yet. Fill the pad, then press Save template on the bottom bar.'}</div> : tplList.map((t: any) => <button key={t.id} type="button" className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${(tplSel ?? tplList[0])?.id === t.id ? 'bg-paper-2 font-semibold' : 'hover:bg-paper-2'}`} onClick={() => setTplSel(t)}><span className="min-w-0 flex-1 truncate">{t.name}</span>{t.uses > 0 && <span className="text-[11px] text-muted">{t.uses}×</span>}</button>)}</div></div>
+                    <div className="max-h-64 space-y-0.5 overflow-y-auto">{tplList.length === 0 ? <div className="px-2 py-2 text-xs text-muted">{tplQ ? 'No template by that name.' : 'No templates yet. Fill the pad, then press Save this pad as a template below.'}</div> : tplList.map((t: any) => <button key={t.id} type="button" className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] ${(tplSel ?? tplList[0])?.id === t.id ? 'bg-paper-2 font-semibold' : 'hover:bg-paper-2'}`} onClick={() => setTplSel(t)}><span className="min-w-0 flex-1 truncate">{t.name}</span>{t.uses > 0 && <span className="text-[11px] text-muted">{t.uses}×</span>}</button>)}</div></div>
                   {(tplSel ?? tplList[0]) ? (() => { const t = tplSel ?? tplList[0]; return <div className="rounded-md border border-line bg-surface-2 p-2.5 text-[12.5px] leading-relaxed">
                     <div className="mb-1 flex items-center gap-2"><b className="text-[13px]">{t.name}</b><button type="button" className="btn btn-sm btn-primary ml-auto" onClick={() => applyTpl(t)}>Load</button></div>
                     {joinList(t.data?.assessment?.diagnosis) && <div><b>Dx</b> {joinList(t.data.assessment.diagnosis)}</div>}
@@ -799,10 +799,10 @@ export function Encounter() {
                     {(t.recommendations ?? []).length > 0 && <div><b>Plan</b> {(t.recommendations ?? []).map((r: any) => r.kind === 'followup' ? `review in ${r.intervalDays} d` : r.kind === 'investigation' ? r.notes : 'procedure').join(', ')}</div>}
                     <div className="mt-1 text-[11.5px] text-muted">Loading replaces the pad; your symptoms and review answers are kept. Clear loaded undoes it.</div></div>; })() : <div className="rounded-md border border-dashed border-line p-2.5 text-[12.5px] text-muted">A template here is the whole pad: diagnosis, medicines, advice, tests and plan, loaded in one tap.</div>}
                 </div>
-                {/* saving the whole Rxpad as a template is on the bottom bar */}
-                {applied && <div className="flex items-center gap-1 border-t border-line p-1.5">
-                  <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => { clearLoaded(); setTplOpen(false); }}>Clear loaded ({applied})</button>
-                </div>}
+                <div className="flex items-center gap-1 border-t border-line p-1.5">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setTplOpen(false); void askTpl(); }}><Save className="h-3.5 w-3.5" aria-hidden />Save this pad as a template</button>
+                  {applied && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => { clearLoaded(); setTplOpen(false); }}>Clear loaded ({applied})</button>}
+                </div>
               </Floating></>}
             {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm btn-icon" aria-label="Configure pad: sections, required, printing" title="Configure pad: sections, required, printing" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" /></button>}
           </span>
@@ -891,13 +891,12 @@ export function Encounter() {
         {!readOnly && isDoctor && <button type="button" className={B} onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
         {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-paper/80">Cannot finish yet · missing:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose px-2 py-0.5 font-semibold text-white hover:bg-rose/80" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
-          : saveFailed && !readOnly ? notSaved : <span className="text-xs text-paper/60">{savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Autosaves every 15 s'}</span>}
+          : saveFailed && !readOnly ? notSaved : <span className="text-xs text-paper/60">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves by itself'}</span>}
         <span className="ml-auto" />
         {!readOnly && !isDoctor && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>
           {can(perms, 'config.write') && <button type="button" className={B} onClick={() => nav('/settings?tab=pad')}><Icon name="print" className="h-4 w-4" />Print settings</button>}
           <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
-          <button type="button" className={B} title="Save this whole Rxpad as a template" onClick={askTpl}><Save className="h-4 w-4" aria-hidden />Save template</button>
           <button type="button" className={B} onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
           <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
@@ -909,12 +908,12 @@ export function Encounter() {
       <div className="card flex flex-wrap items-center gap-2 !px-4 !py-3 anim-fade-up">
         {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet · missing:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
-          : saveFailed && !readOnly && !save.isPending ? notSaved : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
+          : saveFailed && !readOnly && !save.isPending ? notSaved : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves by itself'}</span>}
         {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-muted/80 xl:inline">Alt ↑↓ section · / search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
         <span className="ml-auto" />
         {!readOnly && !isDoctor && <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>
-          <button type="button" className="btn btn-sm" title="Save this whole Rxpad as a template" onClick={askTpl}><Save className="h-3.5 w-3.5" aria-hidden />Save template</button>
+          <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
           <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>

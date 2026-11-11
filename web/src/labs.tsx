@@ -91,10 +91,11 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
     <div>
       <div className="mb-1.5 flex flex-wrap items-center gap-3 text-xs text-muted">
         {shown.length > 0 && <span>{mine.length ? 'Values for this consultation' : 'Latest values on record'}</span>}
-        <label className="ml-auto inline-flex items-center gap-1.5 font-medium text-ink-2"><input type="checkbox" className="accent-ink" checked={printOut} disabled={readOnly} onChange={(e) => onPrintOut(e.target.checked)} />Print only out-of-range</label>
-        {!readOnly && <button type="button" className="btn btn-sm" onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add values</button>}
+        {shown.length === 0 && <span>{q.isLoading ? 'Loading…' : 'No values yet.'}</span>}
+        {shown.length > 0 && <label className="ml-auto inline-flex items-center gap-1.5 font-medium text-ink-2"><input type="checkbox" className="accent-ink" checked={printOut} disabled={readOnly} onChange={(e) => onPrintOut(e.target.checked)} />Print only out-of-range</label>}
+        {!readOnly && <button type="button" className={`btn btn-sm ${shown.length ? "" : "ml-auto"}`} onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add values</button>}
       </div>
-      {q.isLoading ? <div className="text-xs text-muted">Loading…</div> : shown.length === 0 ? <div className="text-xs text-muted">No values yet. They are typed when a report arrives, or add them here.</div> : (
+      {q.isLoading || shown.length === 0 ? null : (
         <div className="grid grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_96px_28px] items-center gap-x-2 text-[13px]">
           <span className="text-[11.5px] font-semibold text-muted">Investigation</span><span className="text-[11.5px] font-semibold text-muted">Value</span><span className="text-[11.5px] font-semibold text-muted">Unit</span><span className="text-[11.5px] font-semibold text-muted">Range</span><span className="text-[11.5px] font-semibold text-muted">Earlier</span><span className="text-[11.5px] font-semibold text-muted">Report</span><span />
           {shown.map((r) => { const e = earlier(r); return (
