@@ -13,6 +13,7 @@ import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
 import { DaySchedule } from './frontDeskSchedule';
+import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
 import { enabledVitals, vitalProblem } from '../vitals';
@@ -324,71 +325,59 @@ const weekdayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateStrin
 /** History across days. The controls sit on the tab row (search, one Filters dropdown, print, export); the date is a column. */
 const PERIODS: [string, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']];
 const SHOWS: [string, string][] = [['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']];
-function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; onBook: (p?: any) => void; slot: HTMLElement | null }) {
-  const { perms, me } = useOutletContext<Ctx>();
-  const canList = !!(me as any)?.privacy?.canExport;
+function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook: (p?: any) => void; slot: HTMLElement | null }) {
+  const { perms, cfg } = useOutletContext<Ctx & { cfg: any }>();
   const nav = useNavigate();
-  const [period, setPeriod] = useState('7');
-  const [custom, setCustom] = useState({ from: shiftDay(today(), -13), to: today() });
-  const [filter, setFilter] = useState('all');
+  const [sp, setSp] = useSearchParams();
+  // the shared table: Period and Show go to the server, Doctor filters what came back; "Pick dates" opens two date boxes
+  const PERIOD: FilterDef<any> = { key: 'period', label: 'Period', icon: 'calendar', options: [PERIODS[2], ...PERIODS.filter((x) => x[0] !== '7')].map(([value, label]) => ({ value, label })) };
+  const SHOW: FilterDef<any> = { key: 'show', label: 'Show', icon: 'filter', options: SHOWS.map(([value, label]) => ({ value, label })) };
+  const docs: any[] = cfg?.practitioners ?? [];
+  const DOC: FilterDef<any> = { key: 'doctor', label: 'Doctor', icon: 'stetho', options: [{ value: '', label: 'All doctors' }, ...docs.map((d) => ({ value: d.name as string, label: d.name as string }))], test: (r, v) => !v || r.doctor === v };
+  const period = filterValue(sp, PERIOD), filter = filterValue(sp, SHOW);
+  const t0 = today();
+  const custom = { from: sp.get('from') ?? shiftDay(t0, -13), to: sp.get('to') ?? t0 };
+  const { from, to } = period === 'today' ? { from: t0, to: t0 } : period === 'yesterday' ? { from: shiftDay(t0, -1), to: shiftDay(t0, -1) } : period === '30' ? { from: shiftDay(t0, -29), to: t0 } : period === 'custom' ? custom : { from: shiftDay(t0, -6), to: t0 };
+  const badDates = from > to;
+  const setDate = (k: 'from' | 'to', v: string) => v && setSp((p) => { const n = new URLSearchParams(p); n.set(k, v); n.delete('p'); return n; }, { replace: true });
   const [term, setTerm] = usePageSearch('Search all days: name, phone or token'); const [qd, setQd] = useState(term || find);
   useEffect(() => { if (find && !term) setTerm(find); }, []);
-  const [open, setOpen] = useState(false); const fbtn = useRef<HTMLButtonElement>(null);
-  const t0 = today();
-  const { from, to } = period === 'today' ? { from: t0, to: t0 } : period === 'yesterday' ? { from: shiftDay(t0, -1), to: shiftDay(t0, -1) } : period === '7' ? { from: shiftDay(t0, -6), to: t0 } : period === '30' ? { from: shiftDay(t0, -29), to: t0 } : custom;
   useEffect(() => { const h = setTimeout(() => setQd(term), 300); return () => clearTimeout(h); }, [term]);
-  const h = useQuery({ queryKey: ['fd-history', from, to, qd, filter], queryFn: () => get(`/frontdesk/history?from=${from}&to=${to}&q=${encodeURIComponent(qd)}&filter=${filter}`) });
+  const h = useQuery({ queryKey: ['fd-history', from, to, qd, filter], queryFn: () => get(`/frontdesk/history?from=${from}&to=${to}&q=${encodeURIComponent(qd)}&filter=${filter}`), enabled: !badDates });
   const refund = useMutation({ mutationFn: ({ c, reason }: any) => post(`/charges/${c.id}/adjust`, { kind: 'refunded', reason }), onSuccess: (_r, { c, name }: any) => { ['fd-history', 'frontdesk', 'daily', 'dayclose'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`Refunded ${money(c.amountPaise)} to ${name}`); }, onError: (e) => toast(moneyErr(e), 'err') });
   // the same reason picker as every other refund
   const [refunding, setRefunding] = useState<null | { c: any; name: string }>(null);
-  const askRefund = (c: any, name: string) => setRefunding({ c, name });
   const rows: any[] = h.data?.rows ?? []; const s = h.data?.summary;
   const outcomeChip = (r: any) => r.outcome === 'completed' ? <Chip tone="sage">completed</Chip> : r.outcome === 'left' ? <Chip>left</Chip> : r.outcome === 'noshow' ? <Chip tone="rose">no-show</Chip> : <Chip tone="amber">{r.outcome.replace('_', ' ')}</Chip>;
-  const exportCsv = () => downloadCsv(`front-desk-history-${from}-to-${to}.csv`, [['Date', 'Token / time', 'Patient', 'Age', 'Sex', 'Phone', 'Outcome', 'Doctor', 'What happened'],
-    ...rows.map((r) => [r.date, r.token, r.patient.fullName, r.patient.ageYears, r.patient.sex, r.patient.phone, r.outcome, r.doctor, r.kind === 'noshow' ? 'Did not arrive' : r.outcome === 'left' ? 'Left without seeing the doctor' : (r.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ')])]);
-  const periodLabel = period === 'custom' ? `${dayOf(custom.from)} – ${dayOf(custom.to)}` : PERIODS.find((p) => p[0] === period)![1];
-  const showLabel = SHOWS.find((x) => x[0] === filter)![1];
-  const Opt = ({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) => <button type="button" onClick={onClick} className={on ? '!font-semibold' : ''}><span className="flex-1">{children}</span>{on && <Icon name="check" className="h-4 w-4" />}</button>;
-  const controls = (
-    <>
-      <button ref={fbtn} type="button" className={`btn ${open ? '!bg-surface' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="filter" className="h-4 w-4" />{periodLabel}{filter !== 'all' && <span className="text-muted font-medium">· {showLabel}</span>}<Icon name="chevR" className={`h-3.5 w-3.5 transition-transform duration-300 ${open ? '-rotate-90' : 'rotate-90'}`} /></button>
-      <Floating anchor={fbtn} open={open} onClose={() => setOpen(false)} width={300}>
-        <div className="px-3 pt-2 pb-1 text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Period</div>
-        {PERIODS.map(([k, l]) => <Opt key={k} on={period === k} onClick={() => { setPeriod(k); if (k !== 'custom') setOpen(false); }}>{l}</Opt>)}
-        {period === 'custom' && <div className="flex items-center gap-2 px-3 pb-2"><input type="date" className="input !py-1.5 !px-2.5 text-xs" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} /><span className="text-muted text-xs">to</span><input type="date" className="input !py-1.5 !px-2.5 text-xs" value={custom.to} min={custom.from} max={t0} onChange={(e) => setCustom({ ...custom, to: e.target.value })} /></div>}
-        <div className="my-1.5 h-px bg-ink/8" />
-        <div className="px-3 pt-1 pb-1 text-[11px] font-bold uppercase tracking-[0.09em] text-muted">Show</div>
-        {SHOWS.map(([k, l]) => <Opt key={k} on={filter === k} onClick={() => { setFilter(k); setOpen(false); }}>{l}</Opt>)}
-        {(period !== '7' || filter !== 'all') && <><div className="my-1.5 h-px bg-ink/8" /><button type="button" onClick={() => { setPeriod('7'); setFilter('all'); setOpen(false); }} className="!text-muted">Reset filters</button></>}
-      </Floating>
-      {canList && <button className="btn btn-icon" title="Print or save as PDF" aria-label="Print or save as PDF" onClick={() => listOut(`Printed front desk history ${from} to ${to}`, rows.length, () => window.print())}><Icon name="print" /></button>}
-      {canList && <button className="btn btn-icon" title="Export to Excel" aria-label="Export to Excel" disabled={!rows.length} onClick={() => listOut(`Downloaded front desk history ${from} to ${to}`, rows.length, exportCsv)}><Icon name="export" /></button>}
-    </>
-  );
+  const happened = (r: any) => r.kind === 'noshow' ? 'Did not arrive' : r.outcome === 'left' ? 'Left without seeing the doctor' : (r.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ') || 'Medicines only';
+  const paidOf = (r: any) => r.charges.find((c: any) => c.status === 'paid' && c.amountPaise > 0);
+  const columns: Col<any>[] = [
+    { key: 'date', label: 'Date', fixed: true, sort: (r) => `${r.date} ${r.token}`, csv: (r) => r.date, cell: (r) => <div className="whitespace-nowrap"><div className="font-semibold">{dayOf(r.date)}</div><div className="text-[12px] text-muted">{weekdayOf(r.date)}</div></div> },
+    { key: 'token', label: 'Token', sort: (r) => r.token, csv: (r) => r.token, cell: (r) => <b className="tabular-nums">{r.token}</b> },
+    { key: 'patient', label: 'Patient', sort: (r) => r.patient.fullName.toLowerCase(), csv: (r) => r.patient.fullName, cell: (r) => <div><div className="font-bold">{r.patient.fullName} <span className="font-medium text-muted">{[r.patient.ageYears, r.patient.sex].filter(Boolean).join(' ')}</span></div><div className="text-[12px] text-muted">{r.patient.phone ?? ''}</div></div> },
+    { key: 'outcome', label: 'Outcome', sort: (r) => r.outcome, csv: (r) => r.outcome, cell: outcomeChip },
+    { key: 'doctor', label: 'Doctor', sort: (r) => r.doctor ?? '', csv: (r) => r.doctor ?? '', cell: (r) => <span className="whitespace-nowrap">{r.doctor ?? '—'}</span> },
+    { key: 'what', label: 'What happened', hideOnPhone: true, csv: happened, cell: (r) => { const paid = paidOf(r); const adj = r.charges.find((c: any) => ['waived', 'refunded'].includes(c.status));
+      return <div className="text-[12.5px]">{r.kind === 'noshow' ? <span className="text-muted">Did not arrive</span> : r.outcome === 'left' ? <span className="text-muted">Left without seeing the doctor{paid ? ` · ${money(paid.amountPaise)} paid` : ''}</span> : (
+        <div className="flex flex-wrap gap-1">{r.recommendations.length ? r.recommendations.map((x: any) => <Chip key={x.id} tone={x.kind === 'procedure' ? 'sky' : x.kind === 'investigation' ? 'clay' : 'amber'}>{x.kind === 'procedure' ? x.procedure ?? 'Procedure' : x.kind === 'investigation' ? `Test: ${x.notes}` : `Review ${x.dueOn ? fmtDate(x.dueOn) : ''}`}</Chip>) : <span className="text-muted">Medicines only</span>}</div>)}
+        {adj && <div className="mt-1"><Chip tone="amber">{adj.status}{adj.reason ? ` · ${adj.reason}` : ''}</Chip></div>}</div>; } },
+    { key: 'action', label: '', fixed: true, align: 'right', cell: (r) => { const paid = paidOf(r);
+      return <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={() => onBook(r.patient)}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.refund') ? <button className="btn btn-sm btn-primary" disabled={refund.isPending} onClick={() => setRefunding({ c: paid, name: r.patient.fullName })}>Refund</button> : null}
+        <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button></span>; } },
+  ];
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 anim-fade-up">
-      {slot && createPortal(controls, slot)}
-      <div className="text-sm text-muted">{s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : 'Loading…'}</div>
-      <div className="card-flat flex min-h-0 flex-1 flex-col overflow-hidden"><div className="min-h-0 flex-1 overflow-auto"><table className="table sticky-head !text-sm min-w-[860px]">
-        <thead><tr><th className="pl-4 w-28">Date</th><th className="w-24">Token</th><th>Patient</th><th className="w-36">Outcome</th><th className="w-36">Doctor</th><th>What happened</th><th className="text-right pr-4 w-60 no-print">Action</th></tr></thead>
-        <tbody>
-          {h.isLoading && <tr><td colSpan={7} className="!py-10 text-center text-muted">Loading…</td></tr>}
-          {!h.isLoading && rows.length === 0 && <tr><td colSpan={7} className="!py-10 text-center text-muted">Nothing found for this period</td></tr>}
-          {rows.map((r) => { const paid = r.charges.find((c: any) => c.status === 'paid' && c.amountPaise > 0); const adj = r.charges.find((c: any) => ['waived', 'refunded'].includes(c.status));
-            return (
-            <tr key={r.key}><td className="pl-4">{dayOf(r.date)}<div className="text-xs text-muted">{weekdayOf(r.date)}</div></td>
-              <td className={r.kind === 'noshow' ? 'font-semibold' : 'serif text-lg'}>{r.token}</td>
-              <td><b>{r.patient.fullName}</b> <span className="text-muted">{r.patient.ageYears ?? ''} {r.patient.sex ?? ''}</span><div className="text-xs text-muted">{r.patient.phone ?? ''}</div></td>
-              <td>{outcomeChip(r)}</td><td>{r.doctor ?? '—'}</td>
-              <td className="text-xs">{r.kind === 'noshow' ? <span className="text-muted">Did not arrive</span> : r.outcome === 'left' ? <span className="text-muted">Left without seeing the doctor{paid ? ` · ${money(paid.amountPaise)} paid` : ''}</span> : (
-                <div className="flex flex-wrap gap-1">{r.recommendations.length ? r.recommendations.map((x: any) => <Chip key={x.id} tone={x.kind === 'procedure' ? 'sky' : x.kind === 'investigation' ? 'clay' : 'amber'}>{x.kind === 'procedure' ? x.procedure ?? 'Procedure' : x.kind === 'investigation' ? `Test: ${x.notes}` : `Review ${x.dueOn ? fmtDate(x.dueOn) : ''}`}</Chip>) : <span className="text-muted">Medicines only</span>}</div>)}
-                {adj && <div className="mt-1"><Chip tone="amber">{adj.status}{adj.reason ? ` · ${adj.reason}` : ''}</Chip></div>}</td>
-              <td className="text-right pr-4 whitespace-nowrap no-print">
-                {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={() => onBook(r.patient)}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.refund') ? <button className="btn btn-sm btn-primary" disabled={refund.isPending} onClick={() => askRefund(paid, r.patient.fullName)}>Refund</button> : <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>Open record</button>}
-                {(r.kind === 'noshow' || r.outcome === 'left') && <> <MoreMenu items={[{ label: 'Open record', onClick: () => nav(`/patients/${r.patient.id}`) }]} /></>}</td></tr>); })}
-        </tbody></table></div>
-        {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-ink/8">Showing the newest 500. Narrow the period or search to see older rows.</div>}
-      </div>
+      <div className="text-sm text-muted">{s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : badDates ? 'Check the dates' : 'Loading…'}</div>
+      <DataTable id="fd-history" exportName={`front-desk-history-${from}-to-${to}`} rows={rows} rowKey={(r) => r.key} columns={columns}
+        loading={h.isLoading && !badDates} error={h.error} onRetry={() => h.refetch()} onRow={(r) => nav(`/patients/${r.patient.id}`)}
+        search={{ placeholder: 'Search all days: name, phone or token' }} sort={{ key: 'date', dir: -1 }}
+        filters={[PERIOD, SHOW, ...(docs.length > 1 ? [DOC] : [])]}
+        toolbar={period === 'custom' && <span className="inline-flex items-center gap-1.5 text-[12.5px] text-muted">
+          <input type="date" aria-label="From date" className={`dt-select ${badDates ? '!border-rose' : ''}`} value={custom.from} max={t0} onChange={(e) => setDate('from', e.target.value)} />to
+          <input type="date" aria-label="To date" className={`dt-select ${badDates ? '!border-rose' : ''}`} value={custom.to} max={t0} onChange={(e) => setDate('to', e.target.value)} /></span>}
+        empty={{ title: badDates ? 'Check the dates' : 'Nothing found for this period', hint: badDates ? 'The “from” date is after the “to” date.' : 'Try a longer period, or Everything under Show.' }} />
+      {rows.length >= 500 && <div className="text-xs text-muted">Showing the newest 500. Narrow the period or search to see older rows.</div>}
       {refunding && <RefundDialog title={`Refund ${money(refunding.c.amountPaise)} to ${refunding.name}?`} body="The money must be handed back, the same way it was paid. It comes off today's takings." confirmLabel={`Refund ${money(refunding.c.amountPaise)}`}
         onClose={(reason) => { const x = refunding; setRefunding(null); if (reason) refund.mutate({ c: x.c, reason, name: x.name }); }} />}
     </div>
