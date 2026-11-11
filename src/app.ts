@@ -77,7 +77,7 @@ export async function buildApp() {
     const user = await withTenant(t, u, (tx) => tx.select().from(appUser).where(and(eq(appUser.id, u), eq(appUser.tenantId, t))).then((r) => r[0]));
     if (!ten || !user?.active) throw new HttpError(401, 'UNAUTHENTICATED');
     const roles = user.roles?.length ? user.roles : [user.role];
-    req.ctx = { tenantId: t, userId: u, role: user.role, roles, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone, tenantKind: ten.kind, ip: cleanIp(req.ip) };
+    req.ctx = { tenantId: t, userId: u, role: user.role, roles, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone, tenantKind: ten.kind, ip: cleanIp(req.ip), mustChangePassword: user.mustChangePassword };
     req.perms = permsFor(roles, ten.settings?.roles);
     const sec = securityOf(ten.settings);
     req.privacy = privacyFor(req.ctx, sec);
@@ -86,6 +86,8 @@ export async function buildApp() {
       if (throttleOnce(`stop|${u}|${req.ctx.ip}`, 10 * 60_000)) await withTenant(t, u, (tx) => writeAudit(tx, req.ctx, { kind: 'signin', action: 'signin.stopped', summary: `Stopped: not on the clinic's internet (${req.ctx.ip})` }));
       throw new HttpError(403, 'IP_NOT_ALLOWED', { ip: req.ctx.ip });
     }
+    // A first or reset password: nothing else works until the person picks their own.
+    if (user.mustChangePassword && !/^\/api\/(me|me\/password|auth\/logout)(\?|$)/.test(req.url)) throw new HttpError(403, 'MUST_CHANGE_PASSWORD');
   });
 
   // Phone numbers are hidden in every answer for roles the owner has not ticked; the server still has them for WhatsApp and calls.

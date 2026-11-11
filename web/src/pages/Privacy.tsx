@@ -26,7 +26,11 @@ export function PrivacyTab() {
   // Turning the lock on is asked first, and never done while this computer is outside the list; removing this computer's address while it is on is refused.
   const setLock = async () => {
     if (s.ipLock.enabled) return put({ ipLock: { enabled: false } });
-    if (!d.myIpAllowed) return toast("Add this computer's address first. Otherwise staff using this computer are stopped as soon as it is on.", 'err');
+    if (!d.myIpAllowed) {
+      // the server asks the same: from a computer not on the list, the owner must say it is not a clinic computer
+      if (await ask({ title: 'This computer is not on the list', body: `This computer (${d.myIp}) is not one of the clinic's addresses. If staff use it, add it first, or they are stopped at once. Turn it on only if you are away from the clinic.`, confirmLabel: 'I am away, turn it on', tone: 'danger' })) save.mutate({ ...s, away: true, ipLock: { ...s.ipLock, enabled: true } });
+      return;
+    }
     if (await ask({ title: 'Work only from the clinic?', body: `From now on staff can sign in and use the app only from the addresses in the list (${s.ipLock.allowed.length}). Staff working from home or a phone network are stopped until you allow them. The owner and admins can still work from anywhere.`, confirmLabel: 'Turn it on' })) put({ ipLock: { enabled: true } });
   };
   const removeAddress = async (i: number) => {

@@ -8,6 +8,7 @@ import { NewBooking } from './pages/Booking';
 import { settingsTopic } from './pages/Settings';
 import { refreshBookings } from './apptDrawer';
 import { PrintHost } from './printPreview';
+import { FirstPassword } from './firstPassword';
 import { ViewerHost } from './viewer';
 
 export function can(perms: string[] | undefined, needed: string) {
@@ -199,6 +200,7 @@ export function App() {
       </div>
     );
   }
+  if (me.data.mustChangePassword) return <FirstPassword name={me.data.name} />;
   const signOut = async () => { window.dispatchEvent(new Event('app:save-now')); await new Promise((r) => setTimeout(r, 300)); await post('/auth/logout').catch(() => {}); qc.clear(); nav('/login'); };
   const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
   const topic = loc.pathname === '/settings' ? settingsTopic(new URLSearchParams(loc.search).get('tab')) : null;

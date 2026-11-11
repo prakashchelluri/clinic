@@ -86,7 +86,7 @@ export function followupRoutes(app: FastifyInstance) {
       if (rec) await tx.update(recommendation).set({ status: b.outcome === 'not_interested' ? 'cancelled' : rec.status === 'open' ? 'contacted' : rec.status, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: b.outcome, note: b.note }] }).where(eq(recommendation.id, rec.id));
     }
     let messaged = false;
-    if (b.outcome === 'no_answer' && b.sendMessage && p.phone && /^\d{10}$/.test(p.phone)) {
+    if (b.outcome === 'no_answer' && b.sendMessage && p.phone && /^\d{10}$/.test(p.phone) && !p.noWhatsapp) {
       const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
       const phone = (ten?.settings as any)?.print?.phone;
       await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'followup_call', channel: 'whatsapp', toPhone: p.phone, params: { name: p.fullName },

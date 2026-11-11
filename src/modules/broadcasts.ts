@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, desc, inArray, sql } from 'drizzle-orm';
+import { and, eq, desc, inArray, isNull, sql } from 'drizzle-orm';
 import { broadcast, message, patient, tenant, appUser } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -12,6 +12,8 @@ type Audience = keyof typeof AUDIENCES;
 const Aud = z.object({ audience: z.enum(['all', 'recent', 'lapsed', 'followup', 'course', 'pick']), days: z.number().int().min(1).max(730).optional(), ids: z.array(z.string().uuid()).max(2000).optional() });
 
 const validPhone = (p: string | null) => !!p && /^[0-9]{10}$/.test(p);
+/** Who gets a message: a valid mobile number, and not someone who asked for no WhatsApp messages. */
+const reachable = (r: { phone: string | null; noWhatsapp: boolean }) => validPhone(r.phone) && !r.noWhatsapp;
 const label = (a: Audience, days?: number) => a === 'recent' ? `Seen in the last ${days ?? 30} days` : a === 'lapsed' ? `Not seen for ${days ?? 180} days` : AUDIENCES[a];
 const fill = (body: string, vars: Record<string, string>) => body.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
 
@@ -26,7 +28,7 @@ async function audience(tx: Tx, t: string, tz: string, a: z.infer<typeof Aud>) {
     course: sql`exists (select 1 from recommendation r where r.patient_id = ${patient.id} and r.kind = 'procedure' and r.status in ('open','contacted','scheduled'))`,
     pick: a.ids?.length ? inArray(patient.id, a.ids) : sql`false`,
   }[a.audience];
-  return tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }).from(patient).where(and(eq(patient.tenantId, t), cond)).orderBy(patient.fullName);
+  return tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, noWhatsapp: patient.noWhatsapp }).from(patient).where(and(eq(patient.tenantId, t), isNull(patient.mergedInto), cond)).orderBy(patient.fullName);
 }
 
 /** Bulk messages to patients. Demo for now: each message is recorded in the outbox as logged, nothing leaves the building. */
@@ -34,14 +36,14 @@ export function broadcastRoutes(app: FastifyInstance) {
   route(app, 'post', '/broadcasts/preview', 'message.broadcast', async (req, tx) => {
     const a = Aud.parse(req.body);
     const rows = await audience(tx, req.ctx.tenantId, req.ctx.timezone, a);
-    const ok = rows.filter((r) => validPhone(r.phone));
-    return { total: ok.length, skipped: rows.length - ok.length, recipients: ok.slice(0, 1000) };
+    const ok = rows.filter(reachable);
+    return { total: ok.length, skipped: rows.length - ok.length, optedOut: rows.filter((r) => r.noWhatsapp).length, recipients: ok.slice(0, 1000).map(({ noWhatsapp, ...r }) => r) };
   });
 
   const Send = Aud.extend({ title: z.string().trim().max(80).optional(), body: z.string().trim().min(1).max(1000), ids: z.array(z.string().uuid()).min(1).max(2000) });
   route(app, 'post', '/broadcasts', 'message.broadcast', async (req, tx) => {
     const b = Send.parse(req.body); const t = req.ctx.tenantId;
-    const rows = (await tx.select({ id: patient.id, fullName: patient.fullName, phone: patient.phone }).from(patient).where(and(eq(patient.tenantId, t), inArray(patient.id, b.ids)))).filter((r) => validPhone(r.phone));
+    const rows = (await tx.select({ id: patient.id, fullName: patient.fullName, phone: patient.phone, noWhatsapp: patient.noWhatsapp }).from(patient).where(and(eq(patient.tenantId, t), inArray(patient.id, b.ids)))).filter(reachable);
     if (!rows.length) throw new HttpError(400, 'NO_RECIPIENTS');
     const clinic = (await tx.select({ name: tenant.name }).from(tenant).where(eq(tenant.id, t)))[0]?.name ?? '';
     const [bc] = await tx.insert(broadcast).values({ tenantId: t, title: b.title || b.body.slice(0, 40), body: b.body, audience: b.audience, audienceLabel: label(b.audience, b.days), recipients: rows.length, skipped: Math.max(0, b.ids.length - rows.length), createdBy: req.ctx.userId }).returning();

@@ -15,6 +15,7 @@ const SecurityIn = z.object({
   ipLock: z.object({ enabled: z.boolean(), allowed: z.array(Addr).max(50), anywhere: z.array(z.string().uuid()).max(200), ignored: z.array(z.string().max(45)).max(500).default([]) }),
   idleMinutes: z.union([z.literal(0), z.literal(10), z.literal(30), z.literal(60)]),
   phoneRoles: z.array(z.string().max(40)).max(40), listRoles: z.array(z.string().max(40)).max(40),
+  away: z.boolean().optional(), // the owner says this computer is not at the clinic (turning the lock on from home)
 });
 
 export function securityRoutes(app: FastifyInstance) {
@@ -43,9 +44,17 @@ export function securityRoutes(app: FastifyInstance) {
     if (b.ipLock.enabled && !b.ipLock.allowed.length) throw new HttpError(409, 'ADD_AN_ADDRESS');
     for (const a of b.ipLock.allowed) if (a.to && (!/^\d+\.\d+\.\d+\.\d+$/.test(a.from) || !/^\d+\.\d+\.\d+\.\d+$/.test(a.to))) throw new HttpError(400, 'RANGE_IPV4_ONLY');
     const cur = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
-    req.auditBefore = securityOf(cur.settings);
-    const next = { ...b, ipLock: { ...b.ipLock, allowed: b.ipLock.allowed.map((a) => ({ label: a.label, from: cleanIp(a.from), to: a.to ? cleanIp(a.to) : null })) },
+    const before = securityOf(cur.settings); req.auditBefore = before;
+    const { away, ...rest } = b;
+    const next = { ...rest, ipLock: { ...b.ipLock, allowed: b.ipLock.allowed.map((a) => ({ label: a.label, from: cleanIp(a.from), to: a.to ? cleanIp(a.to) : null })) },
       phoneRoles: b.phoneRoles.filter((r) => r !== 'owner'), listRoles: [...new Set(['owner', ...b.listRoles])] };
+    // Never lock out the computer making the change. Taking this computer's own address off the list is refused outright (it is a clinic computer);
+    // turning the lock on from an address not on the list needs "I am away from the clinic", since staff on this computer would be stopped at once.
+    const ip = req.ctx.ip;
+    if (ip && next.ipLock.enabled && !ipAllowed(ip, next.ipLock.allowed)) {
+      if (ipAllowed(ip, before.ipLock.allowed)) throw new HttpError(409, 'WOULD_LOCK_THIS_COMPUTER', { ip });
+      if (!before.ipLock.enabled && !away) throw new HttpError(409, 'THIS_COMPUTER_NOT_LISTED', { ip });
+    }
     await tx.update(tenant).set({ settings: sql`${tenant.settings} || ${JSON.stringify({ security: next })}::jsonb` }).where(eq(tenant.id, t));
     return next;
   });

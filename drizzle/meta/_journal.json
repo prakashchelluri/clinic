@@ -176,6 +176,13 @@
       "when": 1794359265220,
       "tag": "0024_pharmacy_guards",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0026_patient_prefs",
+      "breakpoints": true
     }
   ]
 }

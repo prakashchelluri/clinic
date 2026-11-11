@@ -59,11 +59,24 @@ export function adminRoutes(app: FastifyInstance) {
   const UserIn = z.object({ name: Name, email: z.string().trim().email().max(200), password: z.string().min(8).max(200).optional(), roles: z.array(z.string().min(1)).min(1), practitionerId: z.string().uuid().nullable().optional(), active: z.boolean().optional() });
   route(app, 'post', '/admin/users', 'user.write', async (req, tx) => {
     const body = UserIn.parse(req.body); await checkRoles(tx, req.ctx.tenantId, body.roles);
-    if (!body.password) throw new HttpError(400, 'PASSWORD_REQUIRED');
     if (body.roles.includes('owner') && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'OWNER_ONLY_GRANT');
-    const [row] = await tx.insert(appUser).values({ tenantId: req.ctx.tenantId, name: body.name, email: body.email.toLowerCase(), passwordHash: hashPassword(body.password), role: body.roles[0], roles: body.roles, practitionerId: body.practitionerId ?? null }).returning();
+    // No password given: the app makes one, shows it once, and the person picks their own at first sign-in.
+    const generated = body.password ? null : firstPassword();
+    const [row] = await tx.insert(appUser).values({ tenantId: req.ctx.tenantId, name: body.name, email: body.email.toLowerCase(), passwordHash: hashPassword(body.password ?? generated!), role: body.roles[0], roles: body.roles, practitionerId: body.practitionerId ?? null, mustChangePassword: !!generated }).returning();
     await emit(tx, req.ctx, 'user.created', 'user', row.id, { roles: body.roles });
-    return pub(row);
+    return { ...pub(row), ...(generated ? { firstPassword: generated } : {}) };
+  });
+  /** Owner or admin resets a staff member's password: a new one is shown once, and they must pick their own at next sign-in. Only an owner resets an owner. */
+  route(app, 'post', '/admin/users/:id/reset-password', 'user.write', async (req, tx) => {
+    const id = (req.params as any).id;
+    const cur = await tx.select().from(appUser).where(and(eq(appUser.id, id), eq(appUser.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    if (id === req.ctx.userId) throw new HttpError(400, 'USE_CHANGE_MY_PASSWORD');
+    if ((cur.roles?.length ? cur.roles : [cur.role]).includes('owner') && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'OWNER_ONLY_EDIT');
+    const pw = firstPassword();
+    await tx.update(appUser).set({ passwordHash: hashPassword(pw), mustChangePassword: true }).where(eq(appUser.id, id));
+    await writeAudit(tx, req.ctx, { kind: 'settings', action: 'user.password_reset', summary: `Reset the password of ${cur.name}`, entity: 'users', entityId: id }); req.audited = true;
+    return { firstPassword: pw };
   });
   route(app, 'patch', '/admin/users/:id', 'user.write', async (req, tx) => {
     const body = sent(UserIn.partial().parse(req.body), req.body); const id = (req.params as any).id; if (body.roles) await checkRoles(tx, req.ctx.tenantId, body.roles);
@@ -247,7 +260,10 @@ async function upd(tx: any, table: any, req: any, set: any) {
   if (!row) throw new HttpError(404, 'NOT_FOUND');
   return row;
 }
-const pub = (u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, roles: u.roles, practitionerId: u.practitionerId, active: u.active });
+const pub = (u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role, roles: u.roles, practitionerId: u.practitionerId, active: u.active, mustChangePassword: u.mustChangePassword });
+/** A first or reset password, read out or sent to the person once: no 0/O or 1/l/I to mix up. */
+const ALPHA = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export const firstPassword = () => Array.from(randomBytes(10), (b) => ALPHA[b % ALPHA.length]).join('');
 function deepMerge(a: any, b: any): any {
   if (!a || typeof a !== 'object' || Array.isArray(b) || typeof b !== 'object') return b;
   const out = { ...a }; for (const k of Object.keys(b)) out[k] = deepMerge(a[k], b[k]); return out;

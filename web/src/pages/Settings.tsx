@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
@@ -13,43 +13,46 @@ import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 import '../settings.css';
 
-type Tab = 'clinic' | 'day' | 'people' | 'roles' | 'rooms' | 'availability' | 'services' | 'rules' | 'messages' | 'pad' | 'forms' | 'templates' | 'medicines' | 'procedures' | 'photos' | 'fees' | 'privacy' | 'testdata';
-/** key, name, icon, what it is for (one plain sentence) */
-type TabDef = [Tab, string, string, string];
-const GROUPS: [string, string, TabDef[]][] = [
-  ['Your clinic', 'Who works here, where, and how the day runs.', [
-    ['clinic', 'Clinic details', 'home', 'Name, address and phone as printed on prescriptions, and how token numbers run.'],
-    ['day', 'The day at the desk', 'queue', 'Junior screening, free return with reports, the waiting-room screen.'],
-    ['people', 'Staff and doctors', 'users', 'Who can sign in, and the doctors whose names go on prescriptions.'],
-    ['roles', 'What each role can do', 'lock', 'Which screens and actions reception, doctors, pharmacy and others have.'],
-    ['rooms', 'Rooms', 'door', 'Procedure rooms and what each is equipped for.'],
-    ['privacy', 'Privacy and security', 'lock', 'Work only from the clinic, idle sign-out, and the audit log.'],
+type Tab = 'clinic' | 'day' | 'availability' | 'rooms' | 'people' | 'roles' | 'prices' | 'rules' | 'messages' | 'pad' | 'forms' | 'templates' | 'photos' | 'privacy' | 'testdata';
+/** key, name, what it is for (one plain sentence) */
+type TabDef = [Tab, string, string];
+/** Six groups. name, icon, what is in it, extra words the search finds it by, its topics. */
+const GROUPS: [string, string, string, string, TabDef[]][] = [
+  ['Clinic', 'home', 'Details on prescriptions, the day at the desk, doctors’ hours and rooms.', 'address phone token upi qr screening junior waiting room tv screen hours routine room laser', [
+    ['clinic', 'Details', 'Name, address and phone as printed on prescriptions, and how token numbers run.'],
+    ['day', 'The day at the desk', 'Junior screening, free return with reports, the waiting-room screen.'],
+    ['availability', 'Doctors’ hours', 'When each doctor sits for OP. The calendar fills from this every week.'],
+    ['rooms', 'Rooms', 'Procedure rooms and what each one has.'],
   ]],
-  ['Bookings and reminders', 'What patients can book, when, and how they are reminded.', [
-    ['availability', 'Doctors’ weekly hours', 'clock', 'When each doctor sits for OP. The calendar fills from this every week.'],
-    ['services', 'Visit types', 'calendar', 'What a patient books: name, length, colour on the calendar, fee.'],
-    ['rules', 'Booking rules', 'list', 'How early to arrive, how late one can cancel, how the calendar looks.'],
-    ['messages', 'WhatsApp reminders', 'message', 'Confirmations, reminders and follow-up messages sent to patients.'],
+  ['People', 'users', 'Staff who sign in, the doctors, and what each role can do.', 'staff user password login account doctor role permission access', [
+    ['people', 'Staff and doctors', 'Who can sign in, and the doctors whose names go on prescriptions.'],
+    ['roles', 'What each role can do', 'Which screens and actions reception, doctors, pharmacy and others have.'],
   ]],
-  ['Consultations', 'What the doctor sees and prescribes.', [
-    ['pad', 'Prescription pad', 'stetho', 'What the doctor fills in, which parts are required, and what prints.'],
-    ['forms', 'Consultation form fields', 'edit', 'The vitals taken, and the complaints, examination findings and diagnoses the doctor picks from.'],
-    ['templates', 'Templates', 'list', 'Ready sets of medicines, complaints, advice and tests, filled in one click.'],
-    ['medicines', 'Medicines', 'pill', 'The medicines the doctor prescribes, with usual dosing and price.'],
-    ['procedures', 'Procedures and packages', 'spark', 'Each procedure’s duration, price and room needs; multi-sitting packages.'],
-    ['photos', 'Photo areas', 'user', 'Body areas for before and after photos.'],
+  ['Prices', 'rupee', 'Everything the clinic charges, on one screen.', 'fee fees consultation visit type procedure package medicine mrp gst tax hsn discount', [
+    ['prices', 'Prices', 'Consultation fees, visit types, procedures and packages, medicines with MRP and GST, and the discount limit.'],
   ]],
-  ['Money', 'What a visit costs.', [
-    ['fees', 'Consultation fees', 'rupee', 'The fee for each visit category, and which categories jump the queue.'],
+  ['Bookings', 'calendar', 'Booking rules and WhatsApp reminders.', 'booking cancel arrive calendar reminder whatsapp message confirmation', [
+    ['rules', 'Booking rules', 'How early to arrive, how late one can cancel, how the calendar looks.'],
+    ['messages', 'WhatsApp reminders', 'Confirmations, reminders and follow-up messages sent to patients.'],
   ]],
-  ['Testing', 'Only on a test clinic.', [
-    ['testdata', 'Test data', 'repeat', 'Wipe everything this clinic has done and load a week of sample data.'],
+  ['Prescription', 'stetho', 'The pad, form fields, templates and photo areas.', 'pad print rx vitals complaints diagnosis form template photo', [
+    ['pad', 'Prescription pad', 'What the doctor fills in, which parts are required, and what prints.'],
+    ['forms', 'Form fields', 'The vitals taken, and the complaints, examination findings and diagnoses the doctor picks from.'],
+    ['templates', 'Templates', 'Ready sets of medicines, complaints, advice and tests, filled in one click.'],
+    ['photos', 'Photo areas', 'Body areas for before and after photos.'],
+  ]],
+  ['Privacy & security', 'lock', 'Work only from the clinic, idle sign-out, phone numbers and the audit log.', 'ip internet address lock audit phone export privacy test data reset', [
+    ['privacy', 'Privacy and security', 'Work only from the clinic, idle sign-out, and the audit log.'],
+    ['testdata', 'Test data', 'Wipe everything this clinic has done and load a week of sample data.'],
   ]],
 ];
-const OWNER_ONLY = new Set<Tab>(['privacy', 'testdata']);
-const TABS: TabDef[] = GROUPS.flatMap(([, , t]) => t);
-/** The topic's name for the breadcrumb: Settings › Privacy and security. */
-export const settingsTopic = (k: string | null) => TABS.find((t) => t[0] === k)?.[1] ?? null;
+const OWNER_ONLY_GROUP = 'Privacy & security';
+const TABS: TabDef[] = GROUPS.flatMap((g) => g[4]);
+/** Old links (?tab=fees, ?tab=medicines…) still land on the right screen. */
+const ALIAS: Record<string, [Tab, string]> = { fees: ['prices', 'price-fees'], services: ['prices', 'price-visits'], procedures: ['prices', 'price-procedures'], medicines: ['prices', 'price-medicines'] };
+const groupOf = (k: Tab) => GROUPS.find((g) => g[4].some((t) => t[0] === k))!;
+/** The topic's name for the breadcrumb: Settings › Prices. */
+export const settingsTopic = (k: string | null) => { const t = ALIAS[k ?? '']?.[0] ?? k; return TABS.find((x) => x[0] === t)?.[1] ?? null; };
 /** Server refusals on this page, as sentences. */
 const SAY: Record<string, string> = {
   OWNER_ONLY_GRANT: 'Only an owner can make someone an owner, or take the owner role away.',
@@ -69,69 +72,65 @@ function ShowInactive({ on, set, n }: { on: boolean; set: (v: boolean) => void; 
 const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'Long text'], ['number', 'Number'], ['select', 'Pick one'], ['multiselect', 'Pick many'], ['tags', 'List (type several)'], ['diagnoses', 'Diagnoses with severity'], ['date', 'Date']];
 
 /** Owner's control panel. Everything here is data: no deploy needed to change it.
- *  A home of plain cards, one per topic; opening one shows that topic alone with a way back and its neighbours. */
+ *  The home is six groups; opening one shows its first topic, with the group's other topics as tabs. Prices is one screen. */
 export function Settings() {
   const { cfg, me } = useOutletContext<any>();
   const owner = (me?.roles ?? []).includes('owner');
-  const visible = (k: Tab) => (owner || !OWNER_ONLY.has(k)) && (k !== 'testdata' || !!cfg?.testData);
+  const visible = (k: Tab) => (owner || groupOf(k)[0] !== OWNER_ONLY_GROUP) && (k !== 'testdata' || !!cfg?.testData);
   const [params, setParams] = useSearchParams();
-  const tab = TABS.find((t) => t[0] === params.get('tab') && visible(t[0]))?.[0] ?? null;
-  // from the cards to a topic is a step of its own (Back returns to the cards); topic to topic replaces it
+  const asked = params.get('tab') ?? ''; const alias = ALIAS[asked];
+  const tab = TABS.find((t) => t[0] === (alias?.[0] ?? asked) && visible(t[0]))?.[0] ?? null;
+  // an old link to fees, medicines… opens Prices at that part
+  useEffect(() => { if (alias && tab) setTimeout(() => document.getElementById(alias[1])?.scrollIntoView({ block: 'start' }), 80); }, [asked, !!tab]);
+  // from the groups to a topic is a step of its own (Back returns to the groups); topic to topic replaces it
   const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: tab !== null && k !== null }); window.scrollTo({ top: 0 }); };
   const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['inactive'] }); };
-  // the header's search box finds a setting by its name or what it is for
+  // the header's search box finds a group by its name, its topics or common words (GST, password, WhatsApp…)
   const [find] = usePageSearch('Search settings', !tab);
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;
 
   if (!tab) {
     const q = find.trim().toLowerCase();
-    const groups = GROUPS.map(([g, about, tabs]) => [g, about, tabs.filter(([k, label, , hint]) => visible(k) && (!q || `${label} ${hint} ${g}`.toLowerCase().includes(q)))] as const).filter(([, , tabs]) => tabs.length);
+    const groups = GROUPS.map(([g, icon, about, words, tabs]) => ({ g, icon, about, tabs: tabs.filter(([k]) => visible(k)), words })).filter((x) => x.tabs.length && (!q || `${x.g} ${x.about} ${x.words} ${x.tabs.map((t) => `${t[1]} ${t[2]}`).join(' ')}`.toLowerCase().includes(q)));
     return (
       <div>
-        <PageHeader title="Settings" subtitle="How the clinic runs. A change applies straight away, for everyone." />
+        <PageHeader title="Settings" subtitle="How the clinic runs. A change applies for everyone once saved." />
         {groups.length === 0 && <div className="card py-10 text-center text-muted">No setting matches “{find}”.</div>}
-        {/* one list per area, two areas side by side on a wide screen */}
-        <div className="settings-home">
-          {groups.map(([g, about, tabs], gi) => (
-            <section key={g} className="settings-group card-flat" style={{ '--tone': TONES[GROUPS.findIndex((x) => x[0] === g) % TONES.length] } as React.CSSProperties}>
-              <header className="settings-group-head"><h2>{g}</h2><p>{about}</p></header>
-              {tabs.map(([k, label, icon, hint], i) => (
-                <button key={k} type="button" onClick={() => setTab(k)} className="settings-row" style={{ animationDelay: `${Math.min(gi * 60 + i * 30, 360)}ms` }}>
-                  <span className="settings-row-icon"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-[14.5px] font-semibold text-ink">{label}</span><span className="block text-[12.5px] leading-snug text-muted">{hint}</span></span>
-                  <Icon name="chevR" className="settings-row-chev h-4 w-4 shrink-0 text-muted" />
-                </button>))}
-            </section>))}
-        </div>
+        {groups.length > 0 && <section className="settings-group card-flat max-w-[860px]" style={{ '--tone': 'var(--color-clay)' } as React.CSSProperties}>
+          {groups.map(({ g, icon, about, tabs }, i) => (
+            <button key={g} type="button" onClick={() => setTab(tabs[0][0])} className="settings-row" style={{ animationDelay: `${Math.min(i * 40, 240)}ms` }}>
+              <span className="settings-row-icon"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
+              <span className="min-w-0 flex-1"><span className="block text-[14.5px] font-semibold text-ink">{g}</span><span className="block text-[12.5px] leading-snug text-muted">{about}</span>
+                {tabs.length > 1 && <span className="mt-0.5 block text-[12px] text-muted">{tabs.map((t) => t[1]).join(' · ')}</span>}</span>
+              <Icon name="chevR" className="settings-row-chev h-4 w-4 shrink-0 text-muted" />
+            </button>))}
+        </section>}
       </div>
     );
   }
 
   const cur = TABS.find((t) => t[0] === tab)!;
-  const group = GROUPS.find(([, , tabs]) => tabs.some(([k]) => k === tab))!;
-  const neighbours = group[2].filter(([k]) => visible(k));
+  const group = groupOf(tab);
+  const neighbours = group[4].filter(([k]) => visible(k));
   return (
     <div>
-      <PageHeader title={cur[1]} subtitle={cur[3]} />
-      {/* the other topics of the same area, as tabs; the top bar's Settings and Back lead to all of them */}
+      <PageHeader title={group[0]} subtitle={cur[2]} />
+      {/* the other topics of the same group, as tabs; the top bar's Settings and Back lead to all six groups */}
       {neighbours.length > 1 && <Tabs value={tab} onChange={(k) => setTab(k)} options={neighbours.map(([k, label]) => ({ value: k, label }))} className="anim-fade-up mb-5" />}
       <div key={tab} id="settings-body" className={`settings-body anim-fade-up min-w-0 ${NARROW.has(tab) ? 'max-w-[860px]' : ''}`}>
-        {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
-        {tab === 'services' && <ServicesTab cfg={cfg} onSaved={refresh} />}
-        {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
-        {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
-        {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
         {tab === 'clinic' && <ClinicTab cfg={cfg} onSaved={refresh} />}
         {tab === 'day' && <DayTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'availability' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
         {tab === 'people' && <PeopleTab cfg={cfg} onSaved={refresh} />}
-        {tab === 'roles' && <><RolesTab onSaved={refresh} /><DiscountCap cfg={cfg} onSaved={refresh} /></>}
+        {tab === 'roles' && <RolesTab onSaved={refresh} />}
+        {tab === 'prices' && <PricesTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
+        {tab === 'messages' && <MessagesTab cfg={cfg} onSaved={refresh} />}
         {tab === 'pad' && <PadTab onSaved={refresh} />}
         {tab === 'forms' && <FormsTab cfg={cfg} onSaved={refresh} />}
-        {tab === 'fees' && <FeesTab cfg={cfg} onSaved={refresh} />}
         {tab === 'templates' && <TemplatesTab cfg={cfg} />}
-        {tab === 'medicines' && <MedicinesTab cfg={cfg} onSaved={refresh} />}
-        {tab === 'procedures' && <><ProceduresTab cfg={cfg} onSaved={refresh} /><PackagesCard cfg={cfg} onSaved={refresh} /></>}
-        {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
+        {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
         {tab === 'privacy' && owner && <PrivacyTab />}
         {tab === 'testdata' && owner && <TestDataCard />}
       </div>
@@ -139,9 +138,22 @@ export function Settings() {
   );
 }
 /** Topics whose content is a short form or a short list: kept to a readable width instead of stretching across the screen. */
-/** One soft colour per area, for the icon tiles on the Settings home. */
-const TONES = ['var(--color-clay)', 'var(--color-sky)', 'var(--color-amber)', 'var(--color-sage)', 'var(--color-rose)'];
-const NARROW = new Set<Tab>(['clinic', 'day', 'people', 'rooms', 'availability', 'rules', 'photos', 'fees', 'testdata']);
+const NARROW = new Set<Tab>(['clinic', 'day', 'people', 'rooms', 'availability', 'rules', 'photos', 'testdata']);
+
+/* ---------------- Prices: everything the clinic charges, on one screen ---------------- */
+function PricesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const parts: [string, string][] = [['price-fees', 'Consultation fees'], ['price-visits', 'Visit types'], ['price-procedures', 'Procedures and packages'], ['price-medicines', 'Medicines'], ['price-discount', 'Discount limit']];
+  return (
+    <div className="space-y-6">
+      <nav className="flex flex-wrap gap-1.5" aria-label="On this screen">{parts.map(([id, l]) => <button key={id} type="button" className="toggle-opt" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>{l}</button>)}</nav>
+      <div id="price-fees" className="scroll-mt-20"><FeesTab cfg={cfg} onSaved={onSaved} /></div>
+      <div id="price-visits" className="scroll-mt-20"><ServicesTab cfg={cfg} onSaved={onSaved} /></div>
+      <div id="price-procedures" className="scroll-mt-20 space-y-4"><ProceduresTab cfg={cfg} onSaved={onSaved} /><PackagesCard cfg={cfg} onSaved={onSaved} /></div>
+      <div id="price-medicines" className="scroll-mt-20"><MedicinesTab cfg={cfg} onSaved={onSaved} /></div>
+      <div id="price-discount" className="scroll-mt-20 max-w-[860px]"><DiscountCap cfg={cfg} onSaved={onSaved} /></div>
+    </div>
+  );
+}
 
 /* ---------------- Clinic: what prints, how tokens count ---------------- */
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
@@ -219,7 +231,11 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const roleName = (k: string) => roleList.find((r) => r.key === k)?.name ?? k;
   const [edit, setEdit] = useState<any>(null); const [doc, setDoc] = useState<any>(null);
   useAddFromNew((w) => { if (w === 'user') setEdit({ name: '', email: '', password: '', roles: ['receptionist'], practitionerId: null, active: true }); if (w === 'doctor') setDoc({ name: '', regNo: '', qualification: '', active: true }); });
-  const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: () => { toast('Saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
+  // a new person gets a password made by the app, shown once here; they pick their own at first sign-in
+  const [shown, setShown] = useState<null | { name: string; email: string; password: string }>(null);
+  const save = useMutation({ mutationFn: (u: any) => u.id ? patch(`/admin/users/${u.id}`, u) : post('/admin/users', u), onSuccess: (r: any) => { toast('Saved'); setEdit(null); onSaved(); if (r?.firstPassword) setShown({ name: r.name, email: r.email, password: r.firstPassword }); }, onError: (e: any) => toast(say(e), 'err') });
+  const reset = useMutation({ mutationFn: (u: any) => post(`/admin/users/${u.id}/reset-password`), onSuccess: (r: any, u: any) => { setEdit(null); onSaved(); setShown({ name: u.name, email: u.email, password: r.firstPassword }); }, onError: (e: any) => toast(say(e), 'err') });
+  const askReset = async (u: any) => { if (await ask({ title: `Reset ${u.name}'s password?`, body: 'Their current password stops working now. You will see a new one to give them; they pick their own when they next sign in.', confirmLabel: 'Reset password' })) reset.mutate(u); };
   const saveDoc = useMutation({ mutationFn: async ({ routine, ...p }: any) => { const row = p.id ? await patch(`/admin/practitioners/${p.id}`, p) : await post('/admin/practitioners', p); if (routine) await api('PUT', `/calendar/routine/${row.id}`, routine); return row; }, onSuccess: () => { toast('Saved'); setDoc(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
   // an admin cannot change an owner's sign-in or switch them off
   const lockedOwner = !!edit?.id && !iAmOwner && !!(users.data ?? []).find((u: any) => u.id === edit.id)?.roles?.includes('owner');
@@ -231,26 +247,38 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         {(users.data ?? []).map((u: any) => (
           <div key={u.id} className={`row ${u.active ? '' : 'opacity-50'}`}>
             <div className="flex-1 min-w-0"><div className="text-sm font-medium">{u.name}</div><div className="text-xs text-muted">{u.email}{u.practitionerId ? ` · ${cfg.practitioners.find((p: any) => p.id === u.practitionerId)?.name ?? ''}` : ''}</div></div>
-            <div className="flex gap-1 flex-wrap justify-end">{(u.roles ?? [u.role]).map((r: string) => <Chip key={r} tone={r === 'owner' ? 'clay' : r === 'doctor' ? 'sky' : ''}>{roleName(r)}</Chip>)}{!u.active && <Chip tone="rose">inactive</Chip>}</div>
+            <div className="flex gap-1 flex-wrap justify-end">{(u.roles ?? [u.role]).map((r: string) => <Chip key={r} tone={r === 'owner' ? 'clay' : ''}>{roleName(r)}</Chip>)}{u.active && u.mustChangePassword && <Chip>first password not changed yet</Chip>}{!u.active && <Chip tone="rose">inactive</Chip>}</div>
             <button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...u, roles: u.roles ?? [u.role], password: '' })}><Icon name="edit" /></button>
           </div>
         ))}
       </Section>
-      <Section title="Doctors (practitioners)" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.practitioners?.length} />}>
+      <Section title="Doctors" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.practitioners?.length} />}>
         {doctors.map((p: any) => <div key={p.id} className={`row ${p.active === false ? 'opacity-50' : ''}`}><div className="flex-1"><div className="text-sm font-medium">{p.name}</div><div className="text-xs text-muted">{[p.qualification, p.regNo && `Reg. ${p.regNo}`].filter(Boolean).join(' · ')}</div></div>{p.active === false && <Chip tone="rose">inactive</Chip>}<Chip tone={p.routine ? 'sage' : 'amber'}>{routineSummary(p.routine)}</Chip><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setDoc({ ...p, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" /></button></div>)}
-        <div className="px-4 py-2 text-xs text-muted">A doctor who also signs in needs a user account linked to their practitioner record (People → user → "Signs prescriptions as").</div>
+        <div className="px-4 py-2 text-xs text-muted">A doctor who also signs in needs a staff account too: open it above and pick their name under "Signs prescriptions as".</div>
       </Section>
       {edit && (
-        <Modal title={edit.id ? 'Edit user' : 'New user'} subtitle="One person can hold several roles; permissions add up" onClose={() => setEdit(null)} width="max-w-md">
+        <Modal title={edit.id ? 'Edit staff member' : 'New staff member'} subtitle="Pick what they do. Someone can be Doctor and Owner at once." onClose={() => setEdit(null)} width="max-w-md">
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
             {lockedOwner && <div className="rounded-xl bg-amber-soft px-3 py-2 text-sm text-[#6E4D10]">This person is an owner. Only an owner can change their email, password or whether they are active.</div>}
             <div><label className="label">Email (used to sign in)</label><input className="input" type="email" disabled={lockedOwner} value={edit.email} onChange={(e) => setEdit({ ...edit, email: e.target.value })} /></div>
-            {!lockedOwner && <div><label className="label">{edit.id ? 'New password (leave blank to keep)' : 'Password (at least 8 characters)'}</label><input className="input" type="password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} />{edit.password && edit.password.length < 8 && <div className="mt-1 text-xs text-rose">At least 8 characters.</div>}</div>}
+            {!edit.id && <div className="text-xs text-muted">The app makes a first password and shows it once after you save. They pick their own when they first sign in.</div>}
+            {edit.id && !lockedOwner && edit.id !== me?.userId && <div className="flex flex-wrap items-center gap-2"><span className="label !mb-0">Password</span><button type="button" className="btn btn-sm" disabled={reset.isPending} onClick={() => askReset(edit)}><Icon name="lock" className="h-3.5 w-3.5" />Reset password</button></div>}
             <div><label className="label">Roles</label><div className="flex flex-wrap gap-1">{ROLES.map(([r, l]) => <button key={r} className={`toggle-opt ${edit.roles.includes(r) ? 'on' : ''}`} onClick={() => toggleRole(r)}>{l}</button>)}</div></div>
             {(edit.roles.includes('doctor') || edit.roles.includes('owner')) && <div><label className="label">Signs prescriptions as</label><select className="input" value={edit.practitionerId ?? ''} onChange={(e) => setEdit({ ...edit, practitionerId: e.target.value || null })}><option value="">Not a consulting doctor</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>}
             {edit.id && !lockedOwner && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active (uncheck when staff leave)</label>}
-            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.name || !edit.email || !edit.roles.length || (!edit.id && !edit.password) || (!!edit.password && edit.password.length < 8)} onClick={() => save.mutate({ id: edit.id, name: edit.name, email: edit.email, roles: edit.roles, practitionerId: edit.practitionerId, active: edit.active, ...(edit.password ? { password: edit.password } : {}) })}>Save</button></div>
+            <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.name || !edit.email || !edit.roles.length} onClick={() => save.mutate({ id: edit.id, name: edit.name, email: edit.email, roles: edit.roles, practitionerId: edit.practitionerId, active: edit.active })}>Save</button></div>
+          </div>
+        </Modal>
+      )}
+      {shown && (
+        <Modal title={`${shown.name}'s first password`} subtitle="Shown only now. Give it to them in person or on WhatsApp." onClose={() => setShown(null)} width="max-w-sm">
+          <div className="space-y-3">
+            <div className="text-sm text-ink-2">Sign-in email: {shown.email}</div>
+            <div className="flex items-center gap-2"><input className="input font-mono text-[17px] tracking-wider" readOnly value={shown.password} onFocus={(e) => e.target.select()} aria-label="First password" />
+              <button type="button" className="btn btn-sm" onClick={async () => { try { await navigator.clipboard.writeText(shown.password); toast('Copied'); } catch { toast('Select the password and copy it', 'info'); } }}><Icon name="copy" className="h-3.5 w-3.5" />Copy</button></div>
+            <div className="text-xs text-muted">When they sign in with it, the app asks them to pick their own password before anything else.</div>
+            <div className="modal-foot"><button className="btn btn-primary" onClick={() => setShown(null)}>Done</button></div>
           </div>
         </Modal>
       )}
@@ -316,14 +344,14 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const current = cfg.forms.find((f: any) => f.key === 'encounter');
   const [schema, setSchema] = useState<any>(() => JSON.parse(JSON.stringify(current?.schema ?? { sections: [] })));
   const [sel, setSel] = useState<{ s: number; f: number } | null>(null);
-  const save = useMutation({ mutationFn: () => post('/admin/forms/encounter', schema), onSuccess: (r: any) => { toast(`Published version ${r.version}`); onSaved(); } , onError: (e: any) => toast('Check keys: lowercase letters, numbers, underscores', 'err') });
+  const save = useMutation({ mutationFn: () => post('/admin/forms/encounter', schema), onSuccess: () => { toast('Form saved'); onSaved(); } , onError: (e: any) => toast('Check keys: lowercase letters, numbers, underscores', 'err') });
   const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '');
   const upd = (fn: (d: any) => void) => { const d = JSON.parse(JSON.stringify(schema)); fn(d); setSchema(d); };
   const field = sel ? schema.sections[sel.s]?.fields[sel.f] : null;
   return (
     <div className="space-y-3">
       <VitalsSettings cfg={cfg} onSaved={onSaved} />
-      <div className="text-sm text-muted">Version {current?.version}. Saving publishes a new version; past consultations keep the version they were written with.</div>
+      <div className="text-sm text-muted">Past notes keep the form they were written on.</div>
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
         <div className="space-y-3">
           {schema.sections.map((s: any, si: number) => (
@@ -353,7 +381,7 @@ function FormsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
           )}
         </div>
       </div>
-      <div className="settings-save"><button className="btn btn-ghost" onClick={() => setSchema(JSON.parse(JSON.stringify(current.schema)))}>Discard changes</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Publish new version</button></div>
+      <div className="settings-save"><button className="btn btn-ghost" onClick={() => setSchema(JSON.parse(JSON.stringify(current.schema)))}>Discard changes</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save form</button></div>
     </div>
   );
 }
@@ -368,19 +396,19 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
     if (was && was.amountPaise !== c.amountPaise && !(await ask({ title: `Change ${c.name} from ${money(was.amountPaise)} to ${money(c.amountPaise)}?`, body: 'It applies to check-ins from now. Patients already checked in keep the fee they were charged.', confirmLabel: 'Change the fee' }))) return;
     save.mutate(c);
   };
-  useAddFromNew(() => setEdit({ code: '', name: '', amount: '', priority: 0, affectsCapacity: true, active: true }));
+  useAddFromNew((w) => { if (w === 'category') setEdit({ code: '', name: '', amount: '', priority: 0, affectsCapacity: true, active: true }); });
   const save = useMutation({ mutationFn: (c: any) => c.id ? patch(`/admin/fee-categories/${c.id}`, c) : post('/admin/fee-categories', c), onSuccess: () => { toast('Fee saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
-    <Section title="Visit categories & fees" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.feeCategories?.length} />}>
+    <Section title="Consultation fees"aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.feeCategories?.length} />}>
       <table className="table"><thead><tr><th className="pl-4">Code</th><th>Name</th><th className="text-right">Fee</th><th>Rule</th><th>Queue</th><th /></tr></thead>
         <tbody>{rows.map((c: any) => <tr key={c.id} className={c.active === false ? 'opacity-50' : ''}><td className="pl-4 font-mono text-xs">{c.code}</td><td>{c.name}{c.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-right">{money(c.amountPaise)}</td><td className="text-xs text-muted">{c.eligibilityNote ?? (c.eligibility ? 'auto-suggested by rule' : 'manual')}</td><td>{c.priority > 0 && <Chip tone="amber">jumps queue</Chip>}</td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...c, amount: c.amountPaise / 100 })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
         <Modal title={edit.id ? `Edit ${edit.code}` : 'New category'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2"><div><label className="label">Code</label><input className="input uppercase" maxLength={8} value={edit.code} disabled={!!edit.id} onChange={(e) => setEdit({ ...edit, code: e.target.value.toUpperCase() })} /></div><div className="col-span-2"><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div></div>
-            <div className="grid grid-cols-2 gap-2"><div><label className="label">Fee (₹)</label><MoneyInput value={String(edit.amount ?? "")} onChange={(v) => setEdit({ ...edit, amount: v })} /></div><div><label className="label" htmlFor="fee-prio">Queue priority (0 = normal, up to 99)</label><NumInput id="fee-prio" max={99} className="input" value={String(edit.priority ?? 0)} onChange={(e) => setEdit({ ...edit, priority: Number(e.target.value || 0) })} /></div></div>
-            <div><label className="label">Rule note (shown to reception)</label><input className="input" value={edit.eligibilityNote ?? ''} onChange={(e) => setEdit({ ...edit, eligibilityNote: e.target.value })} /></div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.affectsCapacity} onChange={(e) => setEdit({ ...edit, affectsCapacity: e.target.checked })} /> Counts against window capacity</label>
+            <div className="grid grid-cols-2 gap-2"><div><label className="label">Fee (₹)</label><MoneyInput value={String(edit.amount ?? "")} onChange={(v) => setEdit({ ...edit, amount: v })} /></div><div><span className="label">Jumps the queue?</span><div className="flex gap-1" role="group" aria-label="Jumps the queue?">{([[false, 'No'], [true, 'Yes']] as const).map(([v, l]) => <button key={l} type="button" aria-pressed={(edit.priority > 0) === v} className={`toggle-opt ${(edit.priority > 0) === v ? 'on' : ''}`} onClick={() => setEdit({ ...edit, priority: v ? (edit.priority > 0 ? edit.priority : 10) : 0 })}>{l}</button>)}</div></div></div>
+            <div><label className="label">Note for reception (when to use it)</label><input className="input" value={edit.eligibilityNote ?? ''} onChange={(e) => setEdit({ ...edit, eligibilityNote: e.target.value })} /></div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.affectsCapacity} onChange={(e) => setEdit({ ...edit, affectsCapacity: e.target.checked })} /> Uses a booking slot</label>
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.code || !edit.name} onClick={() => confirmSave({ id: edit.id, code: edit.code, name: edit.name, amountPaise: Math.round(Number(edit.amount || 0) * 100), priority: edit.priority, affectsCapacity: edit.affectsCapacity, eligibilityNote: edit.eligibilityNote || null, active: edit.active })}>Save</button></div>
           </div>
@@ -393,12 +421,12 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Medicines ---------------- */
 function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null); const [q, setQ] = useState('');
-  useAddFromNew(() => setEdit({ name: '', form: 'tab', scheduleClass: 'H', defaults: {}, packSize: 10, reorderLevel: 5 }));
+  useAddFromNew((w) => { if (w === 'medicine') setEdit({ name: '', form: 'tab', scheduleClass: 'H', defaults: {}, packSize: 10, reorderLevel: 5 }); });
   const save = useMutation({ mutationFn: ({ mrp, id, ...m }: any) => { const b = { ...m, mrpPaise: mrp !== undefined ? toPaise(mrp || '0') : m.mrpPaise, gstBp: m.gstBp ?? 1200, hsn: m.hsn || null }; delete b.createdAt; delete b.tenantId; return id ? patch(`/admin/medicines/${id}`, b) : post('/admin/medicines', b); }, onSuccess: () => { toast('Medicine saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
   const del = useMutation({ mutationFn: (id: string) => api('DELETE', `/admin/medicines/${id}`), onSuccess: () => { toast('Removed', 'info'); setEdit(null); onSaved(); }, onError: () => toast('In use by a prescription; cannot delete', 'err') });
   const list = cfg.medicines.filter((m: any) => m.name.toLowerCase().includes(q.toLowerCase()));
   return (
-    <Section title={<>Favourites <span className="text-muted font-normal">· {cfg.medicines.length}</span></>} aside={<><input className="input !w-48 !py-1.5" placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} /></>}>
+    <Section title={<>Medicines <span className="text-muted font-normal">· {cfg.medicines.length} · price (MRP) and GST</span></>} aside={<><input className="input !w-48 !py-1.5" placeholder="Filter" value={q} onChange={(e) => setQ(e.target.value)} /></>}>
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Form</th><th>Schedule</th><th>Price</th><th>Default</th><th /></tr></thead>
         <tbody>{list.map((m: any) => <tr key={m.id}><td className="pl-4 font-medium">{m.name}</td><td className="text-muted">{m.form}</td><td><Chip tone={m.scheduleClass === 'OTC' ? '' : 'amber'}>{m.scheduleClass ?? '—'}</Chip></td><td className={m.mrpPaise ? '' : 'text-rose text-xs'}>{m.mrpPaise ? `${money(m.mrpPaise)} · ${m.gstBp / 100}%` : 'not set'}</td><td className="text-xs text-muted">{[m.defaults?.dose, m.defaults?.frequency, m.defaults?.durationDays ? `${m.defaults.durationDays}d` : null].filter(Boolean).join(' · ')}</td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...m, defaults: m.defaults ?? {} })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
@@ -464,12 +492,12 @@ function LeafletField({ med, onChange, onSaved }: { med: any; onChange: (url: st
 /* ---------------- Procedures ---------------- */
 function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
-  useAddFromNew(() => setEdit({ name: '', typicalMinutes: 30, bufferMinutes: 0, typicalSittings: 1, price: '', requiresMainDoctor: false, requiresReview: false, requiredCapability: '', taxRateBp: 0, active: true }));
+  useAddFromNew((w) => w === 'procedure' && setEdit({ name: '', typicalMinutes: 30, bufferMinutes: 0, typicalSittings: 1, price: '', requiresMainDoctor: false, requiresReview: false, requiredCapability: '', taxRateBp: 0, active: true }));
   const caps = [...new Set<string>(cfg.rooms.flatMap((r: any) => r.capabilities))];
   const save = useMutation({ mutationFn: (p: any) => p.id ? patch(`/admin/procedures/${p.id}`, p) : post('/admin/procedures', p), onSuccess: () => { toast('Procedure saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
   const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const rows = [...cfg.procedures, ...(showOff ? off.data?.procedures ?? [] : [])];
   return (
-    <Section title="Procedure catalogue" aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.procedures?.length} />}>
+    <Section title="Procedures"aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.procedures?.length} />}>
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Typical</th><th>Sittings</th><th>Needs room with</th><th className="text-right">Price</th><th>GST</th><th>Rules</th><th /></tr></thead>
         <tbody>{rows.map((p: any) => <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}><td className="pl-4 font-medium">{p.name}{p.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-muted">{p.typicalMinutes} min{p.bufferMinutes ? ` +${p.bufferMinutes}` : ''}</td><td>{p.typicalSittings}</td><td>{p.requiredCapability ? <Chip>{p.requiredCapability}</Chip> : <span className="text-muted text-xs">any</span>}</td><td className="text-right">{p.pricePaise != null ? money(p.pricePaise) : '—'}</td><td className="text-xs text-muted">{p.taxRateBp ? `${p.taxRateBp / 100}%` : 'exempt'}</td><td><div className="flex gap-1 flex-wrap">{p.requiresMainDoctor && <Chip tone="clay">doctor</Chip>}{p.requiresReview && <Chip tone="amber">review</Chip>}</div></td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...p, price: p.pricePaise != null ? p.pricePaise / 100 : '', requiredCapability: p.requiredCapability ?? '' })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
@@ -482,7 +510,7 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">Sittings</label><NumInput max={50} className="input" value={edit.typicalSittings} onChange={(e) => setEdit({ ...edit, typicalSittings: Number(e.target.value) })} /></div>
               <div><label className="label">Price (₹)</label><MoneyInput value={String(edit.price ?? "")} onChange={(v) => setEdit({ ...edit, price: v })} /></div>
             </div>
-            <div><label className="label">Needs a room with</label><div className="flex flex-wrap gap-1"><button className={`toggle-opt ${!edit.requiredCapability ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: '' })}>any room</button>{caps.map((c) => <button key={c} className={`toggle-opt ${edit.requiredCapability === c ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: c })}>{c}</button>)}</div><div className="text-[11px] text-muted mt-1">Capabilities come from Rooms. Add a new one there first.</div></div>
+            <div><label className="label">Needs a room with</label><div className="flex flex-wrap gap-1"><button className={`toggle-opt ${!edit.requiredCapability ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: '' })}>any room</button>{caps.map((c) => <button key={c} className={`toggle-opt ${edit.requiredCapability === c ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: c })}>{c}</button>)}</div><div className="text-[11px] text-muted mt-1">These come from what the rooms have (Settings › Clinic › Rooms).</div></div>
             <div><label className="label">GST</label><div className="flex gap-1">{[[0, 'Exempt (medical)'], [1800, '18% (cosmetic)']].map(([v, l]) => <button key={v} className={`toggle-opt ${edit.taxRateBp === v ? 'on' : ''}`} onClick={() => setEdit({ ...edit, taxRateBp: v })}>{l}</button>)}</div></div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.requiresMainDoctor} onChange={(e) => setEdit({ ...edit, requiresMainDoctor: e.target.checked })} /> Needs a doctor present (blocks their OP time)</label>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.requiresReview} onChange={(e) => setEdit({ ...edit, requiresReview: e.target.checked })} /> Doctor reviews the plan before the patient is confirmed</label>
@@ -498,20 +526,20 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Rooms ---------------- */
 function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
-  useAddFromNew(() => setEdit({ name: '', capabilities: ['procedure'], active: true, newCap: '' }));
+  useAddFromNew((w) => { if (w === 'room') setEdit({ name: '', capabilities: ['procedure'], active: true, newCap: '' }); });
   const allCaps = [...new Set<string>([...cfg.rooms.flatMap((r: any) => r.capabilities), 'procedure', 'laser', 'cryo', 'minor_ot'])];
   const save = useMutation({ mutationFn: (r: any) => r.id ? patch(`/admin/rooms/${r.id}`, r) : post('/admin/rooms', r), onSuccess: () => { toast('Room saved'); setEdit(null); onSaved(); }, onError: (e: any) => toast(say(e), 'err') });
   const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const rows = [...cfg.rooms, ...(showOff ? off.data?.rooms ?? [] : [])];
   return (
     <Section title={<>Rooms <span className="text-muted font-normal">· {cfg.rooms.length}</span></>} aside={<ShowInactive on={showOff} set={setShowOff} n={off.data?.rooms?.length} />}>
       {rows.map((r: any) => <div key={r.id} className={`row ${r.active === false ? 'opacity-50' : ''}`}><div className="flex-1"><div className="text-sm font-medium">{r.name}{r.active === false && <> <Chip tone="rose">inactive</Chip></>}</div></div><div className="flex gap-1 flex-wrap">{r.capabilities.map((c: string) => <Chip key={c}>{c}</Chip>)}</div><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...r, newCap: '' })}><Icon name="edit" /></button></div>)}
-      <div className="px-4 py-2 text-xs text-muted">A capability is a tag such as "laser" or "minor_ot". Procedures declare which tag they need; scheduling only offers rooms that have it. Rooms cannot be treated as interchangeable.</div>
+      <div className="px-4 py-2 text-xs text-muted">Tick what each room has. A procedure is only booked into a room that has it.</div>
       {edit && (
         <Modal title={edit.id ? 'Edit room' : 'New room'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
-            <div><label className="label">Capabilities</label><div className="flex flex-wrap gap-1">{allCaps.map((c) => <button key={c} className={`toggle-opt ${edit.capabilities.includes(c) ? 'on' : ''}`} onClick={() => setEdit({ ...edit, capabilities: edit.capabilities.includes(c) ? edit.capabilities.filter((x: string) => x !== c) : [...edit.capabilities, c] })}>{c}</button>)}</div>
-              <div className="flex gap-2 mt-2"><input className="input" placeholder="new capability, e.g. phototherapy" value={edit.newCap} onChange={(e) => setEdit({ ...edit, newCap: e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, '_') })} /><button className="btn btn-sm" disabled={!edit.newCap} onClick={() => setEdit({ ...edit, capabilities: [...edit.capabilities, edit.newCap], newCap: '' })}>Add</button></div></div>
+            <div><label className="label">What this room has</label><div className="flex flex-wrap gap-1">{allCaps.map((c) => <button key={c} className={`toggle-opt ${edit.capabilities.includes(c) ? 'on' : ''}`} onClick={() => setEdit({ ...edit, capabilities: edit.capabilities.includes(c) ? edit.capabilities.filter((x: string) => x !== c) : [...edit.capabilities, c] })}>{c}</button>)}</div>
+              <div className="flex gap-2 mt-2"><input className="input" placeholder="something else, e.g. phototherapy" value={edit.newCap} onChange={(e) => setEdit({ ...edit, newCap: e.target.value.toLowerCase().replace(/[^a-z0-9_]+/g, '_') })} /><button className="btn btn-sm" disabled={!edit.newCap} onClick={() => setEdit({ ...edit, capabilities: [...edit.capabilities, edit.newCap], newCap: '' })}>Add</button></div></div>
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name} onClick={() => save.mutate({ id: edit.id, name: edit.name, capabilities: edit.capabilities, active: edit.active })}>Save</button></div>
           </div>

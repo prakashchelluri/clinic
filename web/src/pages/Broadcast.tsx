@@ -50,7 +50,7 @@ export function BroadcastDialog({ onClose, onSent }: { onClose: () => void; onSe
           {!aud ? <div className="rounded-2xl bg-white/70 px-4 py-3 text-sm text-muted">Pick who should get this message.</div> : <>
           <div className="rounded-2xl bg-white/70 px-4 py-3">
             {pre.isLoading ? <span className="text-sm text-muted">Counting…</span> : pre.isError ? <span className="text-sm text-rose">{errText(pre.error)}</span> : <><b className="text-[15px]">{checked.size} patient{checked.size === 1 ? '' : 's'}</b> <span className="text-sm text-muted">ticked of {total} in this group</span>
-              {(pre.data?.skipped ?? 0) > 0 && <div className="text-xs text-muted mt-0.5">{pre.data.skipped} left out: no valid mobile number</div>}
+              {(pre.data?.skipped ?? 0) > 0 && <div className="text-xs text-muted mt-0.5">{pre.data.skipped} left out: {[pre.data.optedOut ? `${pre.data.optedOut} asked for no WhatsApp` : '', pre.data.skipped - (pre.data.optedOut ?? 0) > 0 ? `${pre.data.skipped - (pre.data.optedOut ?? 0)} without a valid mobile number` : ''].filter(Boolean).join(', ')}</div>}
               {capped && <div className="text-xs text-amber mt-0.5">Only the first {listed.toLocaleString('en-IN')} of {total.toLocaleString('en-IN')} (A to Z by name) can be listed here. The other {(total - listed).toLocaleString('en-IN')} will not get this message; send to smaller groups to reach them.</div>}</>}
           </div>
           <div>

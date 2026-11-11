@@ -33,6 +33,7 @@ export const appUser = pgTable('app_user', {
   roles: text('roles').array().notNull().default([]), // all roles; permissions are the union
   practitionerId: uuid('practitioner_id'),
   active: boolean('active').notNull().default(true),
+  mustChangePassword: boolean('must_change_password').notNull().default(false), // a first or reset password: the person picks their own at next sign-in
 }, (t) => [uniqueIndex('user_email').on(t.tenantId, t.email)]);
 
 export const specialty = pgTable('specialty', { ...tenantCols, key: text('key').notNull(), name: text('name').notNull(), sourcePack: text('source_pack') });
@@ -138,6 +139,9 @@ export const patient = pgTable('patient', {
   notes: text('notes'),
   legacyId: text('legacy_id'),
   consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string }>>().notNull().default({}),
+  noWhatsapp: boolean('no_whatsapp').notNull().default(false), // asked for no WhatsApp: reminders and messages to many skip them
+  language: text('language'),                // preferred language for messages: en | te | hi
+  mergedInto: uuid('merged_into'),           // set on a duplicate merged into another record; hidden from lists
 }, (t) => [uniqueIndex('patient_no').on(t.tenantId, t.patientNo), index('patient_phone').on(t.tenantId, t.phone)]);
 
 // OP availability block: doctor × day × time window × practical capacity
