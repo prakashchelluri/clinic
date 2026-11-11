@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { charge, course, message, patient, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
-import { emit, nextNumber, todayIn, addDays } from '../lib/core.js';
+import { emit, nextNumber, todayIn, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 
@@ -33,8 +33,8 @@ export function planRoutes(app: FastifyInstance) {
     const number = 'Q-' + String(await nextNumber(tx, t, 'quote_no', 'tenant')).padStart(4, '0');
     const validUntil = addDays(todayIn(req.ctx.timezone), b.validDays);
     await tx.update(quote).set({ status: 'declined' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open'))); // a new quote replaces the old
-    const [row] = await tx.insert(quote).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, number, totalPaise: total, sittings, validUntil, extras: b.extras, byName: req.ctx.name, ...(b.send ? { sentVia: b.send, sentAt: new Date().toISOString() } : {}) }).returning();
-    let messaged = false;
+    const [row] = await tx.insert(quote).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, number, totalPaise: total, sittings, validUntil, extras: b.extras, byName: req.ctx.name, ...(b.send && !(b.send === 'whatsapp' && p?.noWhatsapp) ? { sentVia: b.send, sentAt: new Date().toISOString() } : {}) }).returning();
+    let messaged = false; const optedOut = b.send === 'whatsapp' && !!p?.noWhatsapp; // asked for no WhatsApp: recorded as not sent, the screen says to print it
     if (b.send === 'whatsapp') {
       if (!p?.phone || !/^\d{10}$/.test(p.phone)) throw new HttpError(400, 'NO_PHONE');
       const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
@@ -42,11 +42,12 @@ export function planRoutes(app: FastifyInstance) {
       const lang = patientLang(p, ten?.settings); const w = MSG[lang];
       const label = p.flags?.careful ? w.plan : proc?.name ?? 'Procedure'; // a Handle carefully patient's messages never name the procedure
       await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'quote', channel: 'whatsapp', toPhone: p.phone, params: { quote: number, lang },
-        body: `${ten?.name ?? 'Clinic'} · ${w.quote} ${number}\n${label}: ${sittings} ${w.sittings} ${money(total)}${b.extras.map((x) => `\n${x.name} ${money(x.pricePaise)}`).join('')}\n${w.total} ${money(total + extraTotal)}. ${w.validUntil(validUntil)}\n${w.replyYes}` });
-      messaged = true;
+        body: `${ten?.name ?? 'Clinic'} · ${w.quote} ${number}\n${label}: ${sittings} ${w.sittings} ${money(total)}${b.extras.map((x) => `\n${x.name} ${money(x.pricePaise)}`).join('')}\n${w.total} ${money(total + extraTotal)}. ${w.validUntil(validUntil)}\n${w.replyYes}`,
+        status: optedOut ? 'skipped' : 'pending', error: optedOut ? OPTED_OUT : null });
+      messaged = !optedOut;
     }
     await emit(tx, req.ctx, 'quote.created', 'quote', row.id, { number, totalPaise: total, send: b.send });
-    return { ...row, messaged };
+    return { ...row, messaged, ...(optedOut ? { whatsapp: 'opted_out' } : {}) };
   });
 
   route(app, 'get', '/quotes', 'worklist.read', async (req, tx) => {

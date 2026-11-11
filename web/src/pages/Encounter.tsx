@@ -691,7 +691,7 @@ export function Encounter() {
         {(frequent.data ?? []).filter((f: any) => !rx.some((r) => r.name === f.name)).length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1"><span className="quick-label">Frequently prescribed</span>{(frequent.data ?? []).filter((f: any) => !rx.some((r) => r.name === f.name)).slice(0, QUICK).map((f: any) => <button key={f.name} type="button" className="opt-add" onClick={() => addRxByName(f.name)}>{f.name}</button>)}{inline && lastRx.length > 0 && !isReview && <button type="button" className="opt-add" onClick={() => addRxMany(lastRx)}>Repeat last Rx</button>}</div>}
         {inline && <SearchLine placeholder='Start typing a medicine · “itra 100 1-0-1 7d after food”' options={meds.map((m: any) => m.name)} invalid={bad('medicines')} onAdd={(t) => smartAdd(t, 'medicine')} />}
       </>}
-      {leaflets.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted"><span>Sent with the Rx on WhatsApp:</span>{leaflets.map((m: any) => <Chip key={m.id} tone="sage">{m.name}: how to use</Chip>)}</div>}
+      {leaflets.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted"><span>{p.noWhatsapp ? 'Not sent: the patient asked for no WhatsApp — print it instead:' : 'Sent with the Rx on WhatsApp:'}</span>{leaflets.map((m: any) => <Chip key={m.id} tone="sage">{m.name}: how to use</Chip>)}</div>}
     </Card> : null,
     advice: isDoctor ? <Card key="advice" id="advice" title="Advice" meta="standard lines print in Telugu too" actions={cardActs('advice')}>
       {adviceLines.map((a) => <Row key={a} label={a} onRemove={readOnly ? null : () => toggleAdvice(a)}><b className="text-[13.5px]">{a}</b></Row>)}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, post, qc, today, fmtTime, errText } from '../api';
+import { get, post, qc, today, fmtTime, errText, NO_WHATSAPP } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
 import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
@@ -439,7 +439,7 @@ function PayDialog({ total, patient, saleKey, upiId, payee, build, onClose, onDo
       receivedPaise: cash > 0 && received ? got : undefined }),
     onSuccess: (s: any) => {
       setPref('ph.print', print); setPref('ph.wa', wa);
-      toast(`Saved ${s.invoiceNo} · ${money(s.totalPaise)}${change > 0 ? ` · give change ${money(change)}` : ''}`);
+      toast(`Saved ${s.invoiceNo} · ${money(s.totalPaise)}${change > 0 ? ` · give change ${money(change)}` : ''}${s.whatsapp === 'opted_out' ? `. Receipt ${NO_WHATSAPP[0].toLowerCase()}${NO_WHATSAPP.slice(1)}` : ''}`, s.whatsapp === 'opted_out' && !print ? 'info' : 'ok', s.whatsapp === 'opted_out' && !print ? { label: 'Print', run: () => printSale(s.id) } : undefined);
       ['pharmacy', 'stock', 'reports', 'patients'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       if (print) printSale(s.id);
       onDone(s);

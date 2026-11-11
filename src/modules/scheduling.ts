@@ -4,7 +4,7 @@ import { and, eq, sql, asc, desc, gte, lte, inArray, or, ilike } from 'drizzle-o
 import { session, appointment, service, message, recommendation, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, waitlist, type Routine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, sent, todayIn, nextNumber, addDays } from '../lib/core.js';
+import { emit, sent, todayIn, nextNumber, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { newToken, queueMessage, planReminders, dropReminders, originOf, bookingSettings } from '../lib/booking.js';
 import { whatsappReady } from '../lib/messaging.js';
@@ -20,9 +20,9 @@ export function normPhone(raw: string): string {
   return d.slice(0, 10);
 }
 /** Whether a patient message really went in the queue, so screens never say "the patient is told" when they are not. */
-export type WhatsApp = 'queued' | 'no_phone' | 'off' | 'not_connected' | 'none';
+export type WhatsApp = 'queued' | 'no_phone' | 'opted_out' | 'off' | 'not_connected' | 'none';
 export const msgOutcome = (m: { status: string; error?: string | null } | null | undefined): WhatsApp =>
-  !m ? 'none' : m.status === 'skipped' ? (m.error === 'no mobile number' ? 'no_phone' : 'off') : whatsappReady() ? 'queued' : 'not_connected';
+  !m ? 'none' : m.status === 'skipped' ? (m.error === 'no mobile number' ? 'no_phone' : m.error === OPTED_OUT ? 'opted_out' : 'off') : whatsappReady() ? 'queued' : 'not_connected';
 /** "Meena  R" and "meena r" are one name. */
 const sameName = sql`lower(regexp_replace(trim(${patient.fullName}), '\\s+', ' ', 'g'))`;
 
@@ -500,7 +500,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     const msgs = await tx.select().from(message).where(and(eq(message.tenantId, t), eq(message.appointmentId, id))).orderBy(desc(message.sendAfter));
     const ten = await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) });
     return { ...r.a, window: { day: r.s.day, startTime: r.s.startTime, endTime: r.s.endTime, practitionerId: r.s.practitionerId, doctor: r.doctor },
-      patient: { id: r.p.id, fullName: r.p.fullName, phone: r.p.phone, patientNo: r.p.patientNo, ageYears: r.p.ageYears, sex: r.p.sex }, history: hist,
+      patient: { id: r.p.id, fullName: r.p.fullName, phone: r.p.phone, patientNo: r.p.patientNo, ageYears: r.p.ageYears, sex: r.p.sex, noWhatsapp: r.p.noWhatsapp }, history: hist,
       service: r.svc, series, messages: msgs, link: r.a.publicToken && ten ? `${originOf(req)}/a/${ten.slug}/${r.a.publicToken}` : null };
   });
 

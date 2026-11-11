@@ -140,7 +140,7 @@ export const patient = pgTable('patient', {
   contactLabel: text('contact_label'),       // who answers this phone: mother, father…
   notes: text('notes'),
   legacyId: text('legacy_id'),
-  consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string; how?: string }>>().notNull().default({}), // photos, and 'procedure:<id>' per procedure type
+  consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string; how?: string; documentId?: string }>>().notNull().default({}), // photos, and 'procedure:<id>' per procedure type
   noWhatsapp: boolean('no_whatsapp').notNull().default(false), // asked for no WhatsApp: reminders and messages to many skip them
   language: text('language'),                // preferred language for messages: en | te | hi
   mergedInto: uuid('merged_into'),           // set on a duplicate merged into another record; hidden from lists
