@@ -28,8 +28,11 @@ function validate(schema: FormSchema, data: Record<string, any>) {
     const v = data[s.key]?.[f.key];
     const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
     if (f.required && empty) errors.push({ path: `${s.key}.${f.key}`, message: 'required' });
-    if (!empty && f.options && f.type !== 'tags' && (f.type === 'select' ? !f.options.includes(v) : f.type === 'multiselect' && !(v as string[]).every((x) => f.options!.includes(x))))
-      errors.push({ path: `${s.key}.${f.key}`, message: 'not an allowed option' });
+    if (!empty && f.options && f.type !== 'tags') {
+      // name the field and the value, so the pad can say what to fix ("Site: Chest is not one of the choices")
+      const bad = f.type === 'select' ? (f.options.includes(v) ? [] : [String(v)]) : f.type === 'multiselect' ? (v as string[]).filter((x) => !f.options!.includes(x)) : [];
+      if (bad.length) errors.push({ path: `${s.key}.${f.key}`, message: `${f.label}: ${bad.join(', ')} ${bad.length === 1 ? 'is' : 'are'} not one of the choices` });
+    }
   }
   return errors;
 }

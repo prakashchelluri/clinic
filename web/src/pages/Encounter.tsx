@@ -16,7 +16,7 @@ import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, t
 import { HistoryChips } from '../historyChips';
 import { VitalsCard, vitalFields, vitalsText } from '../vitals';
 import { LabResultsCard, ReportLink, reportFor } from '../labs';
-import { BodyMap, SkinMapPanel, usePins } from '../skinmap';
+import { BodyMap, SkinMapPanel, siteFor, usePins } from '../skinmap';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
@@ -48,6 +48,8 @@ const examOptionFor = (fields: Field[], f: string): { field: Field; opt: string 
 const pinFindings = (p: { finding: string | null }) => (p.finding ?? '').split(',').map((x) => x.trim()).filter(Boolean);
 const PH = 'placeholder:italic placeholder:opacity-60'; // a placeholder that cannot be mistaken for a value
 const withQty = (i: RxItem): RxItem => (i._qtyTouched || i.qty ? i : { ...i, qty: qtyFor(i) ?? undefined });
+/** Sections short enough to share a row in Stacked. */
+const HALF = new Set(['followup', 'procedures', 'notes', 'referral']);
 const ICON: Record<string, [string, string]> = { vitals: ['♡', '#5B8DB8'], symptoms: ['S', '#C53B14'], diagnosis: ['Dx', '#8A2E10'], exam: ['Ex', '#6F8F78'], medicines: ['℞', '#4F7396'], advice: ['A', '#B98B6E'], tests: ['T', '#7A6FB0'], results: ['R', '#B8860B'], followup: ['→', '#6F8F78'], procedures: ['Pr', '#285C9C'], notes: ['N', '#8B929C'], referral: ['Rf', '#5B8DB8'], history: ['H', '#8A2E10'], photos: ['P', '#6F8F78'] };
 
 /** One section of the pad as its own card: icon tile, title, the header actions on the right, rows inside, the search line last. */
@@ -76,7 +78,7 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
   const mine = sets.filter((t) => t.kind === kind); const list = mine.filter((t) => !q || t.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
-      {compact ? <button ref={btn} type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" aria-label={`${what} templates`} title={`${what[0].toUpperCase()}${what.slice(1)} templates (${sub})`} aria-expanded={open} onClick={() => setOpen(!open)}><TplLogo sub={sub} /></button>
+      {compact ? <button ref={btn} type="button" data-act="templates" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" aria-label={`${what} templates`} title={`${what[0].toUpperCase()}${what.slice(1)} templates (${sub})`} aria-expanded={open} onClick={() => setOpen(!open)}><TplLogo sub={sub} /></button>
         : <button ref={btn} id={id} type="button" className="btn btn-sm" aria-label={`${what} templates`} title={`${what[0].toUpperCase()}${what.slice(1)} templates (Alt+T)`} aria-expanded={open} onClick={() => setOpen(!open)}><TplLogo sub={sub} /></button>}
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)} width={320}>
         <div className="p-1.5">
@@ -96,17 +98,21 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
 
 /** The line at the foot of a card, Eka's "Start typing…": matches as you type, Enter adds the top match or what was typed. */
 function SearchLine({ placeholder, options = [], onAdd, invalid, autoFocus }: { placeholder: string; options?: string[]; onAdd: (t: string) => void; invalid?: boolean; autoFocus?: boolean }) {
-  const [v, setV] = useState(''); const [shut, setShut] = useState(false); const box = useRef<HTMLDivElement>(null);
+  const [v, setV] = useState(''); const [shut, setShut] = useState(false); const [sel, setSel] = useState(-1); const box = useRef<HTMLDivElement>(null);
   const q = v.trim().toLowerCase();
   const hits = q ? options.filter((o) => o.toLowerCase().includes(q)).slice(0, 8) : [];
-  const add = (t: string) => { if (t.trim()) onAdd(t.trim()); setV(''); };
+  const add = (t: string) => { if (t.trim()) onAdd(t.trim()); setV(''); setSel(-1); };
   return (
     <div ref={box} className="relative mt-2" data-invalid={invalid || undefined}>
       <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-      <input aria-label={placeholder} autoFocus={autoFocus} className={`input w-full !py-2 !pl-9 ${invalid ? '!outline-2 !outline-rose/70' : ''}`} placeholder={placeholder} value={v} onChange={(e) => { setV(e.target.value); setShut(false); }}
-        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(hits[0] && hits[0].toLowerCase().startsWith(q) ? hits[0] : v); } else if (e.key === 'Escape') setV(''); }} />
+      <input aria-label={placeholder} autoFocus={autoFocus} className={`input w-full !py-2 !pl-9 ${invalid ? '!outline-2 !outline-rose/70' : ''}`} placeholder={placeholder} value={v} onChange={(e) => { setV(e.target.value); setShut(false); setSel(-1); }} data-search role="combobox" aria-expanded={hits.length > 0 && !shut}
+        onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; /* the pad's shortcuts */
+          if (e.key === 'ArrowDown' && hits.length) { e.preventDefault(); setShut(false); setSel((x) => Math.min(hits.length - 1, x + 1)); }
+          else if (e.key === 'ArrowUp' && hits.length) { e.preventDefault(); setSel((x) => Math.max(-1, x - 1)); }
+          else if (e.key === 'Enter') { e.preventDefault(); add(sel >= 0 && hits[sel] ? hits[sel] : hits[0] && hits[0].toLowerCase().startsWith(q) ? hits[0] : v); }
+          else if (e.key === 'Escape') { if (v) e.preventDefault(); setV(''); setSel(-1); } }} />
       <Floating anchor={box} open={hits.length > 0 && !shut} onClose={() => setShut(true)} width={box.current?.offsetWidth ?? 320} align="left">
-        <div className="p-1" role="listbox" aria-label={placeholder}>{hits.map((o) => <button key={o} type="button" role="option" aria-selected={false} className="flex w-full rounded-[10px] px-2.5 py-2 text-left text-[13px] font-medium hover:bg-paper-2" onMouseDown={(e) => e.preventDefault()} onClick={() => add(o)}>{o}</button>)}</div>
+        <div className="p-1" role="listbox" aria-label={placeholder}>{hits.map((o, k) => <button key={o} type="button" role="option" aria-selected={k === sel} className={`flex w-full rounded-[4px] px-2.5 py-2 text-left text-[13px] font-medium hover:bg-paper-2 ${k === sel ? 'bg-paper-2' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => add(o)}>{o}</button>)}</div>
       </Floating>
     </div>
   );
@@ -164,6 +170,15 @@ const PinLine = ({ patientId, onOpen }: { patientId: string; onOpen: () => void 
   return <div className="flex flex-wrap items-center gap-x-3 gap-y-1"><span className="min-w-[92px] text-xs text-muted">Pins</span>{pins.map((p) => <button key={p.id} type="button" className="text-[13px] hover:underline" onClick={onOpen}><b className="pick-ink">{no(p)}{p.side === 'back' ? ' (back)' : ''}</b> {p.area}{p.diagnosis ? ` · ${p.diagnosis}` : ''}</button>)}</div>;
 };
 
+/** The Stacked pad's keys, behind a ? on the bottom bar. */
+const KEYS: [string, string][] = [['/', "this section's search"], ['↑ ↓ then Enter', 'pick from the search list'], ['Tab', 'next box or chip; Space ticks a chip'], ['Alt + ↓ / ↑', 'next or previous section'], ['Alt + L', 'load previous, this section'], ['Alt + T', "this section's templates"], ['Alt + S', 'save this section as a template'], ['Alt + P', 'preview the prescription'], ['Ctrl + Enter', 'finish']];
+function KeyHelp({ className }: { className: string }) {
+  const [open, setOpen] = useState(false); const btn = useRef<HTMLButtonElement>(null);
+  return <><button ref={btn} type="button" className={`${className} !px-2.5`} aria-label="Keyboard shortcuts" title="Keyboard shortcuts" aria-expanded={open} onClick={() => setOpen(!open)}>?</button>
+    <Floating anchor={btn} open={open} onClose={() => setOpen(false)} width={320} align="left"><div className="p-2.5"><div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Keyboard</div>
+      <table className="w-full text-[12.5px]"><tbody>{KEYS.map(([k, d]) => <tr key={k}><td className="whitespace-nowrap py-1 pr-3"><span className="kbd">{k}</span></td><td className="py-1 text-muted">{d}</td></tr>)}</tbody></table></div></Floating></>;
+}
+
 /** One row inside a card: the item, its details, and the remove button at the right edge. */
 const Row = ({ children, onRemove, label, plain }: { children: ReactNode; onRemove?: (() => void) | null; label: string; plain?: boolean }) => (
   <div className={plain ? 'flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line/70 py-2 first:border-t-0 first:pt-0' : 'pick'}>
@@ -196,7 +211,7 @@ function LoadPrevious({ previous, onLoad, part, compact, id }: { previous: any[]
   if (!done.length) return compact ? null : <button type="button" className="btn btn-sm" disabled title={`No earlier visit with ${what} to load`}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>;
   return (
     <>
-      {compact ? <button ref={btn} type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" title={`Load ${what} from an earlier visit`} aria-expanded={open} onClick={() => setOpen(!open)}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>
+      {compact ? <button ref={btn} type="button" data-act="loadprev" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" title={`Load ${what} from an earlier visit (Alt+L)`} aria-expanded={open} onClick={() => setOpen(!open)}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>
         : <button ref={btn} id={id} type="button" className="btn btn-sm" title={`Load ${what} from an earlier visit (Alt+L)`} aria-expanded={open} onClick={() => setOpen(!open)}><HistoryIcon className="h-3.5 w-3.5" aria-hidden />Load previous</button>}
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)} width={460}>
         <div className="p-2">
@@ -217,7 +232,7 @@ function LoadPrevious({ previous, onLoad, part, compact, id }: { previous: any[]
 }
 
 /** A small save on a section: saves what the section holds now as one of its templates. */
-const SaveTemplate = ({ what, onSave }: { what: string; onSave: () => void }) => <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" title={`Save these ${what} as a template`} aria-label={`Save ${what} as a template`} onClick={onSave}><Save className="h-3.5 w-3.5" aria-hidden />Save</button>;
+const SaveTemplate = ({ what, onSave }: { what: string; onSave: () => void }) => <button type="button" data-act="save" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" title={`Save these ${what} as a template`} aria-label={`Save ${what} as a template`} onClick={onSave}><Save className="h-3.5 w-3.5" aria-hidden />Save</button>;
 
 /** A pick list that always shows every choice on focus (a datalist only shows the ones matching what is already in the box), filters as you type,
  *  and still takes free text. Used for the medicine name, frequency and timing. */
@@ -231,7 +246,7 @@ function Combo({ value, options, onChange, placeholder, label, className, disabl
       <input id={id} aria-label={label} role="combobox" aria-expanded={open && list.length > 0} autoComplete="off" className={className} placeholder={placeholder} value={value} disabled={disabled}
         onFocus={() => { setOpen(true); setTyped(false); setSel(-1); }} onClick={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
         onChange={(e) => { onChange(e.target.value); setTyped(true); setOpen(true); setSel(-1); }}
-        onKeyDown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setSel((s) => Math.min(list.length - 1, s + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(-1, s - 1)); } else if (e.key === 'Enter' && open && sel >= 0 && list[sel]) { e.preventDefault(); pick(list[sel]); } else if (e.key === 'Escape' || e.key === 'Tab') setOpen(false); }} />
+        onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setSel((s) => Math.min(list.length - 1, s + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(-1, s - 1)); } else if (e.key === 'Enter' && open && sel >= 0 && list[sel]) { e.preventDefault(); pick(list[sel]); } else if (e.key === 'Escape' || e.key === 'Tab') setOpen(false); }} />
       {/* above the page, not inside the card: a card's glass would hide a list that runs past its foot */}
       <Floating anchor={box} open={open && !disabled && list.length > 0} onClose={() => setOpen(false)} width={Math.max(220, box.current?.offsetWidth ?? 0)} align="left">
         <div className="max-h-64 overflow-y-auto p-1" role="listbox" aria-label={label}>
@@ -726,7 +741,8 @@ export function Encounter() {
   const tpl = scope ? SECTION_TPL[scope] : null;
   const pin = () => { if (scope && active !== scope) setActive(scope); }; // once she adds to a section it stays open; it does not jump to the next empty one
   keys.current = (ev) => {
-    if (view === 'stacked' || readOnly || !isDoctor || tab !== 'pad' || ev.defaultPrevented) return;
+    if (view === 'stacked') return stackedKeys(ev);
+    if (readOnly || !isDoctor || tab !== 'pad' || ev.defaultPrevented) return;
     const t = ev.target as HTMLElement | null; const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
     const go = (fn: () => void) => { ev.preventDefault(); fn(); };
     const bar = (fn: () => void) => go(() => { document.getElementById('pad-toolbar')?.scrollIntoView({ block: 'start' }); setTimeout(fn, 30); }); // the toolbar is in the page, not floating: bring it back into view first
@@ -739,6 +755,29 @@ export function Encounter() {
     if (ev.code === 'KeyT') return bar(() => document.getElementById('pad-templates')?.click());
     if (ev.code === 'KeyA') return bar(() => { setAnywhere(!!scope); setTimeout(() => document.getElementById('pad-search')?.focus(), 30); });
     if (ev.code === 'KeyP') return go(() => { void preview(); });
+  };
+  /** Stacked by keyboard: / goes to this section's search, Alt+↓/↑ to the next or previous section, Alt+L / Alt+T load previous or the
+   *  section's templates, Alt+S saves the section as a template, Alt+P previews, Ctrl+Enter finishes. "This section" is the one the cursor is in,
+   *  else the first one on screen. */
+  const stackedKeys = (ev: KeyboardEvent) => {
+    if (readOnly || !isDoctor || tab !== 'pad' || ev.defaultPrevented) return;
+    const t = ev.target as HTMLElement | null; const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+    const go = (fn: () => void) => { ev.preventDefault(); fn(); };
+    const secs = [...document.querySelectorAll<HTMLElement>('section[id^="sec-"]')];
+    const here = (t?.closest('section[id^="sec-"]') as HTMLElement | null) ?? secs.find((x) => x.getBoundingClientRect().bottom > 140) ?? secs[0];
+    const into = (sec?: HTMLElement) => { if (!sec) return; const body = sec.querySelector<HTMLElement>(':scope > div:last-child') ?? sec;
+      const el = body.querySelector<HTMLElement>('input[data-search]') ?? body.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), button:not([disabled])');
+      sec.scrollIntoView({ block: 'center' }); el?.focus({ preventScroll: true }); };
+    if (ev.key === '/' && !typing) return go(() => into(secs.slice(Math.max(0, secs.indexOf(here!))).find((x) => x.querySelector('input[data-search]')) ?? here)); // the nearest section with a search
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') return go(finish);
+    if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
+    const i = secs.indexOf(here!);
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') return go(() => into(secs[Math.max(0, Math.min(secs.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)))]));
+    const act = (a: string) => go(() => here?.querySelector<HTMLElement>(`[data-act="${a}"]:not([disabled])`)?.click());
+    if (ev.code === 'KeyL') return act('loadprev');
+    if (ev.code === 'KeyT') return act('templates');
+    if (ev.code === 'KeyS') return act('save');
+    if (ev.code === 'KeyP') return go(() => { if (dirty.current) save.mutate({ complete: false }); openPrint({ title: 'Prescription preview', rx: id }); });
   };
   const toolbar = isDoctor && !readOnly ? (
     <div id="pad-toolbar" className="scroll-mt-24 anim-fade-up">
@@ -857,7 +896,9 @@ export function Encounter() {
           </div>
         </div>
         : <>
-          {order.map((k) => cards[k] ?? null)}
+          {/* the short sections at the end (follow-up, procedures, notes, referral) sit two to a row; the rest keep the full width */}
+          {(() => { const out: ReactNode[] = []; let run: ReactNode[] = []; const flush = () => { if (run.length) out.push(<div key={`half-${out.length}`} className="grid items-start gap-3 md:grid-cols-2">{run}</div>); run = []; };
+            for (const k of order) { const c = cards[k]; if (!c) continue; if (HALF.has(k)) run.push(c); else { flush(); out.push(c); } } flush(); return out; })()}
           {customSections.map(custom)}
         </>}
       </>}
@@ -889,13 +930,13 @@ export function Encounter() {
       {/* the action bar, as in Eka: one dark strip that stays at the foot of the screen */}
       <div className="sticky bottom-3 z-20 flex flex-wrap items-center gap-2 rounded-[14px] bg-ink px-3 py-2 text-paper shadow-lg anim-fade-up">
         {!readOnly && isDoctor && <button type="button" className={B} onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
-        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-paper/80">Cannot finish yet · missing:</span>
+        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-paper/80">Cannot finish yet:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose px-2 py-0.5 font-semibold text-white hover:bg-rose/80" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
           : saveFailed && !readOnly ? notSaved : <span className="text-xs text-paper/60">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves by itself'}</span>}
+        {!readOnly && isDoctor && <KeyHelp className={B} />}
         <span className="ml-auto" />
         {!readOnly && !isDoctor && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>
-          {can(perms, 'config.write') && <button type="button" className={B} onClick={() => nav('/settings?tab=pad')}><Icon name="print" className="h-4 w-4" />Print settings</button>}
           <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className={B} onClick={() => { void preview(); }}>Preview</button>
           {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
@@ -906,7 +947,7 @@ export function Encounter() {
       </> : <>
       {/* the action bar, in the page at the end of the pad (not floating): saved or missing on the left; save the open section as a template, Preview and Finish on the right */}
       <div className="card flex flex-wrap items-center gap-2 !px-4 !py-3 anim-fade-up">
-        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet · missing:</span>
+        {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
           : saveFailed && !readOnly && !save.isPending ? notSaved : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves by itself'}</span>}
         {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-muted/80 xl:inline">Alt ↑↓ section · / search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
@@ -921,7 +962,7 @@ export function Encounter() {
         {readOnly && <button type="button" className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
       </div>
       </>}
-      {mapOpen && <Modal title="Skin map" subtitle={p.fullName} width="max-w-4xl" onClose={() => setMapOpen(false)}><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), a]))} onFinding={onPinFinding} /></Modal>}
+      {mapOpen && <Modal title="Skin map" subtitle={p.fullName} width="max-w-4xl" onClose={() => setMapOpen(false)}><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => { const s = siteFor(a, formSections.find((x) => x.key === 'complaint')?.fields.find((x: Field) => x.key === 'site')?.options ?? []); if (s) set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), s])); }} onFinding={onPinFinding} /></Modal>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {capture && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} onClose={() => setCapture(false)} />}
       {compare && <PhotoCompare name={p.fullName} a={compare[0]} b={compare[1]} onClose={() => setCompare(null)} />}
@@ -944,13 +985,17 @@ function CompactField({ f, value, onChange, disabled, invalid }: { f: Field; val
     const multi = f.type === 'multiselect'; const v: string[] = multi ? (value ?? []) : value ? [value] : [];
     const rest = f.options!.filter((o) => !v.includes(o)); const shown = [...f.options!.filter((o) => v.includes(o)), ...rest.slice(0, 5)]; const more = rest.slice(5);
     const chip = (o: string) => <button type="button" key={o} disabled={disabled} aria-pressed={v.includes(o)} className={v.includes(o) ? 'pick-chip' : 'opt-add'} onClick={() => { onChange(multi ? (v.includes(o) ? v.filter((x) => x !== o) : [...v, o]) : value === o ? undefined : o); setMore(false); }}>{v.includes(o) && <Icon name="check" className="h-3 w-3" />}{o}</button>;
+    const stray = v.filter((x) => !f.options!.includes(x)); // a value that is not one of the choices (an old pin area, say): shown so it can be taken out
     return <div className="flex flex-wrap items-center gap-1.5"><span className="mr-0.5 min-w-[92px] text-xs text-muted">{f.label}</span>{shown.map(chip)}
+      {stray.map((x) => <span key={x} className="pick-chip !text-rose" title={`${x} is not one of the ${f.label} choices; take it out to finish`}>{x}{!disabled && <button type="button" aria-label={`Remove ${x}`} className="ml-1" onClick={() => onChange(multi ? v.filter((y) => y !== x) : undefined)}><Icon name="x" className="inline h-3 w-3" /></button>}</span>)}
       {!disabled && more.length > 0 && <><button ref={moreBtn} type="button" className="btn btn-ghost !min-h-7 gap-0.5 !px-2 text-[12.5px]" aria-expanded={moreOpen} onClick={() => setMore(!moreOpen)}>More ({more.length})<Icon name="chevR" className={`h-3.5 w-3.5 ${moreOpen ? "-rotate-90" : "rotate-90"}`} /></button>
         <Floating anchor={moreBtn} open={moreOpen} onClose={() => setMore(false)} width={300} align="left"><div className="flex flex-wrap gap-1.5 p-2">{more.map(chip)}</div></Floating></>}</div>;
   }
   if (f.type === 'textarea') {
     if (!value && !note) return disabled ? null : <button type="button" className="text-xs font-semibold text-muted underline" onClick={() => setNote(true)}>+ {f.label.toLowerCase()}</button>;
-    return <textarea aria-label={f.label} autoFocus={note && !value} className={`input min-h-14 ${invalid ? '!border-rose' : ''}`} placeholder={f.placeholder ?? f.label} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} />;
+    // × takes the note out and folds the box back to its link; an empty box folds by itself when you leave it
+    return <div className="relative"><textarea aria-label={f.label} autoFocus={note && !value} className={`input min-h-14 !pr-9 ${invalid ? '!border-rose' : ''}`} placeholder={f.placeholder ?? f.label} value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value)} onBlur={() => { if (!value) setNote(false); }} onKeyDown={(e) => { if (e.key === 'Escape' && !value) { e.preventDefault(); setNote(false); } }} />
+      {!disabled && <button type="button" className="btn btn-ghost btn-icon absolute right-1.5 top-1.5 !h-7 !w-7" aria-label={value ? `Remove ${f.label.toLowerCase()}` : `Close ${f.label.toLowerCase()}`} title={value ? 'Remove this note' : 'Close'} onMouseDown={(e) => e.preventDefault()} onClick={() => { onChange(undefined); setNote(false); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}</div>;
   }
   const cls = `input ${invalid ? '!border-rose' : ''}`;
   return <div className="flex items-center gap-2"><span className="w-20 shrink-0 text-xs text-muted">{f.label}{f.unit ? ` (${f.unit})` : ''}</span><div className="min-w-0 flex-1 sm:max-w-xs">

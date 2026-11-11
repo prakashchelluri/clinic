@@ -19,6 +19,12 @@ const ZONES: { area: string; x: number; y: number; w: number; h: number; back?: 
   { area: 'Right leg', x: 60, y: 408, w: 38, h: 90, back: 'Left leg' }, { area: 'Left leg', x: 102, y: 408, w: 38, h: 90, back: 'Right leg' },
   { area: 'Right foot', x: 52, y: 498, w: 46, h: 36, back: 'Left foot' }, { area: 'Left foot', x: 102, y: 498, w: 46, h: 36, back: 'Right foot' },
 ];
+/** The Site choice a pinned area belongs to (Chest → Trunk, Right forearm → Arms), or null when the clinic's Site list has none. */
+const SITE_OF: [RegExp, string][] = [[/scalp|back of head/i, 'Scalp'], [/face/i, 'Face'], [/neck|nape/i, 'Neck'], [/chest|abdomen/i, 'Trunk'], [/upper back|lower back|buttock/i, 'Back'], [/groin/i, 'Genitals'], [/hand/i, 'Hands'], [/arm/i, 'Arms'], [/foot/i, 'Feet'], [/thigh|leg/i, 'Legs']];
+export const siteFor = (area: string, options: string[]): string | null => {
+  if (options.includes(area)) return area;
+  const hit = SITE_OF.find(([re]) => re.test(area)); return hit && options.includes(hit[1]) ? hit[1] : null;
+};
 export const AREAS = (side: 'front' | 'back') => [...new Set(ZONES.map((z) => (side === 'back' ? z.back ?? z.area : z.area)))];
 export function areaAt(side: 'front' | 'back', nx: number, ny: number) {
   const x = nx * 200, y = ny * 620;
