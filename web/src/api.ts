@@ -1,12 +1,21 @@
-import { QueryClient, useQuery } from '@tanstack/react-query';
+import { MutationCache, QueryClient, useQuery } from '@tanstack/react-query';
 import { toast } from './ui';
+import { OFFLINE_MSG, clearOfflineCache, markReachable, startOfflineCache } from './offline';
 
-export const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000 } } });
+// Writes are never held back and replayed later (networkMode 'always'): offline they fail at once and say so.
+// A write with no error handler of its own still tells the person it was not saved.
+export const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000 }, mutations: { networkMode: 'always' } },
+  mutationCache: new MutationCache({ onError: (e, _v, _c, m) => { if (!m.options.onError) toast(errText(e), 'err'); } }) });
+startOfflineCache(qc);
+export { clearOfflineCache };
 
 export class ApiError extends Error { constructor(public status: number, public body: any) { super(body?.code ?? `HTTP ${status}`); } }
 
 export async function api<T = any>(method: string, url: string, body?: unknown): Promise<T> {
-  const r = await fetch('/api' + url, { method, headers: body ? { 'content-type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' });
+  let r: Response;
+  try { r = await fetch('/api' + url, { method, headers: body ? { 'content-type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin' }); }
+  catch { markReachable(false); throw new ApiError(0, { code: 'OFFLINE' }); } // no answer at all: the internet or the server is down
+  markReachable(true);
   if (r.status === 204) return undefined as T;
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
@@ -21,7 +30,7 @@ export async function api<T = any>(method: string, url: string, body?: unknown):
 let leaving = false;
 function toLogin() {
   if (leaving || /^\/(login|display|a)(\/|$)/.test(location.pathname)) return;
-  leaving = true; window.dispatchEvent(new Event('app:save-now'));
+  leaving = true; window.dispatchEvent(new Event('app:save-now')); clearOfflineCache();
   setTimeout(() => { location.href = '/login'; }, 400);
 }
 export const get = <T = any>(url: string) => api<T>('GET', url);
@@ -79,6 +88,8 @@ const MESSAGES: Record<string, string> = {
   DUPLICATE_LINE: 'The same medicine is on the order twice.', VENDOR_NOT_FOUND: 'Pick a vendor.', NOTHING_TO_RETURN: 'Everything on this bill is already returned.', VOID_TOO_LATE: 'A bill can be voided for ten minutes. After that, take the items back from Bills.', ALREADY_RETURNED: 'Something on this bill was already returned. Take the rest back from Bills.', VOID_SPLIT: 'A bill paid two ways is cancelled from Bills by the owner.', BAD_RANGE: '“From” is after “to”.', PAYMENT_REQUIRED: 'Choose how the patient is paying.',
   BAD_REQUEST: 'That request was not understood.',
   UNAUTHENTICATED: 'Please sign in again.',
+  OFFLINE: OFFLINE_MSG,
+  CONSENT_NEEDED: 'No consent is on file for this procedure. Get the paper consent form signed first.',
 };
 const FIELD_NAMES: Record<string, string> = { reason: 'Reason', note: 'Note', cancelReason: 'Reason', minutes: 'Length', color: 'Colour', pricePaise: 'Price', places: 'Places', fullName: 'Name', phone: 'Phone', ageYears: 'Age', amountPaise: 'Amount', description: 'Description', name: 'Name', email: 'Email', password: 'Password', weight_kg: 'Weight', height_cm: 'Height', temp_f: 'Temperature', spo2: 'SpO₂', pulse: 'Pulse', priority: 'Queue priority' };
 /** Turn any API failure into one plain sentence a receptionist can act on. */

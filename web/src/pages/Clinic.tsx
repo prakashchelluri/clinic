@@ -105,14 +105,14 @@ export function Clinic() {
         <section className="fd-sheet p-5 anim-fade-up">
           <b className="text-[15px]">Doctors today</b>
           <div className="mt-2 grid grid-cols-[minmax(0,1fr)_64px_72px_110px] gap-x-3 text-[13.5px] tabular-nums">
-            {['Doctor', 'Seen', 'Waiting', 'Billed'].map((h, i) => <span key={h} className={`pb-1.5 text-[11.5px] font-bold uppercase tracking-wider text-muted ${i === 3 ? 'text-right' : ''}`}>{h}</span>)}
+            {['Doctor', 'Seen', 'Waiting', 'Collected'].map((h, i) => <span key={h} className={`pb-1.5 text-[11.5px] font-bold uppercase tracking-wider text-muted ${i === 3 ? 'text-right' : ''}`}>{h}</span>)}
             {tiles.map((d) => [
               <b key={d.id} className="truncate border-t border-line py-2.5">{d.name}</b>,
               <span key={d.id + 's'} className="border-t border-line py-2.5">{visits.filter((v) => v.practitionerId === d.id && v.status === 'done').length}</span>,
               <span key={d.id + 'w'} className="border-t border-line py-2.5">{waiting.filter((v) => v.practitionerId === d.id).length}</span>,
-              <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.revenuePaise !== undefined ? money(d.revenuePaise) : '—'}</span>])}
+              <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.paidPaise !== undefined ? money(d.paidPaise) : '—'}</span>])}
           </div>
-          <div className="mt-2 text-[12.5px] text-muted">Billed is consultations and sittings, paid or still due. Pharmacy is not split by doctor.</div>
+          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sittings, less refunds, from the same figures as End of day. Pharmacy and course advances are not split by doctor.</div>
         </section>
       </div>
 

@@ -1,5 +1,5 @@
 // Procedure billing: a sitting with no course is billed at list price, a cancelled done sitting gives its charge back,
-// sitting numbers never repeat when booked ahead, and starting the first sitting records whether consent was signed.
+// sitting numbers never repeat when booked ahead, consent is kept per procedure and asked only when none is on file, and a partly used advance counts.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -12,7 +12,7 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 const { migrate, applyRls, withTenant } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
-const { domainEvent } = await import('../src/db/schema.js');
+const { domainEvent, patient: patientT } = await import('../src/db/schema.js');
 const { eq } = await import('drizzle-orm');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -89,15 +89,45 @@ test('sittings booked ahead get their own numbers', async () => {
   assert.equal((await book(reception, rec.id, '16:00')).sittingNo, 2, 'a cancelled number is reused');
 });
 
-test('starting the first sitting records the consent answer; later sittings are not first', async () => {
+test('Start needs consent on file: the first Start records it on the patient; later sittings do not ask', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
-  const { p, rec } = await plan(owner, reception, 'Billing Consent', '9848055604', 2);
+  const { p, peel, rec } = await plan(owner, reception, 'Billing Consent', '9848055604', 2);
   const ps = await book(reception, rec.id, '17:00');
-  assert.equal((await reception('GET', `/procedure-sessions/${ps.id}`)).json().firstSitting, true);
+  const s0 = (await reception('GET', `/procedure-sessions/${ps.id}`)).json();
+  assert.equal(s0.consentNeeded, true); assert.equal(s0.consent, null);
+  assert.equal((await reception('GET', `/procedure-sessions?day=${today()}&detail=1`)).json().find((x: any) => x.id === ps.id).consentNeeded, true, 'the coordinator schedule shows Consent needed');
+  const refused = await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'in_progress' });
+  assert.equal(refused.statusCode, 409); assert.equal(refused.json().code, 'CONSENT_NEEDED');
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'in_progress', consent: true })).statusCode, 200);
+  const stored = await withTenant(p.tenantId, '00000000-0000-4000-8000-000000000000', (tx) => tx.select().from(patientT).where(eq(patientT.id, p.id)));
+  const c = (stored[0].consents as any)[`procedure:${peel.id}`];
+  assert.equal(c.how, 'signed paper form filed'); assert.ok(c.grantedAt); assert.ok(c.by, 'who recorded it');
   const ev = await withTenant(p.tenantId, '00000000-0000-4000-8000-000000000000', (tx) => tx.select().from(domainEvent).where(eq(domainEvent.aggregateId, ps.id)));
   const started = ev.find((x: any) => x.type === 'procedure_session.in_progress');
   assert.equal((started?.payload as any)?.consent, true);
   const ps2 = await book(reception, rec.id, '18:00');
-  assert.equal((await reception('GET', `/procedure-sessions/${ps2.id}`)).json().firstSitting, false);
+  const s2 = (await reception('GET', `/procedure-sessions/${ps2.id}`)).json();
+  assert.equal(s2.consentNeeded, false); assert.equal(s2.consent.how, 'signed paper form filed', 'Consent on file');
+  assert.equal((await reception('PATCH', `/procedure-sessions/${ps2.id}`, { state: 'in_progress' })).statusCode, 200, 'no consent question the second time');
+});
+
+test('a partly used advance pays part of the next sitting; the rest is due', async () => {
+  const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
+  const { peel, p, rec } = await plan(owner, reception, 'Billing Partial', '9848055605', 2);
+  const c = (await owner('POST', '/courses', { recommendationId: rec.id })).json();
+  const half = Math.round(peel.pricePaise / 2);
+  assert.equal((await reception('POST', `/courses/${c.id}/advance`, { amountPaise: peel.pricePaise + half, method: 'cash', idempotencyKey: 'procbilling-partial-1' })).statusCode, 200);
+  const a = await book(reception, rec.id, '19:00');
+  await reception('PATCH', `/procedure-sessions/${a.id}`, { state: 'completed' });
+  const b = await book(reception, rec.id, '19:30');
+  const before = (await reception('GET', `/procedure-sessions/${b.id}`)).json().money;
+  assert.deepEqual(before, { kind: 'due', amountPaise: c.perSittingPaise - half, prepaidPaise: half }, 'only the balance is due');
+  await reception('PATCH', `/procedure-sessions/${b.id}`, { state: 'completed' });
+  const after = (await reception('GET', `/procedure-sessions/${b.id}`)).json().money;
+  assert.equal(after.kind, 'due'); assert.equal(after.amountPaise + after.prepaidPaise, c.totalPaise - c.perSittingPaise, 'the last sitting is the rest of the course');
+  assert.equal(after.prepaidPaise, half);
+  const course = (await owner('GET', `/courses?patientId=${p.id}`)).json()[0];
+  assert.equal(course.unusedPaise, 0, 'the advance is used up'); assert.equal(course.drawnPaise, peel.pricePaise + half);
+  const live = (await sittingCharges(owner, p.id)).filter((x: any) => x.status !== 'cancelled');
+  assert.equal(live.reduce((s: number, x: any) => s + x.amountPaise, 0), c.totalPaise, 'charges add up to the course price');
 });

@@ -11,12 +11,18 @@ import { HttpError, can } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
 import { drawSitting, reverseSitting, sittingMoney } from './courses.js';
 
-/** True when the patient has never had this procedure started before: the first sitting is when the consent form is signed. */
-async function firstOfProcedure(tx: Tx, t: string, ps: { id: string; patientId: string; procedureId: string | null }) {
-  if (!ps.procedureId) return false;
+type Consent = { grantedAt: string; by: string; how?: string };
+const consentKey = (procedureId: string) => `procedure:${procedureId}`;
+/** The patient's consent for this procedure, kept on the patient (one per procedure type, recorded at the first Start).
+ *  A sitting started before consent was stored counts as consent given: the old Start asked for the signed form on the first sitting. */
+export async function procedureConsent(tx: Tx, t: string, ps: { id: string; patientId: string; procedureId: string | null }): Promise<{ consentNeeded: boolean; consent: Consent | null }> {
+  if (!ps.procedureId) return { consentNeeded: false, consent: null };
+  const p = await tx.select({ consents: patient.consents }).from(patient).where(and(eq(patient.id, ps.patientId), eq(patient.tenantId, t))).then((r) => r[0]);
+  const on = p?.consents?.[consentKey(ps.procedureId)];
+  if (on) return { consentNeeded: false, consent: on };
   const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, ps.patientId), eq(procedureSession.procedureId, ps.procedureId),
     sql`${procedureSession.state} in ('in_progress','completed')`, sql`${procedureSession.id} <> ${ps.id}`));
-  return n === 0;
+  return n ? { consentNeeded: false, consent: { grantedAt: '', by: '', how: 'given at an earlier sitting' } } : { consentNeeded: true, consent: null };
 }
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -145,10 +151,10 @@ export function procedureRoutes(app: FastifyInstance) {
       .then(async (rows) => {
         const ids = [...new Set(rows.map((r) => r.ps.supervisorId).filter(Boolean))] as string[];
         const names = new Map((ids.length ? await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(inArray(practitioner.id, ids)) : []).map((x) => [x.id, x.name]));
-        // detail=1 (the Schedule tab): what the patient pays on the day and whether this is the first sitting (consent), per row
+        // detail=1 (the Schedule tab): what the patient pays on the day and whether the procedure consent is on file, per row
         const fees = can(req.perms, 'fees.see'); const detail = !!q.detail;
         return Promise.all(rows.map(async (r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, doctor: r.doctor, supervisor: r.ps.supervisorId ? names.get(r.ps.supervisorId) ?? null : null, of: r.of, requiresMainDoctor: r.mainDoctor, requiresReview: r.review,
-          ...(detail ? { money: fees && !['cancelled', 'postponed'].includes(r.ps.state) ? await sittingMoney(tx, t, r.ps) : null, firstSitting: r.ps.state === 'confirmed' ? await firstOfProcedure(tx, t, r.ps) : false } : {}) })));
+          ...(detail ? { money: fees && !['cancelled', 'postponed'].includes(r.ps.state) ? await sittingMoney(tx, t, r.ps) : null, ...(await procedureConsent(tx, t, r.ps)) } : {}) })));
       });
   });
 
@@ -168,7 +174,7 @@ export function procedureRoutes(app: FastifyInstance) {
       .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, r.ps.recommendationId))).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
     const supervisor = r.ps.supervisorId ? await tx.select({ name: practitioner.name }).from(practitioner).where(eq(practitioner.id, r.ps.supervisorId)).then((x) => x[0]?.name ?? null) : null;
     const money = can(req.perms, 'fees.see') && !['cancelled', 'postponed'].includes(r.ps.state) ? await sittingMoney(tx, t, r.ps) : null;
-    return { ...r.ps, patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor, money, firstSitting: r.ps.state === 'confirmed' ? await firstOfProcedure(tx, t, r.ps) : false,
+    return { ...r.ps, patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor, money, ...(await procedureConsent(tx, t, r.ps)),
       plan: r.rec ? { notes: r.rec.notes, sittings: r.rec.sittings, plannedOn: enc?.at ?? null, diagnosis: names((enc?.data as any)?.assessment?.diagnosis) } : null, sittings };
   });
 
@@ -200,16 +206,26 @@ export function procedureRoutes(app: FastifyInstance) {
   /** State changes keep history: postponing records the reason and frees the doctor's time; the course stays open. */
   // The desk changes any state; a doctor (from the Calendar's sitting drawer) only starts a scheduled sitting and finishes one in progress.
   route(app, 'patch', '/procedure-sessions/:id', null, async (req, tx) => {
-    // consent: on starting, whether the patient signed the procedure consent form (asked on the first sitting of a procedure)
+    // consent: on starting, true when the patient signed the procedure consent form (sent only when none is on file for this procedure)
     const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional(), consent: z.boolean().optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
-    const cur = await tx.select({ state: procedureSession.state }).from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+    const cur = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
     if (!can(req.perms, 'worklist.write')) {
       if (!can(req.perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:worklist.write');
       const from = { in_progress: 'confirmed', completed: 'in_progress' }[body.state as string];
       if (!from) throw new HttpError(403, 'FORBIDDEN:worklist.write');
       if (cur.state !== from) throw new HttpError(409, 'NOT_CHANGEABLE', { state: cur.state });
+    }
+    // Start needs the procedure consent on file; the first Start records it on the patient (paper form filed), so later sittings don't ask
+    if (body.state === 'in_progress' && cur.state !== 'in_progress' && cur.procedureId) {
+      if ((await procedureConsent(tx, t, cur)).consentNeeded) {
+        if (body.consent !== true) throw new HttpError(409, 'CONSENT_NEEDED');
+        const p = await tx.select({ consents: patient.consents }).from(patient).where(eq(patient.id, cur.patientId)).then((r) => r[0]);
+        const key = consentKey(cur.procedureId);
+        await tx.update(patient).set({ consents: { ...(p?.consents ?? {}), [key]: { grantedAt: new Date().toISOString(), by: req.ctx.name, how: 'signed paper form filed' } } }).where(eq(patient.id, cur.patientId));
+        await emit(tx, req.ctx, 'consent.granted', 'patient', cur.patientId, { key, procedureSessionId: id });
+      }
     }
     const [ps] = await tx.update(procedureSession).set({ state: body.state, stateReason: body.reason, ...(body.outcome ? { outcome: body.outcome } : {}) }).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).returning();
     if (!ps) throw new HttpError(404, 'NOT_FOUND');

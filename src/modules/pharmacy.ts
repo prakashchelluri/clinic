@@ -264,8 +264,8 @@ export const SaleIn = z.object({
   whatsapp: z.boolean().default(false),
   at: z.string().optional(), // test data only: back-dated sales
 });
-// restock: sealed and fit to sell again. The counter asks per line (default No); an older caller that does not say keeps the old behaviour.
-const ReturnIn = z.object({ lines: z.array(z.object({ line: z.number().int().min(0), qty: z.number().int().min(1).max(999), restock: z.boolean().default(true) })).min(1).max(40), reason: z.string().trim().min(3).max(200), method: z.enum(['cash', 'upi', 'card']), reference: z.string().trim().max(40).optional() });
+// restock: sealed and fit to sell again. The counter asks per line; a caller that does not say gets No (written off, never back on the shelf by accident).
+const ReturnIn = z.object({ lines: z.array(z.object({ line: z.number().int().min(0), qty: z.number().int().min(1).max(999), restock: z.boolean().default(false) })).min(1).max(40), reason: z.string().trim().min(3).max(200), method: z.enum(['cash', 'upi', 'card']), reference: z.string().trim().max(40).optional() });
 
 /**
  * One pharmacy bill. Stock is taken from the chosen batch or the one expiring first; prices are the batch MRP (GST

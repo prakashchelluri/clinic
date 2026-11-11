@@ -137,7 +137,7 @@ export const patient = pgTable('patient', {
   contactLabel: text('contact_label'),       // who answers this phone: mother, father…
   notes: text('notes'),
   legacyId: text('legacy_id'),
-  consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string }>>().notNull().default({}),
+  consents: jsonb('consents').$type<Record<string, { grantedAt: string; by: string; how?: string }>>().notNull().default({}), // photos, and 'procedure:<id>' per procedure type
 }, (t) => [uniqueIndex('patient_no').on(t.tenantId, t.patientNo), index('patient_phone').on(t.tenantId, t.phone)]);
 
 // OP availability block: doctor × day × time window × practical capacity

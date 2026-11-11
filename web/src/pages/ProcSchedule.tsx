@@ -24,7 +24,7 @@ function useRoomsShown(): [Record<string, boolean>, (id: string, on: boolean) =>
 
 /**
  * Sittings for one day by the hour, one column per room: the same shape as the front desk.
- * A sitting opens the procedure drawer (Start asks about consent on the first sitting, Mark done says what happens to the money);
+ * A sitting opens the procedure drawer (Start asks for consent only when none is on file for that procedure, Mark done says what happens to the money);
  * a free room-hour books a sitting from the plans waiting for a date. The side panel holds only what needs the coordinator.
  */
 export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
@@ -63,7 +63,7 @@ export function ProcSchedule({ onPlans }: { onPlans: () => void }) {
 
   const chip = (s: any) => {
     const k = s.state === 'completed' ? 'fd-k-done' : s.state === 'in_progress' ? 'fd-k-doctor' : s.state === 'missed' ? 'fd-k-late' : s.id === nextId ? 'fd-k-booked fd-k-next' : 'fd-k-booked';
-    const note = s.state === 'in_progress' ? 'in the room' : s.state === 'missed' ? 'missed' : [s.startTime, s.state === 'confirmed' && !s.patientConfirmedAt && day >= t ? 'not called' : null, !s.practitionerId && live(s) ? 'no doctor' : null].filter(Boolean).join(' · ');
+    const note = s.state === 'in_progress' ? 'in the room' : s.state === 'missed' ? 'missed' : [s.startTime, s.state === 'confirmed' && !s.patientConfirmedAt && day >= t ? 'not called' : null, !s.practitionerId && live(s) ? 'no doctor' : null, s.state === 'confirmed' && s.consentNeeded ? 'consent needed' : null].filter(Boolean).join(' · ');
     return <button key={s.id} type="button" className={`fd-pc fd-sit ${k} ${openId === s.id ? 'sel' : ''}`} onClick={() => setOpenId(s.id)}>
       <b>{s.state === 'completed' ? '✓ ' : ''}{s.patient.fullName}</b><span>{s.procedure ?? 'Procedure'} · {note}</span></button>;
   };

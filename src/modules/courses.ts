@@ -47,9 +47,17 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   const amount = isLast ? Math.max(0, c.totalPaise - (before[0]?.s ?? 0)) : st.perSittingPaise; // the last sitting takes the rounding
   if (amount <= 0) return;
   const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.name) : null;
-  const prepaid = st.unusedPaise >= amount;
-  const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}`, amountPaise: amount, courseId: c.id, sessionId: ps.id, prepaid, status: prepaid ? 'paid' : 'due' }).returning();
-  await emit(tx, ctx, prepaid ? 'course.sitting_drawn' : 'course.sitting_due', 'charge', row.id, { courseId: c.id, amountPaise: amount });
+  const what = `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}`;
+  // the advance pays what it can; a partly covered sitting gets two charges: the part from the advance (paid) and the balance (due)
+  const fromAdvance = Math.min(amount, st.unusedPaise);
+  if (fromAdvance > 0) {
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: fromAdvance < amount ? `${what} (from advance)` : what, amountPaise: fromAdvance, courseId: c.id, sessionId: ps.id, prepaid: true, status: 'paid' }).returning();
+    await emit(tx, ctx, 'course.sitting_drawn', 'charge', row.id, { courseId: c.id, amountPaise: fromAdvance });
+  }
+  if (amount > fromAdvance) {
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: fromAdvance ? `${what} (balance)` : what, amountPaise: amount - fromAdvance, courseId: c.id, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
+    await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: c.id, amountPaise: amount - fromAdvance });
+  }
 }
 
 /** A done sitting was undone (cancelled, or moved back): its charge is cancelled so a rebooked sitting is not billed twice. A prepaid one goes back to the advance.
@@ -65,11 +73,22 @@ export async function reverseSitting(tx: Tx, ctx: Ctx, sessionId: string, reason
 }
 
 /** What a sitting means for the patient's money on the day: prepaid from the course, due, already paid, or no price at all. */
-export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommendationId: string; procedureId: string | null }): Promise<{ kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number }> {
-  const ch = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID))).then((r) => r[0]);
-  if (ch) return { kind: ch.prepaid ? 'prepaid' : ch.status === 'paid' ? 'paid' : 'due', amountPaise: ch.amountPaise };
+// A partly used advance pays part of the sitting: then it is 'due' for the balance, with prepaidPaise saying how much the advance covers.
+export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommendationId: string; procedureId: string | null }): Promise<{ kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number; prepaidPaise?: number }> {
+  const chs = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID)));
+  if (chs.length) {
+    const prepaid = chs.filter((x) => x.prepaid).reduce((s, x) => s + x.amountPaise, 0);
+    const due = chs.filter((x) => !x.prepaid && x.status !== 'paid').reduce((s, x) => s + x.amountPaise, 0);
+    const total = chs.reduce((s, x) => s + x.amountPaise, 0);
+    if (due) return prepaid ? { kind: 'due', amountPaise: due, prepaidPaise: prepaid } : { kind: 'due', amountPaise: due };
+    return { kind: prepaid === total ? 'prepaid' : 'paid', amountPaise: total };
+  }
   const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
-  if (c) { const st = await standing(tx, t, c); return { kind: st.unusedPaise >= st.perSittingPaise ? 'prepaid' : 'due', amountPaise: st.perSittingPaise }; }
+  if (c) {
+    const st = await standing(tx, t, c); const per = st.perSittingPaise;
+    if (st.unusedPaise >= per) return { kind: 'prepaid', amountPaise: per };
+    return st.unusedPaise > 0 ? { kind: 'due', amountPaise: per - st.unusedPaise, prepaidPaise: st.unusedPaise } : { kind: 'due', amountPaise: per };
+  }
   const price = ps.procedureId ? await tx.select({ p: procedureCatalog.pricePaise }).from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]?.p ?? null) : null;
   return price ? { kind: 'due', amountPaise: price } : { kind: 'none', amountPaise: 0 };
 }
