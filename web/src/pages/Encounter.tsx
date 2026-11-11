@@ -7,7 +7,6 @@ import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon } from 'lucide-react';
 import { Avatar, Chip, Floating, Icon, Modal, Segmented, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
-import { PadSimple } from './padSimple';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
 import { parseRxLine, qtyFor, allergyHit, rxWarnings, pregnancyFlag, ageText } from '../rxLine';
@@ -29,14 +28,11 @@ const FREQ = ['1-0-0', '0-0-1', '1-0-1', '1-1-1', 'at night', 'once daily', 'twi
 const TIMING = ['after food', 'before food', 'empty stomach', 'at bedtime', 'with food'];
 const TESTS = ['CBC', 'FBS / PPBS', 'HbA1c', 'LFT', 'RFT', 'Lipid profile', 'TSH', 'Vitamin D', 'Vitamin B12', 'Serum ferritin', 'KOH mount', 'Skin biopsy', 'Patch test', 'VDRL', 'HIV', 'HBsAg', 'ANA', 'Urine routine', 'Culture & sensitivity', 'Woods lamp'];
 const ADVICE = ['Keep the area dry', "Don't share towels", 'Wash clothes in hot water', 'No steroid creams', 'Loose cotton clothes', 'Sunscreen every 3 hours', 'Moisturise twice daily', 'Avoid scrubbing', 'Avoid oily food', 'Mild soap only'];
-const RESPONSES = ['Better', 'Same', 'Worse', 'New problem'];
-const SIDE_EFFECTS = ['None', 'Dry lips', 'Dry skin', 'Irritation', 'Itching', 'Redness', 'Stomach upset', 'Headache'];
 const REVIEW_IN: [number | null, string][] = [[7, '7d'], [14, '14d'], [30, '1 m'], [90, '3 m'], [null, 'none']];
 const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
 const DX_STATUS = ['Provisional', 'Confirmed'];
 const DX_OPTIONS = ['Acne vulgaris', 'Melasma', 'Tinea corporis', 'Tinea cruris', 'Psoriasis vulgaris', 'Alopecia areata', 'Androgenetic alopecia', 'Verruca vulgaris', 'Atopic dermatitis', 'Seborrheic dermatitis', 'Contact dermatitis', 'Acute urticaria', 'Chronic urticaria', 'Vitiligo', 'Post-inflammatory hyperpigmentation', 'Scabies', 'Pityriasis versicolor', 'Lichen planus', 'Rosacea', 'Molluscum contagiosum', 'Impetigo', 'Herpes zoster'];
 // ponytail: the allergy, pregnancy and interaction word lists live in rxLine.ts (tested there); a proper drug database is the upgrade path.
-const sameLine = (a: RxItem, b: RxItem) => a.name === b.name && (a.dose ?? '') === (b.dose ?? '') && (a.frequency ?? '') === (b.frequency ?? '') && (a.durationDays ?? null) === (b.durationDays ?? null) && (a.instructions ?? '') === (b.instructions ?? '');
 const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, _issued, ...i }: any): RxItem => i;
 /** The pad's own lines keep their id so a held-open consultation updates them instead of re-issuing; issued lines are locked. */
 const own = (i: any): RxItem => ({ ...strip(i), id: i.id, _issued: !!(i.dispensed || i.issuedQty > 0) });
@@ -247,15 +243,7 @@ function Combo({ value, options, onChange, placeholder, label, className, disabl
 }
 
 /** The consultation on one pad: section cards in the clinic's order, templates in every card header, type anything on top, finish and call the next patient. */
-/** Which pad model: Stacked, Focused and Review are the pad below; Simple is the third model (padSimple.tsx), for doctors. */
 export function Encounter() {
-  const { perms } = useOutletContext<any>();
-  const [simple, setSimple] = useState(() => { try { return localStorage.getItem('pad-layout') === 'simple'; } catch { return false; } });
-  const pick = (v: string) => { try { localStorage.setItem('pad-layout', v); } catch { /* private mode */ } setSimple(v === 'simple'); };
-  return simple && (can(perms, 'encounter.complete') || can(perms, 'encounter.*')) ? <PadSimple onLayout={pick} /> : <EncounterPad onSimple={() => pick('simple')} />;
-}
-
-function EncounterPad({ onSimple }: { onSimple: () => void }) {
   const { id } = useParams(); const nav = useNavigate(); const { cfg, perms, me } = useOutletContext<any>();
   const enc = useQuery({ queryKey: ['encounter', id], queryFn: () => get(`/encounters/${id}`) });
   const timeline = useQuery({ queryKey: ['timeline', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/timeline`), enabled: !!enc.data });
@@ -277,24 +265,21 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
   const pinsQ = usePins(enc.data?.patientId ?? '');
   const [testDraft, setTestDraft] = useState(''); const [line, setLine] = useState(''); const [pendingLine, setPendingLine] = useState<string | null>(null);
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
-  const [seOpen, setSeOpen] = useState(false); // the side-effect options are folded until asked for
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
   const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
-  // the doctor's choice: Stacked (every card, Eka) is the default; Focused (one section open, the rest folded) and Review (review visits only) are the others
-  const [layout, setLayout] = useState<'stacked' | 'focused' | 'review'>(() => { try { const v = localStorage.getItem('pad-layout'); return v === 'focused' || v === 'review' ? v : 'stacked'; } catch { return 'stacked'; } });
+  // the doctor's choice: Stacked (every card, Eka) is the default; Focused (one section open, the rest folded) is the other
+  const [layout, setLayout] = useState<'stacked' | 'focused'>(() => { try { return localStorage.getItem('pad-layout') === 'focused' ? 'focused' : 'stacked'; } catch { return 'stacked'; } });
   useEffect(() => { try { localStorage.setItem('pad-layout', layout); } catch { /* private mode */ } }, [layout]);
-  const [peek, setPeek] = useState(false); // Review → one section of the full pad, without changing the doctor's choice
   const keys = useRef<(ev: KeyboardEvent) => void>(() => {}); // Focused and Review are run from the keyboard; the handler is set each render below
   useEffect(() => { const f = (ev: KeyboardEvent) => keys.current(ev); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f); }, []);
   const [slot, setSlot] = useState<HTMLElement | null>(null); // the app's top bar keeps a place for the patient on the pad
   useEffect(() => { setSlot(document.getElementById('topbar-slot')); }, []);
   const [active, setActive] = useState<string | null>(null); // the open section; the toolbar's search, Load previous and Templates act on it
   const [anywhere, setAnywhere] = useState(false); // the doctor picked "Anywhere" in the search
-  const viewRef = useRef<'stacked' | 'focused' | 'review'>('stacked');
+  const viewRef = useRef<'stacked' | 'focused'>('stacked');
   const goTo = (k: string) => {
     setActive(k); setAnywhere(false);
-    if (viewRef.current === 'review') setPeek(true);
     if (viewRef.current === 'stacked') document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     else setTimeout(() => document.getElementById('pad-open')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
   };
@@ -403,10 +388,9 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
   const err = (s: string, k: string) => missingList.find((x) => x.path === `${s}.${k}`)?.message; // missingList is built below; err runs at render time
   const meds: any[] = cfg?.medicines ?? [];
   const lastRx: RxItem[] = (lastDone?.prescription ?? []).map(strip);
-  const lastRaw: any[] = lastDone?.prescription ?? [];
   const isReview = isDoctor && !!lastDone && lastRx.length > 0;
   const visitNo = previous.length + 1;
-  const view: 'stacked' | 'focused' | 'review' = !isDoctor ? 'stacked' : layout === 'review' ? (!isReview ? 'stacked' : peek ? 'focused' : 'review') : layout;
+  const view: 'stacked' | 'focused' = !isDoctor ? 'stacked' : layout;
   viewRef.current = view;
   const inline = view === 'stacked'; // every card on screen: each keeps its own search line; otherwise the toolbar's search serves the open section
   const QUICK = inline ? 8 : 3; // quick picks per card; the whole list is in the search
@@ -678,34 +662,12 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
       <div className="space-y-2">{x.fields.map((f: Field) => <div key={f.key} data-invalid={!!err(x.key, f.key)}><CompactField f={f} value={data[x.key]?.[f.key]} onChange={(v) => set(x.key, f.key, v)} disabled={readOnly} invalid={!!err(x.key, f.key)} />{err(x.key, f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div>
     </Card>);
 
-  const reviewCard = isReview && isDoctor ? <Card id="review" title={`Since ${fmtDate(lastDone.createdAt)}`} meta={joinList(lastDone.data?.assessment?.diagnosis) || 'last consultation'}>
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center gap-3"><span className="min-w-[72px] text-xs text-muted">How is it?</span>
-              <Segmented disabled={readOnly} value={data.review?.response ?? ''} onChange={(r) => set('review', 'response', r || undefined)} options={RESPONSES.map((r) => ({ value: r, label: r }))} /></div>
-            {(() => { const se: string[] = data.review?.sideEffects ?? []; const real = se.filter((x) => x !== 'None'); return (
-              <div className="flex flex-wrap items-center gap-2"><span className="min-w-[72px] text-xs text-muted">Side effects</span><span className={`text-[13.5px] ${real.length ? 'font-medium text-amber' : ''}`}>{real.length ? real.join(', ') : 'none reported'}</span>{!readOnly && <button type="button" className="opt-add" onClick={() => setSeOpen(!seOpen)}>{seOpen ? 'Done' : 'Change'}</button>}
-                {seOpen && !readOnly && <div className="flex basis-full flex-wrap gap-1 anim-fade-in">{SIDE_EFFECTS.filter((x) => x !== 'None').map((x) => { const on = se.includes(x); return <button key={x} type="button" className={`!min-h-7 !py-0.5 ${on ? 'toggle-opt on' : 'opt'}`} onClick={() => set('review', 'sideEffects', on ? se.filter((y) => y !== x) : [...se.filter((y) => y !== 'None'), x])}>{x}</button>; })}</div>}
-              </div>); })()}
-            {lastRx.length > 0 && <div>
-              <div className="flex items-center gap-2"><span className="text-xs text-muted">Last prescription · continue, change or stop each line</span>{!readOnly && <button id="pad-continue-all" className="btn btn-ghost btn-sm ml-auto" onClick={() => setRx((cur) => [...cur.filter((r) => r.name && !lastRx.some((l) => l.name === r.name)), ...lastRx.map((l) => cur.find((r) => r.name === l.name) ?? withQty({ ...l }))])}>Continue all</button>}</div>
-              {lastRx.map((l, k) => {
-                const cur = rx.find((r) => r.name === l.name); const st = !cur ? (rx.length ? 'stop' : '') : sameLine(cur, l) ? 'continue' : 'change';
-                const raw = lastRaw[k];
-                return (
-                  <Row plain key={l.name + k} label={l.name}>
-                    <span className="min-w-0 flex-1"><b className="text-[13.5px]">{l.name}</b><span className="block text-[12.5px] text-muted">{[l.dose, l.frequency, l.durationDays ? `${l.durationDays} days` : null, l.instructions].filter(Boolean).join(' · ')}{raw && raw.medicineId && !raw.issuedQty ? ' · patient did not buy' : ''}{st === 'change' && cur ? ` · now ${[cur.dose, cur.frequency, cur.durationDays ? `${cur.durationDays}d` : null].filter(Boolean).join(' · ')}` : ''}</span></span>
-                    {!readOnly && <Segmented size="sm" value={st} onChange={(v) => { if (v === 'continue') setRx((r) => cur ? r.map((x) => (x.name === l.name ? withQty({ ...l }) : x)) : [...r.filter((x) => x.name), withQty({ ...l })]); else if (v === 'change') { if (!cur) setRx((r) => [...r.filter((x) => x.name), withQty({ ...l })]); goTo('medicines'); setTimeout(() => document.getElementById(`rx-${l.name}`)?.focus(), 300); } else setRx((r) => r.filter((x) => x.name !== l.name)); }} options={[{ value: 'continue', label: 'Continue' }, { value: 'change', label: 'Change' }, { value: 'stop', label: 'Stop' }]} />}
-                  </Row>); })}
-            </div>}
-          </div>
-        </Card> : null;
   // side by side: one row per section with what it says so far; the open row's card sits on the right
   const txt = (xs: (string | null | undefined | false)[]) => xs.filter(Boolean).join(' · ');
   const vd = e.visit?.details ?? {};
   const examFields: Field[] = formSections.find((x) => x.key === 'exam')?.fields ?? [];
   const histItems: string[] = (cfg?.historyCategories ?? []).flatMap((c: any) => (Array.isArray(p.history?.[c.key]) ? p.history[c.key].map((x: any) => x.name) : []));
   const brief: Record<string, string | null> = {
-    review: data.review?.response ?? null,
     vitals: vitalsText(vd, vitalFields(cfg?.tenant?.settings)) || null,
     history: histItems.length ? histItems.join(', ') : null,
     symptoms: syms.length ? syms.map((x) => txt([x.name, x.since && `since ${x.since}`])).join('; ') : null,
@@ -720,13 +682,11 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
     notes: data.notes?.private ? String(data.notes.private).slice(0, 120) : null,
     referral: txt([data.referral?.to, data.referral?.speciality]) || null,
   };
-  const TITLE: Record<string, string> = { review: isReview ? `Since ${fmtDate(lastDone.createdAt)}` : 'Review', vitals: 'Vitals', history: 'Medical history', symptoms: 'Symptoms', diagnosis: 'Diagnosis', exam: 'Examination findings', medicines: 'Medications', advice: 'Advice', tests: 'Lab investigations', results: 'Lab results', followup: 'Follow-up', procedures: 'Procedures', notes: 'Private notes', referral: 'Refer to a doctor' };
+  const TITLE: Record<string, string> = { vitals: 'Vitals', history: 'Medical history', symptoms: 'Symptoms', diagnosis: 'Diagnosis', exam: 'Examination findings', medicines: 'Medications', advice: 'Advice', tests: 'Lab investigations', results: 'Lab results', followup: 'Follow-up', procedures: 'Procedures', notes: 'Private notes', referral: 'Refer to a doctor' };
   for (const x of customSections) { TITLE[x.key] = x.title; brief[x.key] = txt(x.fields.map((f: Field) => { const v = data[x.key]?.[f.key]; return Array.isArray(v) ? v.join(', ') : v ? String(v) : null; })) || null; }
   const lines = (xs: (string | null | undefined | false)[]): ReactNode => { const ys = xs.filter(Boolean) as string[]; return ys.length ? <>{ys.map((y, n) => <span key={n} className="block">{y}</span>)}</> : null; };
-  const se: string[] = (data.review?.sideEffects ?? []).filter((x: string) => x !== 'None');
   const sheet: Record<string, ReactNode> = {
     ...brief,
-    review: isReview ? txt([data.review?.response, se.length ? `side effects: ${se.join(', ')}` : null, lastRx.length ? `${lastRx.filter((l) => rx.some((r) => r.name === l.name)).length} of ${lastRx.length} medicines continued` : null]) || null : null,
     symptoms: lines(syms.map((x) => txt([x.name, x.since && `since ${x.since}`, x.severity?.toLowerCase(), x.note]))),
     diagnosis: lines(dxs.map((d) => txt([d.name, d.severity?.toLowerCase(), d.status?.toLowerCase()]))),
     medicines: rx.filter((i) => i.name).length ? <>{rx.filter((i) => i.name).map((i, n) => <span key={n} className="block"><b className="font-semibold">{n + 1}. {i.name}</b> <span className="text-muted">{txt([i.dose, i.frequency, i.timing, i.durationDays ? `${i.durationDays} days` : null, i.instructions])}</span></span>)}</> : null,
@@ -737,9 +697,9 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
     notes: data.notes?.private ? String(data.notes.private) : null,
     referral: txt([data.referral?.to, data.referral?.speciality, data.referral?.reason]) || null,
   };
-  const EMPTY: Record<string, string> = { review: 'How is it since last time?', vitals: 'Taken at check-in', history: 'Conditions, allergies, habits', symptoms: 'What brings them in', diagnosis: 'Required', exam: 'Findings and sites', medicines: 'Add a medicine', advice: 'Add advice', tests: 'Order a test', results: 'Typed when reports arrive', followup: 'Review date', procedures: 'Add a procedure', notes: 'For you and the clinic only', referral: 'Refer to another doctor' };
-  const rowKeys: string[] = [...(isReview && isDoctor ? ['review'] : []), ...order.filter((k) => cards[k]), ...customSections.map((x: any) => x.key)];
-  const act: string = active && rowKeys.includes(active) ? active : (rowKeys.find((k) => ['review', 'symptoms', 'diagnosis', 'medicines'].includes(k) && !brief[k]) ?? (rowKeys.includes('medicines') ? 'medicines' : rowKeys[0]));
+  const EMPTY: Record<string, string> = { vitals: 'Taken at check-in', history: 'Conditions, allergies, habits', symptoms: 'What brings them in', diagnosis: 'Required', exam: 'Findings and sites', medicines: 'Add a medicine', advice: 'Add advice', tests: 'Order a test', results: 'Typed when reports arrive', followup: 'Review date', procedures: 'Add a procedure', notes: 'For you and the clinic only', referral: 'Refer to another doctor' };
+  const rowKeys: string[] = [...order.filter((k) => cards[k]), ...customSections.map((x: any) => x.key)];
+  const act: string = active && rowKeys.includes(active) ? active : (rowKeys.find((k) => ['symptoms', 'diagnosis', 'medicines'].includes(k) && !brief[k]) ?? (rowKeys.includes('medicines') ? 'medicines' : rowKeys[0]));
   const isRequired = (k: string) => k === 'diagnosis' || (['symptoms', 'exam', 'medicines'].includes(k) && padOf(k).required);
 
   // --- the one toolbar: search, Load previous, Templates and Clear, all acting on the open section ---
@@ -759,7 +719,7 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
     advice: { what: 'advice lines', opts: ADVICE.map((name) => ({ name })), line: (t) => smartAdd(t, 'advice') },
     tests: { what: 'tests', opts: labNames.map((name) => ({ name })), line: addTest },
   };
-  const scopeKey = view === 'review' ? 'medicines' : view === 'focused' ? act : active;
+  const scopeKey = view === 'focused' ? act : active;
   const scope = !anywhere && scopeKey && SEARCH[scopeKey] && rowKeys.includes(scopeKey) ? scopeKey : null;
   const S = scope ? SEARCH[scope] : null;
   const anyOpts: Hit[] = Object.entries(SEARCH).filter(([k]) => rowKeys.includes(k)).flatMap(([k, s]) => s.opts.map((o) => ({ ...o, detail: TITLE[k] })));
@@ -772,7 +732,6 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
     const bar = (fn: () => void) => go(() => { document.getElementById('pad-toolbar')?.scrollIntoView({ block: 'start' }); setTimeout(fn, 30); }); // the toolbar is in the page, not floating: bring it back into view first
     if (ev.key === '/' && !typing) return bar(() => document.getElementById('pad-search')?.focus());
     if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') return go(finish);
-    if (ev.key === 'Escape' && !typing && layout === 'review' && peek) return go(() => setPeek(false));
     if (!ev.altKey || ev.ctrlKey || ev.metaKey) return;
     const i = rowKeys.indexOf(act);
     if (view === 'focused' && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) return go(() => goTo(rowKeys[Math.max(0, Math.min(rowKeys.length - 1, i + (ev.key === 'ArrowDown' ? 1 : -1)))]));
@@ -780,8 +739,6 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
     if (ev.code === 'KeyT') return bar(() => document.getElementById('pad-templates')?.click());
     if (ev.code === 'KeyA') return bar(() => { setAnywhere(!!scope); setTimeout(() => document.getElementById('pad-search')?.focus(), 30); });
     if (ev.code === 'KeyP') return go(() => { void preview(); });
-    if (view === 'review' && /^Digit[1-4]$/.test(ev.code)) return go(() => set('review', 'response', RESPONSES[Number(ev.code.slice(5)) - 1]));
-    if (view === 'review' && ev.code === 'KeyC') return go(() => document.getElementById('pad-continue-all')?.click());
   };
   const toolbar = isDoctor && !readOnly ? (
     <div id="pad-toolbar" className="scroll-mt-24 anim-fade-up">
@@ -800,7 +757,7 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
     </div>) : null;
 
   // Focused: one section open, filled ones folded to a line, empty optional ones as "+ add"
-  const openNode = (k: string): ReactNode => (k === 'review' ? reviewCard : customSections.some((x: any) => x.key === k) ? custom(customSections.find((x: any) => x.key === k)) : cards[k] ?? null);
+  const openNode = (k: string): ReactNode => (customSections.some((x: any) => x.key === k) ? custom(customSections.find((x: any) => x.key === k)) : cards[k] ?? null);
   const segs: { open: boolean; keys: string[] }[] = []; const later: string[] = [];
   for (const k of rowKeys) {
     if (k === act) segs.push({ open: true, keys: [k] });
@@ -813,7 +770,6 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
       <span className={`min-w-0 text-[14px] leading-relaxed ${v ? 'text-ink' : bad(k) ? 'font-medium text-rose' : 'text-muted'}`}>{v ?? (bad(k) ? `${TITLE[k] ?? k} is required` : EMPTY[k] ?? 'Tap to add')}</span>
       <span className="pt-0.5 text-xs font-semibold text-muted">{v ? 'Edit' : 'Add'}</span>
     </button>); };
-  const layoutValue = layout === 'review' && !isReview ? 'stacked' : layout;
   const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">Not saved — check the internet. Your notes are still here.</span>;
   const age = ageText(p);
   const patientLine = [age ? `${age} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
@@ -829,7 +785,7 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
           {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
           {pregnant && <span className="chip chip-rose shrink-0 !py-1">{pregnant}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}
-            {isDoctor && !readOnly && <Segmented<'stacked' | 'focused' | 'review' | 'simple'> size="sm" value={layoutValue} onChange={(v) => { if (v === 'simple') { void (async () => { if (dirty.current) { try { await save.mutateAsync({ complete: false }); } catch { return; } } await qc.invalidateQueries({ queryKey: ['encounter', id] }); onSimple(); })(); return; } setLayout(v); setPeek(false); }} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'focused', label: 'Focused' }, ...(isReview ? [{ value: 'review' as const, label: 'Review' }] : []), { value: 'simple', label: 'Simple' }]} />}
+            {isDoctor && !readOnly && <Segmented<'stacked' | 'focused'> size="sm" value={layout} onChange={setLayout} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'focused', label: 'Focused' }]} />}
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden />Templates</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={540}>
                 <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-2 p-1.5">
@@ -877,25 +833,7 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
         {!isDoctor && (!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <div className="card !p-0"><ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open /></div>}
         {!isDoctor && !padOf('history').show && cards.history}
 
-        {view === 'review' ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="min-w-0 space-y-3">
-            {reviewCard}
-            {cards.photos}
-            <Card id="followup" title="Review again">{reviewIn}</Card>
-            <div className="flex flex-wrap items-center gap-1.5 px-1"><span className="mr-1 text-xs text-muted">Also</span>{rowKeys.filter((k) => k !== 'review').map((k) => <button key={k} type="button" className={`btn btn-sm ${bad(k) ? 'text-rose' : ''}`} onClick={() => goTo(k)}>{TITLE[k] ?? k}{isRequired(k) && <span className="text-rose"> *</span>}</button>)}</div>
-          </div>
-          <aside className="card space-y-3 text-[13.5px] leading-relaxed xl:sticky xl:top-[150px]" aria-label="What the patient leaves with">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-muted">Leaves with</div>
-            <div>{sheet.diagnosis ?? <span className="font-medium text-rose">Diagnosis is required</span>}</div>
-            <div>{sheet.medicines ?? <span className="text-muted">No medicines</span>}</div>
-            {warnings.map((w) => <div key={w} className="text-[12.5px] font-semibold text-rose">{w}</div>)}
-            {sheet.followup && <div className="text-muted">{sheet.followup}</div>}
-            {sheet.procedures && <div className="text-muted">{sheet.procedures}</div>}
-            {leaflets.length > 0 && <div className="text-xs text-sage">WhatsApp with {leaflets.length} how-to-use {leaflets.length === 1 ? 'leaflet' : 'leaflets'}</div>}
-          </aside>
-        </div>
-        : view === 'focused' ? <div className="space-y-3">
-          {layout === 'review' && peek && <button type="button" className="btn btn-sm" onClick={() => setPeek(false)}><Icon name="chevL" className="h-3.5 w-3.5" />Back to the review</button>}
+        {view === 'focused' ? <div className="space-y-3">
           <div className="grid items-start gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
             <nav className="card hidden !p-2 lg:sticky lg:top-[150px] lg:block" aria-label="Sections">
               {rowKeys.map((k) => { const on = act === k; const done = sheet[k] != null; return (
@@ -919,7 +857,6 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
           </div>
         </div>
         : <>
-          {reviewCard}
           {order.map((k) => cards[k] ?? null)}
           {customSections.map(custom)}
         </>}
@@ -973,7 +910,7 @@ function EncounterPad({ onSimple }: { onSimple: () => void }) {
         {missingList.length > 0 ? <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet · missing:</span>
             {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>
           : saveFailed && !readOnly && !save.isPending ? notSaved : <span className="px-1 text-xs text-muted">{save.isPending ? 'Saving…' : savedAt ? `Saved ${savedAt}` : readOnly ? '' : 'Saves as you go'}</span>}
-        {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-muted/80 xl:inline">{view === 'review' ? 'Alt 1–4 how is it · Alt C continue all · ' : 'Alt ↑↓ section · '}/ search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
+        {!readOnly && isDoctor && <span className="hidden text-[11.5px] text-muted/80 xl:inline">Alt ↑↓ section · / search · Alt L previous · Alt T templates · Ctrl ↵ finish</span>}
         <span className="ml-auto" />
         {!readOnly && !isDoctor && <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
         {!readOnly && isDoctor && <>

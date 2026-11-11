@@ -11,7 +11,6 @@ import { TemplatesTab } from './SettingsTemplates';
 import { PadTab } from './SettingsPad';
 import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
-import { ALLERGY_CLASSES } from '../rxSafety';
 import '../settings.css';
 
 type Tab = 'clinic' | 'day' | 'availability' | 'rooms' | 'people' | 'roles' | 'prices' | 'rules' | 'messages' | 'pad' | 'forms' | 'templates' | 'photos' | 'privacy' | 'testdata';
@@ -439,12 +438,6 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
               <div><label className="label">Form</label><div className="flex flex-wrap gap-1">{['tab', 'cap', 'cream', 'gel', 'lotion', 'syrup', 'inj', 'soap'].map((x) => <button key={x} className={`toggle-opt ${edit.form === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, form: x })}>{x}</button>)}</div></div>
               <div><label className="label">Schedule</label><div className="flex gap-1">{['OTC', 'H', 'H1', 'X'].map((x) => <button key={x} className={`toggle-opt ${edit.scheduleClass === x ? 'on' : ''}`} onClick={() => setEdit({ ...edit, scheduleClass: x })}>{x}</button>)}</div></div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div><label className="label">Generic name</label><input className="input" maxLength={120} placeholder="e.g. amoxicillin + clavulanate" value={edit.generic ?? ''} onChange={(e) => setEdit({ ...edit, generic: e.target.value })} /></div>
-              <div><label className="label">Drug group (for allergies)</label><input className="input" maxLength={60} list="allergy-classes" placeholder="e.g. penicillin" value={edit.allergyClass ?? ''} onChange={(e) => setEdit({ ...edit, allergyClass: e.target.value })} />
-                <datalist id="allergy-classes">{Object.keys(ALLERGY_CLASSES).map((c) => <option key={c} value={c} />)}</datalist></div>
-            </div>
-            <div className="-mt-1 text-xs text-muted">The prescription checks allergies, pregnancy, the same medicine twice and interactions against the name, the generic and the group.</div>
             <div className="card-title">Pharmacy counter</div>
             <div className="grid grid-cols-3 gap-2">
               <div><label className="label">Price per unit (MRP, GST included)</label><MoneyInput value={edit.mrp ?? String((edit.mrpPaise ?? 0) / 100 || '')} onChange={(v: string) => setEdit({ ...edit, mrp: v })} /></div>
