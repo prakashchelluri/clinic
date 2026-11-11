@@ -31,12 +31,18 @@ export function Dashboard() {
       <PageHeader title="Dashboard" subtitle={`${fmtDate(d.from)} to ${fmtDate(d.to)} · compared with the same length of time before`}>
         <Filter<Range> icon="calendar" value={range} onChange={setRange} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'This week' }, { value: 'month', label: 'This month' }]} />
       </PageHeader>
+      {d.collected && (
+        <div className="card mb-3">
+          <div className="text-xs text-muted">Collected · the same figure as End of day</div>
+          <div className="text-[24px] font-semibold tracking-tight">{money(d.collected.totalPaise)}</div>
+          <div className="text-xs text-muted">pharmacy {money(d.collected.pharmacyPaise)} · not tied to a doctor (pharmacy, course advances, other) {money(d.collected.notTiedPaise)}</div>
+        </div>)}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         {d.tiles.map((t: any) => (
           <div key={t.id} className="card">
             <div className="text-sm font-medium">{t.name}</div>
-            <div className="mt-1 flex items-end gap-4"><div>{!d.moneyHidden && seesMoney(t) && t.revenuePaise !== undefined && <div className="text-[24px] font-semibold tracking-tight">{money(t.revenuePaise)}</div>}<div className="text-sm text-muted">{t.patients} patients</div></div></div>
-            {!d.moneyHidden && seesMoney(t) && t.revenuePaise > 0 && <div className="mt-3"><div className="flex h-2 overflow-hidden rounded-full bg-paper-2"><i className="block bg-sage" style={{ width: `${Math.round((t.paidPaise / t.revenuePaise) * 100)}%` }} /></div><div className="mt-1 text-xs text-muted">paid {Math.round((t.paidPaise / t.revenuePaise) * 100)}% · pending {money(t.pendingPaise)}</div></div>}
+            <div className="mt-1 flex items-end gap-4"><div>{!d.moneyHidden && seesMoney(t) && t.paidPaise !== undefined && <div className="text-[24px] font-semibold tracking-tight" title="Money received, less refunds">{money(t.paidPaise)}</div>}<div className="text-sm text-muted">{t.patients} patients</div></div></div>
+            {!d.moneyHidden && seesMoney(t) && t.pendingPaise > 0 && <div className="mt-1 text-xs text-muted">still due {money(t.pendingPaise)}</div>}
             {t.patients > 0 && <div className="mt-3"><div className="flex h-2 overflow-hidden rounded-full bg-paper-2"><i className="block bg-clay" style={{ width: `${Math.round((t.newPatients / t.patients) * 100)}%` }} /></div><div className="mt-1 text-xs text-muted">new {t.newPatients} · review {t.reviews}</div></div>}
           </div>))}
       </div>

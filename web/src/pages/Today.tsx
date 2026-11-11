@@ -113,6 +113,10 @@ export function Today() {
   const seen = visits.filter((v) => v.status === 'done').length;
   // test orders whose every report is in: the doctor reviews each once (names of the tests only, values open in the review)
   const readyOrders = ((ordq.data?.orders ?? []) as any[]).filter((o) => o.state === 'ready');
+  // out-of-range results: a count and the test names only, never the values
+  const OUT = ['low', 'high', 'abnormal'];
+  const outTests = (o: any): string[] => (o.tests ?? []).filter((t: any) => (t.values ?? []).some((v: any) => OUT.includes(v.flag ?? ''))).map((t: any) => t.name);
+  const abnormalCount = readyOrders.reduce((n, o) => n + outTests(o).length, 0);
   // --- also waiting on the doctor ---
   const drafts = visits.filter((v) => v.encounterStatus === 'draft' && v.status !== 'in_consult');
   const review = (plans.data ?? []).filter((r: any) => r.status === 'open' && cfg?.procedures.find((p: any) => p.id === r.procedureId)?.requiresReview);
@@ -189,9 +193,9 @@ export function Today() {
           </section>
 
           <section className="fd-sheet overflow-hidden anim-fade-up">
-            <div className="px-4 pb-1 pt-3.5 sm:px-5"><b className="text-[15px]">Results to review</b></div>
+            <div className="px-4 pb-1 pt-3.5 sm:px-5"><b className="text-[15px]">Results to review</b>{abnormalCount > 0 && <span className="ml-2 text-sm font-semibold text-rose">{abnormalCount} out of range</span>}</div>
             {readyOrders.length === 0 ? <div className="px-4 pb-4 text-sm text-muted sm:px-5">Nothing to review.</div>
-              : readyOrders.map((o: any) => <div key={o.key} className="flex items-center gap-3 border-t border-line px-4 py-2.5 sm:px-5"><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{o.patient.fullName}</div><div className="truncate text-xs text-muted">{o.tests.map((t: any) => t.name).join(', ')}</div></div><button className="btn btn-sm" onClick={() => nav('/tests?tab=review')}>Review</button></div>)}
+              : readyOrders.map((o: any) => { const out = outTests(o); return <div key={o.key} className="flex items-center gap-3 border-t border-line px-4 py-2.5 sm:px-5"><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{o.patient.fullName}</div><div className="truncate text-xs text-muted">{o.tests.map((t: any) => t.name).join(', ')}</div>{out.length > 0 && <div className="truncate text-xs text-rose">out of range: {out.join(', ')}</div>}</div><button className="btn btn-sm" onClick={() => nav('/tests?tab=review')}>Review</button></div>; })}
           </section>
 
           {otherCount > 0 && <section className="fd-sheet p-4 sm:p-5 anim-fade-up">

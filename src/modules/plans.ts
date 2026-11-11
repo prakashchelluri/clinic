@@ -86,11 +86,11 @@ export function planRoutes(app: FastifyInstance) {
       const c = courses.find((k) => k.recommendationId === x.r.id); const sit = x.r.sittings ?? 1;
       const mine = sessions.filter((s) => s.ps.recommendationId === x.r.id); const done = mine.filter((s) => s.ps.state === 'completed');
       const ch = charges.filter((k) => mine.some((s) => s.ps.id === k.sessionId));
-      const paidAll = c ? ch.filter((k) => k.status === 'paid').length >= sit : false;
+      const paidAll = c ? new Set(ch.filter((k) => k.status === 'paid' && !ch.some((z) => z.sessionId === k.sessionId && z.status !== 'paid')).map((k) => k.sessionId)).size >= sit : false;
       const q = quotes.find((k) => k.recommendationId === x.r.id);
       const state = !c ? (mine.length > 0 ? 'agreed' : 'advised') : paidAll || x.r.status === 'done' ? 'paid' : 'agreed';
-      const ledger = Array.from({ length: sit }, (_, i) => { const n = i + 1; const s = done[i] ?? mine.find((m) => m.ps.sittingNo === n && !['completed'].includes(m.ps.state)); const k = ch.find((z) => s && z.sessionId === s.ps.id);
-        return { n, state: done[i] ? 'done' : s ? s.ps.state : 'planned', day: s?.ps.day ?? null, doctor: s?.doctor ?? null, did: (done[i]?.ps.outcome as any)?.note ?? done[i]?.ps.notes ?? null, paid: k ? k.status === 'paid' : false, prepaid: !!k?.prepaid, amountPaise: fees ? k?.amountPaise ?? null : null }; });
+      const ledger = Array.from({ length: sit }, (_, i) => { const n = i + 1; const s = done[i] ?? mine.find((m) => m.ps.sittingNo === n && !['completed'].includes(m.ps.state)); const ks = ch.filter((z) => s && z.sessionId === s.ps.id); // two when the advance covered only part of the sitting
+        return { n, state: done[i] ? 'done' : s ? s.ps.state : 'planned', day: s?.ps.day ?? null, doctor: s?.doctor ?? null, did: (done[i]?.ps.outcome as any)?.note ?? done[i]?.ps.notes ?? null, paid: ks.length > 0 && ks.every((k) => k.status === 'paid'), prepaid: ks.some((k) => k.prepaid), amountPaise: fees && ks.length ? ks.reduce((a, k) => a + k.amountPaise, 0) : null }; });
       return { id: x.r.id, patient: x.p, procedure: x.proc ?? 'Procedure', sittings: sit, doneSittings: done.length, state, dueOn: x.r.dueOn, listPaise: fees ? (x.price ?? 0) * sit : null, totalPaise: fees ? c?.totalPaise ?? null : null,
         quote: q ? { number: q.number, validUntil: q.validUntil, state: q.status === 'open' && q.validUntil < today ? 'expired' : q.status } : null, ledger };
     });

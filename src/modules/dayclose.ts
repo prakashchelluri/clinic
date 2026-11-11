@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lt, lte, sql } from 'drizzle-orm';
 import { appointment, charge, dayClose, encounter, expense, feeCategory, payment, pharmacySale, practitioner, procedureSession, session, visit } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -22,27 +22,33 @@ export function visitType(code: string, name: string): (typeof COUNT_KEYS)[numbe
 }
 
 /** A day's money by type and mode, the cash that should be in the drawer, and the visit counts: what the head receptionist reads against the paper diary. */
-export async function dayFigures(tx: Tx, t: string, tz: string, day: string) {
-  const { start, end } = dayBounds(day, tz);
-  const pays = await tx.select({ p: payment, c: charge }).from(payment).leftJoin(charge, eq(charge.id, payment.chargeId)).where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
+// `to` makes it a range (the Dashboard); every money figure in the app comes from here so they always agree.
+// byDoctor: the same money by the doctor of the visit or sitting it paid for; pharmacy, course advances and anything else stay out (the rest of the total).
+export async function dayFigures(tx: Tx, t: string, tz: string, day: string, to = day) {
+  const start = dayBounds(day, tz).start; const end = dayBounds(to, tz).end;
+  const pays = await tx.select({ p: payment, c: charge, vDoc: visit.practitionerId, sDoc: procedureSession.practitionerId }).from(payment).leftJoin(charge, eq(charge.id, payment.chargeId))
+    .leftJoin(visit, eq(visit.id, charge.visitId)).leftJoin(procedureSession, eq(procedureSession.id, charge.sessionId))
+    .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
   const money = { consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), total: empty() };
+  const byDoctor: Record<string, number> = {};
   // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
-  for (const { p, c } of pays) {
+  for (const { p, c, vDoc, sDoc } of pays) {
     const bucket = p.courseId || c?.courseId ? money.procedure : c?.visitId ? money.consultation : money.other;
     put(bucket, p.method, p.amountPaise); put(money.total, p.method, p.amountPaise);
+    const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
   for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) { put(money.pharmacy, x.method, x.amountPaise); put(money.total, x.method, x.amountPaise); }
   const allSales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(day, -90))));
   for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) { put(money.pharmacy, r.method, -r.refundPaise); put(money.total, r.method, -r.refundPaise); }
-  const exp = await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(expense).where(and(eq(expense.tenantId, t), eq(expense.day, day), eq(expense.method, 'cash'), isNull(expense.voidedAt)));
+  const exp = await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(expense).where(and(eq(expense.tenantId, t), gte(expense.day, day), lte(expense.day, to), eq(expense.method, 'cash'), isNull(expense.voidedAt)));
   const expensesCashPaise = exp[0]?.n ?? 0;
-  const vis = await tx.select({ code: feeCategory.code, name: feeCategory.name }).from(visit).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId)).where(and(eq(visit.tenantId, t), eq(visit.day, day)));
+  const vis = await tx.select({ code: feeCategory.code, name: feeCategory.name }).from(visit).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId)).where(and(eq(visit.tenantId, t), gte(visit.day, day), lte(visit.day, to)));
   const counts: Record<string, number> = Object.fromEntries(COUNT_KEYS.map((k) => [k, 0]));
   for (const v of vis) counts[visitType(v.code, v.name)]++;
-  counts.Procedure = (await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, day), eq(procedureSession.state, 'completed'))))[0]?.n ?? 0;
+  counts.Procedure = (await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, day), lte(procedureSession.day, to), eq(procedureSession.state, 'completed'))))[0]?.n ?? 0;
   const awaiting = await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
-  return { day, money, drawer: { expectedCashPaise: money.total.cash - expensesCashPaise, expensesCashPaise }, counts, emiAwaitingPaise: awaiting[0]?.n ?? 0 };
+  return { day, money, byDoctor, drawer: { expectedCashPaise: money.total.cash - expensesCashPaise, expensesCashPaise }, counts, emiAwaitingPaise: awaiting[0]?.n ?? 0 };
 }
 
 /** A day that has been closed does not take new payments; a mistake is put right by a refund, which is dated today. */
@@ -56,7 +62,7 @@ export function dayCloseRoutes(app: FastifyInstance) {
     if (!can(req.perms, 'fees.see')) throw new HttpError(403, 'FORBIDDEN:fees.see');
     const day = String((req.query as any).day ?? todayIn(req.ctx.timezone));
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new HttpError(400, 'BAD_DATE');
-    const live = await dayFigures(tx, req.ctx.tenantId, req.ctx.timezone, day);
+    const { byDoctor: _, ...live } = await dayFigures(tx, req.ctx.tenantId, req.ctx.timezone, day); // per-doctor money is the Dashboard's, by role
     const closed = await tx.select().from(dayClose).where(and(eq(dayClose.tenantId, req.ctx.tenantId), eq(dayClose.day, day))).then((r) => r[0] ?? null);
     return { ...live, closed, countKeys: COUNT_KEYS };
   });
@@ -117,9 +123,11 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const cur = await vis(from, to);
     const charges = cur.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), sql`${charge.visitId} in (select id from visit where tenant_id = ${t} and day >= ${from} and day <= ${to})`)) : [];
     const sitCharges = await tx.select({ c: charge, doc: procedureSession.practitionerId }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), gte(procedureSession.day, from), sql`${procedureSession.day} <= ${to}`));
+    // collected money comes from the same ledger as End of day and Reports: payments received in the range, net of refunds
+    const f = money ? await dayFigures(tx, t, tz, from, to) : null;
     const tiles = docs.map((d) => {
       const mine = cur.filter((x) => x.v.practitionerId === d.id); const cs = [...charges.filter((c) => mine.some((m) => m.v.id === c.visitId)), ...sitCharges.filter((s) => s.doc === d.id).map((s) => s.c)];
-      const paid = cs.filter((c) => c.status === 'paid').reduce((s, c) => s + c.amountPaise, 0); const pending = cs.filter((c) => c.status === 'due').reduce((s, c) => s + c.amountPaise, 0);
+      const paid = f?.byDoctor[d.id] ?? 0; const pending = cs.filter((c) => c.status === 'due').reduce((s, c) => s + c.amountPaise, 0);
       const types = mine.map((m) => visitType(m.code, m.name));
       return { id: d.id, name: d.name, patients: mine.length, newPatients: types.filter((x) => x === 'General' || x === 'Relatives and friends').length, reviews: types.filter((x) => x === 'Review' || x === 'Procedure follow-up').length,
         ...(money && (allMoney || d.id === req.ctx.practitionerId) ? { revenuePaise: paid + pending, paidPaise: paid, pendingPaise: pending } : {}) };
@@ -137,6 +145,8 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const prev = await vis(pFrom, pTo);
     const types: Record<string, number> = Object.fromEntries(COUNT_KEYS.map((k) => [k, 0])); for (const x of cur) types[visitType(x.code, x.name)]++;
     return { from, to, previous: { from: pFrom, to: pTo }, tiles, trend, averagePerDay: avg, busiest: busiest ?? null, quietest: quietest ?? null, types, visits: cur.length, previousVisits: prev.length,
-      times: { now: await times(from, to), before: await times(pFrom, pTo) }, missed: { now: await appts(from, to, 'no_show'), before: await appts(pFrom, pTo, 'no_show') }, cancelled: { now: await appts(from, to, 'cancelled'), before: await appts(pFrom, pTo, 'cancelled') }, moneyHidden: !money };
+      times: { now: await times(from, to), before: await times(pFrom, pTo) }, missed: { now: await appts(from, to, 'no_show'), before: await appts(pFrom, pTo, 'no_show') }, cancelled: { now: await appts(from, to, 'cancelled'), before: await appts(pFrom, pTo, 'cancelled') }, moneyHidden: !money,
+      // the clinic's takings, the End of day figure; the part not tied to an active doctor's tile is pharmacy, course advances and other money
+      collected: f && allMoney ? { totalPaise: f.money.total.total, pharmacyPaise: f.money.pharmacy.total, notTiedPaise: f.money.total.total - docs.reduce((s, d) => s + (f.byDoctor[d.id] ?? 0), 0) } : null };
   });
 }

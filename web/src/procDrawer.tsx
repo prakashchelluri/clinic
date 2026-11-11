@@ -6,22 +6,29 @@ import { get, patch, qc, today, errText } from './api';
 import { Chip, Icon, Skeleton, ask, money, toast, useScrollLock } from './ui';
 import { FlagChips } from './flags';
 
-type Money = { kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number } | null | undefined;
+// prepaidPaise: a partly used advance covers that much; amountPaise is then the balance due
+type Money = { kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number; prepaidPaise?: number } | null | undefined;
 /** "Prepaid", "₹2,500 due", "Paid" or "No price agreed", for a sitting row or the drawer. Nothing when the user cannot see fees. */
 export function MoneyChip({ m }: { m: Money }) {
   if (!m) return null;
-  return m.kind === 'prepaid' ? <Chip tone="sage">Prepaid</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price agreed</Chip>;
+  return m.kind === 'prepaid' ? <Chip tone="sage">Prepaid</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due{m.prepaidPaise ? ` · ${money(m.prepaidPaise)} from advance` : ''}</Chip> : <Chip tone="rose">No price agreed</Chip>;
 }
-/** Before starting: on the patient's first sitting of a procedure, ask whether the consent form is signed. Returns the body to send, or null to not start. */
-export async function startBody(s: { firstSitting?: boolean; procedure?: string | null }): Promise<{ state: 'in_progress'; consent?: boolean } | null> {
-  if (!s.firstSitting) return { state: 'in_progress' };
-  const a = await ask({ title: `Has the patient signed the consent form for ${s.procedure ?? 'this procedure'}?`, body: 'This is the first sitting. Start only after the form is signed.', confirmLabel: 'Yes, signed', cancelLabel: 'Not yet' });
+/** Consent kept on the patient per procedure: "Consent on file" or "Consent needed". */
+type Consent = { consentNeeded?: boolean; consent?: { grantedAt: string; by: string; how?: string } | null };
+export function ConsentChip({ s }: { s: Consent }) {
+  if (s.consentNeeded) return <Chip tone="amber">Consent needed</Chip>;
+  return s.consent ? <Chip tone="sage">Consent on file</Chip> : null;
+}
+/** Before starting: only when no consent is on file for this procedure, ask whether the consent form is signed. Returns the body to send, or null to not start. */
+export async function startBody(s: Consent & { procedure?: string | null }): Promise<{ state: 'in_progress'; consent?: boolean } | null> {
+  if (!s.consentNeeded) return { state: 'in_progress' };
+  const a = await ask({ title: `Has the patient signed the consent form for ${s.procedure ?? 'this procedure'}?`, body: 'No consent is on file for this procedure. Start only after the paper form is signed and filed; it is then recorded and not asked again.', confirmLabel: 'Yes, signed and filed', cancelLabel: 'Not yet' });
   return a ? { state: 'in_progress', consent: true } : null;
 }
 /** Marking done makes the charge, so say what it will be first. */
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
   const m = s.money;
-  const pay = !m ? '' : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'prepaid' ? ' It is paid from the advance.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
+  const pay = !m ? '' : m.kind === 'due' ? (m.prepaidPaise ? ` ${money(m.prepaidPaise)} comes from the advance and ${money(m.amountPaise)} will be due.` : ` ${money(m.amountPaise)} will be due.`) : m.kind === 'prepaid' ? ' It is paid from the advance.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
   return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} sitting ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
 }
 
@@ -76,6 +83,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           <div>
             <Head>Before you start</Head>
             <div className="space-y-1.5 text-sm">
+              <div className="flex items-start gap-2"><span className="w-28 shrink-0 text-muted">Consent</span>{s.consentNeeded ? <ConsentChip s={s} /> : s.consent ? <span><ConsentChip s={s} /> <span className="text-xs text-muted">{s.consent.grantedAt ? `${s.consent.how ?? 'recorded'} · ${s.consent.by} · ${new Date(s.consent.grantedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : s.consent.how}</span></span> : <span className="text-muted">Not needed</span>}</div>
               <div className="flex items-start gap-2"><span className="w-28 shrink-0 text-muted">Allergies</span>{p.allergies ? <b className="text-rose">{p.allergies}</b> : <span className="text-muted">None recorded</span>}</div>
               <div className="flex items-start gap-2"><span className="w-28 shrink-0 text-muted">Conditions</span>
                 {conditions.length ? <span className="flex flex-wrap gap-1">{conditions.map((c) => <Chip key={c.name} tone="amber">{c.name}{c.note ? ` · ${c.note}` : ''}</Chip>)}</span> : <span className="text-muted">{asked ? 'None' : 'Not asked yet'}</span>}</div>

@@ -40,7 +40,7 @@ test('doctor: sitting details, start and mark done only; desk: any state', async
 
   assert.equal((await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).statusCode, 409, 'not started yet');
   assert.equal((await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'cancelled' })).statusCode, 403, 'a doctor does not cancel');
-  assert.equal((await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'in_progress' })).statusCode, 200);
+  assert.equal((await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'in_progress', consent: true })).statusCode, 200);
   assert.equal((await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).statusCode, 200);
   assert.equal((await doctor('GET', `/procedure-sessions/${ps.id}`)).json().state, 'completed');
 
