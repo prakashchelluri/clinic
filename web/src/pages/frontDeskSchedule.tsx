@@ -2,150 +2,130 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get } from '../api';
-import { Filter, Icon, Skeleton } from '../ui';
+import { Icon, Skeleton } from '../ui';
 
-/** The front desk's day as a schedule: a column per doctor (booking windows) and per room (procedure sittings), every patient a chip
- *  coloured by where they are. Any day can be looked at; a chip opens what the table opens, a dashed "free" books that window. */
+/** The front desk's day by the hour: a row per booking hour, a column per doctor (and per room when asked for).
+ *  Patients are booked into an hour, not a minute, and seen in the order they arrive. A name opens the side drawer, "+ Book" books that hour.
+ *  Colours stay calm: booked is a thin outline, here is warm grey, next is light teal, with the doctor is slate, done is grey text. */
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow';
-const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'Initial screening', doctor: 'With the doctor', tests: 'Pending tests & procedures', done: 'Done', noshow: 'No-show' };
-// which chips each stage card keeps lit (today only); the rest dim
-const LIT: Record<string, Kind[] | null> = { now: null, all: null, waiting: ['waiting'], intake: ['intake'], doctor: ['doctor'], checkout: ['tests'], reports: ['tests'], completed: ['done', 'noshow'], scheduled: ['booked', 'late'] };
+const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Tests & procedures to arrange', done: 'Done', noshow: "Didn't come" };
 const SITTING: Record<string, Kind> = { confirmed: 'booked', in_progress: 'doctor', completed: 'done', missed: 'noshow' };
-const PX = 124; // one hour: room for two rows of chips and the Book
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-const hm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-const hhmm = (iso: string) => { const d = new Date(iso); return hm(d.getHours() * 60 + d.getMinutes()); };
-const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const shift = (day: string, n: number) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const dayName = (day: string) => new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+/** "9–10 am", "12–1 pm": how the clinic says an hour */
+const hourLabel = (a: string, b: string) => { const f = (m: number) => { const h = Math.floor(m / 60) % 12 || 12; const mm = m % 60; return mm ? `${h}:${String(mm).padStart(2, '0')}` : `${h}`; }; const s = toMin(a), e = toMin(b); return `${f(s)}–${f(e)} ${e > 12 * 60 ? 'pm' : 'am'}`; };
 
-export function DaySchedule({ today, visitsToday, doctors, rooms, docFilter, setDocFilter, tab, selectedId, kindOf, onVisit, onCheckIn, onOpenAppt, onBook }: {
-  today: string; visitsToday: any[]; doctors: any[]; rooms: any[]; docFilter: string | null; setDocFilter: (v: string | null) => void;
-  tab: string; selectedId: string | null; kindOf: (v: any) => Kind; onVisit: (id: string) => void; onCheckIn: (a: any) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void;
+/** Which calendars this computer shows: picked once, kept. Rooms are off unless asked for. */
+function useShown(): [Record<string, boolean>, (k: string, on: boolean) => void] {
+  const [s, setS] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('fd.cals') ?? '{}'); } catch { return {}; } });
+  return [s, (k, on) => { const n = { ...s, [k]: on }; setS(n); try { localStorage.setItem('fd.cals', JSON.stringify(n)); } catch { /* storage blocked */ } }];
+}
+
+export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, kindOf, nextIds, onVisit, onOpenAppt, onBook, onTable }: {
+  today: string; visitsToday: any[]; doctors: any[]; rooms: any[]; selectedId: string | null; kindOf: (v: any) => Kind; nextIds: Set<string>;
+  onVisit: (id: string) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void; onTable: () => void;
 }) {
   const nav = useNavigate();
   const [day, setDay] = useState(today);
-  const [docsOff, setDocsOff] = useState(false); // rooms only
-  const [roomPick, setRoomPick] = useState('used'); // used = rooms with sittings that day; all; none; or one room's id
+  const [shown, setShown] = useShown();
   const isToday = day === today; const isPast = day < today;
   const cal = useQuery({ queryKey: ['calendar', day, 'all'], queryFn: () => get(`/calendar?day=${day}`), refetchInterval: isToday ? 15000 : false });
   const other = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), enabled: !isToday }); // another day's checked-in patients
-  const visitsAll: any[] = isToday ? visitsToday : other.data?.visits ?? [];
-  const visits = visitsAll.filter((v) => !docFilter || (docFilter === '__none' ? !v.practitionerId : v.practitionerId === docFilter));
+  const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
+  const docOn = (id: string) => shown[`d:${id}`] !== false; // doctors on unless switched off
+  const roomOn = shown.rooms === true;                    // rooms off unless switched on
 
+  const cals = [...doctors.map((d) => ({ key: `d:${d.id}`, label: d.name as string, on: docOn(d.id) })), ...(rooms.length ? [{ key: 'rooms', label: rooms.length === 1 ? rooms[0].name : 'Rooms', on: roomOn }] : [])];
   const bar = (
     <div className="fd-sch-bar">
-      <div className="flex items-center gap-1">
-        <button type="button" className="btn btn-icon !h-9 !w-9" aria-label="Previous day" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" className="h-4 w-4" /></button>
-        <label className="fd-sch-date"><span>{dayName(day)}</span><input type="date" aria-label="Pick a day" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></label>
-        <button type="button" className="btn btn-icon !h-9 !w-9" aria-label="Next day" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" className="h-4 w-4" /></button>
-        {!isToday && <button type="button" className="btn btn-sm ml-1" onClick={() => setDay(today)}>Today</button>}
-      </div>
+      <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous day" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" className="h-4 w-4" /></button>
+      <label className="fd-sch-date"><span>{isToday ? `Today · ${dayName(day)}` : dayName(day)}</span><input type="date" aria-label="Pick a day" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></label>
+      <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next day" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" className="h-4 w-4" /></button>
+      {!isToday && <button type="button" className="btn btn-sm" onClick={() => setDay(today)}>Today</button>}
       <span className="ml-auto" />
-      {doctors.length > 0 && <Filter icon="stetho" value={docsOff ? '__off' : docFilter ?? 'all'} onChange={(v) => { setDocsOff(v === '__off'); setDocFilter(v === 'all' || v === '__off' ? null : v); }}
-        options={[{ value: 'all', label: 'All doctors' }, ...doctors.map((d: any) => ({ value: d.id as string, label: d.name as string })), { value: '__off', label: 'No doctors' }]} />}
-      {rooms.length > 0 && <Filter icon="door" value={roomPick} onChange={setRoomPick}
-        options={[{ value: 'used', label: 'Rooms in use' }, { value: 'all', label: 'All rooms' }, ...rooms.map((r: any) => ({ value: r.id as string, label: r.name as string })), { value: 'none', label: 'No rooms' }]} />}
+      {cals.length > 1 && cals.map((c) => <button key={c.key} type="button" className={`fd-cal ${c.on ? 'on' : ''}`} aria-pressed={c.on} onClick={() => setShown(c.key, !c.on)}><span className="tick">{c.on ? '✓' : ''}</span>{c.label}</button>)}
+      <button type="button" className="btn btn-sm" title="The same day as a list with stages" onClick={onTable}>Table</button>
     </div>);
   if (!cal.data || (!isToday && other.isLoading)) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="p-4"><Skeleton rows={4} /></div></div>;
 
   const now = new Date(); const nowM = now.getHours() * 60 + now.getMinutes();
   const windows: any[] = cal.data.windows ?? []; const procs: any[] = cal.data.procedures ?? [];
-  const lit = isToday ? LIT[tab] ?? null : null;
   const gone = (end: string) => isPast || (isToday && toMin(end) <= nowM);
-  const docCols = docsOff ? [] : doctors.filter((d) => !docFilter || d.id === docFilter)
-    .map((d) => ({ d, ws: windows.filter((w) => w.practitionerId === d.id) })).filter((c) => c.ws.length || visits.some((v) => v.practitionerId === c.d.id) || docFilter === c.d.id);
-  const roomCols = rooms.filter((r) => roomPick === 'all' || roomPick === r.id || (roomPick === 'used' && procs.some((p) => p.roomId === r.id)))
-    .map((r) => ({ r, ps: procs.filter((p) => p.roomId === r.id) }));
-  // a sitting booked without a room still shows, in a column of its own, unless rooms are hidden or one room is picked
-  const roomless = procs.filter((p) => !p.roomId);
-  if (roomless.length && (roomPick === 'used' || roomPick === 'all')) roomCols.push({ r: { id: '__none', name: 'No room' }, ps: roomless });
-  const unpicked = docsOff || (docFilter && docFilter !== '__none') ? [] : visits.filter((v) => !v.practitionerId);
-  const nCols = docCols.length + roomCols.length + (unpicked.length ? 1 : 0);
-  if (!nCols) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="py-10 text-center text-muted">{windows.length || procs.length ? 'Nothing for these filters.' : `No doctor has hours on ${dayName(day)}. Hours are set in Calendar.`}</div></div>;
+  const docCols = doctors.filter((d) => docOn(d.id)).map((d) => ({ d, ws: windows.filter((w) => w.practitionerId === d.id) }));
+  const roomCols = roomOn ? [...rooms.map((r) => ({ r, ps: procs.filter((p) => p.roomId === r.id) })), ...(procs.some((p) => !p.roomId) ? [{ r: { id: '__none', name: 'No room' }, ps: procs.filter((p) => !p.roomId) }] : [])] : [];
+  const nCols = docCols.length + roomCols.length;
+  if (!nCols) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="py-10 text-center text-muted">Tick a doctor above to see their day.</div></div>;
 
-  const times = [...docCols.flatMap((c) => c.ws.flatMap((w) => [toMin(w.startTime), toMin(w.endTime)])), ...roomCols.flatMap((c) => c.ps.flatMap((p) => [toMin(p.startTime), toMin(p.endTime)])), ...visits.map((v) => toMin(hhmm(v.arrivedAt))), ...(isToday ? [nowM] : [])];
-  const from = Math.floor(Math.min(...times, 9 * 60) / 60) * 60;
-  const to = Math.ceil(Math.max(...times, from + 60) / 60) * 60;
-  const y = (m: number) => ((m - from) / 60) * PX;
-  const hours = Array.from({ length: (to - from) / 60 + 1 }, (_, i) => from + i * 60);
-  const off = (wins: [number, number][]) => { const g: [number, number][] = []; let cur = from; for (const [a, b] of [...wins].sort((p, q) => p[0] - q[0])) { if (a > cur) g.push([cur, a]); cur = Math.max(cur, b); } if (cur < to) g.push([cur, to]); return g; };
+  // one row per booking hour (windows that start together share a row); sittings sit in the row their start falls in
+  const starts = [...new Set(docCols.flatMap((c) => c.ws.map((w) => w.startTime)))].sort();
+  const rows = starts.map((s) => { const any = docCols.flatMap((c) => c.ws).find((w) => w.startTime === s)!; return { start: s, end: any.endTime }; });
+  for (const c of roomCols) for (const p of c.ps) if (!rows.some((r) => p.startTime >= r.start && p.startTime < r.end)) rows.push({ start: p.startTime, end: p.endTime });
+  rows.sort((a, b) => a.start.localeCompare(b.start));
+  const rowOf = (t: string) => rows.find((r) => t >= r.start && t < r.end) ?? [...rows].reverse().find((r) => r.start <= t) ?? rows[0];
 
-  // a checked-in patient sits in their booking's window, a walk-in in the window they arrived in (or the nearest one)
-  const homeOf = (v: any, ws: any[]) => ws.find((w) => w.appointments?.some((a: any) => a.id === v.appointmentId))
-    ?? ws.find((w) => { const t = toMin(hhmm(v.arrivedAt)); return t >= toMin(w.startTime) && t < toMin(w.endTime); })
-    ?? [...ws].sort((a, b) => Math.abs(toMin(a.startTime) - toMin(hhmm(v.arrivedAt))) - Math.abs(toMin(b.startTime) - toMin(hhmm(v.arrivedAt))))[0];
+  // a checked-in patient sits in their booking's hour; a walk-in in the hour they arrived
+  const homeOf = (v: any, ws: any[]) => ws.find((w) => w.appointments?.some((a: any) => a.id === v.appointmentId)) ?? ws.find((w) => w.startTime === rowOf(hhmm(v.arrivedAt))?.start);
   const visitChip = (v: any) => {
-    const k = kindOf(v); const w = isToday && ['waiting', 'intake'].includes(k) ? minsSince(v.arrivedAt) : 0;
-    const tag = v.details?.reportsEncounterId ? 'reports' : !v.appointmentId ? 'walk-in' : w >= 5 ? `${w}m` : '';
-    return <Chip key={v.id} k={k} tok={v.opNumber} name={v.patient.fullName} tag={tag} dim={!!lit && !lit.includes(k)} sel={selectedId === v.id}
+    const k = kindOf(v); const next = isToday && nextIds.has(v.id);
+    const tag = k === 'intake' ? 'with junior' : k === 'doctor' ? '' : k === 'tests' ? 'tests' : next ? 'next' : v.details?.reportsEncounterId ? 'reports' : !v.appointmentId && k !== 'done' ? 'walk-in' : '';
+    return <Chip key={v.id} k={k} next={next} tok={k === 'done' ? '✓' : v.opNumber} name={v.patient.fullName} tag={tag} sel={selectedId === v.id}
       onClick={() => (isToday ? onVisit(v.id) : nav(`/patients/${v.patient.id}`))} />;
   };
   const apptChip = (a: any, w: any) => {
     const k: Kind = a.status === 'no_show' ? 'noshow' : gone(w.endTime) ? 'late' : 'booked';
-    return <Chip key={a.id} k={k} tok="·" name={a.name} tag={a.service ?? ''} dim={!!lit && !lit.includes(k)} sel={false}
-      onClick={() => (isToday && k !== 'noshow' ? onCheckIn({ id: a.id, patientId: a.patientId, patient: { fullName: a.name } }) : onOpenAppt(a.id))} />;
+    return <Chip key={a.id} k={k} next={false} tok="" name={a.name} tag={k === 'late' || k === 'noshow' ? "didn't come" : a.service ?? ''} sel={false} onClick={() => onOpenAppt(a.id)} />;
   };
+  const nowRow = isToday ? rows.findIndex((r) => toMin(r.start) <= nowM && nowM < toMin(r.end)) : -1;
 
   return (
-    <div className={`fd-sheet fd-sch anim-fade-up overflow-hidden ${selectedId && isToday ? 'md:mr-[436px]' : ''}`}>
+    <div className="fd-sheet fd-sch anim-fade-up overflow-hidden">
       {bar}
       <div className="overflow-x-auto">
-        <div style={{ minWidth: 64 + nCols * 240 }}>
-          <div className="fd-sch-heads">
-            <div className="w-16 shrink-0" />
-            {docCols.map(({ d, ws }) => {
-              const free = ws.filter((w) => !gone(w.endTime)).reduce((n, w) => n + Math.max(0, w.free), 0);
-              const toSee = visits.filter((v) => v.practitionerId === d.id && ['waiting', 'intake', 'doctor'].includes(kindOf(v))).length + (isPast ? 0 : ws.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status)).length, 0));
-              return <div key={d.id} className="fd-sch-dh"><b>{d.name}</b><span>{ws.length ? `${ws[0].startTime}–${ws[ws.length - 1].endTime}` : 'no hours'} · {toSee} to see · {free} free</span></div>;
-            })}
-            {roomCols.map(({ r, ps }) => <div key={r.id} className="fd-sch-dh fd-sch-room"><b>{r.name}</b><span>Procedures · {ps.length} sitting{ps.length === 1 ? '' : 's'}</span></div>)}
-            {unpicked.length > 0 && <div className="fd-sch-dh"><b className="text-rose">No doctor picked</b><span>{unpicked.length} checked in</span></div>}
-          </div>
-          <div className="relative flex" style={{ height: y(to) + 8 }}>
-            <div className="relative w-16 shrink-0">{hours.map((m) => <span key={m} className="fd-sch-hr" style={{ top: y(m) }}>{hm(m)}</span>)}</div>
-            {docCols.map(({ d, ws }) => {
-              const placed = new Map<string, any[]>(); const loose: any[] = [];
-              for (const v of visits.filter((x) => x.practitionerId === d.id)) { const w = homeOf(v, ws); if (w) placed.set(w.id, [...(placed.get(w.id) ?? []), v]); else loose.push(v); }
-              return (
-                <div key={d.id} className="fd-sch-col">
-                  {hours.map((m) => <i key={m} className="fd-sch-line" style={{ top: y(m) }} />)}
-                  {off(ws.map((w) => [toMin(w.startTime), toMin(w.endTime)])).map(([a, b]) => <div key={a} className="fd-sch-off" style={{ top: y(a), height: y(b) - y(a) }}>{!ws.length ? 'Not in' : a === from ? '' : b === to ? `Off after ${hm(a)}` : 'Not in'}</div>)}
-                  {ws.map((w) => {
-                    const here = placed.get(w.id) ?? [];
-                    const booked = (w.appointments ?? []).filter((a: any) => a.status !== 'arrived' && !visits.some((v) => v.appointmentId === a.id));
-                    const shut = w.effectiveCapacity === 0 && w.reductions?.length;
-                    return (
-                      <div key={w.id} className={`fd-sch-cell ${shut ? 'shut' : ''}`} style={{ top: y(toMin(w.startTime)) + 3, height: y(toMin(w.endTime)) - y(toMin(w.startTime)) - 6 }}>
-                        {here.map(visitChip)}
-                        {booked.map((a: any) => apptChip(a, w))}
-                        {shut ? <span className="fd-sch-full">{w.reductions[0].note ?? 'Blocked'}</span>
-                          : !gone(w.endTime) && (w.free > 0 ? (onBook ? <button type="button" className="fd-sch-free" onClick={() => onBook({ ...w, day })}>+ Book · {w.free} free</button> : <span className="fd-sch-full">{w.free} free</span>)
-                            : <span className="fd-sch-full">Full</span>)}
-                        <span className="fd-sch-cap">{w.allocated} of {w.effectiveCapacity}</span>
-                      </div>);
-                  })}
-                  {loose.length > 0 && <div className="fd-sch-cell" style={{ top: 3, height: PX - 6 }}>{loose.map(visitChip)}</div>}
-                </div>);
-            })}
-            {roomCols.map(({ r, ps }) => (
-              <div key={r.id} className="fd-sch-col">
-                {hours.map((m) => <i key={m} className="fd-sch-line" style={{ top: y(m) }} />)}
-                {ps.length === 0 && <div className="fd-sch-off" style={{ top: 0, height: y(to) }}>No sittings</div>}
-                {ps.map((p) => { const k = SITTING[p.state] ?? 'booked'; return (
-                  <button key={p.id} type="button" className={`fd-sch-sit fd-k-${k}`} style={{ top: y(toMin(p.startTime)) + 2, height: Math.max(30, y(toMin(p.endTime)) - y(toMin(p.startTime)) - 4) }}
-                    title={`${p.patient} · ${p.procedure ?? 'Procedure'} · ${LABEL[k]}`} onClick={() => nav(`/worklist?day=${day}`)}>
-                    <b className="truncate">{p.patient}</b><span className="truncate">{p.startTime}–{p.endTime} · {p.procedure ?? 'Procedure'}{p.doctor ? ` · ${p.doctor}` : ''}</span></button>); })}
-              </div>))}
-            {unpicked.length > 0 && <div className="fd-sch-col"><div className="fd-sch-cell" style={{ top: 3, bottom: 3 }}>{unpicked.map(visitChip)}</div></div>}
-            {isToday && nowM >= from && nowM <= to && <div className="fd-sch-now" style={{ top: y(nowM) }}><span>{hm(nowM)}</span><i /></div>}
-          </div>
+        <div className="fd-hgrid" style={{ minWidth: 88 + nCols * 230, gridTemplateColumns: `88px repeat(${nCols}, minmax(0, 1fr))` }}>
+          <span className="fd-hh" />
+          {docCols.map(({ d }) => <span key={d.id} className="fd-hh"><b>{d.name}</b></span>)}
+          {roomCols.map(({ r }) => <span key={r.id} className="fd-hh"><b>{r.name}</b> <span>procedures</span></span>)}
+          {rows.map((r, i) => {
+            const past = gone(r.end);
+            return [
+              <span key={`t${r.start}`} className={`fd-ht ${i === nowRow ? 'now' : ''} ${past ? 'past' : ''}`}>{hourLabel(r.start, r.end)}{i === nowRow && <small>now</small>}</span>,
+              ...docCols.map(({ d, ws }) => {
+                const w = ws.find((x) => x.startTime === r.start);
+                if (!w) return <div key={d.id + r.start} className={`fd-hc off ${i === nowRow ? 'now' : ''}`}>{ws.length ? '' : 'not in'}</div>;
+                const here = visits.filter((v) => v.practitionerId === d.id && homeOf(v, ws)?.id === w.id);
+                const booked = (w.appointments ?? []).filter((a: any) => a.status !== 'arrived' && a.status !== 'cancelled' && !visits.some((v) => v.appointmentId === a.id));
+                const shut = w.effectiveCapacity === 0 && w.reductions?.length;
+                return (
+                  <div key={d.id + r.start} className={`fd-hc ${i === nowRow ? 'now' : ''}`}>
+                    <span className="fd-hcap">{shut ? w.reductions[0].note ?? 'Closed' : `${w.allocated} of ${w.effectiveCapacity} booked`}</span>
+                    <div className="fd-hchips">{here.map(visitChip)}{booked.map((a: any) => apptChip(a, w))}</div>
+                    {!shut && !past && w.free > 0 && onBook && <button type="button" className="fd-sch-free" onClick={() => onBook({ ...w, day })}>+ Book · {w.free} free</button>}
+                  </div>);
+              }),
+              ...roomCols.map(({ r: room, ps }) => {
+                const mine = ps.filter((p) => rowOf(p.startTime) === r);
+                return (
+                  <div key={room.id + r.start} className={`fd-hc ${i === nowRow ? 'now' : ''}`}>
+                    {!mine.length && <span className="fd-hcap">free</span>}
+                    <div className="fd-hchips">{mine.map((p) => { const k = SITTING[p.state] ?? 'booked'; return (
+                      <Chip key={p.id} k={k} next={false} tok={k === 'done' ? '✓' : ''} name={`${p.procedure ?? 'Procedure'} · ${p.patient}`} tag={p.startTime} sel={false} onClick={() => nav(`/worklist?day=${day}`)} />); })}</div>
+                  </div>);
+              }),
+            ];
+          })}
         </div>
+      </div>
+      <div className="fd-hkey">
+        <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
+        <span className="text-muted">✓ Done</span><span className="text-rose">Didn't come</span>
+        <span className="ml-auto">Tap a name for the drawer, “+ Book” to book that hour.</span>
       </div>
     </div>);
 }
 
-function Chip({ k, tok, name, tag, dim, sel, onClick }: { k: Kind; tok: string; name: string; tag: string; dim: boolean; sel: boolean; onClick: () => void }) {
-  return <button type="button" className={`fd-pc fd-k-${k} ${dim ? 'dim' : ''} ${sel ? 'sel' : ''}`} title={`${name} · ${LABEL[k]}`} aria-pressed={sel} onClick={onClick}>
-    <span className="tk">{tok}</span><span className="truncate">{name}</span>{tag && <span className="tg">{tag}</span>}</button>;
+function Chip({ k, next, tok, name, tag, sel, onClick }: { k: Kind; next: boolean; tok: string; name: string; tag: string; sel: boolean; onClick: () => void }) {
+  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${sel ? 'sel' : ''}`} title={`${name} · ${next ? 'Next' : LABEL[k]}`} aria-pressed={sel} onClick={onClick}>
+    {tok && <span className="tk">{tok}</span>}<span className="truncate">{name}</span>{tag && <span className="tg">{tag}</span>}</button>;
 }

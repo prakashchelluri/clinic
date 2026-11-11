@@ -27,7 +27,7 @@ const minus = (hhmm: string, min: number) => { const [h, m] = hhmm.split(':').ma
 export const refreshBookings = () => ['calendar', 'sessions', 'appointments', 'queue', 'bookings', 'appointment'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
 /** One booking, opened from anywhere (calendar, bookings list). Every action on a booking lives here. */
-export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; cfg: any; canWrite: boolean; onClose: () => void }) {
+export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id: string; cfg: any; canWrite: boolean; onClose: () => void; onArrive?: (a: any) => void }) {
   useScrollLock();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['appointment', id], queryFn: () => get(`/appointments/${id}`) });
@@ -69,6 +69,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
             {a.cancelReason && a.status === 'cancelled' && <div className="mt-2 text-sm text-rose">Reason: {a.cancelReason}</div>}
           </div>
 
+          {onArrive && open && mode === null && a.window.day === today() && <button className="btn btn-primary justify-center" onClick={() => onArrive(a)}>Arrived · check in</button>}
           {canWrite && open && mode === null && (
             <div className="grid grid-cols-2 gap-2">
               <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>

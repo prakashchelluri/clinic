@@ -46,7 +46,7 @@ export function FrontDesk() {
   useEffect(() => setSel(null), [tab]);
   const [docFilter, setDocFilter] = useState<string | null>(null); // one doctor's queue, or everyone
   // Table or Schedule: the same day two ways; the desk's last choice is kept on this computer
-  const [view, setViewS] = useState<'table' | 'schedule'>(() => { try { return localStorage.getItem('fd.view') === 'schedule' ? 'schedule' : 'table'; } catch { return 'table'; } });
+  const [view, setViewS] = useState<'table' | 'schedule'>(() => { try { return localStorage.getItem('fd.view') === 'table' ? 'table' : 'schedule'; } catch { return 'schedule'; } });
   const setView = (v: 'table' | 'schedule') => { setViewS(v); try { localStorage.setItem('fd.view', v); } catch { /* storage blocked */ } };
   const [booking, setBooking] = useState<any>(null); // a free window clicked on the schedule
   const [apptId, setApptId] = useState<string | null>(null); // a no-show opened from the schedule
@@ -161,6 +161,33 @@ export function FrontDesk() {
       <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-2 gap-y-1">{top}</div><div className="mt-0.5 text-[12px] text-muted">{sub}</div></div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">{actions}</div>
     </div>);
+  // Next for each doctor: the first in the line who can go in now
+  const nextIds = new Set<string>(); { const seen = new Set<string>(); for (const v of visitsAll) if (['waiting', 'screened'].includes(v.status) && !(screening === 'required' && v.status === 'waiting') && !seen.has(v.practitionerId ?? '')) { seen.add(v.practitionerId ?? ''); nextIds.add(v.id); } }
+  const sendIn = (v: any) => upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
+  const toJunior = (v: any) => upVisit.mutate({ id: v.id, status: 'intake' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent to the junior doctor`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
+  const onSchedule = view === 'schedule' && canDesk && tab !== 'history';
+  const waitingPanel = (
+    <aside className="flex flex-col gap-4">
+      <section className="fd-sheet overflow-hidden">
+        <div className="flex items-baseline gap-2 px-4 pb-2 pt-3.5"><b className="text-[15px]">Waiting</b><span className="text-[12.5px] text-muted">by token</span></div>
+        {waiting.length === 0 && <div className="px-4 pb-4 text-[13px] text-muted">{f ? 'Nobody waiting matches the search.' : 'Nobody waiting.'}</div>}
+        {waiting.map((v) => { const s = canSend(v); const jr = v.status === 'intake'; const screened = v.status === 'screened'; const due = dueOf(v); return (
+          <div key={v.id} className={`flex items-center gap-2 border-t border-line px-3 py-2.5 ${selV?.id === v.id ? 'bg-surface-2' : ''}`}>
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" title="Show the journey" onClick={() => setPickV(v.id)}>
+              <span className="grid h-8 min-w-8 shrink-0 place-items-center rounded-[9px] bg-paper-2 px-1.5 text-[13px] font-bold">{v.opNumber}</span>
+              <span className="min-w-0"><span className="block truncate text-[14px] font-semibold">{v.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{meta([v.doctor ?? 'no doctor', jr ? 'with junior' : screened ? 'screened' : `${minsSince(v.arrivedAt)} min`, due ? `${money(due)} due` : null])}</span></span>
+            </button>
+            {jr ? <span className="shrink-0 text-[12px] text-muted">with junior</span> : !screened && <button className="btn btn-sm shrink-0" disabled={upVisit.isPending} title="Send to the junior doctor for screening" onClick={() => toJunior(v)}>Jr doctor</button>}
+            <button className={`btn btn-sm shrink-0 ${nextIds.has(v.id) ? 'btn-primary' : ''}`} disabled={!s.ok} title={s.why} onClick={() => sendIn(v)}>Send in</button>
+          </div>); })}
+      </section>
+      {late.length + withDue.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
+        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Needs you · {late.length + withDue.length}</span>
+        {withDue.map((v) => <button key={v.id} className="btn btn-sm !justify-start" onClick={() => setCollecting(v)}>{money(dueOf(v))} due · {v.patient.fullName}</button>)}
+        {late.map((a) => <button key={a.id} className="btn btn-sm !justify-start" onClick={() => setApptId(a.id)}>{a.patient.fullName} didn't come</button>)}
+      </section>}
+      <button type="button" className="self-start px-1 text-[13px] font-semibold text-muted hover:text-ink" onClick={() => setTab('history')}>History ›</button>
+    </aside>);
   const render = (r: Row) => {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting';
       const inside = visitsAll.filter((x) => x.status === 'in_consult' && (!v.practitionerId || !x.practitionerId || x.practitionerId === v.practitionerId)).length; const full = inside >= ROOM_MAX; return (
@@ -168,7 +195,7 @@ export function FrontDesk() {
         top={<>{who(v.patient, v.id)}{withJr ? <Chip tone="sky">with junior</Chip> : v.details?.reportsEncounterId ? <Chip tone="amber">back with reports</Chip> : v.status === 'screened' ? <Chip tone="sage">screened</Chip> : v.priority > 0 ? <Chip tone="amber">priority</Chip> : i === 0 ? <Chip tone="clay">next</Chip> : null}{v.doctor ? <Chip>{v.doctor}</Chip> : <Chip tone="rose">no doctor</Chip>}</>}
         sub={meta([v.patient.patientNo, v.patient.phone, `arrived ${hhmm(v.arrivedAt)} · waited ${minsSince(v.arrivedAt)} min`, v.category, v.details?.complaint, v.details?.weight_kg && `${v.details.weight_kg} kg`, v.details?.bp && `BP ${v.details.bp}`])}
         actions={<>
-          {isJunior && v.status === 'waiting' && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>Intake</button>}
+          {isJunior && ['waiting', 'intake'].includes(v.status) && <button className="btn btn-sm btn-primary" onClick={() => openEncounter.mutate(v.id)}>{v.status === 'intake' ? 'Open' : 'Intake'}</button>}
           {isDoctorUser && <button className="btn btn-sm" disabled={withJr} title={withJr ? 'With the junior doctor right now' : 'Open the consultation yourself; the desk is told'} onClick={() => openEncounter.mutate(v.id)}>Open</button>}
           {canDesk && <button className="btn btn-sm btn-primary" disabled={withJr || needsJr || full || upVisit.isPending} title={withJr ? 'With the junior doctor right now' : needsJr ? 'Screening first: the junior doctor sees them before the doctor' : full ? `${inside} already inside: the room takes ${ROOM_MAX}. Send the next one in when someone comes out.` : 'Send the patient in to the doctor'} onClick={() => upVisit.mutate({ id: v.id, status: 'in_consult' })}>{full ? 'Room full' : 'Send in'}</button>}
           {canDesk && <MoreMenu items={[{ label: 'Profile', onClick: () => nav(`/patients/${v.patient.id}`) }, { label: 'Move up', hidden: i === 0, onClick: () => upVisit.mutate({ id: v.id, afterVisitId: i >= 2 ? waiting[i - 2].id : null }) }, { label: 'Change doctor', hidden: !(d?.doctors ?? []).length, onClick: () => setMoving(v) }, { label: 'Left without consultation', danger: true, onClick: () => markLeft(v) }]} />}
@@ -216,7 +243,7 @@ export function FrontDesk() {
       {!d ? (q.isError ? <div role="alert" className="fd-sheet flex flex-wrap items-center justify-center gap-3 py-10 text-[14px]"><span>Couldn't load the queue. {errText(q.error)}</span><button className="btn btn-sm btn-primary" disabled={q.isFetching} onClick={() => q.refetch()}>Retry</button></div> : <Skeleton rows={3} />) : (
         <div>
           <div className="min-w-0">
-            {tab !== 'history' && <StageStrip tab={tab} onTab={setTab}
+            {tab !== 'history' && !onSchedule && <StageStrip tab={tab} onTab={setTab}
               items={[...(canDesk ? [['now', 'For you now', nowCount, nowCount > 0]] : []), ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest <Num value={longest} /> min</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ...(canDesk ? [['scheduled', 'Still to arrive', scheduled.length, false]] : []), ['all', 'All', visits.length + scheduled.length + noShows.length, false]] as [Tab, string, number, boolean, React.ReactNode?][]}
               extra={<>{docFilter && tab !== 'now' && view !== 'schedule' && <span className="fd-chip">{docOptions.find((o) => o.value === docFilter)?.label}<button type="button" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button></span>}
               {canDesk && <span className="self-center shrink-0 ml-auto"><Segmented size="sm" value={view} onChange={setView} options={[{ value: 'table', label: 'Table' }, { value: 'schedule', label: 'Schedule' }]} /></span>}
@@ -230,9 +257,11 @@ export function FrontDesk() {
               <span className="ml-auto" />
               <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-paper px-3 font-semibold text-ink hover:bg-paper-2 disabled:opacity-50" disabled={!sel.size || bulk.isPending} onClick={bulkAsk}>{tab === 'scheduled' ? 'Mark no-show' : 'Mark as left'}{sel.size ? ` · ${sel.size}` : ''}</button>
             </div>}
-            {view === 'schedule' && canDesk && tab !== 'history' ? <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} docFilter={docFilter} setDocFilter={setDocFilter} tab={tab} selectedId={selV?.id ?? null}
+            {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                onVisit={setPickV} onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} />
+                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} onTable={() => setView('table')} />
+              {waitingPanel}</div>
             : tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
                 onReportsArrive={(o) => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })} freeDays={freeDays}
@@ -242,7 +271,7 @@ export function FrontDesk() {
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
               </div>)}
-            {canDesk && tab !== 'history' && <Filmstrip visits={visitsAll} selectedId={selV?.id ?? null} onSelect={setPickV}
+            {canDesk && tab !== 'history' && !onSchedule && <Filmstrip visits={visitsAll} selectedId={selV?.id ?? null} onSelect={setPickV}
               onEnter={(v) => { const s = canSend(v); if (['waiting', 'screened'].includes(v.status) && s.ok) upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') }); else if (['waiting', 'screened'].includes(v.status)) toast(s.why, 'info'); }} />}
           </div>
           {collecting && <TakePayment patientId={collecting.patientId} patientName={collecting.patient.fullName} charges={collecting.due} payments={collecting.due.map((c: any) => ({ chargeId: c.id, amountPaise: c.paidPaise ?? 0 }))} onClose={() => { setCollecting(null); refresh(); }} />}
@@ -255,9 +284,9 @@ export function FrontDesk() {
             </div></Modal>}
           {booking && <Modal title="Book" subtitle={`${booking.day === day ? 'Today' : new Date(booking.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId) ? ` · ${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
             <BookForm session={booking} arriveEarly={cfg?.tenant?.settings?.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); setBooking(null); }} /></Modal>}
-          {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onClose={() => { setApptId(null); qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); }} />}
+          {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onArrive={canDesk ? (a) => { setApptId(null); setArrive({ patientId: a.patient.id ?? a.patientId, appointmentId: a.id, name: a.patient.fullName }); } : undefined} onClose={() => { setApptId(null); qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); }} />}
           {selV && <JourneyPanel key={selV.id} v={selV} order={reportsOpen.find((o) => o.encounterId === selV.encounterId)} screening={screening} inLine={waiting.findIndex((x) => x.id === selV.id) + 1} canDesk={canDesk}
-              canSend={canSend} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })} onClose={() => setPickV('')}
+              canSend={canSend} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })} onToJunior={(id) => { const v = visitsAll.find((x) => x.id === id); if (v) toJunior(v); }} onClose={() => setPickV('')}
               arrangeSlot={<CheckoutList bare visits={[selV]} canDesk={canDesk} canForce={can(perms, 'config.write')} />} />}
         </div>)}
     </div>

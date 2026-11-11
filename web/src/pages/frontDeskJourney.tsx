@@ -202,9 +202,9 @@ function Step({ i = 0, state, title, meta, last, children }: { i?: number; state
 }
 
 /** One patient's day, top to bottom; the open tasks sit inside the step they belong to. */
-export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk, onSendIn, canSend, onClose }: {
+export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk, onSendIn, onToJunior, canSend, onClose }: {
   v: any; order?: any; screening: 'off' | 'first' | 'required'; inLine: number; arrangeSlot: React.ReactNode; canDesk: boolean;
-  onSendIn: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onClose: () => void;
+  onSendIn: (id: string) => void; onToJunior?: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onClose: () => void;
 }) {
   const nav = useNavigate(); const { cfg } = useOutletContext<any>() ?? {};
   const d = v.details ?? {}; const left = v.status === 'left';
@@ -217,7 +217,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
   const closed = !!d.checkoutClosedAt || (seen && open.length === 0);
   const finished = left || (seen && closed && !held);
 
-  const vit: [StepState, string] = v.status === 'intake' ? ['now', 'with the junior doctor now'] : d.screenedAt ? ['done', `${hhmm(d.screenedAt)} · junior doctor`]
+  const vit: [StepState, string] = canDesk && onToJunior && v.status === 'waiting' && !d.screenedAt ? ['next', 'not yet'] : v.status === 'intake' ? ['now', 'with the junior doctor now'] : d.screenedAt ? ['done', `${hhmm(d.screenedAt)} · junior doctor`]
     : v.status === 'waiting' && screening === 'required' ? ['next', 'junior doctor sees them first'] : seen || v.status === 'in_consult' || screening === 'off' ? ['skip', 'not needed for this visit'] : ['next', 'if the junior doctor picks them'];
   const doc: [StepState, string] = left ? ['skip', 'left without seeing the doctor'] : seen ? ['done', `${v.completedAt ? hhmm(v.completedAt) : ''}${v.doctor ? ` · ${v.doctor}` : ''}`]
     : v.status === 'in_consult' ? ['now', `in the room${d.calledAt ? ` since ${hhmm(d.calledAt)} · ${minsSince(d.calledAt)} min` : ''}`] : ['next', `${v.doctor ?? 'no doctor picked'}${inLine ? ` · ${inLine === 1 ? 'next' : `${inLine}th in line`}` : ''}`];
@@ -235,7 +235,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
 
       <ol className="m-0 list-none p-0">
         <Step i={0} state="done" title="Checked in" meta={`${hhmm(v.arrivedAt)} · ${v.category}`}>{d.complaint && <div className="mt-0.5 text-[12.5px] text-muted">{d.complaint}</div>}</Step>
-        <Step i={1} state={vit[0]} title="Initial screening" meta={vit[1]}>{vitals && <div className="mt-0.5 text-[12.5px] text-muted">{vitals}</div>}</Step>
+        <Step i={1} state={vit[0]} title="Junior doctor" meta={vit[1]}>{vitals && <div className="mt-0.5 text-[12.5px] text-muted">{vitals}</div>}{canDesk && onToJunior && v.status === 'waiting' && <div className="mt-2"><button className="btn btn-sm" onClick={() => onToJunior(v.id)}>Send to junior doctor</button></div>}</Step>
         <Step i={2} state={doc[0]} title="Doctor" meta={doc[1]}>
           {seen && v.rxCount > 0 && <div className="mt-0.5 text-[12.5px] text-muted">{plural(v.rxCount, 'medicine')} · the pharmacy has the Rx</div>}
           {canDesk && waiting && (() => { const s = canSend(v); return <div className="mt-2"><SendIn ok={s.ok} why={s.why} onClick={() => onSendIn(v.id)} /></div>; })()}

@@ -83,48 +83,51 @@
 .fd-x { color: var(--color-clay-ink); }
 
 /* Schedule view: a column per doctor, a row per booking window, patients as chips coloured by stage */
-.fd-sch-heads { display: flex; border-bottom: 1px solid var(--color-line); }
-.fd-sch-dh { flex: 1; min-width: 240px; display: flex; flex-direction: column; padding: 10px 14px; border-left: 1px solid var(--color-line); }
-.fd-sch-dh b { font-size: 14px; font-weight: 800; }
-.fd-sch-dh span { font-size: 12px; font-weight: 600; color: var(--color-muted); }
-.fd-sch-hr { position: absolute; right: 10px; transform: translateY(-7px); font-size: 11.5px; font-weight: 700; color: var(--color-muted); font-variant-numeric: tabular-nums; }
-.fd-sch-col { position: relative; flex: 1; min-width: 240px; border-left: 1px solid var(--color-line); }
-.fd-sch-line { position: absolute; left: 0; right: 0; border-top: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent); }
-.fd-sch-off { position: absolute; left: 0; right: 0; display: flex; justify-content: center; padding-top: 10px; box-sizing: border-box; font-size: 12px; font-weight: 700; color: var(--color-muted);
-  background: repeating-linear-gradient(135deg, transparent 0 8px, color-mix(in srgb, var(--color-ink) 5%, transparent) 8px 16px); }
-.fd-sch-cell { position: absolute; left: 6px; right: 6px; box-sizing: border-box; padding: 6px 6px 18px; border-radius: 10px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; overflow-y: auto; scrollbar-width: thin;
-  background: color-mix(in srgb, var(--color-sage-soft) 45%, transparent); }
-.fd-sch-cell.shut { background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
-.fd-sch-cap { position: absolute; right: 8px; bottom: 3px; font-size: 10.5px; font-weight: 700; color: var(--color-muted); }
-.fd-sch-free { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border: 1.5px dashed color-mix(in srgb, var(--color-sage) 55%, transparent); border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--color-sage); white-space: nowrap; }
-.fd-sch-free:hover { background: var(--color-sage-soft); border-style: solid; }
-.fd-sch-full { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--color-muted); background: color-mix(in srgb, var(--color-ink) 6%, transparent); }
-.fd-sch-now { position: absolute; left: 58px; right: 0; border-top: 2px solid var(--color-clay); z-index: 2; pointer-events: none; }
-.fd-sch-now i { position: absolute; left: -5px; top: -6px; width: 10px; height: 10px; border-radius: 9px; background: var(--color-clay); }
-.fd-sch-now span { position: absolute; left: -58px; top: -9px; font-size: 11px; font-weight: 800; color: var(--color-clay); }
-.fd-pc { display: inline-flex; align-items: center; gap: 6px; height: 28px; max-width: 100%; padding: 0 9px 0 4px; border-radius: 8px; font-size: 12.5px; font-weight: 700; white-space: nowrap; transition: opacity .2s, transform .15s; }
-.fd-pc:hover { transform: translateY(-1px); }
-.fd-pc .tk { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; box-sizing: border-box; border-radius: 6px; background: color-mix(in srgb, var(--color-surface) 70%, transparent); font-size: 11px; font-weight: 800; }
-.fd-pc .tg { font-size: 11px; font-weight: 600; opacity: .8; }
-.fd-pc.dim { opacity: .22; }
-.fd-pc.sel { box-shadow: 0 0 0 2px var(--color-ink); }
-.fd-k-booked { background: var(--color-surface); box-shadow: inset 0 0 0 1.5px var(--color-line-2); color: var(--color-ink-2); }
-.fd-k-late { background: var(--color-surface); box-shadow: inset 0 0 0 1.5px var(--color-amber); color: var(--color-amber); }
-.fd-k-waiting { background: var(--color-sky-soft); color: var(--color-sky); }
-.fd-k-intake { background: color-mix(in srgb, #7c5cc4 16%, var(--color-surface)); color: color-mix(in srgb, #7c5cc4 80%, var(--color-ink)); }
-.fd-k-doctor { background: var(--color-ink); color: var(--color-paper); }
-.fd-k-doctor .tk { background: color-mix(in srgb, var(--color-paper) 18%, transparent); }
-.fd-k-tests { background: var(--color-amber-soft); color: var(--color-amber); }
-.fd-k-done { background: var(--color-sage-soft); color: var(--color-sage); }
-.fd-k-noshow { background: var(--color-rose-soft); color: var(--color-rose); text-decoration: line-through; }
-.fd-pc.fd-k-booked .tk, .fd-pc.fd-k-late .tk { background: transparent; }
-
-.fd-sch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--color-line); }
-.fd-sch-date { position: relative; display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 999px; font-size: 14px; font-weight: 800; background: var(--g-glass-2, var(--color-surface)); box-shadow: inset 0 0 0 1px var(--g-edge, var(--color-line)); cursor: pointer; white-space: nowrap; }
+/* the day by the hour: a row per booking hour, a column per doctor (and room when shown) */
+.fd-sch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-line); }
+.fd-sch-date { position: relative; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .fd-sch-date input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .fd-sch-date input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: auto; height: auto; cursor: pointer; }
 .fd-sch-date:focus-within { box-shadow: 0 0 0 2px var(--color-ink); }
-.fd-sch-room { background: color-mix(in srgb, var(--color-sky-soft) 40%, transparent); }
-.fd-sch-sit { position: absolute; left: 6px; right: 6px; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 4px 10px; border-radius: 10px; text-align: left; font-size: 12.5px; overflow: hidden; z-index: 1; }
-.fd-sch-sit b { font-weight: 800; }
-.fd-sch-sit span { font-size: 11.5px; font-weight: 600; opacity: .85; }
+.fd-cal { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 11px 0 8px; border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line-2); }
+.fd-cal .tick { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 5px; box-shadow: inset 0 0 0 1.5px var(--color-line-2); font-size: 11px; color: var(--color-paper); }
+.fd-cal.on { color: var(--color-ink); box-shadow: inset 0 0 0 1.5px var(--color-nav-active, var(--color-ink)); }
+.fd-cal.on .tick { background: var(--color-nav-active, var(--color-ink)); box-shadow: none; }
+.fd-hgrid { display: grid; }
+.fd-hh { padding: 7px 12px; font-size: 13px; background: var(--color-surface-2); border-left: 1px solid var(--color-line); }
+.fd-hh:first-child { border-left: 0; }
+.fd-hh b { font-weight: 700; }
+.fd-hh span { font-size: 12px; color: var(--color-muted); }
+.fd-ht { display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; font-size: 13.5px; font-weight: 700; color: var(--color-ink-2); border-top: 1px solid var(--color-line); white-space: nowrap; }
+.fd-ht.past { color: var(--color-muted); }
+.fd-ht small { font-size: 11.5px; font-weight: 700; color: var(--color-clay); }
+.fd-ht.now, .fd-hc.now { background: color-mix(in srgb, var(--color-clay) 6%, transparent); }
+.fd-ht.now { box-shadow: inset 3px 0 0 var(--color-clay); }
+.fd-hc { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px 10px; border-top: 1px solid var(--color-line); border-left: 1px solid var(--color-line); }
+.fd-hc.off { color: var(--color-muted); font-size: 12px; background: repeating-linear-gradient(45deg, rgba(0,0,0,.03) 0 6px, transparent 6px 12px); }
+.fd-hcap { font-size: 12px; font-weight: 600; color: var(--color-muted); }
+.fd-hchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.fd-sch-free { align-self: flex-start; display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--color-clay); box-shadow: inset 0 0 0 1.5px var(--color-clay-line, var(--color-line-2)); white-space: nowrap; }
+.fd-sch-free:hover { background: var(--color-clay-soft); }
+.fd-hkey { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-top: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); }
+.fd-hkey span { display: inline-flex; align-items: center; gap: 6px; }
+.fd-hkey i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; }
+
+/* a patient chip: one calm colour per state; text says the rest */
+.fd-pc { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 100%; padding: 0 9px 0 4px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; transition: opacity .2s, transform .15s; }
+.fd-pc:hover { transform: translateY(-1px); }
+.fd-pc .tk { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; box-sizing: border-box; border-radius: 6px; background: color-mix(in srgb, var(--color-surface) 70%, transparent); font-size: 11px; font-weight: 700; }
+.fd-pc .tg { font-size: 11px; font-weight: 500; opacity: .8; }
+.fd-pc.dim { opacity: .22; }
+.fd-pc.sel { box-shadow: 0 0 0 2px var(--color-ink); }
+.fd-k-booked { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-line-2); color: var(--color-ink-2); font-weight: 500; padding-left: 9px; }
+.fd-k-late, .fd-k-noshow { background: transparent; color: var(--color-rose); font-weight: 500; padding-left: 4px; }
+.fd-k-waiting, .fd-k-intake, .fd-k-tests { background: var(--color-paper-2); color: var(--color-ink); }
+.fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-2, var(--color-clay)); box-shadow: inset 0 0 0 1.5px var(--color-clay); }
+.fd-k-doctor { background: var(--color-nav-active, var(--color-ink)); color: var(--color-paper); }
+.fd-k-doctor .tk { background: color-mix(in srgb, var(--color-paper) 18%, transparent); }
+.fd-k-done { background: transparent; color: var(--color-muted); font-weight: 500; }
+.fd-pc.fd-k-done .tk { background: transparent; }
+/* the doctor's own day: booked is the least of their worries, procedures matter */
+.fd-doc .fd-k-booked { background: transparent; color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line); }
+.fd-k-proc { background: var(--color-surface); color: var(--color-ink); box-shadow: inset 0 0 0 1.5px var(--color-muted); padding-left: 9px; }
