@@ -24,23 +24,35 @@ export function visitType(code: string, name: string): (typeof COUNT_KEYS)[numbe
 /** A day's money by type and mode, the cash that should be in the drawer, and the visit counts: what the head receptionist reads against the paper diary. */
 // `to` makes it a range (the Dashboard); every money figure in the app comes from here so they always agree.
 // byDoctor: the same money by the doctor of the visit or sitting it paid for; pharmacy, course advances and anything else stay out (the rest of the total).
-export async function dayFigures(tx: Tx, t: string, tz: string, day: string, to = day) {
-  const start = dayBounds(day, tz).start; const end = dayBounds(to, tz).end;
+export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; total: Bucket };
+export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), total: empty() });
+
+/** Money in over a range, each payment on the clinic's local day it came in: the one ledger End of day, Reports, Clinic and Accounts all read. */
+export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to = from) {
+  const start = dayBounds(from, tz).start; const end = dayBounds(to, tz).end;
+  const days: Record<string, Money> = {}; const total = emptyMoney(); const byDoctor: Record<string, number> = {};
+  const add = (at: string | Date, key: Exclude<keyof Money, 'total'>, method: string, amount: number) => {
+    const m = (days[todayIn(tz, new Date(at))] ??= emptyMoney());
+    put(m[key], method, amount); put(m.total, method, amount); put(total[key], method, amount); put(total.total, method, amount);
+  };
   const pays = await tx.select({ p: payment, c: charge, vDoc: visit.practitionerId, sDoc: procedureSession.practitionerId }).from(payment).leftJoin(charge, eq(charge.id, payment.chargeId))
     .leftJoin(visit, eq(visit.id, charge.visitId)).leftJoin(procedureSession, eq(procedureSession.id, charge.sessionId))
     .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
-  const money = { consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), total: empty() };
-  const byDoctor: Record<string, number> = {};
   // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
   for (const { p, c, vDoc, sDoc } of pays) {
-    const bucket = p.courseId || c?.courseId ? money.procedure : c?.visitId ? money.consultation : money.other;
-    put(bucket, p.method, p.amountPaise); put(money.total, p.method, p.amountPaise);
+    add(p.receivedAt, p.courseId || c?.courseId ? 'procedure' : c?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
     const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
-  for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) { put(money.pharmacy, x.method, x.amountPaise); put(money.total, x.method, x.amountPaise); }
-  const allSales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(day, -90))));
-  for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) { put(money.pharmacy, r.method, -r.refundPaise); put(money.total, r.method, -r.refundPaise); }
+  for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) add(s.createdAt, 'pharmacy', x.method, x.amountPaise);
+  const allSales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90))));
+  for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) add(r.at, 'pharmacy', r.method, -r.refundPaise);
+  return { days, total, byDoctor };
+}
+
+export async function dayFigures(tx: Tx, t: string, tz: string, day: string, to = day) {
+  const start = dayBounds(day, tz).start; const end = dayBounds(to, tz).end;
+  const { total: money, byDoctor } = await moneyByDay(tx, t, tz, day, to);
   const exp = await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(expense).where(and(eq(expense.tenantId, t), gte(expense.day, day), lte(expense.day, to), eq(expense.method, 'cash'), isNull(expense.voidedAt)));
   const expensesCashPaise = exp[0]?.n ?? 0;
   const vis = await tx.select({ code: feeCategory.code, name: feeCategory.name }).from(visit).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId)).where(and(eq(visit.tenantId, t), gte(visit.day, day), lte(visit.day, to)));

@@ -33,6 +33,7 @@ import { adminRoutes } from './modules/admin.js';
 import { procedureRoutes } from './modules/procedures.js';
 import { platformRoutes } from './modules/platform.js';
 import { overviewRoutes } from './modules/overview.js';
+import { financeRoutes } from './modules/finance.js';
 import { publicRoutes } from './modules/public.js';
 import { skinmapRoutes } from './modules/skinmap.js';
 
@@ -97,7 +98,7 @@ export async function buildApp() {
   });
 
   await app.register(async (api) => {
-    identityRoutes(api); securityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); templateRoutes(api); rxpadRoutes(api); skinmapRoutes(api); orderRoutes(api); courseRoutes(api); followupRoutes(api); planRoutes(api); dayCloseRoutes(api); pharmacyRoutes(api); stockRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); publicRoutes(api);
+    identityRoutes(api); securityRoutes(api); patientRoutes(api); schedulingRoutes(api); visitRoutes(api); clinicalRoutes(api); billingRoutes(api); sampleRoutes(api); documentRoutes(api); templateRoutes(api); rxpadRoutes(api); skinmapRoutes(api); orderRoutes(api); courseRoutes(api); followupRoutes(api); planRoutes(api); dayCloseRoutes(api); pharmacyRoutes(api); stockRoutes(api); broadcastRoutes(api); adminRoutes(api); procedureRoutes(api); platformRoutes(api); overviewRoutes(api); financeRoutes(api); publicRoutes(api);
   }, { prefix: '/api' });
 
   // Serve the built PWA (web/dist) with SPA fallback.
