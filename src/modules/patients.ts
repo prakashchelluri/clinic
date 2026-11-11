@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm';
-import { type PatientFlags, appointment, callback, patient, practitioner, procedureCatalog, procedureSession, session, visit, encounter, prescriptionItem, recommendation, charge, payment } from '../db/schema.js';
+import { and, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { type PatientFlags, appointment, callback, patient, practitioner, procedureCatalog, procedureSession, session, visit, encounter, prescriptionItem, recommendation, charge, payment, message } from '../db/schema.js';
 import { route } from '../lib/route.js';
-import { auditView } from '../lib/audit.js';
+import { auditView, writeAudit } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { normHistory, cleanHistory, allergyText, HISTORY_KEYS } from '../lib/history.js';
@@ -21,7 +21,26 @@ const PatientIn = z.object({
   notes: z.string().max(2000).optional().nullable(),
   guardianId: z.string().uuid().optional().nullable(),
   contactLabel: z.string().trim().max(40).optional().nullable(),
+  noWhatsapp: z.boolean().optional(), // asked for no WhatsApp messages
+  language: z.enum(['en', 'te', 'hi']).optional().nullable(),
 });
+
+/** Names compared loosely: case, dots and extra spaces do not count. */
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function editDistance(a: string, b: string) {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) { let prev = d[0]; d[0] = i; for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; } }
+  return d[b.length];
+}
+/** "Ravi", "Ravi Kumar", "K. Ravi Kumar" and "Ravi Kumaar" are the same person on one phone; "Ravi" and "Sita" are a family. */
+export function similarName(a: string, b: string) {
+  const x = norm(a), y = norm(b); if (!x || !y) return false;
+  if (x === y) return true;
+  const xs = x.split(' '), ys = y.split(' ');
+  const [short, long] = xs.length <= ys.length ? [xs, ys] : [ys, xs];
+  if (short.every((w) => w.length > 1 && long.includes(w))) return true;
+  return Math.min(x.length, y.length) >= 4 && editDistance(x, y) <= 2;
+}
 
 /** History sent with the patient (check-in's first-visit details): only the categories sent replace the stored ones; allergies follow. */
 export function withHistory(sentH: any, stored: any, by: string) {
@@ -30,6 +49,18 @@ export function withHistory(sentH: any, stored: any, by: string) {
   const h: any = { ...normHistory(stored), confirmedAt: new Date().toISOString(), confirmedBy: by };
   for (const k of HISTORY_KEYS) if (k in sentH) { if (clean[k]) h[k] = clean[k]; else delete h[k]; } // a category sent empty is cleared
   return { history: h, allergies: allergyText(h) };
+}
+
+/** Records that are probably this person already. A warning only: families share phones and names repeat. */
+export async function likelyDuplicates(tx: any, t: string, b: { fullName: string; phone?: string | null; ageYears?: number | null; dob?: string | null }, exceptId?: string) {
+  const n = norm(b.fullName);
+  const rows: any[] = await tx.select({ id: patient.id, patientNo: patient.patientNo, fullName: patient.fullName, phone: patient.phone, ageYears: patient.ageYears, dob: patient.dob, sex: patient.sex }).from(patient)
+    .where(and(eq(patient.tenantId, t), isNull(patient.mergedInto), ne(patient.patientNo, 'WALKIN'), or(...(b.phone ? [eq(patient.phone, b.phone)] : []), sql`trim(regexp_replace(lower(${patient.fullName}), '[^a-z]+', ' ', 'g')) = ${n}`))).limit(50);
+  return rows.filter((p) => p.id !== exceptId).map((p) => {
+    const why = b.phone && p.phone === b.phone && similarName(p.fullName, b.fullName) ? 'same phone, similar name'
+      : norm(p.fullName) === n && ((b.dob && p.dob === b.dob) || (b.ageYears != null && p.ageYears === b.ageYears)) ? (b.dob && p.dob === b.dob ? 'same name and date of birth' : 'same name and age') : null;
+    return why ? { ...p, why } : null;
+  }).filter(Boolean).slice(0, 5);
 }
 
 /** Diagnoses are for clinical roles (doctor, junior doctor). Reception, pharmacy and coordinators do not get them. */
@@ -46,7 +77,7 @@ export function patientRoutes(app: FastifyInstance) {
     // Without ?page= it is the quick search other screens use: the newest 25 matches, as a plain list.
     const pg = z.object({ page: z.coerce.number().int().min(1).optional(), size: z.coerce.number().int().min(1).max(100).default(25), sort: z.enum(['new', 'name', 'name_desc', 'old']).default('new'),
       seen: z.enum(['', 'month', 'quarter', 'year_plus', 'never']).default(''), flag: z.enum(['', 'vip', 'family', 'careful']).default('') }).parse(req.query);
-    const conds: any[] = [where, ne(patient.patientNo, 'WALKIN')]; // the pharmacy's shared walk-in record is not a patient
+    const conds: any[] = [where, ne(patient.patientNo, 'WALKIN'), isNull(patient.mergedInto)]; // the pharmacy's shared walk-in record is not a patient; a merged duplicate is gone
     const lastVisit = sql`(select max(e.created_at) from encounter e where e.patient_id = ${patient.id} and e.tenant_id = ${patient.tenantId})`;
     if (pg.seen === 'never') conds.push(sql`${lastVisit} is null`);
     if (pg.seen === 'month') conds.push(sql`${lastVisit} >= now() - interval '30 days'`);
@@ -86,11 +117,10 @@ export function patientRoutes(app: FastifyInstance) {
   route(app, 'post', '/patients', 'patient.write', async (req, tx) => {
     const body = PatientIn.parse(req.body);
     const t = req.ctx.tenantId;
-    // Duplicate warning (not a block): same phone and same name
-    if (body.phone) {
-      const dup = await tx.select({ id: patient.id, patientNo: patient.patientNo }).from(patient)
-        .where(and(eq(patient.tenantId, t), eq(patient.phone, body.phone), ilike(patient.fullName, body.fullName))).limit(1);
-      if (dup.length && !(req.query as any).force) throw new HttpError(409, 'POSSIBLE_DUPLICATE', { existing: dup[0] });
+    // Duplicate warning (not a block): same phone and a similar name, or the same name with the same age or date of birth
+    if (!(req.query as any).force) {
+      const matches = await likelyDuplicates(tx, t, body);
+      if (matches.length) throw new HttpError(409, 'POSSIBLE_DUPLICATE', { existing: matches[0], matches });
     }
     const n = await nextNumber(tx, t, 'patient_no', 'tenant');
     const [row] = await tx.insert(patient).values({ ...body, ...withHistory(body.history, {}, req.ctx.name), tenantId: t, patientNo: `P${String(n).padStart(5, '0')}` }).returning();
@@ -111,7 +141,47 @@ export function patientRoutes(app: FastifyInstance) {
     if (cur) req.auditBefore = Object.fromEntries(Object.keys(body).map((k) => [k, (cur as any)[k]]));
     const [row] = await tx.update(patient).set({ ...body, ...withHistory(body.history, cur?.history, req.ctx.name) }).where(and(eq(patient.id, (req.params as any).id), eq(patient.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
+    // asked for no WhatsApp: reminders already planned are not sent either
+    if (body.noWhatsapp && !cur?.noWhatsapp) await tx.update(message).set({ status: 'skipped', error: 'patient asked for no WhatsApp messages' }).where(and(eq(message.tenantId, req.ctx.tenantId), eq(message.patientId, row.id), eq(message.status, 'pending')));
     return row;
+  });
+
+  /** Likely duplicates of this record, for the owner's merge tool. */
+  route(app, 'get', '/patients/:id/duplicates', 'patient.read', async (req, tx) => {
+    const id = (req.params as any).id; const t = req.ctx.tenantId;
+    const p = await tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]);
+    if (!p) throw new HttpError(404, 'NOT_FOUND');
+    return likelyDuplicates(tx, t, p, id);
+  });
+
+  /** Owner only: merge a duplicate into this record. Everything that points at the duplicate (visits, consultations, bills, payments, bookings, sittings, photos…)
+   *  moves to the kept record; the duplicate is archived (hidden from lists, kept for the audit). Empty details on the kept record are filled from the duplicate. */
+  route(app, 'post', '/patients/:id/merge', 'patient.write', async (req, tx) => {
+    if (!req.ctx.roles.includes('owner')) throw new HttpError(403, 'ONLY_OWNER_MERGES');
+    const keepId = (req.params as any).id; const t = req.ctx.tenantId;
+    const { dropId } = z.object({ dropId: z.string().uuid() }).parse(req.body);
+    if (dropId === keepId) throw new HttpError(400, 'SAME_PATIENT');
+    const [keep, drop] = await Promise.all([keepId, dropId].map((x) => tx.select().from(patient).where(and(eq(patient.id, x), eq(patient.tenantId, t))).then((r) => r[0])));
+    if (!keep || !drop) throw new HttpError(404, 'NOT_FOUND');
+    if (keep.mergedInto || drop.mergedInto) throw new HttpError(409, 'ALREADY_MERGED');
+    // every table with a patient_id, so a table added later is never left pointing at the archived record; the audit log keeps its history as written
+    const res: any = await tx.execute(sql`select table_name from information_schema.columns where table_schema = current_schema() and column_name = 'patient_id' and table_name <> 'audit_log'`);
+    const tables: string[] = (res.rows ?? res).map((r: any) => r.table_name); // PGlite gives { rows }, postgres-js an array
+    const moved: Record<string, number> = {};
+    for (const tb of tables) {
+      const r: any = await tx.execute(sql`update ${sql.identifier(tb)} set patient_id = ${keepId} where patient_id = ${dropId} and tenant_id = ${t}`);
+      const n = r.affectedRows ?? r.count ?? r.rowCount ?? 0; if (n) moved[tb] = n;
+    }
+    await tx.update(patient).set({ guardianId: keepId }).where(and(eq(patient.tenantId, t), eq(patient.guardianId, dropId)));
+    const fill: any = {};
+    for (const k of ['phone', 'sex', 'ageYears', 'dob', 'locality', 'contactLabel', 'language', 'notes'] as const) if ((keep as any)[k] == null && (drop as any)[k] != null) fill[k] = (drop as any)[k];
+    // allergies are never dropped: both records' are kept
+    const allergies = [keep.allergies, drop.allergies].filter(Boolean).filter((a, i, xs) => xs.indexOf(a) === i).join('; ') || null;
+    await tx.update(patient).set({ ...fill, allergies, noWhatsapp: keep.noWhatsapp || drop.noWhatsapp, referralCard: keep.referralCard || drop.referralCard, flags: { ...drop.flags, ...keep.flags }, consents: { ...drop.consents, ...keep.consents } }).where(eq(patient.id, keepId));
+    await tx.update(patient).set({ mergedInto: keepId, notes: [drop.notes, `Merged into ${keep.patientNo} by ${req.ctx.name}`].filter(Boolean).join('\n') }).where(eq(patient.id, dropId));
+    await writeAudit(tx, req.ctx, { kind: 'change', action: 'patient.merged', summary: `Merged ${drop.patientNo} ${drop.fullName} into ${keep.patientNo} ${keep.fullName}`, entity: 'patients', entityId: keepId, patientId: keepId, before: { kept: keep.patientNo, archived: drop.patientNo }, after: moved });
+    req.audited = true;
+    return { kept: keepId, archived: dropId, moved };
   });
 
   // Timeline: what the doctor sees when opening a patient.

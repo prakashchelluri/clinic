@@ -73,6 +73,7 @@ function Timeline({ id }: { id: string }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const [flagging, setFlagging] = useState(false); const [filter, setFilter] = useState<'all' | 'visits' | 'procedures' | 'payments' | 'reports' | 'missed'>('all');
   const show = (...k: string[]) => filter === 'all' || k.includes(filter); const [paying, setPaying] = useState(false);
+  const { me } = useOutletContext<any>(); const isOwner = (me?.roles ?? []).includes('owner'); const [merging, setMerging] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); }, onError: (e: any) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
@@ -81,6 +82,7 @@ function Timeline({ id }: { id: string }) {
   const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo');
   return (
     <div className="space-y-4">
+      {p.mergedInto && <div className="card flex flex-wrap items-center gap-3 !py-3 text-sm" role="status"><span className="flex-1">This record was merged into another one and is kept only for the record.</span><button className="btn btn-sm btn-primary" onClick={() => nav(`/patients/${p.mergedInto}`)}>Open the kept record</button></div>}
       <div className="card anim-fade-up">
         <div className="flex items-start gap-4">
           <Avatar name={p.fullName} size="h-12 w-12 text-[15px]" />
@@ -88,25 +90,27 @@ function Timeline({ id }: { id: string }) {
             <h2 className="text-[18px] font-semibold leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-muted text-lg font-normal">{p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span> <span className="inline-flex flex-wrap gap-1.5 align-middle"><FlagChips flags={p.flags} /></span></h2>
             <CarefulBanner flags={p.flags} />
             {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1.5 text-sm text-ink-2">{guardian && <>Guardian: <button className="underline font-medium" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
-            <div className="text-sm text-muted mt-1 flex items-center gap-2 flex-wrap"><span>{p.patientNo}</span><span>·</span><span>{p.phone ?? 'no phone'}</span>{p.locality && <><span>·</span><span>{p.locality}</span></>}{p.referralCard && <Chip tone="sky">Special card</Chip>}</div>
+            <div className="text-sm text-muted mt-1 flex items-center gap-2 flex-wrap"><span>{p.patientNo}</span><span>·</span><span>{p.phone ?? 'no phone'}</span>{p.locality && <><span>·</span><span>{p.locality}</span></>}{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.noWhatsapp && <Chip>No WhatsApp messages</Chip>}{p.language && p.language !== 'en' && <Chip>{p.language === 'te' ? 'Telugu' : 'Hindi'}</Chip>}</div>
             {p.allergies && <div className="mt-2 inline-flex items-center gap-1.5 text-sm text-rose bg-rose-soft rounded-full px-3 py-1"><Icon name="spark" className="h-3.5 w-3.5" />Allergies: {p.allergies}</div>}
             {p.notes && <div className="text-sm text-ink-2 mt-2">{p.notes}</div>}
             {can(perms, 'user.write') && <div className="mt-2"><SeenBy patientId={id} /></div>}
           </div>
           <div className="text-right"><div className="text-[11px] uppercase tracking-wider text-muted">Visits</div><div className="serif text-2xl">{visits.length}</div>{outstandingPaise > 0 && <div className="text-sm text-rose font-medium mt-1">Due {money(outstandingPaise)}</div>}{outstandingPaise > 0 && can(perms, 'payment.record') && <button className="btn btn-sm btn-primary mt-1.5" onClick={() => setPaying(true)}>Take payment</button>}</div>
           {can(perms, 'encounter.complete') && <button className="btn btn-sm" onClick={() => setFlagging(true)}>Flags</button>}
-          {can(perms, 'patient.write') && <button aria-label="Edit" className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian })}><Icon name="edit" /></button>}
+          {isOwner && !p.mergedInto && <button className="btn btn-sm" title="Two records for one person: move everything into this one" onClick={() => setMerging(true)}>Merge duplicate</button>}
+          {can(perms, 'patient.write') && <button aria-label="Edit" className="btn btn-ghost btn-icon" title="Edit" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp })}><Icon name="edit" /></button>}
         </div>
         {edit && (
           <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-line anim-fade-up">
-            {[['fullName', 'Full name'], ['phone', 'Phone'], ['locality', 'Location'], ['allergies', 'Allergies'], ['notes', 'Notes']].map(([k, l]) => <div key={k} className={k === 'notes' ? 'col-span-3' : ''}><label className="label">{l}</label><input className="input" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></div>)}
+            {[['fullName', 'Full name'], ['phone', 'Phone'], ['locality', 'Area / town'], ['allergies', 'Allergies'], ['notes', 'Notes']].map(([k, l]) => <div key={k} className={k === 'notes' ? 'col-span-3' : ''}><label className="label">{l}</label><input className="input" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></div>)}
             <div><label className="label" htmlFor="np-age">Age</label><NumInput id="np-age" max={120} className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
             <div><span className="label">Sex</span><div className="flex gap-1" role="group" aria-label="Sex">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
             <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={edit.referralCard} onChange={(e) => setEdit({ ...edit, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
             <div><label className="label">Who answers this phone</label><input className="input" placeholder="mother, father…" maxLength={40} value={edit.contactLabel} onChange={(e) => setEdit({ ...edit, contactLabel: e.target.value })} /></div>
             <div className="col-span-2"><label className="label">Guardian (for a minor)</label><GuardianPick selfId={id} value={edit.guardian} onChange={(g) => setEdit({ ...edit, guardian: g })} /></div>
+            <div className="col-span-3"><MessagePrefs language={edit.language} noWhatsapp={edit.noWhatsapp} onChange={(v) => setEdit({ ...edit, ...v })} /></div>
             <div className="col-span-3 flex gap-2 justify-end"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => save.mutate({ ...edit, guardian: undefined, guardianId: edit.guardian?.id ?? null, contactLabel: edit.contactLabel.trim() || null, phone: edit.phone || null, ageYears: edit.ageYears === '' ? null : Number(edit.ageYears), sex: edit.sex || null, locality: edit.locality || null, allergies: edit.allergies || null, notes: edit.notes || null })}>Save</button></div>
+              <button className="btn btn-primary" onClick={() => save.mutate({ ...edit, guardian: undefined, guardianId: edit.guardian?.id ?? null, language: edit.language || null, contactLabel: edit.contactLabel.trim() || null, phone: edit.phone || null, ageYears: edit.ageYears === '' ? null : Number(edit.ageYears), sex: edit.sex || null, locality: edit.locality || null, allergies: edit.allergies || null, notes: edit.notes || null })}>Save</button></div>
           </div>
         )}
       </div>
@@ -154,31 +158,70 @@ function Timeline({ id }: { id: string }) {
       {show('payments') && <Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} canDiscount={can(perms, 'discount.give')} />}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}
+      {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
     </div>
   );
 }
 
+const LANGS: [string, string][] = [['', 'Not asked'], ['en', 'English'], ['te', 'Telugu'], ['hi', 'Hindi']];
+/** Messages: preferred language and "no WhatsApp", the same two fields on the new-patient form and the edit form. */
+function MessagePrefs({ language, noWhatsapp, onChange }: { language: string; noWhatsapp: boolean; onChange: (v: { language?: string; noWhatsapp?: boolean }) => void }) {
+  return (
+    <div className="flex flex-wrap items-end gap-4">
+      <div><span className="label">Language for messages</span><div className="flex flex-wrap gap-1" role="group" aria-label="Language for messages">{LANGS.map(([v, l]) => <button key={v} type="button" aria-pressed={language === v} className={`toggle-opt ${language === v ? 'on' : ''}`} onClick={() => onChange({ language: v })}>{l}</button>)}</div></div>
+      <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" className="accent-clay" checked={noWhatsapp} onChange={(e) => onChange({ noWhatsapp: e.target.checked })} /> No WhatsApp messages</label>
+    </div>
+  );
+}
+
+/** Two records for one person: what each one is, so the owner can pick which to keep. */
+function MergeDialog({ keep, onClose }: { keep: any; onClose: (merged?: boolean) => void }) {
+  const dups = useQuery({ queryKey: ['duplicates', keep.id], queryFn: () => get(`/patients/${keep.id}/duplicates`) });
+  const [q, setQ] = useState(''); const found = useQuery({ queryKey: ['palette', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
+  const [pick, setPick] = useState<any>(null);
+  const merge = useMutation({ mutationFn: () => post(`/patients/${keep.id}/merge`, { dropId: pick.id }), onSuccess: () => { qc.invalidateQueries(); toast(`Merged ${pick.patientNo} into ${keep.patientNo}`); onClose(true); }, onError: (e: any) => toast(errText(e), 'err') });
+  const list: any[] = (q.trim().length >= 2 ? found.data ?? [] : dups.data ?? []).filter((p: any) => p.id !== keep.id);
+  const line = (p: any) => [p.patientNo, p.phone, [p.ageYears, p.sex].filter(Boolean).join(' '), p.why].filter(Boolean).join(' · ');
+  return (
+    <Modal title="Merge a duplicate record" subtitle={`Keep ${keep.fullName} (${keep.patientNo}). Visits, notes, bills, payments, bookings, sittings and photos of the other record move here.`} onClose={() => onClose()} width="max-w-lg">
+      <div className="space-y-3">
+        <input className="input" placeholder="Find the other record: name, phone or patient number" value={q} onChange={(e) => { setQ(e.target.value); setPick(null); }} />
+        {q.trim().length < 2 && <div className="text-xs text-muted">{dups.isLoading ? 'Looking for likely duplicates…' : list.length ? 'Likely duplicates:' : 'No likely duplicates found. Search for the other record.'}</div>}
+        <div className="max-h-64 space-y-1 overflow-y-auto">{list.map((p: any) => <button key={p.id} type="button" className={`row w-full rounded-xl text-left ${pick?.id === p.id ? 'bg-clay-soft' : ''}`} onClick={() => setPick(p)}><div className="min-w-0 flex-1"><div className="text-sm font-medium">{p.fullName}</div><div className="text-xs text-muted">{line(p)}</div></div>{pick?.id === p.id && <Icon name="check" className="h-4 w-4 text-clay" />}</button>)}</div>
+        {pick && <div className="rounded-xl bg-rose-soft px-3 py-2 text-sm text-ink-2" role="alert"><b>{pick.fullName} ({pick.patientNo})</b> will be archived: it stops showing in lists and search, and everything on it moves to {keep.patientNo}. Missing details (phone, age, address) are filled in from it; both records' allergies are kept. This is recorded in the audit log and cannot be undone here.</div>}
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn !bg-rose-soft !text-rose" disabled={!pick || merge.isPending} onClick={() => merge.mutate()}>{pick ? `Merge ${pick.patientNo} into ${keep.patientNo}` : 'Pick the other record'}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
 function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
-  const [f, setF] = useState({ fullName: '', phone: '', ageYears: '', sex: '', locality: '', referralCard: false });
-  const [dup, setDup] = useState<any>(null);
+  const [f, setF] = useState({ fullName: '', phone: '', ageYears: '', sex: '', locality: '', referralCard: false, language: '', noWhatsapp: false });
+  const [dup, setDup] = useState<any[] | null>(null);
   const nameBad = f.fullName !== '' && f.fullName.trim().length < 2;
   const create = useMutation({
-    mutationFn: (force: boolean) => post(`/patients${force ? '?force=1' : ''}`, { ...f, phone: f.phone || null, ageYears: f.ageYears ? Number(f.ageYears) : null, sex: f.sex || null, locality: f.locality || null }),
-    onSuccess: (p) => { toast(`Registered ${p.patientNo}`); onClose(p); }, onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.existing); else toast(errText(e), 'err'); },
+    mutationFn: (force: boolean) => post(`/patients${force ? '?force=1' : ''}`, { ...f, phone: f.phone || null, ageYears: f.ageYears ? Number(f.ageYears) : null, sex: f.sex || null, locality: f.locality || null, language: f.language || null }),
+    onSuccess: (p) => { toast(`Registered ${p.patientNo}`); onClose(p); }, onError: (e: any) => { if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.matches ?? [e.body.existing]); else toast(errText(e), 'err'); },
   });
+  const edit = (p: Partial<typeof f>) => { setDup(null); setF({ ...f, ...p }); };
   return (
     <Modal title="Register patient" subtitle="Only the name is required now; the rest can be completed at arrival" onClose={() => onClose()} width="max-w-lg">
       <div className="space-y-3">
-        <div><label className="label" htmlFor="np-name">Full name</label><input id="np-name" autoFocus maxLength={100} aria-invalid={nameBad} className={`input !py-3 ${nameBad ? '!border-rose' : ''}`} value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} />{nameBad && <div className="mt-1 text-xs text-rose">Enter the name (at least 2 letters).</div>}</div>
+        <div><label className="label" htmlFor="np-name">Full name</label><input id="np-name" autoFocus maxLength={100} aria-invalid={nameBad} className={`input !py-3 ${nameBad ? '!border-rose' : ''}`} value={f.fullName} onChange={(e) => edit({ fullName: e.target.value })} />{nameBad && <div className="mt-1 text-xs text-rose">Enter the name (at least 2 letters).</div>}</div>
         <div className="grid grid-cols-3 gap-2">
-          <div><label className="label" htmlFor="np-phone">Phone</label><input id="np-phone" className="input" inputMode="numeric" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} /></div>
-          <div><label className="label">Age</label><NumInput max={120} className="input" placeholder="years" value={f.ageYears} onChange={(e) => setF({ ...f, ageYears: e.target.value })} /></div>
+          <div><label className="label" htmlFor="np-phone">Phone</label><input id="np-phone" className="input" inputMode="numeric" value={f.phone} onChange={(e) => edit({ phone: e.target.value.replace(/\D/g, '').slice(0, 10) })} /></div>
+          <div><label className="label">Age</label><NumInput max={120} className="input" placeholder="years" value={f.ageYears} onChange={(e) => edit({ ageYears: e.target.value })} /></div>
           <div><label className="label">Sex</label><div className="flex gap-1">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${f.sex === s ? 'on' : ''}`} onClick={() => setF({ ...f, sex: s })}>{s}</button>)}</div></div>
         </div>
-        <div><label className="label" htmlFor="np-loc">Location</label><input id="np-loc" className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>
+        <div><label className="label" htmlFor="np-loc">Area / town</label><input id="np-loc" className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>
+        <MessagePrefs language={f.language} noWhatsapp={f.noWhatsapp} onChange={(v) => setF({ ...f, ...v } as any)} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={f.referralCard} onChange={(e) => setF({ ...f, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
-        {dup && <div className="text-sm text-amber bg-amber-soft rounded-xl p-3 anim-fade-up">A patient with this name and phone exists ({dup.patientNo}). <button className="underline font-medium" onClick={() => create.mutate(true)}>Register anyway</button> (family member) or <button className="underline font-medium" onClick={() => onClose({ id: dup.id })}>open the existing record</button>.</div>}
+        {dup && <div className="space-y-2 rounded-xl bg-amber-soft p-3 text-sm anim-fade-up" role="alert">
+          <div>This may be a patient who is already registered:</div>
+          {dup.map((d: any) => <div key={d.id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1"><b>{d.fullName}</b> <span className="text-muted">{[d.patientNo, d.phone, d.ageYears != null ? `${d.ageYears}y` : null, d.why].filter(Boolean).join(' · ')}</span></span><button className="btn btn-sm" onClick={() => onClose({ id: d.id })}>Open this record</button></div>)}
+          <button className="btn btn-sm" onClick={() => create.mutate(true)}>It is someone else, register</button>
+        </div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn btn-primary" disabled={f.fullName.trim().length < 2 || create.isPending} onClick={() => create.mutate(false)}><Icon name="check" />Register</button></div>
       </div>
     </Modal>

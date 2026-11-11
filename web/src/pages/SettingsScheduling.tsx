@@ -57,7 +57,7 @@ export function AvailabilityTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
 export function ServicesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const list = useQuery({ queryKey: ['admin-services'], queryFn: () => get('/admin/services') });
   const [edit, setEdit] = useState<any>(null);
-  useAddFromNew(() => setEdit(blank));
+  useAddFromNew((w) => { if (w === 'service') setEdit(blank); });
   const refresh = () => { list.refetch(); onSaved(); };
   const items: any[] = list.data ?? [];
   const blank = { name: '', description: '', minutes: 60, price: '', feeCategoryId: '', color: COLORS[items.length % COLORS.length], bufferMinutes: 0, places: 1, practitionerIds: [], onlineBookable: false, sortOrder: items.length, active: true };
@@ -67,13 +67,13 @@ export function ServicesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void })
         {list.isLoading ? <div className="p-4"><Skeleton rows={3} /></div> : items.length === 0 ? <Empty icon="calendar" title="No visit types yet" hint="Add what patients come for: new consultation, review, procedure follow-up." /> : items.map((s) => (
           <button key={s.id} className={`row w-full text-left ${s.active ? '' : 'opacity-50'} ${edit?.id === s.id ? 'bg-white' : ''}`} onClick={() => setEdit({ ...s, price: s.pricePaise == null ? '' : String(s.pricePaise / 100), feeCategoryId: s.feeCategoryId ?? '', description: s.description ?? '' })}>
             <i className="h-3.5 w-3.5 shrink-0 rounded" style={{ background: s.color }} />
-            <div className="min-w-0 flex-1"><div className="font-medium">{s.name}</div><div className="truncate text-xs text-muted">{s.minutes} min{s.pricePaise != null ? ` · ${money(s.pricePaise)}` : ''}{s.places > 1 ? ` · uses ${s.places} places` : ''} · {s.practitionerIds.length ? s.practitionerIds.map((id: string) => cfg.practitioners.find((p: any) => p.id === id)?.name ?? '?').join(', ') : 'all doctors'}</div></div>
+            <div className="min-w-0 flex-1"><div className="font-medium">{s.name}</div><div className="truncate text-xs text-muted">{s.minutes} min{s.pricePaise != null ? ` · ${money(s.pricePaise)}` : ''}{s.places > 1 ? ` · uses ${s.places} booking slots` : ''} · {s.practitionerIds.length ? s.practitionerIds.map((id: string) => cfg.practitioners.find((p: any) => p.id === id)?.name ?? '?').join(', ') : 'all doctors'}</div></div>
             {!s.active ? <Chip tone="rose">archived</Chip> : null}
           </button>
         ))}
       </Section>
       {edit ? <ServiceEditor key={edit.id ?? 'new'} value={edit} cfg={cfg} onDone={() => { setEdit(null); refresh(); }} onCancel={() => setEdit(null)} />
-        : <div className="card border-dashed text-sm text-muted">Pick a visit type to edit it. Its colour marks bookings on the calendar; “online” ones appear on your booking page.</div>}
+        : <div className="card border-dashed text-sm text-muted">Pick a visit type to edit it. Its colour marks bookings on the calendar.</div>}
     </div>
   );
 }
@@ -97,12 +97,12 @@ function ServiceEditor({ value, cfg, onDone, onCancel }: { value: any; cfg: any;
       <div className="grid grid-cols-3 gap-2">
         <div><label className="label" htmlFor="sv-min">Minutes</label><NumInput id="sv-min" max={480} className={`input ${minBad ? '!border-rose' : ''}`} value={f.minutes} onChange={(e) => set('minutes', e.target.value)} /></div>
         <div><label className="label" htmlFor="sv-price">Fee (₹)</label><MoneyInput id="sv-price" value={f.price} onChange={(v) => set('price', v)} placeholder="—" /></div>
-        <div><label className="label" htmlFor="sv-places">Places used</label><NumInput id="sv-places" max={10} className={`input ${placesBad ? '!border-rose' : ''}`} value={f.places} onChange={(e) => set('places', e.target.value)} /></div>
+        <div><label className="label" htmlFor="sv-places">Booking slots it uses</label><NumInput id="sv-places" max={10} className={`input ${placesBad ? '!border-rose' : ''}`} value={f.places} onChange={(e) => set('places', e.target.value)} /></div>
       </div>
-      {(minBad || placesBad || priceBad || bufBad) && <div className="text-xs text-rose">{minBad ? 'Minutes: 5 to 480. ' : ''}{placesBad ? 'Places: 1 to 10. ' : ''}{priceBad ? 'Fee looks wrong. ' : ''}{bufBad ? 'Buffer: 0 to 240 minutes.' : ''}</div>}
+      {(minBad || placesBad || priceBad || bufBad) && <div className="text-xs text-rose">{minBad ? 'Minutes: 5 to 480. ' : ''}{placesBad ? 'Booking slots: 1 to 10. ' : ''}{priceBad ? 'Fee looks wrong. ' : ''}{bufBad ? 'Buffer: 0 to 240 minutes.' : ''}</div>}
       <div className="grid grid-cols-2 gap-2">
         <div><label className="label" htmlFor="sv-buf">Buffer after (min)</label><NumInput id="sv-buf" max={240} className={`input ${bufBad ? '!border-rose' : ''}`} value={f.bufferMinutes} onChange={(e) => set('bufferMinutes', e.target.value)} /></div>
-        <div><label className="label" htmlFor="sv-fee">Fee at check-in</label><select id="sv-fee" className="input" value={f.feeCategoryId} onChange={(e) => set('feeCategoryId', e.target.value)}><option value="">Decide at check-in</option>{cfg.feeCategories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+        <div><label className="label" htmlFor="sv-fee">Fee at check-in</label><select id="sv-fee" className="input" value={f.feeCategoryId} onChange={(e) => set('feeCategoryId', e.target.value)}><option value="">Decide at check-in</option>{cfg.feeCategories.map((c: any) => <option key={c.id} value={c.id}>{c.name}{c.amountPaise != null ? ` · ${money(c.amountPaise)}` : ''}</option>)}</select></div>
       </div>
       <div><span className="label">Colour</span><div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Colour">{COLORS.map((c) => <button key={c} type="button" role="radio" aria-checked={f.color === c} aria-label={c} onClick={() => set('color', c)} className="h-7 w-7 rounded-full transition-shadow" style={{ background: c, boxShadow: f.color === c ? '0 0 0 2px #fff, 0 0 0 4px var(--color-ink)' : undefined }} />)}</div></div>
       <div><span className="label">Doctors</span><div className="flex flex-wrap gap-1.5"><button type="button" className={`toggle-opt ${f.practitionerIds.length === 0 ? 'on' : ''}`} onClick={() => set('practitionerIds', [])}>All doctors</button>{cfg.practitioners.map((p: any) => <button key={p.id} type="button" className={`toggle-opt ${f.practitionerIds.includes(p.id) ? 'on' : ''}`} onClick={() => toggleDoc(p.id)}>{p.name}</button>)}</div></div>

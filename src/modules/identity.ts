@@ -45,7 +45,7 @@ export function identityRoutes(app: FastifyInstance) {
     reply.setCookie('cc_session', JSON.stringify({ u: hit.u.id, t: hit.t.id }), {
       path: '/', httpOnly: true, sameSite: 'lax', signed: true, secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 * 14,
     });
-    return { id: hit.u.id, name: hit.u.name, role: hit.u.role, roles: hit.u.roles, tenant: { id: hit.t.id, name: hit.t.name, slug: hit.t.slug } };
+    return { id: hit.u.id, name: hit.u.name, role: hit.u.role, roles: hit.u.roles, mustChangePassword: hit.u.mustChangePassword, tenant: { id: hit.t.id, name: hit.t.name, slug: hit.t.slug } };
   });
 
   app.post('/auth/logout', async (_req, reply) => { reply.clearCookie('cc_session', { path: '/' }); return { ok: true }; });
@@ -58,7 +58,7 @@ export function identityRoutes(app: FastifyInstance) {
     const u = await tx.select().from(appUser).where(and(eq(appUser.id, req.ctx.userId), eq(appUser.tenantId, req.ctx.tenantId))).then((r) => r[0]);
     if (!u || !verifyPassword(b.currentPassword, u.passwordHash)) throw new HttpError(400, 'WRONG_CURRENT_PASSWORD');
     if (b.newPassword === b.currentPassword) throw new HttpError(400, 'SAME_PASSWORD');
-    await tx.update(appUser).set({ passwordHash: hashPassword(b.newPassword) }).where(eq(appUser.id, u.id));
+    await tx.update(appUser).set({ passwordHash: hashPassword(b.newPassword), mustChangePassword: false }).where(eq(appUser.id, u.id));
     return { ok: true };
   });
 
@@ -92,6 +92,6 @@ export function identityRoutes(app: FastifyInstance) {
   });
 
   route(app, 'get', '/users', 'user.read', async (req, tx) =>
-    tx.select({ id: appUser.id, name: appUser.name, email: appUser.email, role: appUser.role, roles: appUser.roles, practitionerId: appUser.practitionerId, active: appUser.active })
+    tx.select({ id: appUser.id, name: appUser.name, email: appUser.email, role: appUser.role, roles: appUser.roles, practitionerId: appUser.practitionerId, active: appUser.active, mustChangePassword: appUser.mustChangePassword })
       .from(appUser).where(eq(appUser.tenantId, req.ctx.tenantId)));
 }

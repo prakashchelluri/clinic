@@ -80,9 +80,10 @@ export async function queueMessage(tx: Tx, tenantId: string, appointmentId: stri
   const lang = patientLang(v.p, v.t.settings);
   const vars = renderVars(v, origin, opts.extra, lang);
   const noPhone = !v.p.phone || !/^\d{10}$/.test(v.p.phone);
-  const status = !cfg.enabled || cfg.channel === 'none' || noPhone ? 'skipped' : 'pending';
+  const optedOut = v.p.noWhatsapp; // the patient asked for no WhatsApp messages
+  const status = !cfg.enabled || cfg.channel === 'none' || noPhone || optedOut ? 'skipped' : 'pending';
   const [row] = await tx.insert(message).values({ tenantId, patientId: v.p.id, appointmentId, kind, channel: cfg.channel, toPhone: v.p.phone, body: fill(templateFor(kind, lang, v.t.settings), vars),
-    params: vars, status, sendAfter: (opts.sendAfter ?? new Date()).toISOString(), error: status === 'skipped' ? (noPhone ? 'no mobile number' : 'messages are switched off') : null }).returning();
+    params: vars, status, sendAfter: (opts.sendAfter ?? new Date()).toISOString(), error: status === 'skipped' ? (noPhone ? 'no mobile number' : optedOut ? 'patient asked for no WhatsApp messages' : 'messages are switched off') : null }).returning();
   return row;
 }
 

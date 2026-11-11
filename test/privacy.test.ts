@@ -40,7 +40,11 @@ test('work only from the clinic: staff stopped elsewhere, owner and named people
   assert.equal((await as(rcCookie)('PUT', '/security', base)).statusCode, 403, 'reception cannot change it');
   const D2 = as(await cookie('doctor2@demo.clinic', CLINIC), HOME); // signed in at the clinic, then went home
   const doc2 = sec.users.find((u: any) => u.roles.includes('doctor') && !u.roles.includes('owner'));
-  const on = (await O('PUT', '/security', { ...base, ipLock: { ...base.ipLock, allowed: [{ label: 'Clinic broadband', from: CLINIC }, { label: 'Backup', from: '10.0.0.0', to: '10.0.0.255' }], anywhere: [] } })).json();
+  const lockOn = { ...base, ipLock: { ...base.ipLock, allowed: [{ label: 'Clinic broadband', from: CLINIC }, { label: 'Backup', from: '10.0.0.0', to: '10.0.0.255' }], anywhere: [] } };
+  const notListed = await O('PUT', '/security', lockOn);
+  assert.equal(notListed.statusCode, 409); assert.equal(notListed.json().code, 'THIS_COMPUTER_NOT_LISTED', 'from home, the owner must say they are away');
+  const on = (await O('PUT', '/security', { ...lockOn, away: true })).json();
+  assert.equal(on.away, undefined, 'the answer is not stored');
   assert.equal(on.ipLock.enabled, true);
 
   assert.equal((await as(rcCookie, CLINIC)('GET', '/me')).statusCode, 200, 'at the clinic');
@@ -58,6 +62,13 @@ test('work only from the clinic: staff stopped elsewhere, owner and named people
   assert.equal((await D2('GET', '/me')).statusCode, 200, 'doctor may work from anywhere now');
   assert.equal((await login('reception@demo.clinic', '49.205.13.2')).statusCode, 200, 'new address allowed');
   assert.ok(!(await O('GET', '/security')).json().stopped.some((x: any) => x.ip === '49.205.13.2'), 'no longer listed once allowed');
+
+  // at the clinic, the owner cannot take this computer's own address off the list, even saying "away"
+  const OC = as(await cookie('owner@demo.clinic', CLINIC), CLINIC);
+  const s4 = (await OC('GET', '/security')).json();
+  const lock = await OC('PUT', '/security', { ...s4.security, away: true, ipLock: { ...s4.security.ipLock, allowed: s4.security.ipLock.allowed.filter((a: any) => a.from !== CLINIC) } });
+  assert.equal(lock.statusCode, 409); assert.equal(lock.json().code, 'WOULD_LOCK_THIS_COMPUTER'); assert.equal(lock.json().ip, CLINIC);
+  assert.equal((await as(rcCookie, CLINIC)('GET', '/me')).statusCode, 200, 'nothing changed: the clinic computer still works');
 
   // admin cannot slip privacy settings in through the clinic settings
   const s3 = (await O('GET', '/security')).json();

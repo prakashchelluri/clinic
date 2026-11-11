@@ -1,5 +1,22 @@
 import { post, get, qc, errText } from './api';
-import { Chip, MoreMenu, Section, ask, fmtDate, money, toPaise, toast } from './ui';
+import { useState } from 'react';
+import { Chip, Modal, MoreMenu, Section, ask, fmtDate, money, toPaise, toast } from './ui';
+
+/** Why money is given back: picked, not typed, so the owner can count the reasons. "Other" asks for a few words. */
+export const REFUND_REASONS = ['Patient changed mind', 'Charged twice', 'Wrong amount', 'Service not given'] as const;
+export function RefundDialog({ title, body, confirmLabel, onClose }: { title: string; body?: string; confirmLabel: string; onClose: (reason: string | null) => void }) {
+  const [pick, setPick] = useState(''); const [other, setOther] = useState('');
+  const reason = pick === 'Other' ? (other.trim().length >= 3 ? `Other: ${other.trim()}` : '') : pick;
+  return (
+    <Modal title={title} subtitle={body} onClose={() => onClose(null)} width="max-w-md">
+      <div className="space-y-3">
+        <div><span className="label">Why</span><div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Why">{[...REFUND_REASONS, 'Other'].map((r) => <button key={r} type="button" role="radio" aria-checked={pick === r} className={`toggle-opt ${pick === r ? 'on' : ''}`} onClick={() => setPick(r)}>{r}</button>)}</div></div>
+        {pick === 'Other' && <div><label className="label" htmlFor="rf-other">Say why</label><input id="rf-other" className="input" autoFocus maxLength={180} placeholder="At least 3 letters" value={other} onChange={(e) => setOther(e.target.value)} /></div>}
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose(null)}>Cancel</button><button className="btn !bg-rose-soft !text-rose" disabled={!reason} onClick={() => onClose(reason)}>{confirmLabel}</button></div>
+      </div>
+    </Modal>
+  );
+}
 
 const refresh = () => ['timeline', 'frontdesk', 'daily', 'patients'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -25,12 +42,13 @@ export async function printReceipt(no: string) {
 
 /** Each invoice with what was paid on it and a menu for the rare things: discount, cancel, refund, leave out of tax reports. Every one asks why. */
 export function Invoices({ charges, payments, canRefund, canDiscount }: { charges: any[]; payments: any[]; canRefund: boolean; canDiscount: boolean }) {
+  const [refunding, setRefunding] = useState<null | { c: any; paid: number }>(null);
   if (!charges.length) return null;
   const run = async (path: string, body: object, done: string) => { try { await post(path, body); refresh(); toast(done); } catch (e: any) { toast(e?.body?.code === 'DAY_CLOSED' ? 'Today has been closed: no money can be given back today.' : errText(e), 'err'); } };
   // every reason is at least 3 letters (the server asks the same)
   const why = async (title: string, body?: string, confirmLabel = 'Save') => { const a = await ask({ title, body, confirmLabel, field: { label: 'Why', placeholder: 'At least 3 letters', required: true, maxLength: 200 } }); if (a && a.value.trim().length < 3) { toast('Say why in at least 3 letters', 'err'); return null; } return a; };
   const cancel = async (c: any) => { const a = await why('Cancel this invoice?', 'It stays in the list, marked cancelled.', 'Cancel invoice'); if (a?.value) run(`/charges/${c.id}/cancel`, { reason: a.value }, 'Invoice cancelled'); };
-  const refund = async (c: any) => { const paid = payments.filter((p) => p.chargeId === c.id).reduce((s, p) => s + p.amountPaise, 0); const a = await why(`Refund ${money(paid)}?`, 'The money must be handed back, the same way it was paid. The invoice stays in the list, marked refunded.', `Refund ${money(paid)}`); if (a?.value) run(`/charges/${c.id}/adjust`, { kind: 'refunded', reason: a.value }, `Refunded ${money(paid)}`); };
+  const refund = (c: any) => setRefunding({ c, paid: payments.filter((p) => p.chargeId === c.id).reduce((s, p) => s + p.amountPaise, 0) });
   const exclude = async (c: any) => { const a = await why('Leave this out of the tax reports?', 'It is kept and marked. This cannot be undone.'); if (a?.value) run(`/charges/${c.id}/exclude`, { reason: a.value }, 'Left out of the tax reports'); };
   const discount = async (c: any) => {
     const amt = await ask({ title: 'Discount', body: `${c.description} · ${money(c.amountPaise)}`, confirmLabel: 'Next', field: { label: 'Rupees off', required: true, maxLength: 9 } });
@@ -55,6 +73,8 @@ export function Invoices({ charges, payments, canRefund, canDiscount }: { charge
             { label: 'Leave out of tax reports', hidden: !(canRefund && !c.excludedAt), onClick: () => exclude(c) },
           ]} /></td></tr>;
       })}</tbody></table>
+      {refunding && <RefundDialog title={`Refund ${money(refunding.paid)}?`} body="The money must be handed back, the same way it was paid. The invoice stays in the list, marked refunded." confirmLabel={`Refund ${money(refunding.paid)}`}
+        onClose={(reason) => { const r = refunding; setRefunding(null); if (reason) run(`/charges/${r.c.id}/adjust`, { kind: 'refunded', reason }, `Refunded ${money(r.paid)}`); }} />}
     </Section>
   );
 }
