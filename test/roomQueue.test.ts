@@ -22,6 +22,7 @@ test('room queue: three inside at most, a fourth is refused; the desk prints the
   const R = as(await login('reception@demo.clinic')); const D = as(await login('owner@demo.clinic'));
   const cfg = (await R('GET', '/config')).json();
   const doc = cfg.practitioners.find((p: any) => p.name.includes('Main'));
+  await R('POST', '/sessions', { branchId: cfg.branches[0].id, practitionerId: doc.id, day: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), startTime: '00:00', endTime: '23:59', capacity: 50 }); // the doctor works all day today, so check-ins hold at any hour
   const cat = cfg.feeCategories.find((c: any) => c.amountPaise === 0) ?? cfg.feeCategories[0];
   const checkIn = async (n: number) => {
     const p = (await R('POST', '/patients', { fullName: `Room Test ${n}`, phone: `98000000${String(n).padStart(2, '0')}` })).json();

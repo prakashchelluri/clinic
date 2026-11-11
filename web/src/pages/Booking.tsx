@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { get, post, today, uuid, ApiError, errText, useConfig } from '../api';
 import { Avatar, Chip, Empty, Icon, Modal, Skeleton, toast, NumInput, ask } from '../ui';
+import { FlagChips } from '../flags';
 import { normPhone, searchText, looksLikePhone } from '../phone';
 import { told } from '../apptDrawer';
 
@@ -35,7 +36,8 @@ export function NewBooking({ cfg, me, initialPatient, initialDay, initialDoc, on
   const [win, setWin] = useState<any>(null);
   const ws = useQuery({ queryKey: ['sessions', day, doc], queryFn: () => get(`/sessions?day=${day}${doc ? `&practitionerId=${doc}` : ''}`), enabled: !!day });
   const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-  const windows: any[] = (ws.data ?? []).filter((w: any) => day > today() || w.endTime > now);
+  // Only hours still to come, and none where the doctor is away (leave, day off, gone early).
+  const windows: any[] = (ws.data ?? []).filter((w: any) => (day > today() || w.endTime > now) && !(w.effectiveCapacity === 0 && (w.reductions ?? []).length));
   const pickDay = (d: string) => { if (d && d >= today()) { setDay(d); setWin(null); } };
   return (
     <Modal title="New booking" subtitle={initialPatient ? `For ${initialPatient.name}` : 'Pick a time, then the patient'} onClose={onClose} width="max-w-xl">
@@ -83,7 +85,7 @@ export function OnNumber({ list, newOk, onPick, onNew }: { list: any[]; newOk: b
     <div className="rounded-xl bg-amber-soft px-3 py-2.5 text-sm anim-fade-in" role="status">
       <div className="text-amber"><b>Found on this number:</b> {list.map(whoLine).join(' · ')}</div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {list.map((p) => <button key={p.id} type="button" className="toggle-opt !py-1" onClick={() => onPick(p)}>{whoLine(p)}</button>)}
+        {list.map((p) => <button key={p.id} type="button" className="toggle-opt !py-1" onClick={() => onPick(p)}>{whoLine(p)} <FlagChips flags={p.flags} /></button>)}
         <button type="button" aria-pressed={newOk} className={`toggle-opt !py-1 ${newOk ? 'on' : ''}`} onClick={onNew}>Someone new on this number</button>
       </div>
     </div>
@@ -113,7 +115,8 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
   const countN = Number(count);
   const repeatBad = repeat && (!Number.isInteger(countN) || countN < 2 || countN > 26);
   const phoneBad = !patientId && phone !== '' && !/^\d{10}$/.test(phone);
-  const pickP = (p: any) => { setPatientId(p.id); setName(p.fullName); setNewOk(false); };
+  const [pFlags, setPFlags] = useState<any>(null);
+  const pickP = (p: any) => { setPatientId(p.id); setName(p.fullName); setPFlags(p.flags); setNewOk(false); };
   const book = useMutation({
     mutationFn: (overbook: boolean) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: newName, phone: newPhone || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined,
       repeat: repeat ? { everyWeeks, count: countN } : undefined, notify, overbook, idempotencyKey: uuid() }),
@@ -137,9 +140,9 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
       )}
       <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone number or name" className="input !pl-10" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setPatientId(undefined); setNewOk(false); }} /></div>
       {searchErr && <div className="rounded-xl bg-rose-soft px-3 py-2 text-sm text-rose" role="alert">{SEARCH_FAILED}</div>}
-      {!patientId && hits.length > 0 && <div className="card-flat overflow-hidden max-h-44 overflow-y-auto anim-fade-up">{hits.map((p: any) => <button key={p.id} className="row w-full text-left" onClick={() => pickP(p)}><Avatar name={p.fullName} size="h-7 w-7 text-[10px]" /><span className="flex-1 text-sm">{whoLine(p)} <span className="text-muted text-xs">{[p.phone, p.patientNo].filter(Boolean).join(' · ')}</span></span><Icon name="chevR" className="text-muted h-4 w-4" /></button>)}
+      {!patientId && hits.length > 0 && <div className="card-flat overflow-hidden max-h-44 overflow-y-auto anim-fade-up">{hits.map((p: any) => <button key={p.id} className="row w-full text-left" onClick={() => pickP(p)}><Avatar name={p.fullName} size="h-7 w-7 text-[10px]" /><span className="flex-1 text-sm">{whoLine(p)} <FlagChips flags={p.flags} /> <span className="text-muted text-xs">{[p.phone, p.patientNo].filter(Boolean).join(' · ')}</span></span><Icon name="chevR" className="text-muted h-4 w-4" /></button>)}
         <button type="button" aria-pressed={newOk} className={`row w-full text-left text-sm font-semibold ${newOk ? 'bg-sage-soft text-sage' : ''}`} onClick={() => setNewOk(true)}><Icon name="plus" className="h-4 w-4" />{typedPhone ? 'Someone new on this number' : 'Someone new (not in this list)'}</button></div>}
-      {patientId ? <div className="flex items-center gap-2 text-sm bg-sage-soft text-sage rounded-xl px-3 py-2 anim-fade-in"><Icon name="check" className="h-4 w-4" />Booking for <b>{name}</b><button className="btn btn-ghost btn-sm ml-auto" onClick={() => setPatientId(undefined)}>change</button></div>
+      {patientId ? <div className="flex items-center gap-2 text-sm bg-sage-soft text-sage rounded-xl px-3 py-2 anim-fade-in"><Icon name="check" className="h-4 w-4" />Booking for <b>{name}</b><FlagChips flags={pFlags} /><button className="btn btn-ghost btn-sm ml-auto" onClick={() => setPatientId(undefined)}>change</button></div>
         : !searchErr && <div className="grid gap-2 sm:grid-cols-[1fr_160px]">
             {typedName ? <div className="input !bg-paper text-muted">New patient: {typedName}</div>
               : <input aria-label="New patient name" className="input" maxLength={100} placeholder="New patient: name" value={name} onChange={(e) => setName(e.target.value)} />}

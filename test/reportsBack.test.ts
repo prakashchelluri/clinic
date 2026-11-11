@@ -23,6 +23,7 @@ test('back with reports: free, no review allowance, to the ordering doctor; a ba
   const R = as(await login('reception@demo.clinic')); const D = as(await login('owner@demo.clinic'));
   const cfg = (await R('GET', '/config')).json();
   const doc = cfg.practitioners.find((p: any) => p.name.includes('Main'));
+  await R('POST', '/sessions', { branchId: cfg.branches[0].id, practitionerId: doc.id, day: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), startTime: '00:00', endTime: '23:59', capacity: 50 }); // the doctor works all day today, so check-ins hold at any hour
   const paid = cfg.feeCategories.find((c: any) => c.amountPaise > 0 && c.code !== 'REN');
   assert.ok(paid, 'needs a paid category');
   const ren = paid; // the return is checked in under a paid category, so the rule has a fee to drop

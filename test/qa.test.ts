@@ -97,9 +97,12 @@ test('input rules, duplicates and error hygiene', async () => {
   // same patient: one open check-in per day, one booking per window
   const v1 = await reception('POST', '/visits', { patientId: p.body.id, feeCategoryCode: 'GEN', idempotencyKey: 'a1' }); assert.equal(v1.status, 200);
   const v2 = await reception('POST', '/visits', { patientId: p.body.id, feeCategoryCode: 'GEN', idempotencyKey: 'a2' }); assert.equal(v2.status, 409); assert.equal(v2.body.code, 'ALREADY_CHECKED_IN');
-  const win = (await reception('GET', '/sessions')).body[0];
-  const b1 = await reception('POST', '/appointments', { sessionId: win.id, patientId: p.body.id }); assert.equal(b1.status, 200);
-  assert.equal((await reception('POST', '/appointments', { sessionId: win.id, patientId: p.body.id })).body.code, 'ALREADY_BOOKED');
+  // being seen today, so no new booking until the visit ends; another patient books a free hour still to come, once
+  const win = (await reception('GET', '/calendar/free?days=7')).body[0];
+  assert.equal((await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: p.body.id })).body.code, 'IN_VISIT');
+  const q = await reception('POST', '/patients', { fullName: 'QA Booker', phone: '9111111122' });
+  const b1 = await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: q.body.id }); assert.equal(b1.status, 200, JSON.stringify(b1.body));
+  assert.equal((await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: q.body.id })).body.code, 'ALREADY_BOOKED');
   // a broken fee rule is refused on save, and a bad stored rule can never break suggestions
   assert.equal((await owner('POST', '/admin/fee-categories', { code: 'ZZ', name: 'Bad rule', amountPaise: 100, eligibility: { zzz: [1] } })).body.code, 'BAD_RULE');
   assert.equal((await owner('POST', '/admin/fee-categories', { code: 'OK1', name: 'Good rule', amountPaise: 100, eligibility: { '==': [1, 1] } })).status, 200);

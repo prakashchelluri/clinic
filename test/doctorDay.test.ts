@@ -65,7 +65,9 @@ test('change my day: preview who is affected, move them, undo; doctors change on
   assert.equal((await D2('DELETE', `/calendar/blocks/${done.block.id}`)).statusCode, 200);
 
   // ask them to pick: booking stays, a reschedule message goes, and the front desk sees them to call
-  const a2 = (await R('POST', '/appointments', { sessionId: lastW.id, patientId: p.id })).json();
+  // a second patient: the first one still has their (moved) booking, and a patient holds one booking at a time
+  const p2 = (await R('POST', '/patients', { fullName: 'Day Change Second', phone: '9876500012' })).json();
+  const a2 = (await R('POST', '/appointments', { sessionId: lastW.id, patientId: p2.id })).json();
   const away = (await D2('POST', '/calendar/day-change', { practitionerId: second.id, day, kind: 'away', handling: 'ask', reason: 'Conference' })).json();
   assert.equal(away.moved, 0);
   assert.equal((await db.select().from(S.message).where(and(eq(S.message.appointmentId, a2.id), eq(S.message.kind, 'reschedule')))).length, 1);

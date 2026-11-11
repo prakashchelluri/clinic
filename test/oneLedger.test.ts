@@ -26,6 +26,7 @@ test('Dashboard, Reports, End of day and the Clinic page agree: consult, sitting
   const O = as(await login('owner@demo.clinic')); const R = as(await login('reception@demo.clinic')); const P = as(await login('pharmacy@demo.clinic'));
   const cfg = (await O('GET', '/config')).body;
   const doc = cfg.practitioners[0];
+  await O('POST', '/sessions', { branchId: cfg.branches[0].id, practitionerId: doc.id, day: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), startTime: '00:00', endTime: '23:59', capacity: 50 }); // the doctor works all day today, so check-ins hold at any hour
 
   // a consultation paid by UPI, later refunded
   const p1 = (await R('POST', '/patients', { fullName: 'Ledger Consult', phone: '9848066001' })).body;

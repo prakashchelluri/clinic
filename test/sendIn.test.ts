@@ -23,6 +23,7 @@ test('send in by the owner-doctor counts as the desk; Open by the doctor counts 
   const D = as(await login('owner@demo.clinic')); // owner and doctor in one person
   const cfg = (await D('GET', '/config')).json();
   const doc = cfg.practitioners.find((p: any) => p.name.includes('Main'));
+  await D('POST', '/sessions', { branchId: cfg.branches[0].id, practitionerId: doc.id, day: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), startTime: '00:00', endTime: '23:59', capacity: 50 }); // the doctor works all day today, so check-ins hold at any hour
   const cat = cfg.feeCategories.find((c: any) => c.amountPaise === 0) ?? cfg.feeCategories[0];
   const checkIn = async (n: number) => {
     const p = (await D('POST', '/patients', { fullName: `Send In ${n}`, phone: `98111111${n}${n}` })).json();

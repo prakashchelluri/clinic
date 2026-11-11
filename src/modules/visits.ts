@@ -10,6 +10,7 @@ import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { Vitals } from './rxpad.js';
 import { assertDayOpen } from './dayclose.js';
 import { nextReceiptNo } from './billing.js';
+import { windowsForDay, nowHHMM } from './scheduling.js';
 
 /** How many patients may be inside the consultation room at once. ponytail: fixed for every clinic; a tenant setting if one asks. */
 export const ROOM_MAX = 3;
@@ -81,6 +82,12 @@ export function visitRoutes(app: FastifyInstance) {
     const freeDays = Number((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings?.reports?.freeDays ?? 30);
     const freeReturn = !!held && daysBetween(new Date(held.at as any).toISOString().slice(0, 10), day) <= freeDays;
     if (held && !body.practitionerId) body.practitionerId = held.practitionerId ?? undefined;
+    // Only to a doctor who still has hours today: not after their day is over, not on a day off or on leave. Lunch is fine, they come back.
+    if (body.practitionerId) {
+      const now = nowHHMM(req.ctx.timezone);
+      const ws = await windowsForDay(tx, t, day, body.practitionerId);
+      if (!ws.some((w) => w.endTime > now && w.effectiveCapacity > 0)) throw new HttpError(409, 'DOCTOR_NOT_WORKING', { lastEnd: ws.at(-1)?.endTime ?? null });
+    }
     // Review limit: reviews since the last paid consultation are capped (default 1). A second one is for the head receptionist to allow, with a reason.
     if (cat.code === 'REN' && !freeReturn) {
       const limit = Number((await tx.query.tenant.findFirst({ where: (tn, { eq }) => eq(tn.id, t) }))?.settings?.reviewLimit ?? 1);

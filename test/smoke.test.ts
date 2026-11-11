@@ -32,7 +32,9 @@ test('full OP slice', async () => {
   // 1. windows for today exist with capacity
   const sessions = await reception('GET', '/sessions');
   assert.ok(sessions.body.length >= 5);
-  const win = sessions.body[0];
+  // book into an hour that is still to come whatever the clock says: a window over the whole day
+  const first = sessions.body[0];
+  const win = (await reception('POST', '/sessions', { branchId: first.branchId, practitionerId: first.practitionerId, day: first.day, startTime: '00:00', endTime: '23:59', capacity: first.capacity })).body;
 
   // 2. phone booking creates a minimal patient; same idempotency key does not double-book
   const book = await reception('POST', '/appointments', { sessionId: win.id, newPatient: { fullName: 'Lakshmi Devi', phone: '9876543210' }, idempotencyKey: 'k1' });

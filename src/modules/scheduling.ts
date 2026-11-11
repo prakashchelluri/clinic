@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, gte, lte, inArray, or, ilike } from 'drizzle-orm';
-import { session, appointment, service, message, recommendation, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, waitlist, type Routine } from '../db/schema.js';
+import { session, appointment, service, message, recommendation, OPEN_STATUSES, patient, calendarBlock, procedureSession, procedureCatalog, room, practitioner, branch, waitlist, visit, type Routine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, nextNumber, addDays, OPTED_OUT } from '../lib/core.js';
@@ -31,7 +31,7 @@ export const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(
 const overlapMin = (aS: number, aE: number, bS: number, bE: number) => Math.max(0, Math.min(aE, bE) - Math.max(aS, bS));
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 /** Current local time as HH:MM in the clinic's timezone. */
-const nowHHMM = (tz: string) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+export const nowHHMM = (tz: string) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 
 /** 0=Sunday … 6=Saturday for a YYYY-MM-DD day. */
 const weekday = (day: string) => new Date(day + 'T00:00:00Z').getUTCDay();
@@ -353,6 +353,8 @@ export function schedulingRoutes(app: FastifyInstance) {
     const t = req.ctx.tenantId;
     const all = await windowsForDay(tx, t, s.day);
     const w = all.find((x) => x.id === s.id)!;
+    // The doctor is away for the whole hour (leave, holiday, gone early): no booking there, not even an overbooking.
+    if (w.effectiveCapacity === 0 && w.reductions.length) throw new HttpError(409, 'DOCTOR_AWAY', { reductions: w.reductions });
     const full = w.allocated + places > w.effectiveCapacity;
     if (full && !(overbook && can(req.perms, 'appointment.overbook'))) {
       throw new HttpError(409, 'WINDOW_FULL', { alternatives: all.filter((x) => x.free >= places).map((x) => ({ id: x.id, startTime: x.startTime, endTime: x.endTime, free: x.free, practitionerId: x.practitionerId })), overrideRequires: 'appointment.overbook', reductions: w.reductions });
@@ -376,6 +378,8 @@ export function schedulingRoutes(app: FastifyInstance) {
     }
     const s = await tx.select().from(session).where(and(eq(session.id, body.sessionId), eq(session.tenantId, t))).for('update').then((r) => r[0]);
     if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
+    const today = todayIn(req.ctx.timezone); const now = nowHHMM(req.ctx.timezone);
+    if (s.day < today || (s.day === today && s.endTime <= now)) throw new HttpError(409, 'PAST_WINDOW');
     const svc = await serviceFor(tx, t, body.serviceId, s.practitionerId);
     const { w, full } = await takePlace(tx, req, s, svc?.places ?? 1, body.overbook);
     let patientId = body.patientId; let reusedPatient = false;
@@ -385,9 +389,15 @@ export function schedulingRoutes(app: FastifyInstance) {
       const same = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, body.newPatient.phone), sql`${sameName} = ${nm}`)).orderBy(asc(patient.createdAt)).limit(1);
       if (same.length) { patientId = same[0].id; reusedPatient = true; }
     }
+    // One booking at a time: a patient with an upcoming booking is moved, not booked again; one being seen today is booked after the visit.
     if (patientId) {
-      const twice = await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), eq(appointment.sessionId, s.id), inArray(appointment.status, [...OPEN_STATUSES]))).limit(1);
-      if (twice.length) throw new HttpError(409, 'ALREADY_BOOKED');
+      const upcoming = await tx.select({ id: appointment.id, day: session.day, startTime: session.startTime, endTime: session.endTime, doctor: practitioner.name }).from(appointment)
+        .innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(practitioner, eq(practitioner.id, session.practitionerId))
+        .where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), inArray(appointment.status, [...OPEN_STATUSES]), or(sql`${session.day} > ${today}`, and(eq(session.day, today), sql`${session.endTime} > ${now}`))))
+        .orderBy(asc(session.day), asc(session.startTime)).limit(1);
+      if (upcoming.length) throw new HttpError(409, 'ALREADY_BOOKED', upcoming[0]);
+      const seen = await tx.select({ opNumber: visit.opNumber }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, patientId), eq(visit.day, today), inArray(visit.status, ['waiting', 'intake', 'in_consult']))).limit(1);
+      if (seen.length) throw new HttpError(409, 'IN_VISIT', { opNumber: seen[0].opNumber });
     }
     if (!patientId) {
       if (!body.newPatient) throw new HttpError(400, 'PATIENT_REQUIRED');

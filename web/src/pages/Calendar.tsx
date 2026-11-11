@@ -4,6 +4,7 @@ import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
 import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, usePageSearch, useAddFromNew } from '../ui';
+import { FlagChips } from '../flags';
 import { RoutineModal } from '../routine';
 import { BookForm, OnNumber, useOnNumber, whoLine, SEARCH_FAILED } from './Booking';
 import { AppointmentDrawer, told } from '../apptDrawer';
@@ -272,7 +273,7 @@ function SearchBox({ onOpen, onBook }: { onOpen: (id: string) => void; onBook?: 
   return (
     <div className="card-flat anim-fade-up w-full max-w-xl !p-1.5" aria-label="Patients found">
       {!sel ? (found.isLoading ? <div className="p-3 text-sm text-muted">Searching…</div> : found.isError ? <div className="p-3 text-sm text-rose" role="alert">{SEARCH_FAILED}</div> : (found.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No patient found.</div>
-        : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{whoLine(p)}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
+        : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{whoLine(p)}</b><FlagChips flags={p.flags} /><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
         : <div className="p-1.5">
           <div className="flex items-baseline gap-2 px-1 pb-1.5"><b className="text-sm">{sel.fullName}</b><span className="text-xs text-muted">{[sel.patientNo, sel.phone].filter(Boolean).join(' · ')}</span><button className="ml-auto text-xs text-muted hover:text-ink" onClick={() => setSel(null)}>← Back to results</button></div>
           {appts.isLoading ? <div className="p-2 text-sm text-muted">…</div> : (appts.data ?? []).length === 0 ? <div className="px-1 py-2 text-sm text-muted">No upcoming bookings.</div>
@@ -356,11 +357,11 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
     <Modal title="Book" subtitle="Who, when, which visit type." onClose={onClose} width="max-w-2xl">
       <div className="space-y-4">
         <div><div className="label">1 · Who</div>
-          {patient ? <div className="flex items-center gap-2 rounded-xl bg-clay-soft px-3 py-2 text-sm text-clay-ink"><Icon name="check" className="h-4 w-4" /><b>{whoLine(patient)}</b><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
+          {patient ? <div className="flex items-center gap-2 rounded-xl bg-clay-soft px-3 py-2 text-sm text-clay-ink"><Icon name="check" className="h-4 w-4" /><b>{whoLine(patient)}</b><FlagChips flags={patient.flags} /><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
             : <>
               <input autoFocus aria-label="Phone number or name" inputMode="search" className="input" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setNewOk(false); }} />
               {searchErr && <div className="mt-1.5 rounded-xl bg-rose-soft px-3 py-2 text-sm text-rose" role="alert">{SEARCH_FAILED}</div>}
-              {hits.length > 0 && <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-line">{hits.slice(0, 6).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-paper" onClick={() => pickP(p)}><b>{whoLine(p)}</b><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>)}
+              {hits.length > 0 && <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-line">{hits.slice(0, 6).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-paper" onClick={() => pickP(p)}><b>{whoLine(p)}</b><FlagChips flags={p.flags} /><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>)}
                 <button type="button" aria-pressed={newOk} className={`flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm font-semibold ${newOk ? 'bg-clay-soft text-clay-ink' : 'hover:bg-paper'}`} onClick={() => setNewOk(true)}><Icon name="plus" className="h-4 w-4" />{typedPhone ? 'Someone new on this number' : 'Someone new (not in this list)'}</button></div>}
               {qn.length >= 3 && !found.isLoading && !searchErr && <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_170px]">
                 {typedName ? <div className="input !bg-paper text-muted">New patient: {typedName}</div>

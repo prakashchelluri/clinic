@@ -39,6 +39,7 @@ test("the clinic's own vitals: validated in Settings, saved on the pad, back in 
 
   const cfg = (await O('GET', '/config')).json();
   const doc = cfg.practitioners.find((p: any) => p.name.includes('Main'));
+  await O('POST', '/sessions', { branchId: cfg.branches[0].id, practitionerId: doc.id, day: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), startTime: '00:00', endTime: '23:59', capacity: 50 }); // the doctor works all day today, so check-ins hold at any hour
   const cat = cfg.feeCategories.find((c: any) => c.amountPaise === 0) ?? cfg.feeCategories[0];
   const p = (await O('POST', '/patients', { fullName: 'Vitals Patient', phone: '9811100001' })).json();
   const v = await O('POST', '/visits', { patientId: p.id, feeCategoryCode: cat.code, practitionerId: doc.id, details: { weight_kg: 70 }, idempotencyKey: `vit-${Date.now()}`,

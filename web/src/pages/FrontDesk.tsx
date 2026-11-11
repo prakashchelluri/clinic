@@ -477,7 +477,12 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const tl = useQuery({ queryKey: ['timeline', patientId], queryFn: () => get(`/patients/${patientId}/timeline`), enabled: !!patientId });
   // Checking in from the top button: still link the patient's booking for today, and default to that booking's doctor (else the shortest queue). Tap another doctor to change.
   const appt = todayAppts.find((a) => a.id === init.appointmentId) ?? (patientId ? todayAppts.find((a) => a.patientId === patientId) : undefined);
-  const practitionerId = pickedDoc || appt?.window?.practitionerId || [...(cfg?.practitioners ?? [])].sort((a: any, b: any) => (waitingByDoctor[a.id] ?? 0) - (waitingByDoctor[b.id] ?? 0))[0]?.id || '';
+  // Only doctors who still have hours today: their day not over, not on leave or a day off (lunch is fine, they come back).
+  const dayWs = useQuery({ queryKey: ['sessions', today()], queryFn: () => get(`/sessions?day=${today()}`) });
+  const nowHM = new Intl.DateTimeFormat('en-GB', { timeZone: cfg?.tenant?.timezone ?? 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+  const working = (id: string) => !dayWs.data || dayWs.data.some((w: any) => w.practitionerId === id && w.endTime > nowHM && w.effectiveCapacity > 0);
+  const bookedDoc = appt?.window?.practitionerId && working(appt.window.practitionerId) ? appt.window.practitionerId : '';
+  const practitionerId = pickedDoc || bookedDoc || [...(cfg?.practitioners ?? [])].filter((x: any) => working(x.id)).sort((a: any, b: any) => (waitingByDoctor[a.id] ?? 0) - (waitingByDoctor[b.id] ?? 0))[0]?.id || '';
   const fallbackCat = cfg?.feeCategories.find((c: any) => c.code === 'GEN')?.code ?? cfg?.feeCategories[0]?.code ?? '';
   const chosen = cat || sug.data?.suggested?.code || (patientId && sug.isLoading ? '' : fallbackCat);
   const [dup, setDup] = useState<null | { id: string; patientNo: string; fullName?: string; phone?: string; ageYears?: number }>(null); const [forceNew, setForceNew] = useState(false);
@@ -527,7 +532,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   useEffect(() => setPartOk(false), [collect, fee]);
   const MODE: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'card', bank: 'bank' };
   const modes = [...new Set(pays.filter((_, i) => amtOf(i) > 0).map((x) => MODE[x.method]))].join(' + ');
-  const blocker =!chosen ? 'Pick a visit type' : newP && flagDraftBad(newFlags) ? 'Say why the patient is to be handled carefully' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : taking && collect <= 0 ? 'Enter the amount collected' : taking && collect > fee ? `That is more than the ${money(fee)} fee` : short && !partOk ? 'Tick to take less than the fee' : '';
+  const blocker = !practitionerId && dayWs.data ? 'No doctor is working now' : practitionerId && !working(practitionerId) ? 'Pick a doctor who is working now' : !chosen ? 'Pick a visit type' : newP && flagDraftBad(newFlags) ? 'Say why the patient is to be handled carefully' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : taking && collect <= 0 ? 'Enter the amount collected' : taking && collect > fee ? `That is more than the ${money(fee)} fee` : short && !partOk ? 'Tick to take less than the fee' : '';
   const facts = sug.data?.facts;
   const doctorName = (id?: string) => cfg?.practitioners.find((x: any) => x.id === id)?.name;
   const cats: any[] = cfg?.historyCategories ?? [];
@@ -542,7 +547,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
         <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone, name or patient ID" className="input !pl-10 !py-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder="98765…" /></div>
         <div className="mt-3 card-flat overflow-hidden max-h-64 overflow-y-auto">
           {q.length < 2 ? <div className="p-4 text-sm text-muted">Type at least 2 characters</div> : search.isLoading ? <Skeleton rows={2} /> : (search.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No match. Register below.</div> :
-            search.data.map((x: any) => <button key={x.id} className="row w-full text-left" onClick={() => setPatientId(x.id)}><Avatar name={x.fullName} /><div className="flex-1 min-w-0"><div className="text-sm font-medium">{x.fullName} <span className="text-muted font-normal text-xs">{x.ageYears ? `${x.ageYears}` : ''} {x.sex ?? ''}</span></div><div className="text-xs text-muted">{x.patientNo} · {x.phone ?? 'no phone'} · {x.locality ?? ''}</div></div><Icon name="chevR" className="text-muted" /></button>)}
+            search.data.map((x: any) => <button key={x.id} className="row w-full text-left" onClick={() => setPatientId(x.id)}><Avatar name={x.fullName} /><div className="flex-1 min-w-0"><div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">{x.fullName} <span className="text-muted font-normal text-xs">{x.ageYears ? `${x.ageYears}` : ''} {x.sex ?? ''}</span><FlagChips flags={x.flags} /></div><div className="text-xs text-muted">{x.patientNo} · {x.phone ?? 'no phone'} · {x.locality ?? ''}</div></div><Icon name="chevR" className="text-muted" /></button>)}
         </div>
         <button className="btn mt-3" onClick={() => { setFirst(NO_FIRST); setNewFlags(NO_FLAGS); setNewP({ fullName: /^\d+$/.test(q) ? '' : q, phone: /^\d+$/.test(q) ? q : '' }); }}><Icon name="plus" />New patient</button>
       </div>
@@ -570,7 +575,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                <div className="flex items-center gap-4">
                 <Avatar name={p?.fullName ?? init.name ?? '?'} size="h-12 w-12 text-sm" />
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2"><b className="text-[19px] font-extrabold leading-tight">{p?.fullName ?? init.name}</b>
+                  <div className="flex flex-wrap items-center gap-2"><b className="text-[19px] font-extrabold leading-tight">{p?.fullName ?? init.name}</b><FlagChips flags={p?.flags} />
                     {tl.data && (tl.data.visits.length ? <span className={`${badge} bg-sage-soft text-sage`}>Returning · visit {tl.data.visits.length + 1}</span> : <span className={`${badge} bg-amber-soft text-amber`}>First visit</span>)}
                     {appt && <span className={`${badge} bg-sky-soft text-sky`}>Booked {appt.window?.startTime}{doctorName(appt.window?.practitionerId) ? ` · ${doctorName(appt.window?.practitionerId)}` : ''}</span>}</div>
                   <div className="mt-0.5 text-[13px] text-muted">{p ? [p.patientNo, p.phone ?? 'no phone', !isFirst && p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.locality].filter(Boolean).join(' · ') : 'loading…'}</div>
@@ -642,8 +647,8 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
             <div><span className="label">Doctor</span>
               <div role="radiogroup" aria-label="Doctor" className="flex flex-col gap-1.5">
                 {cfg?.practitioners.map((x: any) => { const on = practitionerId === x.id; return (
-                  <button key={x.id} type="button" role="radio" aria-checked={on} onClick={() => setPractitionerId(x.id)} className={`grid w-full grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-[13.5px] font-semibold text-ink ${on ? 'bg-clay-soft/50 ring-[1.5px] ring-clay' : 'ring-1 ring-line hover:bg-surface-2'}`}>
-                    <i className={`h-4 w-4 rounded-full ${on ? 'shadow-[inset_0_0_0_5px_var(--color-clay)]' : 'shadow-[inset_0_0_0_1.5px_var(--color-line-2)]'}`} /><span className="truncate">{x.name}</span><span className="text-[12.5px] font-medium text-muted">{waitingByDoctor[x.id] ?? 0} waiting</span></button>); })}
+                  <button key={x.id} type="button" role="radio" aria-checked={on} disabled={!working(x.id)} onClick={() => setPractitionerId(x.id)} className={`grid w-full grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-[13.5px] font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-50 ${on ? 'bg-clay-soft/50 ring-[1.5px] ring-clay' : 'ring-1 ring-line hover:bg-surface-2'}`}>
+                    <i className={`h-4 w-4 rounded-full ${on ? 'shadow-[inset_0_0_0_5px_var(--color-clay)]' : 'shadow-[inset_0_0_0_1.5px_var(--color-line-2)]'}`} /><span className="truncate">{x.name}</span><span className="text-[12.5px] font-medium text-muted">{working(x.id) ? `${waitingByDoctor[x.id] ?? 0} waiting` : 'not working now'}</span></button>); })}
               </div></div>
             <div><label htmlFor="visit-type" className="label">Visit type</label>
               <select id="visit-type" className="input" value={chosen} onChange={(e) => setCat(e.target.value)}>{cfg?.feeCategories.map((c: any) => <option key={c.code} value={c.code}>{c.name} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code ? ' (suggested)' : ''}</option>)}</select>
