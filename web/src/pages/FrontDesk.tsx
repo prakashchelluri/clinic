@@ -563,7 +563,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                   <div><label htmlFor="np-phone" className="label">Mobile</label><input id="np-phone" className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
                   <button className="btn btn-ghost" onClick={() => setNewP(null)}>Back to search</button>
                 </div>
-                <FlagPick value={newFlags} onChange={setNewFlags} canCareful={can(perms, 'encounter.complete')} />
+                <FlagPick value={newFlags} onChange={setNewFlags} />
               </Sec>
             ) : (
               <section aria-label="Patient" className="flex flex-col gap-3 rounded-[18px] bg-surface px-5 py-4 ring-1 ring-line">

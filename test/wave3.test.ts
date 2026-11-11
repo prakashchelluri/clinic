@@ -31,9 +31,13 @@ test('flags need a reason and the right person; the desk sees them; guardian and
   const mother = (await reception('POST', '/patients', { fullName: 'Lakshmi Devi Wave3', phone: '9848011122', sex: 'F', ageYears: 40 })).body;
   const son = (await reception('POST', '/patients?force=1', { fullName: 'Manikanta Wave3', phone: '9848011122', sex: 'M', ageYears: 16 })).body;
 
-  // the desk sets VIP and Family (at registration too) but not Handle carefully; a reason is required; the owner can
-  assert.equal((await reception('PATCH', `/patients/${son.id}/flags`, { careful: { note: 'sensitive diagnosis' } })).status, 403);
-  assert.equal((await reception('POST', '/patients?force=1', { fullName: 'Careful Wave3', flags: { careful: { note: 'sensitive diagnosis' } } })).status, 403, 'not at registration either');
+  // the desk sets every flag, at registration too; Handle carefully still needs a reason and keeps who set it
+  assert.equal((await reception('POST', '/patients?force=1', { fullName: 'Careful Wave3', flags: { careful: { note: ' ' } } })).status, 400, 'no reason at registration either');
+  const careful = await reception('POST', '/patients?force=1', { fullName: 'Careful Wave3', flags: { careful: { note: 'sensitive diagnosis' } } });
+  assert.equal(careful.status, 200);
+  assert.equal(careful.body.flags.careful.note, 'sensitive diagnosis');
+  assert.ok(careful.body.flags.careful.by, 'who set it is kept');
+  assert.equal((await reception('PATCH', `/patients/${careful.body.id}/flags`, { careful: null })).body.flags.careful, undefined, 'the desk can clear it');
   const vip = (await reception('POST', '/patients?force=1', { fullName: 'Vip Wave3', phone: '9848011199', flags: { vip: true, family: true } })).body;
   assert.deepEqual(vip.flags, { vip: true, family: true }, 'flags kept from registration');
   assert.equal((await reception('PATCH', `/patients/${vip.id}/flags`, { vip: false })).body.flags.vip, undefined, 'the desk can clear VIP');

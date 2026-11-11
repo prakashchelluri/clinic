@@ -56,7 +56,7 @@ export function Patients() {
         />
       </div>}
       {bulk && <BroadcastDialog onClose={() => setBulk(false)} onSent={() => setView('sent')} />}
-      {showNew && <NewPatient canCareful={can(perms, 'encounter.complete')} onClose={(p) => { setShowNew(false); if (p) { qc.invalidateQueries({ queryKey: ['patients'] }); nav(`/patients/${p.id}`); } }} />}
+      {showNew && <NewPatient onClose={(p) => { setShowNew(false); if (p) { qc.invalidateQueries({ queryKey: ['patients'] }); nav(`/patients/${p.id}`); } }} />}
     </div>
   );
 }
@@ -193,7 +193,7 @@ function Timeline({ id }: { id: string }) {
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}
       {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
-      {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} canCareful={can(perms, 'encounter.complete')} onClose={() => setFlagging(false)} />}
+      {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
     </div>
   );
 }
@@ -230,7 +230,7 @@ function MergeDialog({ keep, onClose }: { keep: any; onClose: (merged?: boolean)
   );
 }
 
-function NewPatient({ onClose, canCareful }: { onClose: (p?: any) => void; canCareful: boolean }) {
+function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
   const [flags, setFlags] = useState(NO_FLAGS);
   const [f, setF] = useState({ fullName: '', phone: '', ageYears: '', sex: '', locality: '', referralCard: false, language: '', noWhatsapp: false });
   const [dup, setDup] = useState<any[] | null>(null);
@@ -252,7 +252,7 @@ function NewPatient({ onClose, canCareful }: { onClose: (p?: any) => void; canCa
         <div><label className="label" htmlFor="np-loc">Area / town</label><input id="np-loc" className="input" value={f.locality} onChange={(e) => setF({ ...f, locality: e.target.value })} /></div>
         <MessagePrefs language={f.language} noWhatsapp={f.noWhatsapp} onChange={(v) => setF({ ...f, ...v } as any)} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={f.referralCard} onChange={(e) => setF({ ...f, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
-        <FlagPick value={flags} onChange={setFlags} canCareful={canCareful} />
+        <FlagPick value={flags} onChange={setFlags} />
         {dup && <div className="space-y-2 rounded-xl bg-amber-soft p-3 text-sm anim-fade-up" role="alert">
           <div>This may be a patient who is already registered:</div>
           {dup.map((d: any) => <div key={d.id} className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1"><b>{d.fullName}</b> <span className="text-muted">{[d.patientNo, d.phone, d.ageYears != null ? `${d.ageYears}y` : null, d.why].filter(Boolean).join(' · ')}</span></span><button className="btn btn-sm" onClick={() => onClose({ id: d.id })}>Open this record</button></div>)}
