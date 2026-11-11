@@ -32,6 +32,10 @@ export function adminRoutes(app: FastifyInstance) {
     if (body.settings?.reports !== undefined) body.settings.reports = z.object({ freeDays: z.number().int().min(0).max(365) }).parse(body.settings.reports);
     // UPI ID for the pharmacy's payment QR (name@bank); empty clears it
     if (body.settings?.upiId !== undefined) body.settings.upiId = z.string().trim().regex(/^([a-zA-Z0-9._-]{2,64}@[a-zA-Z0-9]{2,64})?$/, 'UPI_ID_FORMAT').parse(body.settings.upiId) || null;
+    // GSTIN: 15 letters and digits; empty clears it (the clinic then issues a bill of supply, no CGST/SGST)
+    if (body.settings?.gstin !== undefined) body.settings.gstin = z.string().trim().toUpperCase().regex(/^([0-9A-Z]{15})?$/, 'GSTIN_FORMAT').parse(body.settings.gstin ?? '') || null;
+    // what patients read when their own language is not set
+    if (body.settings?.messages?.language !== undefined) body.settings.messages.language = z.enum(['en', 'te', 'hi']).parse(body.settings.messages.language);
     if (body.settings && 'display' in body.settings) throw new HttpError(400, 'DISPLAY_TOKEN_IS_GENERATED');
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
     if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)

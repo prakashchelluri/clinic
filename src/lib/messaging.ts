@@ -20,8 +20,9 @@ async function sendWhatsapp(m: Outgoing, providerTemplates: Record<string, strin
   if (!whatsappReady()) return { status: 'logged' };
   const to = '91' + m.toPhone;
   const tpl = providerTemplates[m.kind];
+  const lang = m.params?.lang ?? language; // the language the message was written in for this patient
   const payload = tpl
-    ? { messaging_product: 'whatsapp', to, type: 'template', template: { name: tpl, language: { code: language === 'te' ? 'te' : 'en' }, components: [{ type: 'body', parameters: ['patient', 'date', 'time', 'doctor', 'link'].map((k) => ({ type: 'text', text: m.params[k] || '-' })) }] } }
+    ? { messaging_product: 'whatsapp', to, type: 'template', template: { name: tpl, language: { code: ['te', 'hi'].includes(lang) ? lang : 'en' }, components: [{ type: 'body', parameters: ['patient', 'date', 'time', 'doctor', 'link'].map((k) => ({ type: 'text', text: m.params[k] || '-' })) }] } }
     : { messaging_product: 'whatsapp', to, type: 'text', text: { body: m.body } };
   try {
     const r = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {

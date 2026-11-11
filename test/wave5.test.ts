@@ -50,7 +50,7 @@ test('course: agree below list needs the discount permission, advance locks the 
   assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 400000, method: 'emi', idempotencyKey: 'wave5-adv-0001' })).status, 400);
   assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 1300000, method: 'cash', idempotencyKey: 'wave5-adv-0002' })).status, 400);
   const adv = await reception('POST', `/courses/${cid}/advance`, { amountPaise: 400000, method: 'upi', reference: '8821', idempotencyKey: 'wave5-adv-0003' });
-  assert.equal(adv.status, 200); assert.match(adv.body.receiptNo, /^R-\d{4}$/);
+  assert.equal(adv.status, 200); assert.match(adv.body.receiptNo, /^R-\d{4}-\d{2}-\d{4}$/);
   assert.equal(adv.body.course.unusedSittings, 2); assert.ok(adv.body.course.lockedAt, 'price is locked from the first payment');
   assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 400000, method: 'upi', reference: '8821', idempotencyKey: 'wave5-adv-0003' })).body.repeated, true, 'the same click twice takes nothing twice');
 

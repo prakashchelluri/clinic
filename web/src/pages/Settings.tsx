@@ -146,8 +146,8 @@ const NARROW = new Set<Tab>(['clinic', 'day', 'people', 'rooms', 'availability',
 /* ---------------- Clinic: what prints, how tokens count ---------------- */
 function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
-  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', upiId: s.upiId ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope }, upiId: f.upiId.trim() } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const [f, setF] = useState({ name: cfg.tenant.name, address: s.print?.address ?? '', phone: s.print?.phone ?? '', footer: s.print?.footer ?? '', upiId: s.upiId ?? '', gstin: s.gstin ?? '', opNumberScope: s.numbering?.opNumberScope ?? 'day+category' });
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name, settings: { print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, numbering: { opNumberScope: f.opNumberScope }, upiId: f.upiId.trim(), gstin: f.gstin.trim().toUpperCase() } }), onSuccess: () => { toast('Clinic saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <div className="space-y-4">
@@ -157,6 +157,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div><label className="label">Address</label><input className="input" value={f.address} onChange={set('address')} /></div>
         <div className="grid grid-cols-2 gap-3"><div><label className="label">Phone</label><input className="input" value={f.phone} onChange={set('phone')} /></div><div><label className="label">Line at the bottom</label><input className="input" value={f.footer} onChange={set('footer')} placeholder="e.g. Get well soon" /></div></div>
         <div><label className="label">UPI ID for payments (e.g. clinic@okhdfc)</label><input className="input" value={f.upiId} onChange={set('upiId')} placeholder="clinic@okhdfc" /><div className="mt-1 text-xs text-muted">The pharmacy shows a QR code with the amount filled in.</div></div>
+        <div><label className="label" htmlFor="cl-gstin">GSTIN (leave empty if not registered)</label><input id="cl-gstin" className={`input uppercase ${f.gstin.trim() && f.gstin.trim().length !== 15 ? '!border-rose' : ''}`} maxLength={15} value={f.gstin} onChange={set('gstin')} /><div className="mt-1 text-xs text-muted">With a GSTIN, receipts print as a Tax Invoice with CGST and SGST per rate. Without one, they print as a Bill of Supply with no tax lines.</div></div>
       </div>
       <div className="card space-y-3">
         <div className="card-title">Token numbers</div>

@@ -101,7 +101,7 @@ test('invoice menu: cancel only unpaid, exclude from tax reports, discount cap (
   assert.equal((await owner('POST', `/charges/${a.id}/cancel`, { reason: ' ' })).status, 400, 'a reason is required');
   assert.equal((await owner('POST', `/charges/${a.id}/cancel`, { reason: 'entered by mistake' })).status, 200);
   const take = await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [b.id], idempotencyKey: 'wave4-menu-0001', parts: [{ method: 'cash', amountPaise: 100000 }] });
-  assert.match(take.body.receiptNo, /^R-\d{4}$/);
+  assert.match(take.body.receiptNo, /^R-\d{4}-\d{2}-\d{4}$/);
   assert.equal((await owner('POST', `/charges/${b.id}/cancel`, { reason: 'wrong patient' })).status, 409, 'a paid invoice is refunded, not cancelled');
 
   // exclude from tax reports: kept, flagged, once

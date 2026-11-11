@@ -6,6 +6,7 @@ import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
+import { MSG, patientLang } from '../lib/patientText.js';
 import { clinical } from './patients.js';
 
 type Kind = 'review' | 'missed_visit' | 'missed_sitting' | 'schedule' | 'advised';
@@ -89,8 +90,8 @@ export function followupRoutes(app: FastifyInstance) {
     if (b.outcome === 'no_answer' && b.sendMessage && p.phone && /^\d{10}$/.test(p.phone)) {
       const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
       const phone = (ten?.settings as any)?.print?.phone;
-      await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'followup_call', channel: 'whatsapp', toPhone: p.phone, params: { name: p.fullName },
-        body: `Hello ${p.fullName.split(' ')[0]}, we tried to reach you from ${ten?.name ?? 'the clinic'}. ${phone ? `Please call ${phone} or ` : 'Please '}reply to this message and we will help you.` });
+      await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'followup_call', channel: 'whatsapp', toPhone: p.phone, params: { name: p.fullName, lang: patientLang(p, ten?.settings) },
+        body: MSG[patientLang(p, ten?.settings)].triedToCall(p.fullName.split(' ')[0], ten?.name ?? 'the clinic', phone) });
       messaged = true;
     }
     await emit(tx, req.ctx, 'followup.logged', 'callback', row.id, { kind: b.kind, outcome: b.outcome, callbackOn: b.callbackOn });

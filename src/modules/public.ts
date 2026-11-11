@@ -7,6 +7,7 @@ import { HttpError, type Ctx } from '../lib/auth.js';
 import { emit, nextNumber, todayIn, addDays } from '../lib/core.js';
 import { bookingSettings, hoursUntil, newToken, queueMessage, planReminders, dropReminders, originOf, appointmentView } from '../lib/booking.js';
 import { windowsForDay } from './scheduling.js';
+import { patientLang } from '../lib/patientText.js';
 
 const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
 const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => { const x = new Date(d + 'T00:00:00Z'); return !isNaN(+x) && x.toISOString().startsWith(d); }, 'BAD_DATE');
@@ -66,7 +67,7 @@ function patientView(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>
     canConfirm: v.a.status === 'booked' && hours > 0,
     canCancel: open && hours >= cfg.booking.cancelWindowHours,
     canReschedule: open && cfg.booking.patientCanReschedule && hours >= cfg.booking.cancelWindowHours,
-    cancelWindowHours: cfg.booking.cancelWindowHours, policy: cfg.booking.cancellationPolicy,
+    cancelWindowHours: cfg.booking.cancelWindowHours, policy: cfg.booking.cancellationPolicy, lang: patientLang(v.p, v.t.settings),
   };
 }
 
@@ -162,7 +163,7 @@ export function publicRoutes(app: FastifyInstance) {
       // someone is in with a doctor who was not named on the visit: still show them as Now
       const nowUnnamed = docs.length > 1 ? rows.filter((r) => !r.practitionerId && r.v.status === 'in_consult').map((r) => r.v.opNumber) : [];
       if (nowUnnamed.length) lanes.push({ doctor: 'Consultation', now: nowUnnamed[0], next: [], withJunior: [] });
-      return { clinic: t.name, at: new Date().toISOString(), lanes, unassigned };
+      return { clinic: t.name, at: new Date().toISOString(), lanes, unassigned, lang: patientLang(null, t.settings) }; // a room of patients: the clinic's language
     });
   });
 }

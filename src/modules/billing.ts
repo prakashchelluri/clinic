@@ -16,6 +16,26 @@ export function dayBounds(day: string, tz: string) {
   return { start: start.toISOString(), end: new Date(start.getTime() + 86400000).toISOString() };
 }
 
+/** Indian financial year of a local day: April to March, e.g. 2026-11-11 → "2026-27". */
+export const fyOf = (day: string) => { const y = +day.slice(0, 4) - (+day.slice(5, 7) < 4 ? 1 : 0); return `${y}-${String(y + 1).slice(2)}`; };
+/** Next receipt number: one unbroken series per clinic per financial year, R-2026-27-0001. */
+export async function nextReceiptNo(tx: any, tenantId: string, tz: string) {
+  const fy = fyOf(todayIn(tz));
+  return `R-${fy}-${String(await nextNumber(tx, tenantId, 'receipt_no', `fy:${fy}`)).padStart(4, '0')}`;
+}
+
+/** GST on what a receipt covers (prices include tax). With a GSTIN: a Tax Invoice with CGST/SGST per rate. Without: a Bill of Supply and no tax lines. */
+export function gstSummary(gstin: string | null | undefined, lines: { amountPaise: number; taxRateBp: number }[]) {
+  if (!gstin) return { gstin: null, title: 'Bill of Supply', rates: [] as { rateBp: number; taxablePaise: number; cgstPaise: number; sgstPaise: number }[] };
+  const by = new Map<number, number>();
+  for (const l of lines) by.set(l.taxRateBp, (by.get(l.taxRateBp) ?? 0) + l.amountPaise);
+  const rates = [...by].sort((a, b) => a[0] - b[0]).map(([rateBp, gross]) => {
+    const taxablePaise = Math.round((gross * 10000) / (10000 + rateBp)); const tax = gross - taxablePaise; const cgstPaise = Math.floor(tax / 2);
+    return { rateBp, taxablePaise, cgstPaise, sgstPaise: tax - cgstPaise };
+  });
+  return { gstin, title: 'Tax Invoice', rates };
+}
+
 export function billingRoutes(app: FastifyInstance) {
   route(app, 'post', '/payments', 'payment.record', async (req, tx) => {
     const body = z.object({ patientId: z.string().uuid(), chargeId: z.string().uuid().optional(), amountPaise: z.number().int().positive(),
@@ -34,7 +54,7 @@ export function billingRoutes(app: FastifyInstance) {
       const duePaise = ch.status === 'due' ? Math.max(0, ch.amountPaise - paid) : 0;
       if (body.amountPaise > duePaise) throw new HttpError(400, 'MORE_THAN_DUE', { duePaise });
     }
-    const [row] = await tx.insert(payment).values({ ...body, tenantId: t, receivedBy: req.ctx.userId }).returning();
+    const [row] = await tx.insert(payment).values({ ...body, tenantId: t, receiptNo: await nextReceiptNo(tx, t, req.ctx.timezone), receivedBy: req.ctx.userId }).returning();
     if (ch) {
       const [{ paid }] = await tx.select({ paid: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, ch.id));
       if (paid >= ch.amountPaise) await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, ch.id));
@@ -82,7 +102,7 @@ export function billingRoutes(app: FastifyInstance) {
     const left = new Map(charges.map((c) => [c.id, c.amountPaise - (paid.find((p) => p.id === c.id)?.n ?? 0)]));
     const total = body.parts.reduce((s, p) => s + p.amountPaise, 0); const owed = [...left.values()].reduce((s, n) => s + n, 0);
     if (total > owed) throw new HttpError(400, 'MORE_THAN_DUE', { duePaise: owed });
-    const receiptNo = 'R-' + String(await nextNumber(tx, t, 'receipt_no', 'tenant')).padStart(4, '0');
+    const receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone);
     const rows: any[] = []; let seq = 0;
     for (const part of body.parts) {
       let rest = part.amountPaise;
@@ -165,7 +185,8 @@ export function billingRoutes(app: FastifyInstance) {
     if (!rows.length) throw new HttpError(404, 'NOT_FOUND');
     const ten = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any) => r[0]);
     return { receiptNo: (req.params as any).no, at: rows[0].p.receivedAt, patient: { fullName: rows[0].pt.fullName, patientNo: rows[0].pt.patientNo }, clinic: { name: ten?.name, print: ten?.settings?.print ?? {} }, receivedBy: [...new Set(rows.map((r) => r.by).filter(Boolean))].join(', ') || '—', // who took the money, not who is printing
-      lines: rows.map((r) => ({ description: r.c?.description ?? 'Payment', amountPaise: r.p.amountPaise, method: r.p.method, reference: r.p.reference, lender: r.p.lender })), totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0) };
+      lines: rows.map((r) => ({ description: r.c?.description ?? 'Payment', amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0, method: r.p.method, reference: r.p.reference, lender: r.p.lender })), totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0),
+      tax: gstSummary(ten?.settings?.gstin, rows.map((r) => ({ amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0 }))) };
   });
 
   route(app, 'post', '/charges', 'payment.record', async (req, tx) => {

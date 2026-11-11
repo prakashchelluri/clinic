@@ -17,6 +17,7 @@ import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
 import { enabledVitals, vitalProblem } from '../vitals';
 import { TakePayment, moneyErr } from '../takePayment';
+import { printReceipt } from '../invoices';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -498,7 +499,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
         details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: init.reports ? `Back with reports: ${init.reports.tests}` : complaints.map((c) => c.text).join(', '), ...(init.reports ? { reportsEncounterId: init.reports.encounterId } : {}) },
         payment: !waive && fee > 0 ? { method, amountPaise: toPaise(amount || String(fee / 100)) } : undefined, waive: waive ? { reason: waive } : undefined, allowReview: allowReview.current ? { reason: allowReview.current } : undefined, idempotencyKey: visitKey });
     },
-    onSuccess: (v: any) => { toast(`Checked in · token ${v.opNumber}`); onClose(); },
+    onSuccess: (v: any) => { toast(`Checked in · token ${v.opNumber}${v.receiptNo ? ` · receipt ${v.receiptNo}` : ''}`, 'ok', v.receiptNo ? { label: 'Print receipt', run: () => printReceipt(v.receiptNo) } : undefined); onClose(); },
     onError: async (e: any) => {
       if (e instanceof ApiError && e.body.code === 'POSSIBLE_DUPLICATE') setDup(e.body.existing);
       else if (e instanceof ApiError && e.body.code === 'REVIEW_LIMIT') {

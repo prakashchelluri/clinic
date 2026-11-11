@@ -7,6 +7,7 @@ import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
+import { nextReceiptNo } from './billing.js';
 
 type Course = typeof course.$inferSelect;
 const sum = (rows: { n: number }[]) => rows[0]?.n ?? 0;
@@ -121,7 +122,7 @@ export function courseRoutes(app: FastifyInstance) {
     if (b.method === 'emi' && (!b.lender || !b.reference)) throw new HttpError(400, 'EMI_NEEDS_LENDER_AND_APPROVAL_CODE');
     const st = await standing(tx, t, c);
     if (b.amountPaise > st.stillToPayPaise) throw new HttpError(400, 'MORE_THAN_THE_COURSE_NEEDS', { stillToPayPaise: st.stillToPayPaise });
-    const receiptNo = 'R-' + String(await nextNumber(tx, t, 'receipt_no', 'tenant')).padStart(4, '0');
+    const receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone);
     const [row] = await tx.insert(payment).values({ tenantId: t, patientId: c.patientId, courseId: c.id, amountPaise: b.amountPaise, method: b.method, reference: b.reference ?? null, lender: b.lender ?? null, receiptNo, receivedBy: req.ctx.userId, idempotencyKey: `${b.idempotencyKey}#c` }).returning();
     if (!c.lockedAt) await tx.update(course).set({ lockedAt: new Date().toISOString() }).where(eq(course.id, c.id));
     await emit(tx, req.ctx, 'course.advance_taken', 'payment', row.id, { courseId: c.id, amountPaise: b.amountPaise, method: b.method });

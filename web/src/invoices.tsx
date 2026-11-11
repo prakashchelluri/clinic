@@ -5,18 +5,20 @@ const refresh = () => ['timeline', 'frontdesk', 'daily', 'patients'].forEach((k)
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const MODE: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', bank: 'Bank', emi: 'EMI' };
 
-/** Opens the receipt for everything taken in one go in its own window and prints it. */
+/** Opens the receipt for everything taken in one go in its own window and prints it. With a GSTIN it is a Tax Invoice with CGST/SGST per rate; without one, a Bill of Supply with no tax lines. */
 export async function printReceipt(no: string) {
   try {
     const r: any = await get(`/receipts/${encodeURIComponent(no)}`);
     const w = window.open('', '_blank', 'width=420,height=640'); if (!w) return toast('Allow pop-ups to print the receipt', 'err');
     const when = new Date(r.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-    w.document.write(`<!doctype html><title>Receipt ${esc(r.receiptNo)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:5px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
-      <h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}</div>
-      <p><b>Receipt ${esc(r.receiptNo)}</b><br><span class="s">${esc(when)} · ${esc(r.patient.fullName)} (${esc(r.patient.patientNo)})</span></p>
-      <table>${r.lines.map((l: any) => `<tr><td>${esc(l.description)}<div class="s">${esc(MODE[l.method] ?? l.method)}${l.lender ? ' · ' + esc(l.lender) : ''}${l.reference ? ' · ' + esc(l.reference) : ''}</div></td><td class="r">${esc(money(l.amountPaise))}</td></tr>`).join('')}
-      <tr><td><b>Total paid</b></td><td class="r"><b>${esc(money(r.totalPaise))}</b></td></tr></table>
-      <p class="s">Received by ${esc(r.receivedBy)}. ${esc(r.clinic.print?.footer ?? '')}</p><script>window.onload=function(){window.print()}<\/script>`);
+    const tax = r.tax ?? { gstin: null, title: 'Bill of Supply', rates: [] }; const pct = (bp: number) => (bp ? `${bp / 100}%` : 'Exempt');
+    const taxTable = tax.gstin ? `<table><tr><td class="s">GST rate</td><td class="s r">Taxable value</td><td class="s r">CGST</td><td class="s r">SGST</td></tr>${tax.rates.map((x: any) => `<tr><td>${pct(x.rateBp)}</td><td class="r">${esc(money(x.taxablePaise))}</td><td class="r">${esc(money(x.cgstPaise))}</td><td class="r">${esc(money(x.sgstPaise))}</td></tr>`).join('')}</table>` : '';
+    w.document.write(`<!doctype html><title>${esc(tax.title)} ${esc(r.receiptNo)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:5px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
+      <h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}${tax.gstin ? ' · GSTIN ' + esc(tax.gstin) : ''}</div>
+      <p><b>${esc(tax.title)} · Receipt ${esc(r.receiptNo)}</b><br><span class="s">${esc(when)} · ${esc(r.patient.fullName)} (${esc(r.patient.patientNo)})</span></p>
+      <table>${r.lines.map((l: any) => `<tr><td>${esc(l.description)}<div class="s">${tax.gstin ? 'GST ' + pct(l.taxRateBp ?? 0) + ' · ' : ''}${esc(MODE[l.method] ?? l.method)}${l.lender ? ' · ' + esc(l.lender) : ''}${l.reference ? ' · ' + esc(l.reference) : ''}</div></td><td class="r">${esc(money(l.amountPaise))}</td></tr>`).join('')}
+      <tr><td><b>Total paid</b></td><td class="r"><b>${esc(money(r.totalPaise))}</b></td></tr></table>${taxTable}
+      <p class="s">${tax.gstin ? 'Prices include GST.' : 'Not registered for GST, so no tax is charged on this bill.'} Received by ${esc(r.receivedBy)}. ${esc(r.clinic.print?.footer ?? '')}</p><script>window.onload=function(){window.print()}<\/script>`);
     w.document.close();
   } catch (e) { toast(errText(e), 'err'); }
 }
@@ -42,7 +44,7 @@ export function Invoices({ charges, payments, canRefund, canDiscount }: { charge
         const part = c.status === 'due' && paid > 0; const tone = c.status === 'paid' ? 'sage' : c.status === 'due' ? (part ? 'amber' : 'rose') : '';
         const label = part ? 'Part paid' : c.status === 'due' ? 'Unpaid' : c.status === 'paid' ? 'Paid' : c.status[0].toUpperCase() + c.status.slice(1);
         const rno = payments.find((p) => p.chargeId === c.id && p.receiptNo)?.receiptNo;
-        return <tr key={c.id}><td className="pl-4">{c.description}<div className="text-xs text-muted">{fmtDate(c.createdAt)}{c.discountPaise ? ` · ${money(c.discountPaise)} off (${c.discountReason})` : ''}{part ? ` · ${money(paid)} paid, ${money(c.amountPaise - paid)} due` : ''}{c.adjustmentReason ? ` · ${c.adjustmentReason}` : ''}</div></td>
+        return <tr key={c.id}><td className="pl-4">{c.description}<div className="text-xs text-muted">{fmtDate(c.createdAt)}{rno ? ` · ${rno}` : ''}{c.discountPaise ? ` · ${money(c.discountPaise)} off (${c.discountReason})` : ''}{part ? ` · ${money(paid)} paid, ${money(c.amountPaise - paid)} due` : ''}{c.adjustmentReason ? ` · ${c.adjustmentReason}` : ''}</div></td>
           <td><Chip tone={tone}>{label}</Chip>{c.excludedAt && <span title={c.excludedReason}> <Chip>Not in tax reports</Chip></span>}</td>
           <td className="text-right">{money(c.amountPaise)}</td>
           <td className="pr-3 text-right"><MoreMenu items={[
