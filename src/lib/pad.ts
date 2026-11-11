@@ -29,7 +29,7 @@ export function padConfig(settings: any): PadSection[] {
   return out;
 }
 
-export type PrintSettings = { lang: 'te+en' | 'en' | 'te'; outOfRangeOnly: boolean; vitals: string[] };
+export type PrintSettings = { lang: 'te+en' | 'hi+en' | 'en' | 'te'; outOfRangeOnly: boolean; vitals: string[] };
 export const printSettings = (settings: any): PrintSettings => ({ lang: 'te+en', outOfRangeOnly: true, vitals: ['weight_kg', 'bp'], ...(settings?.print?.rx ?? {}) });
 
 // Standard phrases in Telugu. Free text prints as typed. The owner edits this table in Settings later; for now it ships with the app.
@@ -55,4 +55,22 @@ export function te(phrase: string | null | undefined, settings?: any): string | 
   if (k in table) return table[k] || null;
   const d = k.match(/^(\d+)\s*days?$/); if (d) return `${d[1]} రోజులు`;
   return null;
+}
+
+// Standard phrases in Hindi, for a clinic that prints Hindi under the English. Not editable yet (the Telugu table is); free text stays in English.
+export const HI: Record<string, string> = {
+  '1-0-0': 'सुबह 1', '0-1-0': 'दोपहर 1', '0-0-1': 'रात 1', '1-0-1': 'सुबह 1, रात 1', '1-1-1': 'सुबह, दोपहर, रात 1', '1-1-0': 'सुबह 1, दोपहर 1', '0-1-1': 'दोपहर 1, रात 1',
+  'once daily': 'दिन में एक बार', 'twice daily': 'दिन में दो बार', 'thrice daily': 'दिन में तीन बार', 'at night': 'रात में', 'morning': 'सुबह', 'alternate days': 'एक दिन छोड़कर', 'weekly': 'हफ़्ते में एक बार', 'sos': 'ज़रूरत पड़ने पर', 'once': 'एक बार',
+  'after food': 'खाने के बाद', 'before food': 'खाने से पहले', 'empty stomach': 'खाली पेट', 'at bedtime': 'सोने से पहले', 'with food': 'खाने के साथ',
+  'thin layer on affected area': 'प्रभावित जगह पर पतली परत लगाएँ', 'apply thin layer': 'पतली परत लगाएँ', 'days': 'दिन', 'day': 'दिन',
+  'keep the area dry': 'उस जगह को सूखा रखें', "don't share towels": 'तौलिया किसी के साथ न बाँटें', 'wash clothes in hot water': 'कपड़े गरम पानी में धोएँ', 'no steroid creams': 'स्टेरॉयड क्रीम न लगाएँ',
+  'loose cotton clothes': 'ढीले सूती कपड़े पहनें', 'sunscreen every 3 hours': 'हर 3 घंटे में सनस्क्रीन लगाएँ', 'moisturise twice daily': 'दिन में दो बार मॉइस्चराइज़र लगाएँ', 'avoid scrubbing': 'रगड़ें नहीं',
+  'avoid oily food': 'तली-भुनी चीज़ें कम खाएँ', 'mild soap only': 'केवल हल्का साबुन', "don't scratch": 'खुजलाएँ नहीं', 'cut nails short': 'नाखून छोटे रखें', 'stop the steroid cream': 'स्टेरॉयड क्रीम बंद करें',
+};
+/** The patient-language line for a phrase: Telugu or Hindi by the clinic's print setting; null for English only, or free text with no translation. */
+export function localPhrase(lang: PrintSettings['lang'], phrase: string | null | undefined, settings?: any): string | null {
+  if (!phrase || lang === 'en') return null;
+  if (lang !== 'hi+en') return te(phrase, settings);
+  const k = phrase.trim().toLowerCase(); if (k in HI) return HI[k];
+  const d = k.match(/^(\d+)\s*days?$/); return d ? `${d[1]} दिन` : null;
 }

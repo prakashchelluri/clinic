@@ -109,7 +109,7 @@ export function rxpadRoutes(app: FastifyInstance) {
   const padView = (s: any) => ({ sections: padConfig(s), print: printSettings(s), known: PAD_SECTIONS, telugu: teluguTable(s), teluguDefaults: TE, history: historyCategories(s), historyDefaults: HISTORY_CATEGORIES });
   route(app, 'put', '/admin/pad', 'config.write', async (req, tx) => {
     const b = z.object({ sections: z.array(z.object({ key: z.string(), show: z.boolean(), required: z.boolean(), print: z.boolean() })).max(40).optional(),
-      print: z.object({ lang: z.enum(['te+en', 'en', 'te']).optional(), outOfRangeOnly: z.boolean().optional(), vitals: z.array(z.string()).max(8).optional() }).optional(),
+      print: z.object({ lang: z.enum(['te+en', 'hi+en', 'en', 'te']).optional(), outOfRangeOnly: z.boolean().optional(), vitals: z.array(z.string()).max(8).optional() }).optional(),
       telugu: z.record(z.string().trim().min(1).max(80), z.string().trim().max(160)).refine((o) => Object.keys(o).length <= 400, 'TOO_MANY').optional(),
       historyOptions: z.record(z.enum(HISTORY_KEYS), z.array(z.string().trim().min(1).max(60)).max(40)).optional() }).parse(req.body);
     const t = req.ctx.tenantId;

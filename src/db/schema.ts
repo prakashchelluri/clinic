@@ -84,6 +84,8 @@ export const medicine = pgTable('medicine', {
   packSize: integer('pack_size').notNull().default(1),         // tablets in the strip the MRP is for; 1 for a tube or bottle
   reorderLevel: integer('reorder_level').notNull().default(0), // low stock below this many packs
   leafletUrl: text('leaflet_url'),   // "how to apply" sheet sent on WhatsApp with the prescription
+  generic: text('generic'),          // the molecule (amoxicillin + clavulanate for Augmentin): safety checks match it, not only the brand
+  allergyClass: text('allergy_class'), // penicillin, tetracycline, sulfa, retinoid…: an allergy to the class catches every brand in it
 });
 
 /** One measured value from a lab report, typed in when the report arrives. Text results (Negative) keep flag 'normal' or 'abnormal'. */
@@ -249,6 +251,8 @@ export const encounter = pgTable('encounter', {
   status: text('status').notNull().default('draft'), // draft | completed
   completedAt: ts('completed_at'),
   provenance: jsonb('provenance').$type<Record<string, any>>().notNull().default({ source: 'typed' }),
+  signedAt: ts('signed_at'),         // the doctor signed the prescription (Finish → Sign & print / Sign & WhatsApp)
+  amendments: jsonb('amendments').$type<{ at: string; by: string; reason: string }[]>().notNull().default([]), // changes after signing, each with its reason
 }, (t) => [index('enc_patient').on(t.tenantId, t.patientId)]);
 
 export const prescriptionItem = pgTable('prescription_item', {
