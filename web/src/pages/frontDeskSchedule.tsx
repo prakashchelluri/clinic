@@ -1,8 +1,8 @@
-import { useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, qc, errText, ApiError } from '../api';
-import { Icon, Skeleton, ask, toast } from '../ui';
+import { Floating, Icon, Skeleton, ask, toast } from '../ui';
 import { told } from '../apptDrawer';
 
 /** The front desk's day by the hour: a row per booking hour, a column per doctor (and per room when asked for).
@@ -36,7 +36,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const other = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), enabled: !isToday }); // another day's checked-in patients
   const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
   const docOn = (id: string) => shown[`d:${id}`] !== false; // doctors on unless switched off
-  const roomOn = shown.rooms === true;                    // rooms off unless switched on
+  const roomOn = (id: string) => shown[`r:${id}`] ?? shown.rooms === true; // rooms off unless switched on (one by one; 'rooms' was the old all-rooms switch)
   // drag a booked name to another hour to move it, as on the Appointments calendar
   const [over, setOver] = useState<string | null>(null);
   const move = useMutation({
@@ -52,7 +52,14 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   });
   const drop = (e: DragEvent, w: any) => { e.preventDefault(); setOver(null); try { const a = JSON.parse(e.dataTransfer.getData('application/x-appt')); if (a.sessionId !== w.id) move.mutate({ appt: a, to: w }); } catch { /* not ours */ } };
 
-  const cals = [...doctors.map((d) => ({ key: `d:${d.id}`, label: d.name as string, on: docOn(d.id) })), ...(rooms.length ? [{ key: 'rooms', label: rooms.length === 1 ? rooms[0].name : 'Rooms', on: roomOn }] : [])];
+  const docList = doctors.map((d) => ({ key: `d:${d.id}`, label: d.name as string, on: docOn(d.id) }));
+  const roomList = rooms.map((r) => ({ key: `r:${r.id}`, label: r.name as string, on: roomOn(r.id) }));
+  const [pickOpen, setPickOpen] = useState(false); const pickBtn = useRef<HTMLButtonElement>(null);
+  const onD = docList.filter((c) => c.on), onR = roomList.filter((c) => c.on);
+  // what the closed button says: up to two names, else counts, so the bar stays one line
+  const n = (k: number, one: string) => `${k} ${one}${k === 1 ? '' : 's'}`;
+  const summary = onD.length + onR.length === 0 ? 'Nothing' : onD.length + onR.length <= 2 ? [...onD, ...onR].map((c) => c.label).join(', ') : onD.length === docList.length && !onR.length ? 'All doctors' : [onD.length && n(onD.length, 'doctor'), onR.length && n(onR.length, 'room')].filter(Boolean).join(' · ');
+  const tick = (c: { key: string; label: string; on: boolean }) => <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-[13.5px] hover:bg-paper-2"><input type="checkbox" className="accent-ink h-4 w-4" checked={c.on} onChange={(e) => setShown(c.key, e.target.checked)} />{c.label}</label>;
   const bar = (
     <div className="fd-sch-bar">
       <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous day" onClick={() => setDay(shift(day, -1))}><Icon name="chevL" className="h-4 w-4" /></button>
@@ -60,7 +67,13 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next day" onClick={() => setDay(shift(day, 1))}><Icon name="chevR" className="h-4 w-4" /></button>
       {!isToday && <button type="button" className="btn btn-sm" onClick={() => setDay(today)}>Today</button>}
       <span className="ml-auto" />
-      {cals.length > 1 && cals.map((c) => <button key={c.key} type="button" className={`fd-cal ${c.on ? 'on' : ''}`} aria-pressed={c.on} onClick={() => setShown(c.key, !c.on)}><span className="tick">{c.on ? '✓' : ''}</span>{c.label}</button>)}
+      {docList.length + roomList.length > 1 && <><button ref={pickBtn} type="button" className="fd-cal on max-w-[300px]" aria-haspopup="true" aria-expanded={pickOpen} onClick={() => setPickOpen(!pickOpen)}><Icon name="filter" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="text-muted">Show</span><span className="min-w-0 truncate">{summary}</span></button>
+        <Floating anchor={pickBtn} open={pickOpen} onClose={() => setPickOpen(false)} width={260}>
+          <div className="max-h-[60vh] overflow-y-auto p-1.5">
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Doctors</div>{docList.map(tick)}
+            {roomList.length > 0 && <><div className="mt-1 border-t border-line/60 px-2.5 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Rooms · procedures</div>{roomList.map(tick)}</>}
+          </div>
+        </Floating></>}
       {tools}
     </div>);
   if (!cal.data || (!isToday && other.isLoading)) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="p-4"><Skeleton rows={4} /></div></div>;
@@ -69,9 +82,9 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const windows: any[] = cal.data.windows ?? []; const procs: any[] = cal.data.procedures ?? [];
   const gone = (end: string) => isPast || (isToday && toMin(end) <= nowM);
   const docCols = doctors.filter((d) => docOn(d.id)).map((d) => ({ d, ws: windows.filter((w) => w.practitionerId === d.id) }));
-  const roomCols = roomOn ? [...rooms.map((r) => ({ r, ps: procs.filter((p) => p.roomId === r.id) })), ...(procs.some((p) => !p.roomId) ? [{ r: { id: '__none', name: 'No room' }, ps: procs.filter((p) => !p.roomId) }] : [])] : [];
+  const roomCols = [...rooms.filter((r) => roomOn(r.id)).map((r) => ({ r, ps: procs.filter((p) => p.roomId === r.id) })), ...(onR.length && procs.some((p) => !p.roomId) ? [{ r: { id: '__none', name: 'No room' }, ps: procs.filter((p) => !p.roomId) }] : [])];
   const nCols = docCols.length + roomCols.length;
-  if (!nCols) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="py-10 text-center text-muted">Tick a doctor above to see their day.</div></div>;
+  if (!nCols) return <div className="fd-sheet fd-sch overflow-hidden">{bar}<div className="py-10 text-center text-muted">Pick a doctor or room in Show to see the day.</div></div>;
 
   // one row per booking hour (windows that start together share a row); sittings sit in the row their start falls in
   const starts = [...new Set(docCols.flatMap((c) => c.ws.map((w) => w.startTime)))].sort();
