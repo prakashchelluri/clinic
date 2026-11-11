@@ -10,7 +10,7 @@ import { openPrint } from '../printPreview';
 import { PrintRx } from './PrintRx';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
-import { parseRxLine, qtyFor, allergyHit, rxWarnings, pregnancyFlag, ageText } from '../rxLine';
+import { parseRxLine, qtyFor, allergyHit, rxWarnings, pregnancyFlag, ageText } from '../rxSafety';
 import { FlagChips, CarefulBanner } from '../flags';
 import { useTemplates, suggests, norm, uniq, type Tmpl } from '../templates';
 import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, type History } from '../screening';
@@ -35,7 +35,7 @@ const REVIEW_IN: [number | null, string][] = [[7, '7d'], [14, '14d'], [30, '1 m'
 const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
 const DX_STATUS = ['Provisional', 'Confirmed'];
 const DX_OPTIONS = ['Acne vulgaris', 'Melasma', 'Tinea corporis', 'Tinea cruris', 'Psoriasis vulgaris', 'Alopecia areata', 'Androgenetic alopecia', 'Verruca vulgaris', 'Atopic dermatitis', 'Seborrheic dermatitis', 'Contact dermatitis', 'Acute urticaria', 'Chronic urticaria', 'Vitiligo', 'Post-inflammatory hyperpigmentation', 'Scabies', 'Pityriasis versicolor', 'Lichen planus', 'Rosacea', 'Molluscum contagiosum', 'Impetigo', 'Herpes zoster'];
-// ponytail: the allergy, pregnancy and interaction word lists live in rxLine.ts (tested there); a proper drug database is the upgrade path.
+// ponytail: the allergy, pregnancy and interaction word lists live in rxSafety.ts (tested in rxSafety2.test.ts); a proper drug database is the upgrade path.
 const sameLine = (a: RxItem, b: RxItem) => a.name === b.name && (a.dose ?? '') === (b.dose ?? '') && (a.frequency ?? '') === (b.frequency ?? '') && (a.durationDays ?? null) === (b.durationDays ?? null) && (a.instructions ?? '') === (b.instructions ?? '');
 const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, _issued, ...i }: any): RxItem => i;
 /** The pad's own lines keep their id so a held-open consultation updates them instead of re-issuing; issued lines are locked. */

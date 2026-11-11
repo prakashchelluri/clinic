@@ -11,7 +11,7 @@ import { TemplatesTab } from './SettingsTemplates';
 import { PadTab } from './SettingsPad';
 import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, ServicesTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
-import { ALLERGY_CLASSES } from '../rxLine';
+import { ALLERGY_CLASSES } from '../rxSafety';
 import '../settings.css';
 
 type Tab = 'clinic' | 'day' | 'availability' | 'rooms' | 'people' | 'roles' | 'prices' | 'rules' | 'messages' | 'pad' | 'forms' | 'templates' | 'photos' | 'privacy' | 'testdata';

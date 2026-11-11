@@ -3,7 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
-import { rxWarnings, allergyHit } from '../web/src/rxLine.js';
+import { rxWarnings, allergyHit } from '../web/src/rxSafety.js';
 import { localPhrase } from '../src/lib/pad.js';
 
 process.env.NODE_ENV = 'test';
