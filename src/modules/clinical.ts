@@ -3,10 +3,11 @@ import { z } from 'zod';
 import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
 import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, feeCategory, type FormSchema } from '../db/schema.js';
 import { queueRxMessage } from './rxpad.js';
-import { padConfig, printSettings, te } from '../lib/pad.js';
+import { padConfig, printSettings, localPhrase } from '../lib/pad.js';
 import { normHistory } from '../lib/history.js';
 import { route } from '../lib/route.js';
-import { auditView } from '../lib/audit.js';
+import { auditView, writeAudit } from '../lib/audit.js';
+import { clinical } from './patients.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { expectedDays } from '../lib/tests.js';
@@ -80,7 +81,8 @@ export function clinicalRoutes(app: FastifyInstance) {
   route(app, 'get', '/encounters/:id', 'encounter.intake', async (req, tx) => {
     const e = await getEncounter(tx, req.ctx.tenantId, (req.params as any).id);
     await auditView(tx, req, e.patientId, e.status === 'completed' ? 'Read a past consultation' : e.status === 'awaiting_reports' ? 'Opened a consultation held for reports' : 'Opened the consultation');
-    return e;
+    // the diagnosis, private note and safety overrides are for clinical roles only (a role given this permission in Settings without being clinical)
+    return clinical(req.perms) ? e : { ...e, data: { ...e.data, assessment: undefined, notes: undefined, overrides: undefined } };
   });
 
   /** Save draft or complete. Completing validates the form, writes Rx items and recommendations (→ worklists), marks the visit done. */
@@ -94,6 +96,9 @@ export function clinicalRoutes(app: FastifyInstance) {
     // Held open for reports: the prescription has gone out, the pad is still the doctor's to finish.
     const held = enc.status === 'awaiting_reports';
     if (held && !isDoctor) throw new HttpError(409, 'AWAITING_REPORTS');
+    // Reopened after signing (Amend): like a held pad, medicines already issued at the counter stay and work already done is kept.
+    const amending = !held && !!enc.signedAt;
+    if (amending && !isDoctor) throw new HttpError(409, 'AMENDING');
 
     const form = await tx.select().from(formDefinition).where(eq(formDefinition.id, enc.formDefinitionId)).then((r) => r[0]);
     const data = { ...enc.data, ...body.data };
@@ -103,7 +108,7 @@ export function clinicalRoutes(app: FastifyInstance) {
     }
     const today = todayIn(req.ctx.timezone);
     let newRx = 0;
-    if (held) {
+    if (held || amending) {
       // Items already issued at the counter stay; the doctor can add medicines after the reports, correct unissued ones, or drop unissued ones.
       const cur = await tx.select().from(prescriptionItem).where(and(eq(prescriptionItem.encounterId, id), eq(prescriptionItem.tenantId, t)));
       const keep = new Set(body.prescription.map((i) => i.id).filter(Boolean));
@@ -112,6 +117,11 @@ export function clinicalRoutes(app: FastifyInstance) {
         const { id: iid, ...fields } = i;
         if (iid && cur.some((c) => c.id === iid)) { const c = cur.find((x) => x.id === iid)!; await tx.update(prescriptionItem).set(c.dispensed || c.issuedQty > 0 ? { sortOrder: k } : { ...fields, sortOrder: k }).where(eq(prescriptionItem.id, iid)); }
         else { await tx.insert(prescriptionItem).values({ ...fields, tenantId: t, encounterId: id, sortOrder: k }); newRx++; }
+      }
+      if (amending) { // a follow-up or test taken off the amended pad goes, if nobody has acted on it yet
+        const keepRec = new Set(body.recommendations.map((r) => r.id).filter(Boolean) as string[]);
+        const cur = await tx.select({ id: recommendation.id }).from(recommendation).where(and(eq(recommendation.encounterId, id), eq(recommendation.tenantId, t), eq(recommendation.status, 'open')));
+        for (const c of cur) if (!keepRec.has(c.id)) await tx.delete(recommendation).where(eq(recommendation.id, c.id));
       }
       const fresh = body.recommendations.filter((r) => !r.id);
       if (fresh.length) {
@@ -142,7 +152,8 @@ export function clinicalRoutes(app: FastifyInstance) {
     const testsPending = !held && body.complete && (await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.status} not in ('done','cancelled')`)))[0].n > 0;
     if (body.complete) {
       set.status = testsPending ? 'awaiting_reports' : 'completed';
-      if (!held) set.completedAt = new Date().toISOString(); else set.provenance.reportsClosedAt = new Date().toISOString();
+      if (held) set.provenance.reportsClosedAt = new Date().toISOString();
+      else { set.signedAt = new Date().toISOString(); if (!enc.completedAt) set.completedAt = set.signedAt; } // an amendment keeps the first date
       if (req.ctx.practitionerId) set.practitionerId = req.ctx.practitionerId;
     }
     await tx.update(encounter).set(set).where(eq(encounter.id, id));
@@ -155,12 +166,26 @@ export function clinicalRoutes(app: FastifyInstance) {
       if (newRx > 0) await queueRxMessage(tx, req.ctx, id); // medicines added after the reports go out the same way
     } else if (body.complete) {
       await tx.update(visit).set({ status: 'done' }).where(eq(visit.id, enc.visitId));
-      await emit(tx, req.ctx, testsPending ? 'encounter.awaiting_reports' : 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length });
+      await emit(tx, req.ctx, testsPending ? 'encounter.awaiting_reports' : 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, rxItems: body.prescription.length, recommendations: body.recommendations.length, overrides: Array.isArray(data.overrides) ? data.overrides.length : 0, ...(amending ? { amended: true } : {}) });
       await queueRxMessage(tx, req.ctx, id); // the prescription and any "how to apply" leaflets go out on WhatsApp
     } else if (isIntakeOnly(req)) {
       const cur = await tx.select({ details: visit.details }).from(visit).where(eq(visit.id, enc.visitId)).then((r) => r[0]);
       await tx.update(visit).set({ status: 'screened', details: { ...(cur?.details ?? {}), screenedAt: new Date().toISOString(), screenedBy: req.ctx.name } }).where(eq(visit.id, enc.visitId)); // screening done, the doctor's line
     }
+    return getEncounter(tx, t, id);
+  });
+
+  /** Amend a signed prescription: reopens the pad with the reason on record (audited); signing again reprints it marked "Amended". */
+  route(app, 'post', '/encounters/:id/amend', 'encounter.complete', async (req, tx) => {
+    const b = z.object({ reason: z.string().trim().min(3).max(300) }).parse(req.body); const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const enc = await tx.select().from(encounter).where(and(eq(encounter.id, id), eq(encounter.tenantId, t))).then((r) => r[0]);
+    if (!enc) throw new HttpError(404, 'NOT_FOUND');
+    if (enc.status !== 'completed') throw new HttpError(409, 'NOT_SIGNED');
+    const amendments = [...(enc.amendments ?? []), { at: new Date().toISOString(), by: req.ctx.name, reason: b.reason }];
+    await tx.update(encounter).set({ status: 'draft', amendments, signedAt: enc.signedAt ?? enc.completedAt ?? new Date().toISOString() }).where(eq(encounter.id, id)); // signed before this change came in counts as signed
+    await emit(tx, req.ctx, 'encounter.amended', 'encounter', id, { patientId: enc.patientId, reason: b.reason });
+    await writeAudit(tx, req.ctx, { kind: 'clinical', action: 'POST /encounters/:id/amend', summary: `Amended a signed prescription: ${b.reason}`, entity: 'encounters', entityId: id, patientId: enc.patientId, after: b });
+    req.audited = true;
     return getEncounter(tx, t, id);
   });
 
@@ -215,8 +240,10 @@ export function clinicalRoutes(app: FastifyInstance) {
     const recIds = e.recommendations.map((r: any) => r.id);
     const labs = await tx.select().from(labResult).where(and(eq(labResult.tenantId, t), eq(labResult.patientId, e.patientId), recIds.length ? sql`(${labResult.encounterId} = ${e.id} or ${labResult.recommendationId} in ${recIds})` : eq(labResult.encounterId, e.id))).orderBy(labResult.test);
     const phrases = [...e.prescription.flatMap((i: any) => [i.frequency, i.timing, i.instructions, i.durationDays ? `${i.durationDays} days` : null]), ...String(e.data?.plan?.advice ?? '').split('\n')].filter(Boolean) as string[];
-    const telugu = Object.fromEntries(phrases.map((p) => [p, te(p, ten.settings)]).filter(([, v]) => v));
-    return { ...e, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, visit: v, labs, printRx: printSettings(ten.settings), pad: padConfig(ten.settings), telugu, vitalFields: Array.isArray(ten.settings?.vitalFields) ? ten.settings.vitalFields : [] };
+    const pr = printSettings(ten.settings);
+    const local = Object.fromEntries(phrases.map((p) => [p, localPhrase(pr.lang, p, ten.settings)]).filter(([, v]) => v));
+    // the private note and the safety overrides are never on paper; the diagnosis prints only for clinical roles (the desk reprints without it)
+    return { ...e, data: { ...e.data, notes: undefined, overrides: undefined, ...(clinical(req.perms) ? {} : { assessment: undefined }) }, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, visit: v, labs, printRx: pr, pad: padConfig(ten.settings), local, vitalFields: Array.isArray(ten.settings?.vitalFields) ? ten.settings.vitalFields : [] };
   });
 
   /** Worklists: open follow-ups and procedure recommendations with contact log. */

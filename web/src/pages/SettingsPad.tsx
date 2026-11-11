@@ -7,7 +7,7 @@ import { vitalFields } from '../vitals';
 
 type Sec = { key: string; show: boolean; required: boolean; print: boolean };
 type Known = { key: string; label: string; canRequire?: boolean; canPrint?: boolean };
-type Print = { lang: 'te+en' | 'en' | 'te'; outOfRangeOnly: boolean; vitals: string[] };
+type Print = { lang: 'te+en' | 'hi+en' | 'en' | 'te'; outOfRangeOnly: boolean; vitals: string[] };
 type Cat = { key: string; label: string; short: string; options: string[] };
 type PadData = { sections: Sec[]; print: Print; known: Known[]; telugu: Record<string, string>; teluguDefaults: Record<string, string>; history: Cat[]; historyDefaults: Cat[] };
 
@@ -48,7 +48,7 @@ export function PadTab({ onSaved }: { onSaved: () => void }) {
         <div className="space-y-4">
           <Section title="Printed prescription">
             <div className="space-y-4 p-4 text-[13px]">
-              <div><span className="label">Language for standard phrases and advice</span><div className="flex flex-wrap gap-1.5">{([['te+en', 'Telugu + English'], ['en', 'English only'], ['te', 'Telugu only']] as const).map(([v, l]) => <button key={v} type="button" className={`toggle-opt ${print.lang === v ? 'on' : ''}`} onClick={() => setPrint({ ...print, lang: v })}>{l}</button>)}</div><div className="mt-1 text-xs text-muted">Timings, frequencies and the advice chips are translated from the phrase table below. Free text prints as typed.</div></div>
+              <div><span className="label">Language for standard phrases and advice</span><div className="flex flex-wrap gap-1.5">{([['en', 'English only'], ['te+en', 'English + Telugu'], ['hi+en', 'English + Hindi']] as const).map(([v, l]) => <button key={v} type="button" className={`toggle-opt ${(print.lang === 'te' ? 'te+en' : print.lang) === v ? 'on' : ''}`} onClick={() => setPrint({ ...print, lang: v })}>{l}</button>)}</div><div className="mt-1 text-xs text-muted">English always prints. Timings, frequencies and the advice chips also print in Telugu or Hindi; anything with no translation prints in English only.</div></div>
               <div><span className="label">Vitals on the paper</span><div className="flex flex-wrap gap-1.5">{VITAL_CHOICES.map(([k, l]) => <button key={k} type="button" className={`toggle-opt ${print.vitals.includes(k) ? 'on' : ''}`} onClick={() => setPrint({ ...print, vitals: print.vitals.includes(k) ? print.vitals.filter((x) => x !== k) : [...print.vitals, k] })}>{l}</button>)}</div></div>
               <label className="flex items-center gap-2"><input type="checkbox" className="h-4 w-4 accent-ink" checked={print.outOfRangeOnly} onChange={(e) => setPrint({ ...print, outOfRangeOnly: e.target.checked })} />Print only out-of-range lab values by default<span className="text-xs text-muted">· the doctor can change it per prescription</span></label>
             </div>

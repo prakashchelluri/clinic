@@ -20,7 +20,8 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
   const on = (k: string) => (results ? !['symptoms', 'exam', 'history', 'vitals', 'tests'].includes(k) : true) && padOn(k);
   const issuedAt = e.completedAt ? new Date(e.completedAt).getTime() : 0;
   const rxLines: any[] = results ? e.prescription.filter((i: any) => i.createdAt && new Date(i.createdAt).getTime() > issuedAt + 60_000) : e.prescription;
-  const tel = (s: string | null | undefined) => (s && pr.lang !== 'en' ? e.telugu?.[s] ?? null : null);
+  // the patient's language (Telugu or Hindi, the clinic's print setting) under the English; null for a phrase with no translation
+  const tel = (s: string | null | undefined) => (s && pr.lang !== 'en' ? (e.local ?? e.telugu)?.[s] ?? null : null);
   const line = (xs: (string | null | undefined)[]) => xs.filter(Boolean).join(' · ');
   const date = new Date(results ? e.provenance?.reportsClosedAt ?? Date.now() : e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   const investigations = e.recommendations.filter((r: any) => r.kind === 'investigation');
@@ -34,9 +35,10 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
   const labs: any[] = (e.labs ?? []).filter((r: any) => !outOnly || ['low', 'high', 'abnormal'].includes(r.flag));
   const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
   const hist = p.history ?? {}; const histLine = ['conditions', 'drugAllergies', 'otherAllergies'].flatMap((k) => (hist[k] ?? []).map((x: any) => x.name)).join(', ');
-  const en = pr.lang !== 'te';
-  // Telugu only: a phrase with no Telugu prints in English rather than vanishing from the prescription
-  const teOr = (s: string | null | undefined) => (en ? tel(s) : tel(s) ?? s ?? null);
+  // English always prints. The second line is in the patient's language, and a part with no translation stays in English there,
+  // so no instruction is ever dropped (a clinic still set to the old "Telugu only" gets English + Telugu).
+  const teOr = (s: string | null | undefined) => tel(s) ?? s ?? null;
+  const localLine = (xs: (string | null | undefined)[]) => (xs.some((x) => tel(x)) ? line(xs.map(teOr)) : '');
   // not finished yet: marked as a draft across the page and printed without a signature line
   const draft = e.status === 'draft';
   const age = ageText(p);
@@ -61,18 +63,19 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
       {on('medicines') && (!results || rxLines.length > 0) && <>
         <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞{results && <span className="ml-2 align-middle text-[11px] font-sans text-gray-600">added after the reports</span>}</div>
         <table className="w-full mt-1"><tbody>
-          {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : null; const parts = [i.frequency, i.timing, days]; const teLine = line([...parts, !en && i.route && i.route !== 'oral' ? i.route : null].map(teOr)); return (
+          {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : null; const parts = [i.frequency, i.timing, days]; const teLine = localLine([...parts, i.instructions]); return (
             <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>
               <td className="py-1"><b>{i.name}</b>{i.dose ? ` ${i.dose}` : ''}{i.qty ? <span className="float-right text-[11px] text-gray-600">× {i.qty}</span> : null}
-                {en && <div className="text-[11px]">{line([...parts, i.route && i.route !== 'oral' ? i.route : null])}{i.instructions ? ` — ${i.instructions}` : ''}</div>}
-                {(teLine || teOr(i.instructions)) && <div className="text-[11px] text-gray-800">{line([teLine, teOr(i.instructions)])}</div>}</td></tr>); })}
+                {<div className="text-[11px]">{line([...parts, i.route && i.route !== 'oral' ? i.route : null])}{i.instructions ? ` — ${i.instructions}` : ''}</div>}
+                {teLine && <div className="text-[11px] text-gray-800">{teLine}</div>}</td></tr>); })}
         </tbody></table>
       </>}
       {on('tests') && investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => r.notes).join(', ')}</div>}
       {on('results') && labs.length > 0 && <div className="mt-2"><b>Results{outOnly ? ' (out of range)' : ''}:</b> {labs.map((r: any) => `${r.test} ${r.value}${r.unit ? ` ${r.unit}` : ''}${r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''}`).join(' · ')}</div>}
-      {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {en && advice.join(' · ')}{pr.lang !== 'en' && (!en || advice.some((a) => tel(a))) && <div className="text-gray-800">{advice.map((a) => tel(a) ?? (en ? null : a)).filter(Boolean).join(' · ')}</div>}</div>}
+      {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {advice.join(' · ')}{localLine(advice) && <div className="text-gray-800">{localLine(advice)}</div>}</div>}
       {plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).length > 0 && <div className="mt-2">{plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `Procedure advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
       {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
+      {(e.amendments ?? []).length > 0 && <div className="mt-3 border-t border-black pt-1 text-[11px]">{e.amendments.map((a: any, k: number) => <div key={k}><b>Amended on {new Date(a.at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}:</b> {a.reason}</div>)}</div>}
       <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div>{draft ? <div className="text-[11px] font-semibold text-red-700">Draft — not signed</div> : <div className="border-t border-black pt-1 w-48 text-center">Signature</div>}</div>
       {!embed && <button className="no-print btn mt-6" onClick={() => window.print()}>Print</button>}
     </div>

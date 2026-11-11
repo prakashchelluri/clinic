@@ -40,23 +40,26 @@ export function unitsPerDose(dose: string | null | undefined): number {
   return m ? Number(m[1]) || 1 : 1;
 }
 
-// --- safety checks on the prescription: allergy, pregnancy and one interaction ---
-// ponytail: hand-kept word lists matched at the start of each word of the medicine name (and its generic, when the catalogue has one);
-// a proper allergy / interaction database is the upgrade path. Stems are long enough not to catch minoxidil, doxylamine or levocetirizine.
+// --- safety checks on the prescription: allergy, same medicine twice, pregnancy, interactions ---
+// ponytail: hand-kept word lists matched at the start of each word of the medicine name, its generic and its allergy class (both from
+// the medicine list in Settings); a proper drug database is the upgrade path. Stems are long enough not to catch minoxidil, doxylamine
+// or levocetirizine. A cream is matched like a tablet (ketoconazole cream counts as an azole): the doctor gives a reason and goes on.
 export const ALLERGY_CLASSES: Record<string, string[]> = {
-  sulfa: ['sulfa', 'sulpha', 'cotrimoxazole', 'dapsone', 'sulfasalazine'],
+  sulfa: ['sulfa', 'sulpha', 'cotrimoxazole', 'trimox', 'septran', 'bactrim', 'dapsone', 'sulfasalazine'],
   penicillin: ['penicillin', 'amox', 'augmentin', 'moxclav', 'clavam', 'ampi', 'cloxa', 'flucloxa'],
   cephalosporin: ['cephalosporin', 'ceph', 'cef'],
   tetracycline: ['tetracycl', 'doxycyc', 'minocyc', 'lymecyc'],
+  retinoid: ['retinoid', 'isotret', 'isotroin', 'acitret', 'alitret', 'tretin', 'adapal', 'tazarot'],
   'local anaesthetic': ['anaesthe', 'anesthe', 'lidocaine', 'lignocaine', 'prilocaine', 'benzocaine', 'emla'],
   macrolide: ['macrolide', 'azithro', 'clarithro', 'erythro', 'roxithro'],
   quinolone: ['quinolone', 'fluoroquin', 'cipro', 'levoflox', 'oflox', 'moxiflox', 'norflox'],
   nsaid: ['nsaid', 'ibuprofen', 'diclofenac', 'aceclofenac', 'aspirin', 'naproxen', 'mefenamic', 'nimesulide', 'etoricoxib', 'ketorolac'],
+  azole: ['azole', 'itracon', 'ketocon', 'flucon', 'voricon'],
 };
 const words = (s: string) => s.toLowerCase().split(/[^a-z]+/).filter(Boolean);
 const starts = (text: string, stems: string[]) => words(text).some((w) => stems.some((x) => w.startsWith(x)));
 const FILLER = new Set(['drug', 'drugs', 'allergy', 'allergic', 'local', 'tablets', 'medicine', 'medicines', 'hair', 'food', 'other']);
-/** The allergy a medicine clashes with ("penicillin" for Amoxyclav), or null. med is the name, plus the generic when known. */
+/** The allergy a medicine clashes with ("penicillin" for Amoxyclav), or null. med is the name, plus the generic and class when known. */
 export function allergyHit(allergies: string | null | undefined, med: string): string | null {
   if (!allergies || !med) return null;
   for (const word of words(allergies).filter((w) => w.length >= 4 && !FILLER.has(w))) {
@@ -65,16 +68,40 @@ export function allergyHit(allergies: string | null | undefined, med: string): s
   }
   return null;
 }
-const ISO = ['isotret', 'isotroin'];
-const PREGNANCY_AVOID = [...ISO, 'methotrex', 'finaster', 'dutaster', ...ALLERGY_CLASSES.tetracycline];
-type Med = { name: string; generic?: string | null };
-/** What Finish stops on, as sentences: allergy clashes, medicines unsafe in pregnancy or breastfeeding, isotretinoin with a tetracycline. */
+const ORAL_RETINOID = ['isotret', 'isotroin', 'acitret', 'alitret'];
+const MTX = ['methotrex'];
+const TRIMETHOPRIM = ['trimetho', 'cotrimox', 'trimox', 'septran', 'bactrim'];
+const CICLOSPORIN = ['ciclospor', 'cyclospor'];
+/** Unsafe in pregnancy or breastfeeding. */
+export const PREGNANCY_AVOID = [...ALLERGY_CLASSES.retinoid, ...MTX, 'finaster', 'dutaster', 'spironol', 'thalidom', 'leflunom', 'mycophen', 'warfar', 'valpro', 'ribavir', ...ALLERGY_CLASSES.tetracycline];
+/** Pairs that must not go together on one prescription, and why, in words the doctor reads in a second. */
+export const INTERACTIONS: [string[], string[], string][] = [
+  [ORAL_RETINOID, ALLERGY_CLASSES.tetracycline, 'both raise the pressure inside the head; do not give together'],
+  [MTX, ALLERGY_CLASSES.nsaid, 'the painkiller raises methotrexate to toxic levels'],
+  [MTX, TRIMETHOPRIM, 'together they can stop the bone marrow'],
+  [MTX, ORAL_RETINOID, 'together they can damage the liver'],
+  [MTX, ['dapsone'], 'together they can stop the bone marrow'],
+  [CICLOSPORIN, ALLERGY_CLASSES.nsaid, 'together they can damage the kidneys'],
+  [CICLOSPORIN, ALLERGY_CLASSES.azole, 'the azole raises ciclosporin levels'],
+  [ALLERGY_CLASSES.azole, ['atorvast', 'simvast', 'lovast'], 'the azole raises the statin: risk of muscle damage'],
+  [['azathiop'], ['allopur', 'febuxo'], 'together they can stop the bone marrow'],
+  [['dapsone'], TRIMETHOPRIM, 'raises dapsone: risk of blue lips (methaemoglobin)'],
+  [['warfar'], [...ALLERGY_CLASSES.azole, 'metronid', ...TRIMETHOPRIM], 'raises warfarin: risk of bleeding'],
+];
+export type Med = { name: string; generic?: string | null; allergyClass?: string | null };
+const medText = (m: Med) => `${m.name} ${m.generic ?? ''} ${m.allergyClass ?? ''}`;
+/** What one line is, to spot the same medicine written twice: its generic, else the first word of its name. */
+const molecule = (m: Med) => (m.generic?.trim().toLowerCase() || words(m.name).find((w) => w.length >= 4) || m.name.toLowerCase());
+/** What Finish stops on, as sentences: allergy clashes, the same medicine twice, medicines unsafe in pregnancy or breastfeeding, interactions. */
 export function rxWarnings(meds: Med[], p: { name: string; allergies?: string | null; pregnant?: string | null }): string[] {
-  const out: string[] = []; const text = (m: Med) => `${m.name} ${m.generic ?? ''}`;
-  for (const m of meds) { const a = allergyHit(p.allergies, text(m)); if (a) out.push(`${p.name} is allergic to ${a}: ${m.name}.`); }
-  if (p.pregnant) for (const m of meds) if (starts(text(m), PREGNANCY_AVOID)) out.push(`${p.name} is ${p.pregnant.toLowerCase()}: ${m.name} can harm the baby.`);
-  const iso = meds.find((m) => starts(text(m), ISO)); const tet = meds.find((m) => starts(text(m), ALLERGY_CLASSES.tetracycline));
-  if (iso && tet) out.push(`${iso.name} with ${tet.name}: both raise the pressure inside the head; do not give together.`);
+  const out: string[] = [];
+  for (const m of meds) { const a = allergyHit(p.allergies, medText(m)); if (a) out.push(`${p.name} is allergic to ${a}: ${m.name}.`); }
+  meds.forEach((m, k) => { const twin = meds.slice(0, k).find((x) => molecule(x) === molecule(m)); if (twin) out.push(`${twin.name} and ${m.name} are the same medicine (${molecule(m)}).`); });
+  if (p.pregnant) for (const m of meds) if (starts(medText(m), PREGNANCY_AVOID)) out.push(`${p.name} is ${p.pregnant.toLowerCase()}: ${m.name} can harm the baby.`);
+  for (const [a, b, why] of INTERACTIONS) {
+    const x = meds.find((m) => starts(medText(m), a)); const y = meds.find((m) => m !== x && starts(medText(m), b));
+    if (x && y) out.push(`${x.name} with ${y.name}: ${why}.`);
+  }
   return out;
 }
 /** "Pregnant" or "Breastfeeding" when the patient's history chips say so. */

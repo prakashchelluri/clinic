@@ -7,6 +7,7 @@ import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon } from 'lucide-react';
 import { Avatar, Chip, Floating, Icon, Modal, Segmented, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
+import { PadSimple } from './padSimple';
 import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
 import { parseRxLine, qtyFor, allergyHit, rxWarnings, pregnancyFlag, ageText } from '../rxLine';
@@ -246,7 +247,15 @@ function Combo({ value, options, onChange, placeholder, label, className, disabl
 }
 
 /** The consultation on one pad: section cards in the clinic's order, templates in every card header, type anything on top, finish and call the next patient. */
+/** Which pad model: Stacked, Focused and Review are the pad below; Simple is the third model (padSimple.tsx), for doctors. */
 export function Encounter() {
+  const { perms } = useOutletContext<any>();
+  const [simple, setSimple] = useState(() => { try { return localStorage.getItem('pad-layout') === 'simple'; } catch { return false; } });
+  const pick = (v: string) => { try { localStorage.setItem('pad-layout', v); } catch { /* private mode */ } setSimple(v === 'simple'); };
+  return simple && (can(perms, 'encounter.complete') || can(perms, 'encounter.*')) ? <PadSimple onLayout={pick} /> : <EncounterPad onSimple={() => pick('simple')} />;
+}
+
+function EncounterPad({ onSimple }: { onSimple: () => void }) {
   const { id } = useParams(); const nav = useNavigate(); const { cfg, perms, me } = useOutletContext<any>();
   const enc = useQuery({ queryKey: ['encounter', id], queryFn: () => get(`/encounters/${id}`) });
   const timeline = useQuery({ queryKey: ['timeline', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/timeline`), enabled: !!enc.data });
@@ -820,7 +829,7 @@ export function Encounter() {
           {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
           {pregnant && <span className="chip chip-rose shrink-0 !py-1">{pregnant}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}
-            {isDoctor && !readOnly && <Segmented<'stacked' | 'focused' | 'review'> size="sm" value={layoutValue} onChange={(v) => { setLayout(v); setPeek(false); }} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'focused', label: 'Focused' }, ...(isReview ? [{ value: 'review' as const, label: 'Review' }] : [])]} />}
+            {isDoctor && !readOnly && <Segmented<'stacked' | 'focused' | 'review' | 'simple'> size="sm" value={layoutValue} onChange={(v) => { if (v === 'simple') { void (async () => { if (dirty.current) { try { await save.mutateAsync({ complete: false }); } catch { return; } } await qc.invalidateQueries({ queryKey: ['encounter', id] }); onSimple(); })(); return; } setLayout(v); setPeek(false); }} options={[{ value: 'stacked', label: 'Stacked' }, { value: 'focused', label: 'Focused' }, ...(isReview ? [{ value: 'review' as const, label: 'Review' }] : []), { value: 'simple', label: 'Simple' }]} />}
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden />Templates</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={540}>
                 <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-2 p-1.5">
