@@ -53,7 +53,7 @@ export function FrontDesk() {
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
   const [tab, setTab] = useState<Tab>(can(perms, 'visit.write') ? 'now' : 'waiting');
   const [pickV, setPickV] = useState<string | null>(null); // the patient whose journey is open; null = the first that needs the desk, '' = closed
-  const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not yet arrived; null when not selecting
+  const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not here yet; null when not selecting
   useEffect(() => setSel(null), [tab]);
   const [docFilter, setDocFilter] = useState<string | null>(null); // one doctor's queue, or everyone
   // Table or Schedule: the same day two ways; the desk's last choice is kept on this computer
@@ -140,6 +140,8 @@ export function FrontDesk() {
   const reportsIn = reportsOpen.filter((o) => ['ready', 'partial', 'reviewed', 'doctor_call'].includes(o.state) && !visitsAll.some((v) => v.details?.reportsEncounterId === o.encounterId && ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status)));
   const reportsLate = reportsOpen.filter((o) => o.state === 'pending' && o.late?.length);
   const idle = [...intake.map((v) => ({ v, label: 'with junior' })), ...waiting.filter((v) => v.status === 'waiting' && screening === 'required').map((v) => ({ v, label: 'for screening' })), ...inConsult.map((v) => ({ v, label: `with doctor${v.details?.calledAt ? ` ${minsSince(v.details.calledAt)} min` : ''}` }))];
+  /** 8 min, 1 h 20 m: how long someone has waited */
+  const waitText = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} m`);
   const nowCount =sendable.length + checkout.length + reportsIn.length + reportsLate.length + late.length + withDue.length;
   const selV = canDesk && tab !== 'history' ? visitsAll.find((v) => v.id === pickV) ?? null : null; // the journey drawer opens on a tap, never by itself
   const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
@@ -152,7 +154,7 @@ export function FrontDesk() {
     ...(d?.doctors ?? []).map((x: any) => ({ value: x.id as string, label: x.name as string, count: toSee(x.id) })),
     ...(unpicked || docFilter === '__none' ? [{ value: '__none', label: 'No doctor picked', count: unpicked }] : [])] : [];
   const docName = (id: string | null) => cfg?.practitioners.find((p: any) => p.id === id)?.name ?? '—';
-  const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not yet arrived', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['checkout', 'Checkout', checkout.length], ['reports', 'Reports pending', reportsOpen.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount], ['history', 'History', -1]];
+  const tabs: [Tab, string, number][] = [['waiting', 'Waiting', waiting.length], ['scheduled', 'Not here yet', scheduled.length], ['doctor', 'With doctor', inConsult.length], ['checkout', 'Checkout', checkout.length], ['reports', 'Reports pending', reportsOpen.length], ['completed', 'Completed', completed.length + noShows.length], ['all', 'All', visits.length + scheduled.length + noShows.length], ['needs', 'Needs you', needsCount], ['history', 'History', -1]];
 
   type Row = { type: 'waiting' | 'doctor' | 'appt' | 'noshow' | 'done'; v?: any; a?: any; i?: number };
   // the junior's list: who still needs screening first, the screened ones at the bottom (still editable until the doctor finishes)
@@ -160,7 +162,7 @@ export function FrontDesk() {
   const S = { group: 'Scheduled · not yet arrived', rows: scheduled.map((a): Row => ({ type: 'appt', a })) };
   const D = { group: 'With the doctor', rows: inConsult.map((v): Row => ({ type: 'doctor', v })) };
   const C = { group: 'Completed · newest first', rows: [...completed.map((v): Row => ({ type: 'done', v })), ...noShows.map((a): Row => ({ type: 'noshow', a }))] };
-  const N = { group: 'Needs you', rows: [...late.map((a): Row => ({ type: 'appt', a })), ...withDue.map((v): Row => ({ type: 'done', v }))] };
+  const N = { group: 'To do', rows: [...late.map((a): Row => ({ type: 'appt', a })), ...withDue.map((v): Row => ({ type: 'done', v }))] };
   const I = { group: 'With the junior doctor', rows: W.rows.filter((r) => r.v.status === 'intake') };
   const groups = ({ now: [], intake: [I], waiting: [W], scheduled: [S], doctor: [D], completed: [C], needs: [N], checkout: [], reports: [], all: [W, D, S, C], history: [] } as Record<Tab, { group: string; rows: Row[] }[]>)[tab].filter((g) => g.rows.length);
   const emptyText: Record<Tab, string> = { now: '', intake: 'Nobody with the junior doctor', waiting: 'Nobody waiting', scheduled: 'Everyone booked has arrived', doctor: 'Consultation room is free', completed: 'Nothing completed yet', checkout: 'Nothing pending after the doctor', reports: 'No reports are being waited for', all: 'Nothing on this day', needs: 'All clear', history: '' };
@@ -257,7 +259,10 @@ export function FrontDesk() {
         <div>
           <div className="min-w-0">
             {tab !== 'history' && !onSchedule && <StageStrip tab={tab} onTab={setTab}
-              items={[...(canDesk ? [['now', 'For you now', nowCount, nowCount > 0]] : []), ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest <Num value={longest} /> min</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ...(canDesk ? [['scheduled', 'Still to arrive', scheduled.length, false]] : []), ['all', 'All', visits.length + scheduled.length + noShows.length, false]] as [Tab, string, number, boolean, React.ReactNode?][]}
+              items={(canDesk
+                // the desk's three: what to do, who is waiting, who has not come; the rest is on the Schedule board
+                ? [['now', 'To do', nowCount, nowCount > 0], ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest {waitText(longest)}</span>], ['scheduled', 'Not here yet', scheduled.length, false]]
+                : [['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest {waitText(longest)}</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false]]) as [Tab, string, number, boolean, React.ReactNode?][]}
               extra={<>{docFilter && tab !== 'now' && view !== 'schedule' && <span className="fd-chip">{docOptions.find((o) => o.value === docFilter)?.label}<button type="button" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button></span>}
               {canDesk && <span className="self-center shrink-0 ml-auto"><ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} /></span>}
               <span className={`fd-day ${canDesk ? '!ml-0' : ''}`}>{dayLabel}</span>

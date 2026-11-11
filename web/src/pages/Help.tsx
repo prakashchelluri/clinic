@@ -95,13 +95,13 @@ function Reception() {
     <P>This is your home page. The cards across the top are your lists for the day. Tap a card to see that list.</P>
     <Table head={['Card', 'What is in it']} rows={[
       ['Waiting', 'Checked in, waiting to be called. The longest wait is shown.'],
-      ['Not yet arrived', 'Booked for today and not here yet. Tap Check in when they arrive.'],
+      ['Not here yet', 'Booked for today and not arrived yet. Tap Check in when they arrive.'],
       ['With doctor', 'In the consultation room now.'],
       ['Checkout', 'Seen by the doctor, and something is still to arrange. This is where you work after the doctor.'],
       ['Awaiting reports', 'The lab slip is given. They stay here until the reports are reviewed and the patient is told.'],
       ['Completed', 'Finished for today.'],
       ['All', 'Everyone for today in one list.'],
-      ['Needs you', 'Late arrivals and anything with money still due.'],
+      ['To do', 'Late arrivals and anything with money still due.'],
     ]} />
 
     <H2 id="checkin">Check in a patient</H2>
