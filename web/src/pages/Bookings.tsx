@@ -7,8 +7,8 @@ import { Icon, PageHeader, usePageSearch } from '../ui';
 import { AppointmentDrawer, StatusChip } from '../apptDrawer';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 
-type Tab = 'upcoming' | 'unconfirmed' | 'past' | 'no_show' | 'cancelled';
-const TABS: [Tab, string][] = [['upcoming', 'Upcoming'], ['unconfirmed', 'Unconfirmed'], ['past', 'Past'], ['no_show', 'No-shows'], ['cancelled', 'Cancelled']];
+type Tab = 'upcoming' | 'past' | 'no_show' | 'cancelled';
+const TABS: [Tab, string][] = [['upcoming', 'Upcoming'], ['past', 'Past'], ['no_show', 'No-shows'], ['cancelled', 'Cancelled']];
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 const MSG: Record<string, string> = { confirmation: 'Confirmation', reminder: 'Reminder', moved: 'Move notice', cancelled: 'Cancel notice' };
 const msgText = (m: any) => !m ? '—' : `${MSG[m.kind] ?? m.kind} ${m.status === 'pending' ? 'due' : m.status === 'logged' ? 'ready' : m.status} · ${new Date(m.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}`;
@@ -33,9 +33,7 @@ export function Bookings() {
   const when = filterValue(sp, DATES), from = sp.get('from') ?? today(), to = sp.get('to') ?? today();
   const range = span(when, from, to); const badDates = !!range && range[0] > range[1];
   const qs = new URLSearchParams({ tab, limit: '500', ...(filterValue(sp, DOC) && { practitionerId: filterValue(sp, DOC) }), ...(filterValue(sp, SVC) && { serviceId: filterValue(sp, SVC) }), ...(range && { from: range[0], to: range[1] }), ...(q.trim().length >= 2 && { q: q.trim() }) });
-  const list = useQuery({ queryKey: ['bookings', qs.toString()], queryFn: () => get(`/bookings?${qs}`), refetchInterval: 30000, enabled: !badDates });
-  const counts = useQuery({ queryKey: ['bookings', 'counts'], queryFn: () => get('/bookings/counts') });
-  const rows: any[] = list.data ?? [];
+  const list = useQuery({ queryKey: ['bookings', qs.toString()], queryFn: () => get(`/bookings?${qs}`), refetchInterval: 30000, enabled: !badDates });  const rows: any[] = list.data ?? [];
   const setDate = (k: 'from' | 'to', v: string) => v && setSp((p) => { const n = new URLSearchParams(p); n.set(k, v); n.delete('p'); return n; }, { replace: true });
 
   const columns: Col<any>[] = [
@@ -56,7 +54,7 @@ export function Bookings() {
         id="bookings" exportName={`bookings-${tab}-${today()}`} rows={rows} rowKey={(r) => r.id} columns={columns}
         loading={list.isLoading} onRow={(r) => setOpen(r.id)} selected={open}
         empty={{ title: badDates ? 'Check the dates' : list.isError ? errText(list.error) : 'No bookings here', hint: badDates ? 'The “from” date is after the “to” date.' : 'Try another tab or other filters.' }}
-        tabs={TABS.map(([v, l]) => ({ value: v, label: l, count: v === 'unconfirmed' ? counts.data?.unconfirmed : undefined }))} tab={tab}
+        tabs={TABS.map(([v, l]) => ({ value: v, label: l }))} tab={tab}
         onTab={(v) => setSp((p) => { const n = new URLSearchParams(p); v === 'upcoming' ? n.delete('tab') : n.set('tab', v); return n; }, { replace: true })}
         search={{ placeholder: 'Find a booking: name, phone or patient no.' }}
         sort={{ key: 'when', dir: ['past', 'no_show', 'cancelled'].includes(tab) ? -1 : 1 }}

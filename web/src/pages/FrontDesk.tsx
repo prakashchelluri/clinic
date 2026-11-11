@@ -335,11 +335,76 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
 
 type Complaint = { text: string; duration: string };
 
-/** Arrival: who they are, why this fee, vitals, complaints, which doctor. One screen, one button. */
-function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, inline = false }: { inline?: boolean; init: { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
+type First = { dob: string; ageYears: string; sex: string; conditions: string[]; allergies: string[] };
+const NO_FIRST: First = { dob: '', ageYears: '', sex: '', conditions: [], allergies: [] };
+const names = (xs: any) => (Array.isArray(xs) ? xs.map((x: any) => x?.name).filter(Boolean) : []);
+const firstOf = (p: any): First => ({ dob: p.dob ?? '', ageYears: p.ageYears != null ? String(p.ageYears) : '', sex: p.sex ?? '', conditions: names(p.history?.conditions), allergies: names(p.history?.drugAllergies) });
+/** Whole years from a date of birth, today. */
+export const ageFrom = (dob: string, now = new Date()) => { const [y, m, d] = dob.split('-').map(Number); return now.getFullYear() - y - (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d) ? 1 : 0); };
+
+/** One numbered part of check-in: the number, a title that reads first, one line of help, then the fields. */
+function Sec({ n, title, hint, aside, children }: { n: number; title: string; hint?: string; aside?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section aria-label={title} className="flex flex-col gap-4 rounded-[18px] bg-surface p-5 ring-1 ring-line">
+      <div className="flex items-start gap-3">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[9px] bg-ink text-[13px] font-extrabold text-paper">{n}</span>
+        <div className="min-w-0 flex-1"><h3 className="text-[16px] font-extrabold leading-tight text-ink">{title}</h3>{hint && <p className="mt-0.5 text-[13px] text-muted">{hint}</p>}</div>
+        {aside}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** Joined buttons for one choice out of a few (sex, payment method). */
+function Seg({ label, value, options, onChange, full = false }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void; full?: boolean }) {
+  return (
+    <div role="radiogroup" aria-label={label} className={`${full ? 'flex w-full' : 'inline-flex'} gap-0.5 rounded-[11px] bg-surface-2 p-[3px]`}>
+      {options.map(([v, l]) => <button key={v} type="button" role="radio" aria-checked={value === v} onClick={() => onChange(v)}
+        className={`h-9 flex-1 rounded-[8px] px-4 text-[13px] font-bold transition-colors ${value === v ? 'bg-surface text-ink shadow-[0_1px_2px_rgba(16,32,24,.14),0_0_0_1px_rgba(16,32,24,.06)]' : 'text-ink-2 hover:text-ink'}`}>{l}</button>)}
+    </div>
+  );
+}
+
+/** Tick boxes from the clinic's list (the same list as the pad's Medical history); Other, Enter adds one. */
+function Checks({ label, options, value, onChange }: { label: string; options: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  const [other, setOther] = useState('');
+  const add = () => { const t = other.trim(); if (t && !value.includes(t)) onChange([...value, t]); setOther(''); };
+  return (
+    <fieldset className="min-w-0"><legend className="label">{label}</legend>
+      <div className="grid grid-cols-2 gap-x-3 sm:grid-cols-3">
+        {[...new Set([...options, ...value])].map((o) => <label key={o} className="flex cursor-pointer items-center gap-2.5 py-1.5 text-[13.5px] font-semibold text-ink-2">
+          <input type="checkbox" className="h-[18px] w-[18px] shrink-0 accent-clay" checked={value.includes(o)} onChange={() => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o])} />{o}</label>)}
+      </div>
+      <input aria-label={`${label}: other`} className="input mt-2 !min-h-0 !w-60 !py-1.5 text-[13px]" maxLength={80} placeholder="Other, press Enter" value={other} onChange={(e) => setOther(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+    </fieldset>
+  );
+}
+
+/** Typed entries as red tags (allergies stand out); the clinic's common ones one click away. */
+function Tags({ id, label, options, value, onChange }: { id: string; label: string; options: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  const [t, setT] = useState('');
+  const add = (x: string) => { const v = x.trim(); if (v && !value.includes(v)) onChange([...value, v]); setT(''); };
+  const rest = options.filter((o) => !value.includes(o));
+  return (
+    <div className="min-w-0"><label htmlFor={id} className="label">{label}</label>
+      <div className="flex min-h-[42px] flex-wrap items-center gap-1.5 rounded-[12px] bg-surface p-1.5 shadow-[var(--ring)]">
+        {value.map((x) => <span key={x} className="inline-flex h-7 items-center gap-1 rounded-[8px] bg-rose-soft pl-2.5 pr-1 text-[12.5px] font-bold text-rose">{x}
+          <button type="button" aria-label={`Remove ${x}`} className="grid h-5 w-5 place-items-center rounded-[5px] hover:bg-rose/10" onClick={() => onChange(value.filter((y) => y !== x))}><Icon name="x" className="h-3 w-3" /></button></span>)}
+        <input id={id} className="min-w-[110px] flex-1 border-0 bg-transparent px-1.5 text-[13.5px] text-ink outline-none placeholder:text-muted/70" maxLength={80} placeholder={value.length ? 'Add another…' : 'None known · type to add'} value={t}
+          onChange={(e) => setT(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(t); } else if (e.key === 'Backspace' && !t && value.length) onChange(value.slice(0, -1)); }} />
+      </div>
+      {rest.length > 0 && <div className="mt-1.5 text-[12.5px] text-muted">Common: {rest.slice(0, 6).map((o, i) => <span key={o}>{i ? ' · ' : ''}<button type="button" className="font-semibold text-clay hover:underline" onClick={() => add(o)}>{o}</button></span>)}</div>}
+    </div>
+  );
+}
+
+/** Arrival: who they are, what the doctor should know, vitals and complaints on the left; doctor, fee and the one button on the right. */
+function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [patientId, setPatientId] = useState(init.patientId);
-  const [newP, setNewP] = useState<null | { fullName: string; phone: string; ageYears: string; sex: string }>(null);
+  const [newP, setNewP] = useState<null | { fullName: string; phone: string }>(null);
+  const [first, setFirst] = useState<First>(NO_FIRST); // first-visit details: asked once, kept on the patient
   const [cat, setCat] = useState('');
   const vitalList = enabledVitals(cfg?.tenant.settings); // the clinic's vitals (Settings → Consultation form fields)
   const [vit, setVit] = useState<Record<string, string>>({});
@@ -349,6 +414,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   const comp = useTemplates('complaint');
   const [method, setMethod] = useState('cash'); const [amount, setAmount] = useState('');
   const [waive, setWaive] = useState(init.reports?.free ? `Back with reports · consultation of ${fmtDate(init.reports.since)}` : '');
+  const [waiving, setWaiving] = useState(false);
   const [pickedDoc, setPractitionerId] = useState('');
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: !patientId && q.length >= 2 });
   const sug = useQuery({ queryKey: ['suggest', patientId], queryFn: () => get(`/patients/${patientId}/suggest-category`), enabled: !!patientId });
@@ -362,6 +428,11 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   const catRow = cfg?.feeCategories.find((c: any) => c.code === chosen);
   const fee = catRow?.amountPaise ?? 0;
   const p = sug.data?.patient;
+  const isFirst = !!newP || (!!patientId && !init.reports && tl.data?.visits.length === 0); // new, or registered at booking and never seen
+  useEffect(() => { if (p) setFirst(firstOf(p)); }, [p?.id]);
+  const hadHistory = !!(p?.history?.conditions?.length || p?.history?.drugAllergies?.length);
+  const firstBody = () => ({ ageYears: first.ageYears ? Number(first.ageYears) : null, sex: first.sex || null, dob: first.dob || null,
+    ...(first.conditions.length || first.allergies.length || hadHistory ? { history: { conditions: first.conditions.map((name) => ({ name })), drugAllergies: first.allergies.map((name) => ({ name })) } } : {}) });
   const openPlans = (tl.data?.recommendations ?? []).filter((r: any) => !['done', 'cancelled'].includes(r.status));
   const w = Number(vit.weight_kg), h = Number(vit.height_cm);
   const bmi = w > 0 && h > 0 ? Math.round((w / ((h / 100) ** 2)) * 10) / 10 : null;
@@ -370,7 +441,8 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   const submit = useMutation({
     mutationFn: async () => {
       let pid = patientId;
-      if (!pid && newP) { const np = await post(forceNew ? '/patients?force=1' : '/patients', { fullName: newP.fullName.trim(), phone: newP.phone || null, ageYears: newP.ageYears ? Number(newP.ageYears) : null, sex: newP.sex || null, locality: locality || null }); pid = np.id; }
+      if (!pid && newP) { const np = await post(forceNew ? '/patients?force=1' : '/patients', { fullName: newP.fullName.trim(), phone: newP.phone || null, locality: locality.trim() || null, ...firstBody() }); pid = np.id; }
+      else if (pid && isFirst) await patch(`/patients/${pid}`, { ...firstBody(), ...(locality.trim() ? { locality: locality.trim() } : {}) });
       if (!pid) throw new Error('Pick or register a patient');
       const complaints = [...list, ...(draft.text.trim() ? [{ text: draft.text.trim(), duration: draft.duration.trim() }] : [])];
       const vitals: Record<string, any> = {};
@@ -392,90 +464,145 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose, 
   useEffect(() => { if (forceNew) { submit.mutate(); setForceNew(false); } }, [forceNew]);
   const step = !patientId && !newP ? 1 : 2;
   const badVital = vitalList.map((f) => vitalProblem(f, vit[f.key] ?? '')).find(Boolean);
-  const blocker = !chosen ? 'Pick a visit type' : badVital ? badVital : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : fee > 0 && !waive && toPaise(amount === '' ? String(fee / 100) : amount) <= 0 ? 'Enter the amount collected' : '';
+  const collect = toPaise(amount === '' ? String(fee / 100) : amount);
+  const blocker = !chosen ? 'Pick a visit type' : badVital ? badVital : isFirst && !first.sex ? 'Pick male, female or other' : isFirst && !first.ageYears && !first.dob ? 'Enter age or date of birth' : newP && newP.fullName.trim().length < 2 ? 'Enter the patient\'s name (at least 2 letters)' : newP && newP.phone && newP.phone.length !== 10 ? 'Phone needs 10 digits' : fee > 0 && !waive && collect <= 0 ? 'Enter the amount collected' : '';
   const facts = sug.data?.facts;
-  // a plain function, not a component: a component declared here is a new type on every render and remounts the whole sheet (focus lost, stale buttons)
-  const frame = (children: React.ReactNode) => inline
-    ? <section className="card-flat p-4 anim-fade-up" aria-label="Check in"><div className="mb-3 flex items-center gap-2"><b className="text-[14px]">{step === 1 ? 'Check in' : 'Arrival'}</b><span className="text-xs text-muted">{step === 1 ? 'phone, name or patient ID' : p?.fullName ?? newP?.fullName ?? ''}</span>{step === 2 && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={onClose}>Clear</button>}</div>{children}</section>
-    : <Modal title={step === 1 ? 'Who has arrived?' : 'Arrival'} subtitle={step === 1 ? 'Phone, name or patient ID' : undefined} onClose={onClose} width="max-w-2xl">{children}</Modal>;
-  return frame(<>
-      {step === 1 && (
-        <div className="anim-fade-up">
-          <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus className="input !pl-10 !py-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder="98765…" /></div>
-          <div className="mt-3 card-flat overflow-hidden max-h-64 overflow-y-auto">
-            {q.length < 2 ? <div className="p-4 text-sm text-muted">Type at least 2 characters</div> : search.isLoading ? <Skeleton rows={2} /> : (search.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No match. Register below.</div> :
-              search.data.map((x: any) => <button key={x.id} className="row w-full text-left" onClick={() => setPatientId(x.id)}><Avatar name={x.fullName} /><div className="flex-1 min-w-0"><div className="text-sm font-medium">{x.fullName} <span className="text-muted font-normal text-xs">{x.ageYears ? `${x.ageYears}` : ''} {x.sex ?? ''}</span></div><div className="text-xs text-muted">{x.patientNo} · {x.phone ?? 'no phone'} · {x.locality ?? ''}</div></div><Icon name="chevR" className="text-muted" /></button>)}
-          </div>
-          <button className="btn mt-3" onClick={() => setNewP({ fullName: /^\d+$/.test(q) ? '' : q, phone: /^\d+$/.test(q) ? q : '', ageYears: '', sex: '' })}><Icon name="plus" />New patient</button>
+  const doctorName = (id?: string) => cfg?.practitioners.find((x: any) => x.id === id)?.name;
+  const cats: any[] = cfg?.historyCategories ?? [];
+  const opts = (k: string) => cats.find((c) => c.key === k)?.options ?? [];
+  const suggestions = (comp.data ?? []).filter((t) => !list.some((c) => norm(c.text) === norm(t.name)));
+  let n = 2; // 1 is the patient; the rest follow what is shown
+  const badge = 'inline-flex h-6 items-center whitespace-nowrap rounded-[7px] px-2 text-[11.5px] font-bold';
+
+  if (step === 1) return (
+    <Modal title="Who has arrived?" subtitle="Phone, name or patient ID" onClose={onClose} width="max-w-2xl">
+      <div className="anim-fade-up">
+        <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone, name or patient ID" className="input !pl-10 !py-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder="98765…" /></div>
+        <div className="mt-3 card-flat overflow-hidden max-h-64 overflow-y-auto">
+          {q.length < 2 ? <div className="p-4 text-sm text-muted">Type at least 2 characters</div> : search.isLoading ? <Skeleton rows={2} /> : (search.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No match. Register below.</div> :
+            search.data.map((x: any) => <button key={x.id} className="row w-full text-left" onClick={() => setPatientId(x.id)}><Avatar name={x.fullName} /><div className="flex-1 min-w-0"><div className="text-sm font-medium">{x.fullName} <span className="text-muted font-normal text-xs">{x.ageYears ? `${x.ageYears}` : ''} {x.sex ?? ''}</span></div><div className="text-xs text-muted">{x.patientNo} · {x.phone ?? 'no phone'} · {x.locality ?? ''}</div></div><Icon name="chevR" className="text-muted" /></button>)}
         </div>
-      )}
-      {step === 2 && (
-        <div className="space-y-4 anim-fade-up">
-          {newP ? (
-            <div className={inline ? 'grid grid-cols-[minmax(0,1fr)_88px] gap-2' : 'grid grid-cols-6 gap-2'}>
-              <div className={inline ? 'col-span-2' : 'col-span-3'}><label className="label">Full name</label><input autoFocus className="input" maxLength={100} value={newP.fullName} onChange={(e) => { setDup(null); setNewP({ ...newP, fullName: e.target.value }); }} /></div>
-              <div className={inline ? '' : 'col-span-2'}><label className="label">Phone</label><input className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
-              <div><label className="label">Age</label><input className="input" inputMode="numeric" placeholder="years" value={newP.ageYears} onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setNewP({ ...newP, ageYears: v && Number(v) > 120 ? '120' : v }); }} /></div>
-              <div className={`${inline ? 'col-span-2' : 'col-span-6'} flex flex-wrap items-center gap-1.5`}>{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${newP.sex === s ? 'on' : ''}`} onClick={() => setNewP({ ...newP, sex: s })}>{s === 'M' ? 'Male' : s === 'F' ? 'Female' : 'Other'}</button>)}<button className="btn btn-ghost btn-sm ml-auto" onClick={() => setNewP(null)}>Back to search</button></div>
-            </div>
-          ) : (
-            <div className="flex items-start gap-3">
-              <Avatar name={p?.fullName ?? init.name ?? '?'} size="h-12 w-12 text-sm" />
-              <div className="flex-1 min-w-0"><div className="text-xl font-medium leading-tight">{p?.fullName ?? init.name} <span className="text-muted text-base font-normal">{p?.ageYears ?? ''} {p?.sex ?? ''}</span></div><div className="text-xs text-muted mt-0.5">{p ? `${p.patientNo} · ${p.phone ?? 'no phone'} · ${p.locality ?? ''}` : 'loading…'}</div></div>
-              {tl.data && <Chip tone={tl.data.visits.length ? 'sage' : ''}>{tl.data.visits.length ? `returning · visit ${tl.data.visits.length + 1}` : 'first visit'}</Chip>}
-              {!init.patientId && <button className="btn btn-ghost btn-sm" onClick={() => setPatientId(undefined)}>Change</button>}
-            </div>
-          )}
-          {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>A patient with this name and phone already exists ({dup.patientNo}).</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
-          {facts && <div className="flex gap-2 items-start text-sm bg-paper rounded-xl px-3.5 py-2.5"><Icon name="spark" className="h-4 w-4 text-clay shrink-0 mt-0.5" /><span>{facts.days_since_last_paid_consult < 9999 ? <>Last paid consult <b>{facts.days_since_last_paid_consult} days ago</b></> : 'No previous paid consult'} → suggested <b>{sug.data.suggested.name}</b>.{openPlans.length > 0 && <> Open plan: {openPlans.map((r: any) => r.kind === 'procedure' ? 'procedure' : r.kind === 'followup' ? `review ${r.dueOn ? fmtDate(r.dueOn) : ''}` : `test ${r.notes}`).join(', ')}.</>}</span></div>}
+        <button className="btn mt-3" onClick={() => { setFirst(NO_FIRST); setNewP({ fullName: /^\d+$/.test(q) ? '' : q, phone: /^\d+$/.test(q) ? q : '' }); }}><Icon name="plus" />New patient</button>
+      </div>
+    </Modal>
+  );
 
-          <div>
-            <div className="flex items-baseline gap-2 mb-1.5"><span className="label !mb-0">Vitals</span><span className="text-xs text-muted">all optional{bmi ? ` · BMI ${bmi}` : ' · BMI is calculated from weight and height'}</span></div>
-            <div className="grid gap-2.5" style={{ gridTemplateColumns: inline ? 'repeat(auto-fill, minmax(100px, 1fr))' : `repeat(${Math.max(1, Math.min(vitalList.length, 5))}, minmax(0, 1fr))` }}>
-              {vitalList.map((f) => (
-                <div key={f.key}><label htmlFor={`v-${f.key}`} className="text-[10px] font-semibold uppercase tracking-wider text-muted block mb-1">{f.label}</label>
-                  <div className="relative"><input id={`v-${f.key}`} aria-invalid={!!vitalProblem(f, vit[f.key] ?? '')} className={`input !px-3 !pr-11 ${vitalProblem(f, vit[f.key] ?? '') ? '!border-rose' : ''}`} inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph ?? ''} value={vit[f.key] ?? ''} maxLength={f.type === 'number' || f.key === 'bp' ? 7 : 20} onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : f.key === 'bp' ? e.target.value.replace(/[^\d/]/g, '') : e.target.value })} /><span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-muted pointer-events-none">{f.unit}</span></div></div>
-              ))}
-            </div>
-          </div>
+  return (
+    <Modal title="Check in" subtitle={newP ? 'New patient' : undefined} onClose={onClose} width="max-w-6xl">
+      <div className="-mx-6 -mb-6 bg-surface-2 px-6 pb-6 pt-4 anim-fade-up max-sm:-mx-5 max-sm:px-4">
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="flex min-w-0 flex-col gap-3.5">
 
-          <div>
-            <span className="label">Complaints <span className="font-normal normal-case tracking-normal text-muted">· tap what brings them in; each opens its checklist for the doctors</span></span>
-            {(comp.data ?? []).length > 0 && <div className="mb-2.5 flex flex-wrap gap-1.5" role="group" aria-label="Common complaints">{(comp.data ?? []).map((t) => { const on = list.some((c) => norm(c.text) === norm(t.name)); return <button key={t.id} type="button" aria-pressed={on} className={`toggle-opt !py-2 ${on ? 'on' : ''}`} onClick={() => setList(on ? list.filter((c) => norm(c.text) !== norm(t.name)) : [...list, { text: t.name, duration: '' }])}>{t.name}</button>; })}</div>}
-            <div className="space-y-2">
-              {list.map((c, i) => (
-                <div key={i} className={`grid items-center gap-2 anim-scale-in ${inline ? 'grid-cols-[minmax(0,1fr)_92px_40px_40px]' : 'grid-cols-[1fr_150px_44px_44px]'}`}>
-                  <div className="input flex items-center !bg-paper">{c.text}</div><div className="input flex items-center !bg-paper text-muted">{c.duration || '—'}</div>
-                  <span className="grid place-items-center h-11 rounded-full bg-sage-soft text-sage border border-sage/40" title="Done"><Icon name="check" /></span>
-                  <button type="button" className="btn btn-icon !h-11 !w-11" aria-label="Remove complaint" onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
-                </div>))}
-              <div className={`grid items-center gap-2 ${inline ? 'grid-cols-[minmax(0,1fr)_92px_auto]' : 'grid-cols-[1fr_150px_92px]'}`}>
-                <input className="input" aria-label="Complaint" placeholder={list.length ? 'Another complaint…' : 'Main complaint…'} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
-                <input className="input" aria-label="Since when" placeholder={inline ? 'Since' : 'Since when'} value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
-                <button type="button" className="btn btn-primary !h-10" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
+            {/* 1 · who */}
+            {newP ? (
+              <Sec n={1} title="New patient" hint="Name and mobile; the rest is asked below.">
+                <div className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_190px_auto]">
+                  <div><label htmlFor="np-name" className="label">Full name</label><input id="np-name" autoFocus className="input" maxLength={100} value={newP.fullName} onChange={(e) => { setDup(null); setNewP({ ...newP, fullName: e.target.value }); }} /></div>
+                  <div><label htmlFor="np-phone" className="label">Mobile</label><input id="np-phone" className="input" inputMode="numeric" placeholder="10 digits" value={newP.phone} onChange={(e) => { setDup(null); setNewP({ ...newP, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }); }} /></div>
+                  <button className="btn btn-ghost" onClick={() => setNewP(null)}>Back to search</button>
+                </div>
+              </Sec>
+            ) : (
+              <section aria-label="Patient" className="flex flex-col gap-3 rounded-[18px] bg-surface px-5 py-4 ring-1 ring-line">
+               <div className="flex items-center gap-4">
+                <Avatar name={p?.fullName ?? init.name ?? '?'} size="h-12 w-12 text-sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2"><b className="text-[19px] font-extrabold leading-tight">{p?.fullName ?? init.name}</b>
+                    {tl.data && (tl.data.visits.length ? <span className={`${badge} bg-sage-soft text-sage`}>Returning · visit {tl.data.visits.length + 1}</span> : <span className={`${badge} bg-amber-soft text-amber`}>First visit</span>)}
+                    {appt && <span className={`${badge} bg-sky-soft text-sky`}>Booked {appt.window?.startTime}{doctorName(appt.window?.practitionerId) ? ` · ${doctorName(appt.window?.practitionerId)}` : ''}</span>}</div>
+                  <div className="mt-0.5 text-[13px] text-muted">{p ? [p.patientNo, p.phone ?? 'no phone', !isFirst && p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.locality].filter(Boolean).join(' · ') : 'loading…'}</div>
+                  {openPlans.length > 0 && <div className="mt-1 text-[12.5px] text-ink-2">Open plan: {openPlans.map((r: any) => r.kind === 'procedure' ? 'procedure' : r.kind === 'followup' ? `review ${r.dueOn ? fmtDate(r.dueOn) : ''}` : `test ${r.notes}`).join(', ')}</div>}
+                </div>
+                {!init.patientId && <button className="btn btn-ghost shrink-0" onClick={() => setPatientId(undefined)}>Change</button>}
+               </div>
+                {!isFirst && <div className="flex items-center gap-3 border-t border-line pt-3"><label htmlFor="locality" className="label !mb-0 shrink-0">Location today</label><input id="locality" className="input !min-h-0 max-w-xs !py-1.5" maxLength={200} placeholder={p?.locality ? `${p.locality} (same as before)` : 'Area or town'} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>}
+              </section>
+            )}
+            {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>A patient with this name and phone already exists ({dup.patientNo}).</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
+
+            {/* 2 · first visit: asked once */}
+            {isFirst && (
+              <Sec n={n++} title="About the patient" hint="Asked once, on the first visit; the doctor sees it on every visit.">
+                <div className="grid items-end gap-3.5 sm:grid-cols-[170px_96px_minmax(0,1fr)]">
+                  <div><label htmlFor="fv-dob" className="label">Date of birth</label><input id="fv-dob" type="date" className="input" min="1900-01-01" max={today()} value={first.dob} onChange={(e) => { const d = e.target.value; setFirst((x) => ({ ...x, dob: d, ageYears: d && d <= today() ? String(ageFrom(d)) : x.ageYears })); }} /></div>
+                  <div><label htmlFor="fv-age" className="label">Age</label><input id="fv-age" className="input" inputMode="numeric" placeholder="years" disabled={!!first.dob} value={first.ageYears} onChange={(e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setFirst((x) => ({ ...x, ageYears: v && Number(v) > 120 ? '120' : v })); }} /></div>
+                  <div><span className="label">Sex</span><Seg label="Sex" value={first.sex} options={[['M', 'Male'], ['F', 'Female'], ['O', 'Other']]} onChange={(s) => setFirst((x) => ({ ...x, sex: s }))} /></div>
+                </div>
+                <div><label htmlFor="fv-addr" className="label">Address</label><input id="fv-addr" className="input" maxLength={200} placeholder={p?.locality || 'House, street, area, town'} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>
+                <div className="h-px bg-line" />
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+                  <Checks label="Existing conditions" options={opts('conditions')} value={first.conditions} onChange={(v) => setFirst((x) => ({ ...x, conditions: v }))} />
+                  <Tags id="fv-allergy" label="Drug allergies" options={opts('drugAllergies')} value={first.allergies} onChange={(v) => setFirst((x) => ({ ...x, allergies: v }))} />
+                </div>
+              </Sec>
+            )}
+
+            {/* vitals */}
+            <Sec n={n++} title="Vitals" hint={`Optional. BMI is worked out from weight and height.`}
+              aside={bmi ? <span className="rounded-[8px] bg-clay-soft px-2.5 py-1 text-[12px] font-bold text-clay-ink">BMI {bmi}</span> : undefined}>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                {vitalList.map((f) => {
+                  const bad = vitalProblem(f, vit[f.key] ?? '');
+                  return (
+                    <div key={f.key} className="min-w-0"><label htmlFor={`v-${f.key}`} className="label">{f.label}</label>
+                      <div className="relative"><input id={`v-${f.key}`} aria-invalid={!!bad} style={{ paddingRight: (f.unit?.length ?? 0) > 2 ? 58 : 40 }} className={`input ${bad ?'!shadow-[inset_0_0_0_1.5px_var(--color-rose)]' : ''}`} inputMode={f.type === 'number' ? 'decimal' : 'text'} placeholder={f.ph ?? ''} value={vit[f.key] ?? ''} maxLength={f.type === 'number' || f.key === 'bp' ? 7 : 20}
+                        onChange={(e) => setVit({ ...vit, [f.key]: f.type === 'number' ? e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1') : f.key === 'bp' ? e.target.value.replace(/[^\d/]/g, '') : e.target.value })} />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[12px] font-semibold text-muted">{f.unit}</span></div></div>
+                  );
+                })}
               </div>
-            </div>
+              {badVital && <p className="-mt-1 text-[12.5px] font-semibold text-rose">{badVital}</p>}
+            </Sec>
+
+            {/* complaints */}
+            <Sec n={n++} title="Why they came" hint="Each complaint opens its checklist for the doctors.">
+              {init.reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px] text-amber"><b>Back with reports:</b> {init.reports.tests}. No new complaint is needed; the doctor opens the same consultation.{init.reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
+              <div className="flex flex-col gap-2">
+                {list.map((c, i) => (
+                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5 anim-scale-in">
+                    <div className="input flex items-center !bg-surface-2 !shadow-none font-semibold">{c.text}</div><div className="input flex items-center !bg-surface-2 !shadow-none text-muted">{c.duration || '—'}</div>
+                    <button type="button" className="btn btn-ghost btn-icon" aria-label={`Remove ${c.text}`} onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
+                  </div>))}
+                <div className="grid grid-cols-[minmax(0,1fr)_150px_auto] items-center gap-2.5">
+                  <input className="input" aria-label="Complaint" placeholder={list.length ? 'Another complaint…' : 'Main complaint…'} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                  <input className="input" aria-label="Since when" placeholder="Since when" value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                  <button type="button" className="btn" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
+                </div>
+                {suggestions.length > 0 && <div className="text-[13px] text-muted">Common: {suggestions.map((t, i) => <span key={t.id}>{i ? ' · ' : ''}<button type="button" className="font-semibold text-clay hover:underline" onClick={() => setList([...list, { text: t.name, duration: '' }])}>{t.name}</button></span>)}</div>}
+              </div>
+            </Sec>
           </div>
 
-          {init.reports && <div className="rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber"><b>Back with reports:</b> {init.reports.tests}. No new complaint is needed; the doctor opens the same consultation.{init.reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
-          <div className={`grid gap-3 ${inline ? 'grid-cols-[1.5fr_1fr]' : 'grid-cols-2'}`}>
-            <div><label htmlFor="visit-type" className="label">Visit type · fee</label>
-              <select id="visit-type" className="input" value={chosen} onChange={(e) => setCat(e.target.value)}>{cfg?.feeCategories.map((c: any) => <option key={c.code} value={c.code}>{c.name} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code ? ' (suggested)' : ''}</option>)}</select></div>
-            <div><label htmlFor="locality" className="label">Location</label><input id="locality" className="input" placeholder={p?.locality ?? ''} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>
-          </div>
-          <div className={`grid gap-3 ${inline ? 'grid-cols-1' : 'grid-cols-2'}`}>
-            <div><label className="label">Doctor <span className="font-normal text-muted">· tap to change</span></label><div className="flex flex-wrap gap-1.5">{cfg?.practitioners.map((x: any) => <button key={x.id} type="button" className={`toggle-opt !py-2 ${practitionerId === x.id ? 'on' : ''}`} onClick={() => setPractitionerId(x.id)}>{x.name}<span className={`ml-1.5 font-medium ${practitionerId === x.id ? 'text-paper/70' : 'text-muted'}`}>{waitingByDoctor[x.id] ?? 0} waiting</span></button>)}</div></div>
-            <div><label className="label">Payment</label>
-              {fee === 0 ? <div className="text-sm text-muted pt-2.5">Nothing to collect for {catRow?.name?.split(' (')[0] ?? 'this visit'}.</div> : waive ? <div className="text-sm text-amber pt-2.5">Waived · {waive}</div> : (
-                <div className="flex gap-1.5 items-center flex-wrap">{['cash', 'upi', 'card'].map((m) => <button key={m} type="button" className={`toggle-opt !py-2 ${method === m ? 'on' : ''}`} onClick={() => setMethod(m)}>{m === 'upi' ? 'UPI' : m[0].toUpperCase() + m.slice(1)}</button>)}<MoneyInput className="!w-28" value={amount === '' ? String(fee / 100) : amount} onChange={setAmount} /></div>)}
-              {fee > 0 && can(perms, 'payment.waive') && <input className="input mt-2 !py-1.5 text-xs" placeholder="Waive? type the reason (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
+          {/* the rail: doctor, fee and the one button, always in view */}
+          <aside aria-label="Visit and fee" className="flex flex-col gap-4 rounded-[18px] bg-surface p-5 ring-1 ring-line shadow-[0_24px_50px_-30px_rgba(16,32,24,.35)] lg:sticky lg:top-0">
+            <div className="flex items-baseline justify-between"><h3 className="text-[18px] font-extrabold">Visit</h3><span className="text-[12.5px] text-muted">token on check-in</span></div>
+            <div><span className="label">Doctor</span>
+              <div role="radiogroup" aria-label="Doctor" className="flex flex-col gap-1.5">
+                {cfg?.practitioners.map((x: any) => { const on = practitionerId === x.id; return (
+                  <button key={x.id} type="button" role="radio" aria-checked={on} onClick={() => setPractitionerId(x.id)} className={`grid w-full grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-[13.5px] font-semibold text-ink ${on ? 'bg-clay-soft/50 ring-[1.5px] ring-clay' : 'ring-1 ring-line hover:bg-surface-2'}`}>
+                    <i className={`h-4 w-4 rounded-full ${on ? 'shadow-[inset_0_0_0_5px_var(--color-clay)]' : 'shadow-[inset_0_0_0_1.5px_var(--color-line-2)]'}`} /><span className="truncate">{x.name}</span><span className="text-[12.5px] font-medium text-muted">{waitingByDoctor[x.id] ?? 0} waiting</span></button>); })}
+              </div></div>
+            <div><label htmlFor="visit-type" className="label">Visit type</label>
+              <select id="visit-type" className="input" value={chosen} onChange={(e) => setCat(e.target.value)}>{cfg?.feeCategories.map((c: any) => <option key={c.code} value={c.code}>{c.name} · {money(c.amountPaise)}{sug.data?.suggested?.code === c.code ? ' (suggested)' : ''}</option>)}</select>
+              {facts && <p className="mt-1.5 text-[12.5px] text-muted">{facts.days_since_last_paid_consult < 9999 ? `Last paid consultation ${facts.days_since_last_paid_consult} days ago` : 'No paid consultation before'} → {sug.data.suggested.name}.</p>}</div>
+            {fee > 0 && !waive && <div><span className="label">Paid by</span><Seg full label="Payment method" value={method} options={[['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card']]} onChange={setMethod} /></div>}
+            <div className="flex items-center justify-between gap-3 border-t border-dashed border-line-2 pt-3.5">
+              <span className="text-[12.5px] font-semibold text-ink-2">{fee === 0 ? `Nothing to collect for ${catRow?.name?.split(' (')[0] ?? 'this visit'}` : waive ? 'Fee waived' : 'Collect now'}</span>
+              {fee > 0 && !waive ? <MoneyInput label="Amount collected" className="w-36 [&_input]:!text-right [&_input]:!text-[22px] [&_input]:!font-extrabold" value={amount === '' ? String(fee / 100) : amount} onChange={setAmount} /> : <b className="text-[24px] font-extrabold">₹0</b>}
             </div>
-          </div>
-          <div className={inline ? 'flex flex-wrap items-center gap-2 pt-1' : 'modal-foot'}><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{fee > 0 && !waive && !blocker ? ` · collect ${money(toPaise(amount === '' ? String(fee / 100) : amount))}` : ''}</button></div>
+            {waive && <p className="-mt-2 text-[12.5px] text-amber">Waived · {waive}</p>}
+            {(waiving || waive) && fee > 0 && can(perms, 'payment.waive') && <input aria-label="Why the fee is waived" className="input !py-1.5 text-[13px]" placeholder="Why? (known person, doctor said…)" value={waive} onChange={(e) => setWaive(e.target.value)} />}
+            <p role="status" className="min-h-[18px] text-[12.5px] font-semibold text-amber">{blocker}</p>
+            <button className="btn btn-primary !h-12 w-full justify-center text-[15px]" disabled={submit.isPending || !!blocker} onClick={() => submit.mutate()}><Icon name="check" />Check in{fee > 0 && !waive && !blocker ? ` · collect ${money(collect)}` : ''}</button>
+            <div className="flex items-center justify-between">
+              {fee > 0 && can(perms, 'payment.waive') && !waiving && !waive ? <button type="button" className="text-[13px] font-semibold text-clay hover:underline" onClick={() => setWaiving(true)}>Waive the fee</button> : <span />}
+              <button type="button" className="text-[13px] font-semibold text-muted hover:underline" onClick={onClose}>Cancel</button>
+            </div>
+          </aside>
         </div>
-      )}
-  </>);
+      </div>
+    </Modal>
+  );
 }
 
 /** How many patients may be inside the consultation room at once (the server enforces the same number). */

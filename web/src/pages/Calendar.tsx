@@ -7,6 +7,7 @@ import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter,
 import { RoutineModal } from '../routine';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
+import { ProcedureDrawer } from '../procDrawer';
 import { ChangeMyDay } from '../dayChange';
 
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -48,6 +49,7 @@ export function Calendar() {
   const [booking, setBooking] = useState<any>(null); // a window clicked on the calendar
   const [panel, setPanel] = useState<{ patient?: any } | null>(null); // the "+ Book" panel
   const [openId, setOpenId] = useState<string | null>(null);
+  const [procId, setProcId] = useState<string | null>(null);
   const [change, setChange] = useState<string | null>(null); // doctor whose day is being changed
   const [routine, setRoutine] = useState<string | null>(null);
   const weekStart = monday(day); const step = view === 'week' ? 7 : 1;
@@ -65,7 +67,7 @@ export function Calendar() {
     },
   });
   const grid: Grid = { svc: '', setSvc: () => {}, status: '', setStatus: () => {}, services: cfg?.services ?? [], show: 'all', setShow: () => {}, canBook,
-    onOpen: (id: string) => setOpenId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => a.sessionId !== w.id && move.mutate({ appt: a, to: w }) };
+    onOpen: (id: string) => setOpenId(id), onOpenProc: (id: string) => setProcId(id), onBook: (w: any) => setBooking(w), onMove: (a: any, w: any) => a.sessionId !== w.id && move.mutate({ appt: a, to: w }) };
   const a = all.data;
   const countFor = (pid: string) => {
     if (!a) return '';
@@ -110,6 +112,7 @@ export function Calendar() {
       {view === 'week' && pick.k !== 'room' && <WeekGrid from={weekStart} docs={pick.k === 'doc' ? docs.filter((d) => d.id === pick.id) : docs} onOpenDay={(d, pid) => { setDay(d); if (pid) setPick({ k: 'doc', id: pid }); setView('day'); }} />}
 
       {openId && <AppointmentDrawer id={openId} cfg={cfg} canWrite={canBook} onClose={() => setOpenId(null)} />}
+      {procId && <ProcedureDrawer id={procId} canAct={can(perms, 'worklist.write') || can(perms, 'encounter.complete')} onClose={() => setProcId(null)} />}
       {booking && (
         <Modal title="Book" subtitle={`${label(booking.day, { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${docs.find((d) => d.id === booking.practitionerId) ? ` · ${docs.find((d) => d.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
           <BookForm session={booking} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { refresh(); setBooking(null); }} />
@@ -164,7 +167,7 @@ function DayDoc({ day, doc, grid, onChange, onRoutine }: { day: string; doc: any
                     onClick={() => grid.onOpen(ap.id)} className={`inline-flex items-center gap-1.5 rounded-[10px] border px-2.5 py-1 text-[12.5px] font-semibold ${PILL[ap.status] ?? PILL.booked}`}>
                     {ap.color && <i className="h-2 w-2 rounded-[3px]" style={{ background: ap.color }} />}{ap.name}{ap.status === 'arrived' ? ' · arrived' : ap.status === 'no_show' ? ' · no-show' : ap.status === 'confirmed' ? ' ✓' : ''}
                   </button>))}
-                {r.procs.map((p) => <span key={p.id} title={p.room ?? ''} className="rounded-[10px] bg-sky-soft px-2.5 py-1 text-[12.5px] font-semibold text-sky">{p.startTime} {p.patient} · {p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.state === 'completed' ? ' ✓' : ''}</span>)}
+                {r.procs.map((p) => <button key={p.id} type="button" title={p.room ?? ''} onClick={() => grid.onOpenProc?.(p.id)} className="rounded-[10px] bg-sky-soft px-2.5 py-1 text-[12.5px] font-semibold text-sky hover:underline">{p.startTime} {p.patient} · {p.procedure ?? 'Procedure'} {p.sittingNo}{p.of ? `/${p.of}` : ''}{p.room ? ` · ${p.room}` : ''}{p.state === 'completed' ? ' ✓' : ''}</button>)}
                 {w && !closed && w.free > 0 && !past && (!isToday || w.endTime > now) && (grid.canBook
                   ? <button className="rounded-[10px] border-[1.5px] border-dashed border-sage/40 px-2.5 py-1 text-[12.5px] font-semibold text-sage hover:bg-sage-soft" onClick={() => grid.onBook({ ...w, day })}>{w.free} free</button>
                   : <span className="text-xs text-muted">{w.free} free</span>)}
@@ -312,24 +315,26 @@ function WaitlistModal({ onClose, onBook }: { onClose: () => void; onBook: (pati
 function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone }: { initialPatient?: any; defaultDoc?: string; docs: any[]; services: any[]; onClose: () => void; onDone: () => void }) {
   const [q, setQ] = useState(''); const [patient, setPatient] = useState<any>(initialPatient ?? null);
   const [newName, setNewName] = useState(''); const [newPhone, setNewPhone] = useState('');
-  const [doc, setDoc] = useState<string>(defaultDoc ?? ''); const [part, setPart] = useState<'am' | 'pm' | 'any'>('any');
+  const [doc, setDoc] = useState<string>(defaultDoc || docs[0]?.id || ''); const [part, setPart] = useState<'am' | 'pm'>('am');
   const [from, setFrom] = useState(today());
   const [slot, setSlot] = useState<any>(null); const [svc, setSvc] = useState(''); const [note, setNote] = useState('');
   const typedPhone = /^\d{10}$/.test(q.trim()) ? q.trim() : '';
+  const typedName = /\d/.test(q) ? '' : q.trim(); // a name typed in the search is the new patient's name: never asked twice
+  const name = typedName || newName.trim();
   const found = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q.trim())}`), enabled: q.trim().length >= 3 && !patient });
   const free = useQuery({ queryKey: ['calendar-free', doc, from], queryFn: () => get(`/calendar/free?from=${from}&days=7${doc ? `&practitionerId=${doc}` : ''}`) });
-  const slots: any[] = (free.data ?? []).filter((s: any) => part === 'any' || (part === 'am' ? s.startTime < '14:00' : s.startTime >= '14:00'));
+  const slots: any[] = (free.data ?? []).filter((s: any) => (part === 'am' ? s.startTime < '14:00' : s.startTime >= '14:00'));
   const byDay = slots.reduce((m: Record<string, any[]>, s: any) => { (m[s.day] ??= []).push(s); return m; }, {});
   const svcs = services.filter((s: any) => !s.practitionerIds?.length || !slot?.practitionerId || s.practitionerIds.includes(slot.practitionerId));
   const svcId = svc || svcs[0]?.id || '';
   const phoneBad = !patient && newPhone !== '' && !/^\d{10}$/.test(newPhone);
-  const who = patient ? patient.fullName : newName.trim();
+  const who = patient ? patient.fullName : name;
   const book = useMutation({
-    mutationFn: () => post('/appointments', { sessionId: slot.sessionId, patientId: patient?.id, newPatient: patient ? undefined : { fullName: newName.trim(), phone: (typedPhone || newPhone) || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined, idempotencyKey: uuid() }),
+    mutationFn: () => post('/appointments', { sessionId: slot.sessionId, patientId: patient?.id, newPatient: patient ? undefined : { fullName: name, phone: (typedPhone || newPhone) || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined, idempotencyKey: uuid() }),
     onSuccess: (r: any) => { toast(`${who} booked ${label(r.window.day, { weekday: 'short', day: 'numeric', month: 'short' })} ${r.window.startTime}. Confirmation sent.`); onDone(); },
     onError: (e) => { toast(errText(e), 'err'); qc.invalidateQueries({ queryKey: ['calendar-free'] }); },
   });
-  const wait = useMutation({ mutationFn: () => post('/waitlist', { patientId: patient.id, practitionerId: doc || null, note: note.trim() || (part !== 'any' ? (part === 'am' ? 'mornings' : 'evenings') : undefined) }),
+  const wait = useMutation({ mutationFn: () => post('/waitlist', { patientId: patient.id, practitionerId: doc || null, note: note.trim() || (part === 'am' ? 'mornings' : 'evenings') }),
     onSuccess: () => { ['waitlist', 'calendar-attention'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`${patient.fullName} is on the waiting list`); onClose(); }, onError: (e) => toast(errText(e), 'err') });
   const sameNumber = patient?.phone ? (found.data ?? []).filter((p: any) => p.phone === patient.phone && p.id !== patient.id) : [];
   return (
@@ -341,7 +346,8 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
               <input autoFocus aria-label="Phone number or name" inputMode="search" className="input" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => setQ(e.target.value)} />
               {(found.data ?? []).length > 0 && <div className="mt-1.5 max-h-40 overflow-y-auto rounded-xl border border-line">{found.data.slice(0, 6).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 border-t border-line/60 px-3 py-2 text-left text-sm first:border-t-0 hover:bg-paper" onClick={() => setPatient(p)}><b>{p.fullName}</b><span className="text-xs text-muted">{[p.patientNo, p.phone, p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null].filter(Boolean).join(' · ')}</span></button>)}</div>}
               {q.trim().length >= 3 && !found.isLoading && <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_170px]">
-                <input aria-label="New patient name" className="input" maxLength={100} placeholder="New patient: name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                {typedName ? <div className="input !bg-paper text-muted">New patient: {typedName}</div>
+                  : <input aria-label="New patient name" className="input" maxLength={100} placeholder="New patient: name" value={newName} onChange={(e) => setNewName(e.target.value)} />}
                 {typedPhone ? <div className="input !bg-paper text-muted">{typedPhone}</div> : <input aria-label="New patient mobile" inputMode="numeric" className={`input ${phoneBad ? '!border-rose' : ''}`} maxLength={10} placeholder="Mobile (10 digits)" value={newPhone} onChange={(e) => setNewPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} />}
               </div>}
               {phoneBad && <div className="mt-1 text-xs text-rose">Mobile must be 10 digits.</div>}
@@ -352,16 +358,15 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
         <div><div className="label">2 · When</div>
           <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Doctor">
             {docs.map((d) => <button key={d.id} role="radio" aria-checked={doc === d.id} className={`toggle-opt !py-1 ${doc === d.id ? 'on' : ''}`} onClick={() => { setDoc(d.id); setSlot(null); }}>{d.name}</button>)}
-            <button role="radio" aria-checked={doc === ''} className={`toggle-opt !py-1 ${doc === '' ? 'on' : ''}`} onClick={() => { setDoc(''); setSlot(null); }}>Any doctor</button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Part of the day">
-            {([['am', 'Morning'], ['pm', 'Evening'], ['any', 'Any time']] as const).map(([k, l]) => <button key={k} role="radio" aria-checked={part === k} className={`toggle-opt !py-1 ${part === k ? 'on' : ''}`} onClick={() => { setPart(k); setSlot(null); }}>{l}</button>)}
+            {([['am', 'Morning'], ['pm', 'Evening']] as const).map(([k, l]) => <button key={k} role="radio" aria-checked={part === k} className={`toggle-opt !py-1 ${part === k ? 'on' : ''}`} onClick={() => { setPart(k); setSlot(null); }}>{l}</button>)}
             <label className="ml-2 flex items-center gap-1.5 text-xs text-muted">from<input type="date" aria-label="From date" min={today()} className="input !w-auto !py-1" value={from} onChange={(e) => e.target.value >= today() && (setFrom(e.target.value), setSlot(null))} /></label>
           </div>
           <div className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
-            {free.isLoading ? <Skeleton rows={2} /> : Object.keys(byDay).length === 0 ? <div className="text-sm text-muted">No free places in these 7 days. Try another date, another doctor, or the waiting list.</div>
+            {free.isLoading ? <Skeleton rows={2} /> : Object.keys(byDay).length === 0 ? <div className="text-sm text-muted">No free places in these 7 days. Try {part === 'am' ? 'Evening' : 'Morning'}, another date, another doctor, or the waiting list.</div>
               : Object.entries(byDay).map(([d, list]) => <div key={d} className="flex gap-2"><b className="w-24 shrink-0 pt-2 text-xs text-muted">{label(d, { weekday: 'short', day: 'numeric', month: 'short' })}</b>
-                <div className="flex flex-wrap gap-1.5">{list.map((s) => { const on = slot?.sessionId === s.sessionId; return <button key={s.sessionId} role="radio" aria-checked={on} onClick={() => setSlot(s)} className={`rounded-xl border px-3 py-1.5 text-left text-sm font-bold ${on ? 'border-sage bg-sage-soft text-sage' : 'border-line bg-white hover:bg-paper'}`}>{s.startTime}<span className={`block text-[11px] font-medium ${s.free <= 1 ? 'text-clay' : 'text-muted'}`}>{s.free} left{!doc && s.doctor ? ` · ${s.doctor.replace(/^Dr\.?\s*/i, 'Dr. ')}` : ''}</span></button>; })}</div></div>)}
+                <div className="flex flex-wrap gap-1.5">{list.map((s) => { const on = slot?.sessionId === s.sessionId; return <button key={s.sessionId} role="radio" aria-checked={on} onClick={() => setSlot(s)} className={`rounded-xl border px-3 py-1.5 text-left text-sm font-bold ${on ? 'border-sage bg-sage-soft text-sage' : 'border-line bg-white hover:bg-paper'}`}>{s.startTime}<span className={`block text-[11px] font-medium ${s.free <= 1 ? 'text-clay' : 'text-muted'}`}>{s.free} left</span></button>; })}</div></div>)}
           </div>
           {patient && <button className="mt-1.5 text-xs font-semibold underline" disabled={wait.isPending} onClick={() => wait.mutate()}>Put {patient.fullName.split(' ')[0]} on the waiting list for an earlier place</button>}
         </div>
@@ -374,7 +379,7 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
         <div className="modal-foot">
           <span className="text-xs text-muted">{slot ? `WhatsApp confirmation now; reminder before the visit.` : 'Pick a free place.'}</span>
           <span className="ml-auto" /><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={!slot || book.isPending || (!patient && newName.trim().length < 2) || phoneBad} onClick={() => book.mutate()}><Icon name="check" />{slot ? `Book ${label(slot.day, { weekday: 'short' })} ${slot.startTime}` : 'Book'}</button>
+          <button className="btn btn-primary" disabled={!slot || book.isPending || (!patient && name.length < 2) || phoneBad} onClick={() => book.mutate()}><Icon name="check" />{slot ? `Book ${label(slot.day, { weekday: 'short' })} ${slot.startTime}` : 'Book'}</button>
         </div>
       </div>
     </Modal>
@@ -382,7 +387,7 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
 }
 
 type Show = 'all' | 'appts' | 'procs';
-type Grid = { svc: string; setSvc: (s: string) => void; status: string; setStatus: (s: string) => void; services: any[]; show: Show; setShow: (s: Show) => void; canBook: boolean; onRemoveBlock?: (b: any) => void; onOpen: (id: string) => void; onBook: (w: any) => void; onMove: (a: any, w: any) => void };
+type Grid = { svc: string; setSvc: (s: string) => void; status: string; setStatus: (s: string) => void; services: any[]; show: Show; setShow: (s: Show) => void; canBook: boolean; onRemoveBlock?: (b: any) => void; onOpen: (id: string) => void; onOpenProc?: (id: string) => void; onBook: (w: any) => void; onMove: (a: any, w: any) => void };
 type Col = { key: string; head: ReactNode; windows: any[]; blocks: any[]; procs: any[]; day: string; tint?: string };
 
 /** Shared time grid: one column per day or per doctor/room. */
@@ -421,7 +426,7 @@ function TimeGrid({ cols: allCols, grid, px = 1.15, minCol = 140, wide = false, 
                   <div key={b.id} className="absolute left-1 right-1 flex items-start gap-1 rounded-lg px-2 py-0.5 text-[11px] text-muted overflow-hidden" style={{ top: y(b.startTime) + 1, height: h(b.startTime, b.endTime) - 2, background: 'repeating-linear-gradient(135deg, rgba(23,25,26,.06) 0 6px, rgba(23,25,26,.015) 6px 12px)', border: '1px dashed var(--color-line-2)', zIndex: 1 }}><span className="min-w-0 flex-1 truncate"><b className="text-ink-2">{b.note ?? b.kind}</b> {b.startTime}–{b.endTime}</span>{grid.onRemoveBlock && <button className="grid h-5 w-5 shrink-0 place-items-center rounded-full hover:bg-ink/10" aria-label={`Remove ${b.note ?? b.kind}`} data-tip="Remove" onClick={() => grid.onRemoveBlock!(b)}><Icon name="x" className="h-3 w-3" /></button>}</div>
                 ))}
                 {c.procs.map((p) => (
-                  <div key={p.id} title={`${p.procedure ?? 'Procedure'} · ${p.patient} · ${p.startTime}–${p.endTime}${p.room ? ` · ${p.room}` : ''}`} className="absolute rounded-lg px-2 py-1 text-[11px] overflow-hidden" style={{ top: y(p.startTime) + 2, height: h(p.startTime, p.endTime) - 4, left: c.windows.length && !c.tint ? '60%' : 4, right: 4, background: 'var(--color-sky-soft)', border: '1px solid #c7d4e0', color: 'var(--color-sky)' }}>
+                  <div key={p.id} role="button" tabIndex={0} onClick={() => grid.onOpenProc?.(p.id)} onKeyDown={(e) => e.key === 'Enter' && grid.onOpenProc?.(p.id)} title={`${p.procedure ?? 'Procedure'} · ${p.patient} · ${p.startTime}–${p.endTime}${p.room ? ` · ${p.room}` : ''}`} className="absolute cursor-pointer rounded-lg px-2 py-1 text-[11px] overflow-hidden hover:shadow-md" style={{ top: y(p.startTime) + 2, height: h(p.startTime, p.endTime) - 4, left: c.windows.length && !c.tint ? '60%' : 4, right: 4, background: 'var(--color-sky-soft)', border: '1px solid #c7d4e0', color: 'var(--color-sky)' }}>
                     <div className="font-semibold truncate">{p.procedure ?? 'Procedure'}</div><div className="truncate">{p.patient}{c.tint ? (p.doctor ? ` · ${p.doctor}` : '') : (p.room ? ` · ${p.room}` : '')}</div>
                   </div>
                 ))}

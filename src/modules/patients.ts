@@ -6,19 +6,31 @@ import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
+import { normHistory, cleanHistory, allergyText, HISTORY_KEYS } from '../lib/history.js';
 
 const PatientIn = z.object({
   fullName: z.string().trim().min(2).max(100),
   phone: z.string().regex(/^\d{10}$/).optional().nullable(),
   sex: z.enum(['M', 'F', 'O']).optional().nullable(),
   ageYears: z.number().int().min(0).max(120).optional().nullable(),
-  locality: z.string().trim().max(100).optional().nullable(),
+  dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => d >= '1900-01-01' && d <= new Date().toISOString().slice(0, 10), 'DOB_RANGE').optional().nullable(),
+  locality: z.string().trim().max(200).optional().nullable(), // the address
+  history: z.record(z.string(), z.any()).optional(), // first-visit conditions and allergies; cleaned like the pad's history chips
   referralCard: z.boolean().optional(),
   allergies: z.string().max(500).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
   guardianId: z.string().uuid().optional().nullable(),
   contactLabel: z.string().trim().max(40).optional().nullable(),
 });
+
+/** History sent with the patient (check-in's first-visit details): only the categories sent replace the stored ones; allergies follow. */
+export function withHistory(sentH: any, stored: any, by: string) {
+  if (!sentH) return {};
+  const clean: any = cleanHistory(sentH);
+  const h: any = { ...normHistory(stored), confirmedAt: new Date().toISOString(), confirmedBy: by };
+  for (const k of HISTORY_KEYS) if (k in sentH) { if (clean[k]) h[k] = clean[k]; else delete h[k]; } // a category sent empty is cleared
+  return { history: h, allergies: allergyText(h) };
+}
 
 export function patientRoutes(app: FastifyInstance) {
   // Search by phone digits, name prefix or patient number. Family members sharing a phone come back as separate rows.
@@ -77,7 +89,7 @@ export function patientRoutes(app: FastifyInstance) {
       if (dup.length && !(req.query as any).force) throw new HttpError(409, 'POSSIBLE_DUPLICATE', { existing: dup[0] });
     }
     const n = await nextNumber(tx, t, 'patient_no', 'tenant');
-    const [row] = await tx.insert(patient).values({ ...body, tenantId: t, patientNo: `P${String(n).padStart(5, '0')}` }).returning();
+    const [row] = await tx.insert(patient).values({ ...body, ...withHistory(body.history, {}, req.ctx.name), tenantId: t, patientNo: `P${String(n).padStart(5, '0')}` }).returning();
     await emit(tx, req.ctx, 'patient.registered', 'patient', row.id, { patientNo: row.patientNo });
     return row;
   });
@@ -93,7 +105,7 @@ export function patientRoutes(app: FastifyInstance) {
       if (!g) throw new HttpError(400, 'GUARDIAN_NOT_FOUND');
     }
     if (cur) req.auditBefore = Object.fromEntries(Object.keys(body).map((k) => [k, (cur as any)[k]]));
-    const [row] = await tx.update(patient).set(body).where(and(eq(patient.id, (req.params as any).id), eq(patient.tenantId, req.ctx.tenantId))).returning();
+    const [row] = await tx.update(patient).set({ ...body, ...withHistory(body.history, cur?.history, req.ctx.name) }).where(and(eq(patient.id, (req.params as any).id), eq(patient.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     return row;
   });

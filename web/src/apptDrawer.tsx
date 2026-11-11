@@ -62,10 +62,9 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
 
           {canWrite && open && mode === null && (
             <div className="grid grid-cols-2 gap-2">
-              {a.status === 'booked' ? <button className="btn btn-primary justify-center" onClick={() => update.mutate({ status: 'confirmed' })}><Icon name="check" />Mark confirmed</button> : <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>}
+              <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>
               <button className="btn justify-center" onClick={() => setMode('move')}><Icon name="calendar" />Move</button>
               {a.window.day <= today() && <button className="btn justify-center" onClick={() => update.mutate({ status: 'no_show' })}>No-show</button>}
-              {a.status === 'booked' && <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>}
               <button className="btn justify-center !text-rose" onClick={() => setMode('cancel')}>Cancel</button>
             </div>
           )}
@@ -90,7 +89,6 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose }: { id: string; 
                 <div className="min-w-0 flex-1"><div><b className="font-semibold">{MSG[m.kind] ?? m.kind}</b> <span className="text-muted">· {MSG_STATUS[m.status] ?? m.status} · {when(m.sentAt ?? m.sendAfter)}</span></div>{m.error && m.status !== 'pending' && <div className="text-xs text-muted">{m.error}</div>}</div>
               </div>
             ))}
-            {a.link && <button className="btn btn-ghost btn-sm mt-1" onClick={() => { navigator.clipboard?.writeText(a.link).then(() => toast('Patient link copied'), () => toast(a.link, 'info')); }}><Icon name="link" />Copy patient link</button>}
           </div>
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">

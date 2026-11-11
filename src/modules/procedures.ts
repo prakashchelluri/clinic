@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, gte, lte, inArray } from 'drizzle-orm';
-import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient } from '../db/schema.js';
+import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter } from '../db/schema.js';
+import { auditView } from '../lib/audit.js';
+import { normHistory } from '../lib/history.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
@@ -138,6 +140,25 @@ export function procedureRoutes(app: FastifyInstance) {
       });
   });
 
+  /** One sitting, as the doctor needs it before starting: who, what and where, the plan behind it, earlier sittings, conditions and allergies. */
+  route(app, 'get', '/procedure-sessions/:id', 'worklist.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const r = await tx.select({ ps: procedureSession, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, ageYears: patient.ageYears, sex: patient.sex, allergies: patient.allergies, history: patient.history, flags: patient.flags },
+      procedure: procedureCatalog.name, minutes: procedureCatalog.typicalMinutes, room: room.name, doctor: practitioner.name, rec: recommendation })
+      .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))
+      .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
+      .where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((x) => x[0]);
+    if (!r) throw new HttpError(404, 'NOT_FOUND');
+    await auditView(tx, req, r.p.id, 'Opened a procedure sitting');
+    const enc = r.rec ? await tx.select({ at: encounter.createdAt, data: encounter.data }).from(encounter).where(eq(encounter.id, r.rec.encounterId)).then((x) => x[0]) : null;
+    const names = (x: any) => (Array.isArray(x) ? x.map((d) => (typeof d === 'string' ? d : d?.name)).filter(Boolean) : []);
+    const sittings = await tx.select({ id: procedureSession.id, sittingNo: procedureSession.sittingNo, day: procedureSession.day, startTime: procedureSession.startTime, state: procedureSession.state, notes: procedureSession.notes, outcome: procedureSession.outcome, stateReason: procedureSession.stateReason })
+      .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, r.ps.recommendationId))).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
+    const supervisor = r.ps.supervisorId ? await tx.select({ name: practitioner.name }).from(practitioner).where(eq(practitioner.id, r.ps.supervisorId)).then((x) => x[0]?.name ?? null) : null;
+    return { ...r.ps, patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor,
+      plan: r.rec ? { notes: r.rec.notes, sittings: r.rec.sittings, plannedOn: enc?.at ?? null, diagnosis: names((enc?.data as any)?.assessment?.diagnosis) } : null, sittings };
+  });
+
   /** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */
   route(app, 'post', '/procedure-sessions/:id/reschedule', 'worklist.write', async (req, tx) => {
     const body = ScheduleIn.omit({ recommendationId: true }).extend({ reason: z.string().trim().max(200).optional() }).parse(req.body);
@@ -164,9 +185,18 @@ export function procedureRoutes(app: FastifyInstance) {
   });
 
   /** State changes keep history: postponing records the reason and frees the doctor's time; the course stays open. */
-  route(app, 'patch', '/procedure-sessions/:id', 'worklist.write', async (req, tx) => {
+  // The desk changes any state; a doctor (from the Calendar's sitting drawer) only starts a scheduled sitting and finishes one in progress.
+  route(app, 'patch', '/procedure-sessions/:id', null, async (req, tx) => {
     const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
+    if (!can(req.perms, 'worklist.write')) {
+      if (!can(req.perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:worklist.write');
+      const cur = await tx.select({ state: procedureSession.state }).from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+      if (!cur) throw new HttpError(404, 'NOT_FOUND');
+      const from = { in_progress: 'confirmed', completed: 'in_progress' }[body.state as string];
+      if (!from) throw new HttpError(403, 'FORBIDDEN:worklist.write');
+      if (cur.state !== from) throw new HttpError(409, 'NOT_CHANGEABLE', { state: cur.state });
+    }
     const [ps] = await tx.update(procedureSession).set({ state: body.state, stateReason: body.reason, ...(body.outcome ? { outcome: body.outcome } : {}) }).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).returning();
     if (!ps) throw new HttpError(404, 'NOT_FOUND');
     if (['cancelled', 'postponed', 'missed'].includes(body.state)) await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));

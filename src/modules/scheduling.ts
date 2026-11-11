@@ -478,15 +478,13 @@ export function schedulingRoutes(app: FastifyInstance) {
       service: r.svc, series, messages: msgs, link: r.a.publicToken && ten ? `${originOf(req)}/a/${ten.slug}/${r.a.publicToken}` : null };
   });
 
-  /** The Bookings list: upcoming, unconfirmed, past, no-shows, cancelled; filterable. */
+  /** The Bookings list: upcoming, past, no-shows, cancelled; filterable. */
   route(app, 'get', '/bookings', 'appointment.read', async (req, tx) => {
-    const q = z.object({ tab: z.enum(['upcoming', 'unconfirmed', 'past', 'no_show', 'cancelled']).default('upcoming'), practitionerId: z.string().uuid().optional(), serviceId: z.string().uuid().optional(),
+    const q = z.object({ tab: z.enum(['upcoming', 'past', 'no_show', 'cancelled']).default('upcoming'), practitionerId: z.string().uuid().optional(), serviceId: z.string().uuid().optional(),
       from: DAY.optional(), to: DAY.optional(), q: z.string().trim().max(60).optional(), limit: z.coerce.number().int().min(1).max(500).default(200) }).parse(req.query);
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
     const conds: any[] = [eq(appointment.tenantId, t)];
-    if (q.tab === 'upcoming') conds.push(inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today));
-    if (q.tab === 'unconfirmed') conds.push(eq(appointment.status, 'booked'), gte(session.day, today));
-    if (q.tab === 'past') conds.push(sql`${session.day} < ${today}`);
+    if (q.tab === 'upcoming') conds.push(inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today));    if (q.tab === 'past') conds.push(sql`${session.day} < ${today}`);
     if (q.tab === 'no_show') conds.push(eq(appointment.status, 'no_show'));
     if (q.tab === 'cancelled') conds.push(eq(appointment.status, 'cancelled'));
     if (q.practitionerId) conds.push(eq(session.practitionerId, q.practitionerId));

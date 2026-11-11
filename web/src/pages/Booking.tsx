@@ -77,12 +77,14 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
   const [err, setErr] = useState<any>(null);
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.length >= 3 && !patientId });
   const typedPhone = /^\d{10}$/.test(q) ? q : '';
+  const typedName = /\d/.test(q) ? '' : q.trim(); // a name typed in the search is the new patient's name: never asked twice
   const newPhone = typedPhone || phone;
+  const newName = typedName || name.trim();
   const countN = Number(count);
   const repeatBad = repeat && (!Number.isInteger(countN) || countN < 2 || countN > 26);
   const phoneBad = !patientId && phone !== '' && !/^\d{10}$/.test(phone);
   const book = useMutation({
-    mutationFn: (overbook: boolean) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: name.trim(), phone: newPhone || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined,
+    mutationFn: (overbook: boolean) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: newName, phone: newPhone || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined,
       repeat: repeat ? { everyWeeks, count: countN } : undefined, notify, overbook, idempotencyKey: uuid() }),
     onSuccess: (r: any) => {
       const extra = r.series ? ` · ${r.series.created.length} repeat${r.series.created.length === 1 ? '' : 's'} booked${r.series.skipped.length ? `, ${r.series.skipped.length} skipped (${r.series.skipped.map((s: any) => s.day.slice(5)).join(', ')})` : ''}` : '';
@@ -105,7 +107,8 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
       {!patientId && (search.data ?? []).length > 0 && <div className="card-flat overflow-hidden max-h-44 overflow-y-auto anim-fade-up">{search.data.map((p: any) => <button key={p.id} className="row w-full text-left" onClick={() => { setPatientId(p.id); setName(p.fullName); }}><Avatar name={p.fullName} size="h-7 w-7 text-[10px]" /><span className="flex-1 text-sm">{p.fullName} <span className="text-muted text-xs">{p.phone} · {p.patientNo}</span></span><Icon name="chevR" className="text-muted h-4 w-4" /></button>)}</div>}
       {patientId ? <div className="flex items-center gap-2 text-sm bg-sage-soft text-sage rounded-xl px-3 py-2 anim-fade-in"><Icon name="check" className="h-4 w-4" />Booking for <b>{name}</b><button className="btn btn-ghost btn-sm ml-auto" onClick={() => setPatientId(undefined)}>change</button></div>
         : <div className="grid gap-2 sm:grid-cols-[1fr_160px]">
-            <input aria-label="New caller name" className="input" maxLength={100} placeholder="New caller: name" value={name} onChange={(e) => setName(e.target.value)} />
+            {typedName ? <div className="input !bg-paper text-muted">New caller: {typedName}</div>
+              : <input aria-label="New caller name" className="input" maxLength={100} placeholder="New caller: name" value={name} onChange={(e) => setName(e.target.value)} />}
             {typedPhone ? <div className="input !bg-paper text-muted">{typedPhone}</div>
               : <input aria-label="New caller phone" inputMode="numeric" className={`input ${phoneBad ? '!border-rose' : ''}`} maxLength={10} placeholder="Mobile (10 digits)" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} />}
           </div>}
@@ -118,7 +121,7 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
       </div>
       {repeatBad && <div className="text-xs text-rose -mt-1">Repeat between 2 and 26 visits.</div>}
       {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This window is full. Free windows: {err.alternatives.map((a: any) => `${a.startTime} (${a.free})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
-      <div className="modal-foot">{err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}<button className="btn btn-primary" disabled={book.isPending || (!patientId && name.trim().length < 2) || phoneBad || repeatBad} onClick={() => book.mutate(false)}><Icon name="check" />Book</button></div>
+      <div className="modal-foot">{err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={() => book.mutate(true)}>Overbook anyway</button>}<button className="btn btn-primary" disabled={book.isPending || (!patientId && newName.length < 2) || phoneBad || repeatBad} onClick={() => book.mutate(false)}><Icon name="check" />Book</button></div>
     </div>
   );
 }

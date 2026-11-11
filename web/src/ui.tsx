@@ -303,7 +303,7 @@ function useDialogFocus(panel: React.RefObject<HTMLDivElement | null>, active = 
     return () => { if (prev && document.contains(prev)) prev.focus({ preventScroll: true }); };
   }, [active]);
 }
-const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]' };
+const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]', 'max-w-6xl': 'sm:max-w-[1160px]' };
 
 export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean }) {
   const panel = useRef<HTMLDivElement>(null); const close = useRef(onClose); close.current = onClose; const id = useId();
