@@ -17,7 +17,7 @@ import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
 import { enabledVitals, vitalProblem } from '../vitals';
 import { TakePayment, moneyErr } from '../takePayment';
-import { printReceipt } from '../invoices';
+import { printReceipt, RefundDialog } from '../invoices';
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -322,11 +322,9 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
   useEffect(() => { const h = setTimeout(() => setQd(term), 300); return () => clearTimeout(h); }, [term]);
   const h = useQuery({ queryKey: ['fd-history', from, to, qd, filter], queryFn: () => get(`/frontdesk/history?from=${from}&to=${to}&q=${encodeURIComponent(qd)}&filter=${filter}`) });
   const refund = useMutation({ mutationFn: ({ c, reason }: any) => post(`/charges/${c.id}/adjust`, { kind: 'refunded', reason }), onSuccess: (_r, { c, name }: any) => { ['fd-history', 'frontdesk', 'daily', 'dayclose'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`Refunded ${money(c.amountPaise)} to ${name}`); }, onError: (e) => toast(moneyErr(e), 'err') });
-  const askRefund = async (c: any, name: string) => {
-    const a = await ask({ title: `Refund ${money(c.amountPaise)} to ${name}?`, body: "The money must be handed back, the same way it was paid. It comes off today's takings.", confirmLabel: `Refund ${money(c.amountPaise)}`, tone: 'danger', field: { label: 'Why', placeholder: 'At least 3 letters', initial: 'Left without consultation', required: true, maxLength: 200 } });
-    if (!a) return; if (a.value.trim().length < 3) { toast('Say why in at least 3 letters', 'err'); return; }
-    refund.mutate({ c, reason: a.value.trim(), name });
-  };
+  // the same reason picker as every other refund
+  const [refunding, setRefunding] = useState<null | { c: any; name: string }>(null);
+  const askRefund = (c: any, name: string) => setRefunding({ c, name });
   const rows: any[] = h.data?.rows ?? []; const s = h.data?.summary;
   const outcomeChip = (r: any) => r.outcome === 'completed' ? <Chip tone="sage">completed</Chip> : r.outcome === 'left' ? <Chip>left</Chip> : r.outcome === 'noshow' ? <Chip tone="rose">no-show</Chip> : <Chip tone="amber">{r.outcome.replace('_', ' ')}</Chip>;
   const exportCsv = () => downloadCsv(`front-desk-history-${from}-to-${to}.csv`, [['Date', 'Token / time', 'Patient', 'Age', 'Sex', 'Phone', 'Outcome', 'Doctor', 'What happened'],
@@ -374,6 +372,8 @@ function HistoryPanel({ find, onBook, slot }: { canDesk: boolean; find: string; 
         </tbody></table></div>
         {rows.length >= 500 && <div className="px-4 py-3 text-xs text-muted border-t border-ink/8">Showing the newest 500. Narrow the period or search to see older rows.</div>}
       </div>
+      {refunding && <RefundDialog title={`Refund ${money(refunding.c.amountPaise)} to ${refunding.name}?`} body="The money must be handed back, the same way it was paid. It comes off today's takings." confirmLabel={`Refund ${money(refunding.c.amountPaise)}`}
+        onClose={(reason) => { const x = refunding; setRefunding(null); if (reason) refund.mutate({ c: x.c, reason, name: x.name }); }} />}
     </div>
   );
 }
@@ -472,7 +472,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const practitionerId = pickedDoc || appt?.window?.practitionerId || [...(cfg?.practitioners ?? [])].sort((a: any, b: any) => (waitingByDoctor[a.id] ?? 0) - (waitingByDoctor[b.id] ?? 0))[0]?.id || '';
   const fallbackCat = cfg?.feeCategories.find((c: any) => c.code === 'GEN')?.code ?? cfg?.feeCategories[0]?.code ?? '';
   const chosen = cat || sug.data?.suggested?.code || (patientId && sug.isLoading ? '' : fallbackCat);
-  const [dup, setDup] = useState<null | { id: string; patientNo: string }>(null); const [forceNew, setForceNew] = useState(false);
+  const [dup, setDup] = useState<null | { id: string; patientNo: string; fullName?: string; phone?: string; ageYears?: number }>(null); const [forceNew, setForceNew] = useState(false);
   const catRow = cfg?.feeCategories.find((c: any) => c.code === chosen);
   const fee = catRow?.amountPaise ?? 0;
   const p = sug.data?.patient;
@@ -568,7 +568,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                 {!isFirst && <div className="flex items-center gap-3 border-t border-line pt-3"><label htmlFor="locality" className="label !mb-0 shrink-0">Location today</label><input id="locality" className="input !min-h-0 max-w-xs !py-1.5" maxLength={200} placeholder={p?.locality ? `${p.locality} (same as before)` : 'Area or town'} value={locality} onChange={(e) => setLocality(e.target.value)} /></div>}
               </section>
             )}
-            {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>A patient with this name and phone already exists ({dup.patientNo}).</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
+            {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>This looks like a patient already registered: {dup.fullName ?? ''} ({dup.patientNo}){dup.phone ? ` · ${dup.phone}` : ''}{dup.ageYears ? ` · ${dup.ageYears} yrs` : ''}.</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
 
             {/* 2 · first visit: asked once */}
             {isFirst && (

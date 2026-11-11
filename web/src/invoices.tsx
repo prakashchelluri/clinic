@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Chip, Modal, MoreMenu, Section, ask, fmtDate, money, toPaise, toast } from './ui';
 
 /** Why money is given back: picked, not typed, so the owner can count the reasons. "Other" asks for a few words. */
-export const REFUND_REASONS = ['Patient changed mind', 'Charged twice', 'Wrong amount', 'Service not given'] as const;
+export const REFUND_REASONS = ['Left without consultation', 'Patient changed mind', 'Charged twice', 'Wrong amount', 'Service not given'] as const;
 export function RefundDialog({ title, body, confirmLabel, onClose }: { title: string; body?: string; confirmLabel: string; onClose: (reason: string | null) => void }) {
   const [pick, setPick] = useState(''); const [other, setOther] = useState('');
   const reason = pick === 'Other' ? (other.trim().length >= 3 ? `Other: ${other.trim()}` : '') : pick;
