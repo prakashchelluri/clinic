@@ -72,7 +72,7 @@ function MoveSlots({ base, day, busy, onPick, onBack }: { base: string; day: str
     <div className="card space-y-3 anim-fade-up">
       <div className="flex items-center"><b>Pick a new time</b><span className="ml-auto flex gap-1"><button className="btn btn-ghost btn-icon" aria-label="Earlier" disabled={from <= todayIst} onClick={() => setFrom(addDays(from, -7) < todayIst ? todayIst : addDays(from, -7))}><Icon name="chevL" /></button><button className="btn btn-ghost btn-icon" aria-label="Later" onClick={() => setFrom(addDays(from, 7))}><Icon name="chevR" /></button></span></div>
       {q.isLoading ? <Skeleton rows={3} /> : q.isError ? <div className="text-sm text-rose">{errText(q.error)}</div> : days.length === 0 ? <div className="text-sm text-muted">No free times in these days. Try later days.</div> : days.map((d) => (
-        <div key={d.day}><div className="mb-1 text-xs font-semibold text-muted">{nice(d.day)}</div><div className="grid grid-cols-3 gap-2">{d.slots.map((s: any) => <button key={s.id} disabled={busy} onClick={() => setSel({ id: s.id, day: d.day, startTime: s.startTime })} className="rounded-xl bg-white py-2.5 text-sm font-semibold hover:ring-1 hover:ring-ink">{s.startTime}</button>)}</div></div>
+        <div key={d.day}><div className="mb-1 text-xs font-semibold text-muted">{nice(d.day)}</div><div className="grid grid-cols-3 gap-2">{d.slots.map((s: any) => <button key={s.id} disabled={busy} onClick={() => setSel({ id: s.id, day: d.day, startTime: s.startTime })} className="tap rounded-xl bg-surface py-2.5 text-sm font-semibold hover:ring-1 hover:ring-ink">{s.startTime}</button>)}</div></div>
       ))}
       <button className="btn btn-ghost btn-sm" onClick={onBack}>Back</button>
     </div>

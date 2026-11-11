@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, today, errText } from '../api';
 import { can } from '../App';
-import { Icon, PageHeader, usePageSearch } from '../ui';
+import { Icon, Segmented, usePageSearch } from '../ui';
+import { Calendar } from './Calendar';
 import { AppointmentDrawer, StatusChip } from '../apptDrawer';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { searchText } from '../phone';
@@ -20,8 +21,21 @@ const span = (v: string, from: string, to: string): [string, string] | null => {
   return v === 'today' ? [t, t] : v === 'tomorrow' ? [shift(t, 1), shift(t, 1)] : v === 'next7' ? [t, shift(t, 6)] : v === 'last7' ? [shift(t, -6), t] : v === 'last30' ? [shift(t, -29), t] : v === 'custom' ? [from, to] : null;
 };
 
+/** Appointments: the calendar and the list of every booking, one page with two views (it replaced Calendar and Bookings). */
+export function Appointments() {
+  const [sp, setSp] = useSearchParams();
+  const list = sp.get('view') === 'list' && !sp.get('add'); // "+ New › booking" opens on the calendar
+  const setView = (v: 'cal' | 'list') => setSp((p) => { const n = new URLSearchParams(p); v === 'list' ? n.set('view', 'list') : n.delete('view'); return n; }, { replace: true });
+  return (
+    <div className="space-y-3">
+      <Segmented<'cal' | 'list'> value={list ? 'list' : 'cal'} onChange={setView} options={[{ value: 'cal', label: 'Calendar' }, { value: 'list', label: 'List' }]} />
+      {list ? <Bookings /> : <Calendar />}
+    </div>
+  );
+}
+
 /** Every booking in one table: tabs by status; doctor, visit type and dates as filters; the header box finds a patient. */
-export function Bookings() {
+function Bookings() {
   const { cfg, perms } = useOutletContext<any>();
   const [sp, setSp] = useSearchParams();
   const tab = (TABS.some((t) => t[0] === sp.get('tab')) ? sp.get('tab') : 'upcoming') as Tab;
@@ -50,7 +64,6 @@ export function Bookings() {
 
   return (
     <div>
-      <PageHeader title="Bookings" subtitle="Upcoming visits and history. Click any booking for details and actions." />
       <DataTable
         id="bookings" exportName={`bookings-${tab}-${today()}`} rows={rows} rowKey={(r) => r.id} columns={columns}
         loading={list.isLoading} error={list.error} onRetry={() => list.refetch()} onRow={(r) => setOpen(r.id)} selected={open}

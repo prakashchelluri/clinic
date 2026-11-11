@@ -214,7 +214,7 @@ export function FrontDesk() {
       <Row key={a.id} token={a.window.startTime} cls="opacity-70"
         top={<>{who(a.patient)}<Chip tone="rose">no-show</Chip><Chip>{docName(a.window.practitionerId)}</Chip></>}
         sub={meta([a.patient.phone, 'did not arrive'])}
-        actions={canDesk && <button className="btn btn-sm" onClick={() => nav(`/calendar?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>} />); }
+        actions={canDesk && <button className="btn btn-sm" onClick={() => nav(`/appointments?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>} />); }
     const v = r.v; const due = dueOf(v); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
     return (
       <Row key={v.id} token={v.opNumber} cls={due ? 'bg-rose-soft/30' : handled || left ? 'opacity-70' : ''}
@@ -266,7 +266,7 @@ export function FrontDesk() {
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
                 onReportsArrive={(o) => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })} freeDays={freeDays}
                 onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => setCollecting(v)} doctorHead={docOptions.length > 2 && <span className="fd-thf"><Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={docOptions} />{docFilter && <button type="button" className="fd-x" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button>}</span>} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
-            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/calendar?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/calendar?book=1')} /> : (
+            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/appointments?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/appointments?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
