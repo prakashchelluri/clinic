@@ -1,23 +1,28 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, post, qc, today, errText } from '../api';
+import { get, post, patch, qc, today, errText } from '../api';
 import { can } from '../App';
 import { Icon, Modal, MoreMenu, PageHeader, fmtDate, toast } from '../ui';
 import { FlagChips } from '../flags';
 import { DataTable, type Col, type FilterDef } from '../table';
 import { ScheduleModal } from './Worklist';
 
-type Tab = 'all' | 'reviews' | 'missed' | 'procedures' | 'reports';
-const TABS: [Tab, string, string][] = [['all', 'All', 'Everyone to call today'], ['reviews', 'Reviews due', 'Patients the doctor asked to see again'], ['missed', 'Missed', 'Booked and did not come, visits and sittings'], ['procedures', 'Procedures', 'Plans with no sitting booked yet'], ['reports', 'Reports', 'The doctor has seen the reports; tell the patient']];
-type Out = 'booked' | 'call_later' | 'no_answer' | 'not_interested';
-const OUT: Record<Out, string> = { booked: 'Booked', call_later: 'Call later', no_answer: 'No answer', not_interested: 'Not interested' };
+type Tab = 'all' | 'confirm' | 'reviews' | 'missed' | 'procedures' | 'reports';
+const TABS: [Tab, string, string][] = [['all', 'All', 'Everyone to call today'], ['confirm', 'Confirm sittings', 'Booked sittings to confirm: a week before, then the day before'], ['reviews', 'Reviews due', 'Patients the doctor asked to see again'], ['missed', 'Missed', 'Booked and did not come, visits and sittings'], ['procedures', 'Procedures', 'Courses with the next sitting not booked yet'], ['reports', 'Reports', 'The doctor has seen the reports; tell the patient']];
+type Out = 'booked' | 'call_later' | 'no_answer' | 'not_interested' | 'confirmed';
+const OUT: Record<Out, string> = { booked: 'Booked', call_later: 'Call later', no_answer: 'No answer', not_interested: 'Not interested', confirmed: 'Confirmed' };
 /** The outcomes the procedure plans always used, each saved as one of the four call results. "Will come" books. */
 const OUTCOMES: { label: string; out: Out | 'book'; note?: string }[] = [
   { label: 'Will come', out: 'book' }, { label: 'Call later', out: 'call_later' }, { label: 'No answer', out: 'no_answer' },
   { label: 'Wrong number', out: 'no_answer', note: 'Wrong number' }, { label: 'Declined', out: 'not_interested' }, { label: 'Done elsewhere', out: 'not_interested', note: 'Done elsewhere' },
 ];
-const KIND: Record<string, string> = { review: 'Review', missed_visit: 'Missed visit', missed_sitting: 'Missed sitting', schedule: 'Price agreed', advised: 'Advised, not agreed', report: 'Reports to tell' };
+/** A booked sitting's confirm call: the patient says yes, does not pick up, wants another day (Move), or is not coming (the sitting is postponed). */
+const CONFIRM_OUTCOMES: { label: string; out: Out | 'move'; note?: string }[] = [
+  { label: 'Confirmed', out: 'confirmed' }, { label: 'No answer', out: 'no_answer' }, { label: 'Call later', out: 'call_later' }, { label: 'Wants another day', out: 'move' }, { label: 'Not coming', out: 'not_interested' },
+];
+const KIND: Record<string, string> = { review: 'Review', missed_visit: 'Missed visit', missed_sitting: 'Missed sitting', schedule: 'Price agreed', advised: 'Advised, not agreed', report: 'Reports to tell', confirm_week: 'Week-before call', confirm_day: 'Day-before call' };
+const isConfirm = (r: any) => r.kind === 'confirm_week' || r.kind === 'confirm_day';
 const refresh = () => ['followups', 'worklist', 'bookings', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
 const days = (d: string) => Math.round((Date.parse(d) - Date.parse(today())) / 864e5);
@@ -44,6 +49,7 @@ export function Calls() {
   const tab = (TABS.some((t) => t[0] === sp.get('tab')) ? sp.get('tab') : 'all') as Tab;
   const [calling, setCalling] = useState<{ row: any; out?: Out } | null>(null);
   const [sitting, setSitting] = useState<any>(null);
+  const [moving, setMoving] = useState<any>(null); // a confirm row whose sitting the patient wants on another day
   const q = useQuery({ queryKey: ['followups', tab], queryFn: () => get(`/followups?tab=${tab}`), refetchInterval: 30000 });
   const rows: any[] = q.data?.rows ?? []; const counts = q.data?.counts ?? {};
   const canWrite = can(perms, 'worklist.write');
@@ -56,11 +62,12 @@ export function Calls() {
     onSuccess: ({ n, sent }) => { refresh(); toast(`Logged ${n} call${n === 1 ? '' : 's'} as no answer${sent ? `; ${sent} message${sent === 1 ? '' : 's'} on the way` : ''}`); },
     onError: (e) => { refresh(); toast(errText(e), 'err'); },
   });
+  const confirmed = useMutation({ mutationFn: (r: any) => log(r, 'confirmed'), onSuccess: () => { refresh(); toast('Confirmed'); }, onError: (e) => { refresh(); toast(errText(e), 'err'); } });
   const told = useMutation({ mutationFn: (r: any) => post('/orders/inform', { encounterId: r.order.encounterId, orderNo: r.order.orderNo, how: 'phone' }),
     onSuccess: () => { refresh(); toast('Patient told · report closed'); }, onError: (e) => toast(errText(e), 'err') });
 
   /** Book: a sitting for a procedure plan, a visit (pre-filled) for everything else. Booking takes the row off the list. */
-  const bookable = (r: any) => (PROC.includes(r.kind) ? canWrite && !!r.recId && !!r.procedureId : canBook && (r.kind !== 'report' || r.order?.needsVisit));
+  const bookable = (r: any) => isConfirm(r) ? false : (PROC.includes(r.kind) ? canWrite && !!r.recId && !!r.procedureId : canBook && (r.kind !== 'report' || r.order?.needsVisit));
   const book = (r: any) => {
     if (PROC.includes(r.kind)) { setSitting({ id: r.recId, procedureId: r.procedureId, sittings: r.sittings, dueOn: r.dueOn, patient: r.patient }); return; }
     const p = new URLSearchParams(sp); p.set('book', '1'); p.set('patient', r.patient.id); p.set('pname', r.patient.fullName);
@@ -98,11 +105,14 @@ export function Calls() {
     { key: 'act', label: '', fixed: true, align: 'right', className: 'dt-act', cell: (r) => (
       <div className="flex items-center justify-end gap-1">
         {canWrite && <button type="button" className="dt-ghost" disabled={many.isPending} onClick={() => many.mutate({ list: [r], send: false })}>No answer</button>}
-        {canWrite && <button type="button" className="dt-ghost" onClick={() => setCalling({ row: r, out: 'call_later' })}>Call later</button>}
+        {canWrite && isConfirm(r) && <button type="button" className="dt-ghost" disabled={confirmed.isPending} onClick={() => confirmed.mutate(r)}><Icon name="check" className="h-3.5 w-3.5" />Confirmed</button>}
+        {canWrite && isConfirm(r) && <button type="button" className="dt-ghost" onClick={() => setMoving(r)}><Icon name="calendar" className="h-3.5 w-3.5" />Move</button>}
+        {canWrite && !isConfirm(r) && <button type="button" className="dt-ghost" onClick={() => setCalling({ row: r, out: 'call_later' })}>Call later</button>}
         {bookable(r) && <button type="button" className="dt-ghost" onClick={() => book(r)}><Icon name="calendar" className="h-3.5 w-3.5" />Book</button>}
         {r.kind === 'report' && canWrite && <button type="button" className="dt-ghost" disabled={told.isPending} onClick={() => told.mutate(r)}>Told</button>}
         <MoreMenu label={`More for ${r.patient.fullName}`} items={[
           { label: 'Other outcome…', hidden: !canWrite, onClick: () => setCalling({ row: r }) },
+          { label: 'Not coming…', hidden: !canWrite || !isConfirm(r), onClick: () => setCalling({ row: r, out: 'not_interested' }) },
           { label: 'Open patient', onClick: () => nav(`/patients/${r.patient.id}`) },
           { label: 'Copy phone number', hidden: !r.patient.phone, onClick: () => navigator.clipboard?.writeText(r.patient.phone).then(() => toast('Number copied'), () => toast('Could not copy', 'err')) },
         ]} />
@@ -124,32 +134,40 @@ export function Calls() {
           <button type="button" className="dt-ghost" disabled={many.isPending} onClick={() => many.mutate({ list, send: false }, { onSuccess: clear })}>No answer</button>
         </> : undefined}
       />
-      {calling && <CallDialog row={calling.row} initial={calling.out} onBook={bookable(calling.row) ? () => book(calling.row) : undefined} onClose={() => setCalling(null)} />}
+      {calling && <CallDialog row={calling.row} initial={calling.out} onBook={bookable(calling.row) ? () => book(calling.row) : undefined} onMove={isConfirm(calling.row) && canWrite ? () => setMoving(calling.row) : undefined} onClose={() => setCalling(null)} />}
+      {moving && <ScheduleModal rec={{ id: moving.recId, procedureId: moving.procedureId, sittings: moving.sittings, patient: moving.patient }} sitting={moving.sitting} onClose={() => { setMoving(null); refresh(); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
       {sitting && <ScheduleModal rec={sitting} onClose={() => { setSitting(null); refresh(); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
     </div>
   );
 }
 
-function CallDialog({ row, initial, onBook, onClose }: { row: any; initial?: Out; onBook?: () => void; onClose: () => void }) {
-  const [pick, setPick] = useState<number>(() => Math.max(0, OUTCOMES.findIndex((o) => o.out === (initial ?? 'call_later'))));
-  const o = OUTCOMES[pick]; const outcome = o.out;
+function CallDialog({ row, initial, onBook, onMove, onClose }: { row: any; initial?: Out; onBook?: () => void; onMove?: () => void; onClose: () => void }) {
+  const list: { label: string; out: Out | 'book' | 'move'; note?: string }[] = isConfirm(row) ? CONFIRM_OUTCOMES : OUTCOMES;
+  const [pick, setPick] = useState<number>(() => Math.max(0, list.findIndex((o) => o.out === (initial ?? (isConfirm(row) ? 'confirmed' : 'call_later')))));
+  const o = list[pick]; const outcome = o.out;
   const [date, setDate] = useState(''); const [note, setNote] = useState(''); const [send, setSend] = useState(true);
   const go = useMutation({
-    mutationFn: (confirmClosedDay?: boolean) => post('/followups/log', { kind: row.kind, refId: row.refId, patientId: row.patient.id, outcome, note: [o.note, note.trim()].filter(Boolean).join(' · ') || undefined, callbackOn: outcome === 'call_later' ? date : undefined, sendMessage: outcome === 'no_answer' && !o.note ? send : undefined, confirmClosedDay }),
+    mutationFn: async (confirmClosedDay?: boolean) => {
+      // not coming to a booked sitting: postpone it first (frees the room and the doctor), then log the call
+      if (isConfirm(row) && outcome === 'not_interested') await patch(`/procedure-sessions/${row.sitting.id}`, { state: 'postponed', reason: `Not coming: ${[o.note, note.trim()].filter(Boolean).join(' · ')}` });
+      return post('/followups/log', { kind: row.kind, refId: row.refId, patientId: row.patient.id, outcome, note: [o.note, note.trim()].filter(Boolean).join(' · ') || undefined, callbackOn: outcome === 'call_later' ? date : undefined, sendMessage: outcome === 'no_answer' && !o.note ? send : undefined, confirmClosedDay });
+    },
     onSuccess: (r: any) => { refresh(); toast(r.messaged ? 'Logged. A short message is on its way' : 'Logged'); onClose(); },
     onError: (e: any) => { if (e?.body?.code === 'CLOSED_DAY' && confirm(`${fmtDate(date)} is a Sunday and the clinic may be closed. Use this date anyway?`)) go.mutate(true); else toast(errText(e), 'err'); },
   });
-  const bad = outcome === 'book' || (outcome === 'call_later' && (!date || date < today())) || (outcome === 'not_interested' && !o.note && note.trim().length < 3);
+  const bad = outcome === 'book' || outcome === 'move' || (outcome === 'call_later' && (!date || date < today())) || (outcome === 'not_interested' && !o.note && note.trim().length < 3);
   return (
     <Modal title={row.patient.fullName} subtitle={`${row.what}${row.patient.phone ? ` · ${row.patient.phone}` : ''}`} onClose={onClose} width="max-w-md">
       <div className="space-y-3">
-        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How did the call go">{OUTCOMES.map((x, i) => (x.out !== 'book' || onBook) && <button key={x.label} type="button" role="radio" aria-checked={pick === i} className={`toggle-opt ${pick === i ? 'on' : ''}`} onClick={() => setPick(i)}>{x.label}</button>)}</div>
+        <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How did the call go">{list.map((x, i) => (x.out !== 'book' || onBook) && (x.out !== 'move' || onMove) && <button key={x.label} type="button" role="radio" aria-checked={pick === i} className={`toggle-opt ${pick === i ? 'on' : ''}`} onClick={() => setPick(i)}>{x.label}</button>)}</div>
         {outcome === 'call_later' && <div><label className="label" htmlFor="cb">Call again on</label><input id="cb" type="date" min={today()} className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div>}
         {outcome === 'no_answer' && !o.note && row.patient.phone && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={send} onChange={(e) => setSend(e.target.checked)} />Send a short message with the clinic number</label>}
         {outcome === 'book' && <div className="text-sm text-muted">Book the visit or sitting; that takes the patient off the list.</div>}
-        {outcome !== 'book' && <div><label className="label" htmlFor="nt">{outcome === 'not_interested' && !o.note ? 'Why (required)' : 'Note (optional)'}</label><input id="nt" className="input" maxLength={180} value={note} onChange={(e) => setNote(e.target.value)} /></div>}
+        {outcome === 'move' && <div className="text-sm text-muted">Pick the new day and time; the patient is called again before it.</div>}
+        {outcome !== 'book' && outcome !== 'move' && <div><label className="label" htmlFor="nt">{outcome === 'not_interested' && !o.note ? 'Why (required)' : 'Note (optional)'}</label><input id="nt" className="input" maxLength={180} value={note} onChange={(e) => setNote(e.target.value)} /></div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          {outcome === 'book' ? <button className="btn btn-primary" onClick={() => { onClose(); onBook?.(); }}><Icon name="calendar" />Book</button>
+          {outcome === 'move' ? <button className="btn btn-primary" onClick={() => { onClose(); onMove?.(); }}><Icon name="calendar" />Move</button>
+            : outcome === 'book' ? <button className="btn btn-primary" onClick={() => { onClose(); onBook?.(); }}><Icon name="calendar" />Book</button>
             : <button className="btn btn-primary" disabled={bad || go.isPending} onClick={() => go.mutate(undefined)}><Icon name="check" />Save</button>}</div>
       </div>
     </Modal>

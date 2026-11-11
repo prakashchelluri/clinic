@@ -213,7 +213,8 @@ export const message = pgTable('message', {
   error: text('error'),
   providerRef: text('provider_ref'),
   broadcastId: uuid('broadcast_id'),   // set when the message belongs to a bulk send
-}, (t) => [index('msg_due').on(t.status, t.sendAfter), index('msg_appt').on(t.tenantId, t.appointmentId)]);
+  procedureSessionId: uuid('procedure_session_id'), // the sitting a day-before reminder is for
+}, (t) => [index('msg_due').on(t.status, t.sendAfter), index('msg_appt').on(t.tenantId, t.appointmentId), index('msg_sitting').on(t.tenantId, t.procedureSessionId)]);
 
 // A bulk message to many patients: what was said, to whom (as messages), by whom. Demo until WhatsApp is connected.
 export const broadcast = pgTable('broadcast', {
@@ -313,6 +314,7 @@ export const procedureSession = pgTable('procedure_session', {
   notes: text('notes'),
   outcome: jsonb('outcome').$type<Record<string, any>>(),
   patientConfirmedAt: ts('patient_confirmed_at'), // the coordinator spoke to the patient; cleared when the sitting moves
+  weekConfirmedAt: ts('week_confirmed_at'),       // confirmed on the call a week before (or booked within the week); cleared when the sitting moves
 }, (t) => [index('psession_day').on(t.tenantId, t.day)]);
 
 // doctor's plan → worklists. One table serves both follow-up and procedure recommendations.
@@ -324,6 +326,7 @@ export const recommendation = pgTable('recommendation', {
   procedureId: uuid('procedure_id').references(() => procedureCatalog.id),
   dueOn: date('due_on'),
   sittings: integer('sittings'),
+  gapDays: integer('gap_days'),            // procedures: days between sittings; the next falls due this long after the last one done
   notes: text('notes'),
   status: text('status').notNull().default('open'), // open | contacted | scheduled | done | cancelled (for a test: open = pending, done = report received)
   contactLog: jsonb('contact_log').$type<{ at: string; by: string; outcome: string; note?: string }[]>().notNull().default([]),
@@ -357,9 +360,9 @@ export const course = pgTable('course', {
 export const callback = pgTable('callback', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
-  kind: text('kind').notNull(),        // review | missed_visit | missed_sitting | schedule | advised
+  kind: text('kind').notNull(),        // review | missed_visit | missed_sitting | schedule | advised | report | confirm_week | confirm_day
   refId: uuid('ref_id'),               // the recommendation, appointment or sitting this call is about
-  outcome: text('outcome').notNull(),  // booked | call_later | no_answer | not_interested
+  outcome: text('outcome').notNull(),  // booked | call_later | no_answer | not_interested | confirmed
   note: text('note'),
   callbackOn: date('callback_on'),
   byName: text('by_name').notNull(),

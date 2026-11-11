@@ -190,6 +190,13 @@
       "when": 1794700000000,
       "tag": "0026_rx_safety",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0027_procedure_courses",
+      "breakpoints": true
     }
   ]
 }

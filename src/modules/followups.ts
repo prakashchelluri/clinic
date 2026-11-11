@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { appointment, callback, course, encounter, message, patient, procedureCatalog, procedureSession, recommendation, session, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -9,13 +9,18 @@ import { HttpError } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { clinical } from './patients.js';
 
-const KINDS = ['review', 'missed_visit', 'missed_sitting', 'schedule', 'advised', 'report'] as const;
+const KINDS = ['review', 'missed_visit', 'missed_sitting', 'schedule', 'advised', 'report', 'confirm_week', 'confirm_day'] as const;
 type Kind = (typeof KINDS)[number];
-const TABS = { all: KINDS, reviews: ['review'], missed: ['missed_visit', 'missed_sitting'], procedures: ['schedule', 'advised'], schedule: ['schedule'], advised: ['advised'], reports: ['report'] } as const;
+const CONFIRM = ['confirm_week', 'confirm_day'];
+const TABS = { all: KINDS, confirm: CONFIRM, reviews: ['review'], missed: ['missed_visit', 'missed_sitting'], procedures: ['schedule', 'advised'], schedule: ['schedule'], advised: ['advised'], reports: ['report'] } as const;
+/** A booked sitting is called a week before (from 7 days out until 2 days out) and again the day before (or on the day, if still not confirmed). */
+export const WEEK_CALL = { from: 2, to: 7 }; export const DAY_CALL = 1;
 type Tab = keyof typeof TABS;
 const P = { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags };
 /** recId/procedureId: the plan a Book button books a sitting for; order: the report a "Told" button closes. */
-type Row = { key: string; kind: Kind; refId: string; patient: any; what: string; dueOn: string | null; recId?: string | null; procedureId?: string | null; sittings?: number | null; order?: { encounterId: string; orderNo: number; needsVisit: boolean }; lastCall?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null; attempts: number } | null; waiting?: boolean };
+type Row = { key: string; kind: Kind; refId: string; patient: any; what: string; dueOn: string | null; recId?: string | null; procedureId?: string | null; sittings?: number | null; order?: { encounterId: string; orderNo: number; needsVisit: boolean }; lastCall?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null; attempts: number } | null; waiting?: boolean;
+  /** confirm rows: the booked sitting, so Move can reschedule it and Not coming can postpone it */
+  sitting?: { id: string; day: string; startTime: string; endTime: string; practitionerId: string | null; sittingNo: number; of: number | null; weekConfirmedAt: string | null } };
 
 /** The visit's diagnoses as one line, so a review says what it is for. */
 const dxOf = (d: any): string => ((d?.assessment?.diagnosis ?? []) as any[]).map((x) => typeof x === 'string' ? x : x?.name).filter(Boolean).join(', ');
@@ -29,7 +34,19 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   const open = sql`${recommendation.status} in ('open','contacted')`;
   const recs = (kind: string) => tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId))
     .leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, kind), open));
-  const followups = await recs('followup'); const procs = await recs('procedure');
+  const followups = await recs('followup');
+  // a course between sittings is 'scheduled' with nothing booked ahead: it comes back to book the next one (rows with a booked sitting drop out below)
+  const procs = await tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId))
+    .leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'), sql`${recommendation.status} in ('open','contacted','scheduled')`));
+  // per course: sittings done, and the last day a sitting ended (done, missed or called off); calls before it were about an earlier sitting
+  const course0 = new Map<string, { done: number; lastDay: string | null; live: boolean }>();
+  if (procs.length) for (const s of await tx.select({ rec: procedureSession.recommendationId, state: procedureSession.state, day: procedureSession.day }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, procs.map((x) => x.r.id))))) {
+    const c = course0.get(s.rec) ?? { done: 0, lastDay: null, live: false };
+    if (s.state === 'completed') c.done++;
+    if (s.state === 'in_progress') c.live = true;
+    if (['completed', 'missed', 'cancelled', 'postponed'].includes(s.state) && (!c.lastDay || s.day > c.lastDay)) c.lastDay = s.day;
+    course0.set(s.rec, c);
+  }
   const agreed = new Set((await tx.select({ id: course.recommendationId }).from(course).where(eq(course.tenantId, t))).map((c) => c.id));
   const missed = await tx.select({ ps: procedureSession, p: P, proc: procedureCatalog.name }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
     .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.state, 'missed'), gte(procedureSession.day, addDays(today, -60))));
@@ -38,8 +55,10 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   const rows: Row[] = [];
   for (const x of followups) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: dx ? x.r.notes?.trim() || dxOf(x.enc) || 'Review' : 'Follow-up visit', dueOn: x.r.dueOn });
   for (const x of procs) {
-    if (booked.has(x.r.id)) continue;
-    const what = `${x.proc ?? 'Procedure'}${x.r.sittings ? ` · ${x.r.sittings} sittings` : ''}`;
+    const c = course0.get(x.r.id);
+    if (booked.has(x.r.id) || c?.live) continue;
+    if (x.r.status === 'scheduled' && !c?.done && !c?.lastDay) continue; // booked once and nothing has happened to it since (old data)
+    const what = `${x.proc ?? 'Procedure'}${c?.done ? ` · sitting ${c.done + 1}${x.r.sittings ? ` of ${x.r.sittings}` : ''} to book` : x.r.sittings ? ` · ${x.r.sittings} sittings` : ''}`;
     rows.push({ key: x.r.id, kind: agreed.has(x.r.id) ? 'schedule' : 'advised', refId: x.r.id, patient: x.p, what, dueOn: x.r.dueOn, recId: x.r.id, procedureId: x.r.procedureId, sittings: x.r.sittings });
   }
   const from = addDays(today, -30);
@@ -61,11 +80,25 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     rows.push({ key: `rep:${k}`, kind: 'report', refId: r0.id, patient: xs[0].p, what: `Reports ready: ${xs.map((x) => x.r.notes ?? 'Test').join(', ')}`, dueOn: new Date(r0.reviewedAt!).toLocaleDateString('en-CA', { timeZone: tz }),
       order: { encounterId: r0.encounterId, orderNo: r0.orderNo, needsVisit: xs.some((x) => x.r.reviewOutcome === 'needs_visit') } });
   }
+  // booked sittings to confirm: a week before, and the day before
+  const ahead = await tx.select({ ps: procedureSession, p: P, proc: procedureCatalog.name, of: recommendation.sittings }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
+    .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))
+    .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.state, 'confirmed'), gte(procedureSession.day, today), lte(procedureSession.day, addDays(today, WEEK_CALL.to)), sql`${procedureSession.patientConfirmedAt} is null`));
+  for (const x of ahead) {
+    const n = Math.round((Date.parse(x.ps.day) - Date.parse(today)) / 864e5);
+    const kind: Kind | null = n <= DAY_CALL ? 'confirm_day' : n >= WEEK_CALL.from && !x.ps.weekConfirmedAt ? 'confirm_week' : null;
+    if (!kind) continue;
+    const at = `${dayLabel(x.ps.day)}, ${x.ps.startTime}`;
+    rows.push({ key: `${kind}:${x.ps.id}`, kind, refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'} · sitting ${x.ps.sittingNo}${x.of ? ` of ${x.of}` : ''} ${n === 0 ? 'today,' : n === 1 ? 'tomorrow,' : 'on'} ${n <= 1 ? x.ps.startTime : at}`,
+      dueOn: today, recId: x.ps.recommendationId, procedureId: x.ps.procedureId, sittings: x.of,
+      sitting: { id: x.ps.id, day: x.ps.day, startTime: x.ps.startTime, endTime: x.ps.endTime, practitionerId: x.ps.practitionerId, sittingNo: x.ps.sittingNo, of: x.of, weekConfirmedAt: x.ps.weekConfirmedAt } });
+  }
   // last call and number of attempts per row
   const calls = rows.length ? await tx.select().from(callback).where(and(eq(callback.tenantId, t), inArray(callback.refId, rows.map((r) => r.refId)))).orderBy(desc(callback.createdAt)) : [];
   const out: Row[] = [];
   for (const r of rows) {
-    const mine = calls.filter((c) => (c.refId === r.refId && c.kind === r.kind) || (c.refId === r.refId && ['schedule', 'advised'].includes(c.kind) && ['schedule', 'advised'].includes(r.kind)));
+    const since = r.recId && ['schedule', 'advised'].includes(r.kind) ? course0.get(r.recId)?.lastDay : null;
+    const mine = calls.filter((c) => (!since || c.createdAt.slice(0, 10) > since) && ((c.refId === r.refId && c.kind === r.kind) || (c.refId === r.refId && ['schedule', 'advised'].includes(c.kind) && ['schedule', 'advised'].includes(r.kind))));
     const last = mine[0];
     if (last && ['booked', 'not_interested'].includes(last.outcome)) continue;
     r.lastCall = last ? { outcome: last.outcome, note: last.note, at: last.createdAt, by: last.byName, callbackOn: last.callbackOn, attempts: mine.length } : null;
@@ -88,7 +121,7 @@ export function followupRoutes(app: FastifyInstance) {
   /** One call attempt. Call later needs a date (a Sunday asks to be confirmed); Not interested needs a reason; No answer can send a short message. */
   route(app, 'post', '/followups/log', 'worklist.write', async (req, tx) => {
     const b = z.object({ kind: z.enum(KINDS), refId: z.string().uuid(), patientId: z.string().uuid(),
-      outcome: z.enum(['booked', 'call_later', 'no_answer', 'not_interested']), note: z.string().trim().max(200).optional(), callbackOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      outcome: z.enum(['booked', 'call_later', 'no_answer', 'not_interested', 'confirmed']), note: z.string().trim().max(200).optional(), callbackOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       sendMessage: z.boolean().optional(), confirmClosedDay: z.boolean().optional() }).parse(req.body);
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
     if (b.outcome === 'call_later') {
@@ -97,6 +130,18 @@ export function followupRoutes(app: FastifyInstance) {
       if (new Date(b.callbackOn + 'T00:00:00Z').getUTCDay() === 0 && !b.confirmClosedDay) throw new HttpError(409, 'CLOSED_DAY', { day: b.callbackOn });
     }
     if (b.outcome === 'not_interested' && (b.note ?? '').length < 3) throw new HttpError(400, 'REASON_NEEDED');
+    if (b.outcome === 'confirmed' && !CONFIRM.includes(b.kind)) throw new HttpError(400, 'CONFIRM_IS_FOR_SITTINGS');
+    // a confirm call is about one booked sitting of this patient; Confirmed stamps it so it leaves the list (moving the sitting clears the stamps)
+    if (CONFIRM.includes(b.kind)) {
+      const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, b.refId), eq(procedureSession.tenantId, t), eq(procedureSession.patientId, b.patientId))).then((r) => r[0]);
+      if (!ps) throw new HttpError(404, 'NOT_FOUND');
+      if (b.outcome === 'confirmed') {
+        if (ps.state !== 'confirmed') throw new HttpError(409, 'NOT_BOOKED', { state: ps.state });
+        const now = new Date().toISOString();
+        await tx.update(procedureSession).set(b.kind === 'confirm_day' ? { patientConfirmedAt: now, weekConfirmedAt: ps.weekConfirmedAt ?? now } : { weekConfirmedAt: now }).where(eq(procedureSession.id, ps.id));
+        await emit(tx, req.ctx, 'procedure_session.patient_confirmed', 'procedure_session', ps.id, { call: b.kind });
+      }
+    }
     const p = await tx.select().from(patient).where(and(eq(patient.id, b.patientId), eq(patient.tenantId, t))).then((r) => r[0]);
     if (!p) throw new HttpError(404, 'NOT_FOUND');
     const [row] = await tx.insert(callback).values({ tenantId: t, patientId: b.patientId, kind: b.kind, refId: b.refId, outcome: b.outcome, note: b.note ?? null, callbackOn: b.outcome === 'call_later' ? b.callbackOn! : null, byName: req.ctx.name }).returning();

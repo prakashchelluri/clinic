@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, gte, lte, inArray } from 'drizzle-orm';
-import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document } from '../db/schema.js';
+import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant } from '../db/schema.js';
+import { bookingSettings, localToUtc } from '../lib/booking.js';
+import { MSG, patientLang } from '../lib/patientText.js';
 import { auditView } from '../lib/audit.js';
 import { normHistory } from '../lib/history.js';
 import type { Tx } from '../db/index.js';
@@ -26,6 +28,37 @@ export async function procedureConsent(tx: Tx, t: string, ps: { id: string; pati
 }
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/** Whole days from one date to another (YYYY-MM-DD). */
+export const daysFrom = (from: string, to: string) => Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 864e5);
+/** The day-before WhatsApp goes out at this clinic-local time, inside sending hours, so the desk can call those who did not answer the same afternoon. */
+export const REMINDER_AT = '10:00';
+
+/**
+ * The WhatsApp reminder the day before a sitting. Any reminder not yet sent is dropped first, so booking, moving,
+ * cancelling or calling this twice never leaves two: only a sitting still booked gets a fresh one.
+ */
+export async function planSittingReminder(tx: Tx, t: string, sittingId: string) {
+  await tx.update(message).set({ status: 'skipped', error: 'replaced' }).where(and(eq(message.tenantId, t), eq(message.procedureSessionId, sittingId), eq(message.status, 'pending')));
+  const r = await tx.select({ ps: procedureSession, p: patient, proc: procedureCatalog.name, of: recommendation.sittings, ten: tenant }).from(procedureSession)
+    .innerJoin(patient, eq(patient.id, procedureSession.patientId)).innerJoin(tenant, eq(tenant.id, procedureSession.tenantId))
+    .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))
+    .where(and(eq(procedureSession.id, sittingId), eq(procedureSession.tenantId, t))).then((x) => x[0]);
+  if (!r || r.ps.state !== 'confirmed') return null;
+  const at = localToUtc(addDays(r.ps.day, -1), REMINDER_AT, r.ten.timezone);
+  if (at.getTime() <= Date.now()) return null; // booked for tomorrow after the hour: the booking itself was the confirmation
+  const cfg = bookingSettings(r.ten.settings).messages;
+  const lang = patientLang(r.p, r.ten.settings);
+  const date = new Date(r.ps.day + 'T00:00:00Z').toLocaleDateString(`${lang}-IN`, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const part = r.of ? `${r.ps.sittingNo}/${r.of}` : '';
+  const body = MSG[lang].sittingReminder(r.p.fullName.split(' ')[0], r.proc ?? 'procedure', part, date, r.ps.startTime, r.ten.name, (r.ten.settings as any)?.print?.phone);
+  const noPhone = !r.p.phone || !/^\d{10}$/.test(r.p.phone);
+  const status = !cfg.enabled || cfg.channel === 'none' || noPhone || r.p.noWhatsapp ? 'skipped' : 'pending';
+  const [row] = await tx.insert(message).values({ tenantId: t, patientId: r.p.id, procedureSessionId: sittingId, kind: 'sitting_reminder', channel: cfg.channel, toPhone: r.p.phone, body,
+    params: { patient: r.p.fullName, date, time: r.ps.startTime, doctor: '', link: '', lang }, status, sendAfter: at.toISOString(),
+    error: status === 'skipped' ? (noPhone ? 'no mobile number' : r.p.noWhatsapp ? 'patient asked for no WhatsApp messages' : 'messages are switched off') : null }).returning();
+  return row;
+}
 
 /** Room and doctor conflicts for a proposed slot. App-level check inside the transaction; rooms are row-locked. */
 async function conflicts(tx: Tx, t: string, day: string, start: string, end: string, roomId?: string | null, practitionerId?: string | null, ignoreId?: string) {
@@ -86,8 +119,11 @@ export function procedureRoutes(app: FastifyInstance) {
     if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     // the next number after every sitting still on the plan (done or booked ahead), so two booked ahead never share a number
     const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), sql`${procedureSession.state} <> 'cancelled'`));
+    // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
+    const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
-      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes }).returning();
+      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 ? now : null, patientConfirmedAt: ahead <= 1 ? now : null }).returning();
+    await planSittingReminder(tx, t, ps.id);
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${n + 1}`, procedureSessionId: ps.id });
     await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
     await emit(tx, req.ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day: body.day, startTime: body.startTime, endTime, roomId: body.roomId, practitionerId: body.practitionerId, forced: c.length > 0 });
@@ -194,7 +230,10 @@ export function procedureRoutes(app: FastifyInstance) {
     const endTime = toHHMM(toMin(body.startTime) + body.minutes + (proc?.bufferMinutes ?? 0));
     const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId, id);
     if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
-    const [moved] = await tx.update(procedureSession).set({ day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, notes: body.notes ?? ps.notes }).where(eq(procedureSession.id, id)).returning();
+    // a move inside the week counts as the week's confirmation; the day-before call is still made (the clinic may have moved it)
+    const ahead = daysFrom(todayIn(req.ctx.timezone), body.day);
+    const [moved] = await tx.update(procedureSession).set({ day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 ? new Date().toISOString() : null, notes: body.notes ?? ps.notes }).where(eq(procedureSession.id, id)).returning();
+    await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
     const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
@@ -242,8 +281,15 @@ export function procedureRoutes(app: FastifyInstance) {
       const done = await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), eq(procedureSession.state, 'completed')));
       const newStatus = body.state === 'completed' && rec.sittings && done[0].n >= rec.sittings ? 'done' : body.state === 'cancelled' ? 'open' : ['postponed', 'missed'].includes(body.state) ? 'contacted' : rec.status;
       const log = ['postponed', 'missed', 'cancelled'].includes(body.state) ? [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: `Session ${body.state}`, note: body.reason }] : rec.contactLog;
-      await tx.update(recommendation).set({ status: newStatus, contactLog: log }).where(eq(recommendation.id, rec.id));
+      // a sitting done with more to come: the next falls due one gap after it (not after the original plan), unless one is booked already
+      let nextDue: string | undefined;
+      if (body.state === 'completed' && newStatus !== 'done' && rec.gapDays) {
+        const [{ ahead }] = await tx.select({ ahead: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), eq(procedureSession.state, 'confirmed'), sql`${procedureSession.id} <> ${id}`));
+        if (!ahead) nextDue = addDays(ps.day, rec.gapDays);
+      }
+      await tx.update(recommendation).set({ status: newStatus, contactLog: log, ...(nextDue ? { dueOn: nextDue } : {}) }).where(eq(recommendation.id, rec.id));
     }
+    await planSittingReminder(tx, t, id); // only a sitting still booked keeps its reminder
     if (body.state === 'completed') await drawSitting(tx, req.ctx, ps);
     else if (cur.state === 'completed') await reverseSitting(tx, req.ctx, id, body.state === 'cancelled' ? 'Sitting cancelled' : `Sitting moved back to ${body.state.replace('_', ' ')}`);
     await emit(tx, req.ctx, `procedure_session.${body.state}`, 'procedure_session', id, { reason: body.reason, ...(body.state === 'in_progress' && body.consent !== undefined ? { consent: body.consent } : {}) });

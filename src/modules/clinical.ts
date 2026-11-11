@@ -16,7 +16,7 @@ import { expectedDays } from '../lib/tests.js';
 const RxItem = z.object({ id: z.string().uuid().optional(), medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
   frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
-  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
+  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), gapDays: z.number().int().min(1).max(365).nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false) });
 
 /** Validate submitted data against the form definition: required fields and option membership only. */
@@ -138,7 +138,8 @@ export function clinicalRoutes(app: FastifyInstance) {
       if (fresh.length) {
         const rows = await tx.insert(recommendation).values(fresh.map((r) => ({
           tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
-          dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : null), sittings: r.sittings, notes: r.notes,
+          dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : r.kind === 'procedure' ? today : null), sittings: r.sittings, notes: r.notes,
+          ...(r.kind === 'procedure' ? { gapDays: r.gapDays ?? null } : {}),
           ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
         }))).returning();
         for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
@@ -151,7 +152,8 @@ export function clinicalRoutes(app: FastifyInstance) {
       if (body.recommendations.length) {
         const rows = await tx.insert(recommendation).values(body.recommendations.map((r) => ({
           tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
-          dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : null), sittings: r.sittings, notes: r.notes,
+          dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : r.kind === 'procedure' ? today : null), sittings: r.sittings, notes: r.notes,
+          ...(r.kind === 'procedure' ? { gapDays: r.gapDays ?? null } : {}),
           ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
         }))).returning();
         if (body.complete) for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });

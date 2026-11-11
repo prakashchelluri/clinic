@@ -22,7 +22,7 @@ import { BodyMap, SkinMapPanel, siteFor, usePins } from '../skinmap';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
-type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; notes?: string; orderNo?: number; status?: string; id?: string };
+type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; gapDays?: number; notes?: string; orderNo?: number; status?: string; id?: string };
 type Sym = { name: string; since?: string; severity?: string; note?: string };
 type Dx = { name: string; severity?: string; status?: string };
 
@@ -278,6 +278,8 @@ function ReasonSheet({ warnings, onCancel, onDone }: { warnings: string[]; onCan
 /** The consultation on one pad: section cards in the clinic's order, templates in every card header, type anything on top, finish and call the next patient. */
 export function Encounter() {
   const { id } = useParams(); const nav = useNavigate(); const { cfg, perms, me } = useOutletContext<any>();
+  /** Days between sittings for a procedure: the clinic's package for it, else four weeks. The doctor can change it on the line. */
+  const gapFor = (pid?: string | null): number => ((cfg?.tenant?.settings?.packages ?? []) as any[]).find((k) => k.procedureId === pid && k.intervalDays > 0)?.intervalDays ?? 28;
   const enc = useQuery({ queryKey: ['encounter', id], queryFn: () => get(`/encounters/${id}`) });
   const timeline = useQuery({ queryKey: ['timeline', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/timeline`), enabled: !!enc.data });
   const docs = useQuery({ queryKey: ['documents', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/documents`), enabled: !!enc.data });
@@ -337,7 +339,7 @@ export function Encounter() {
       if (isDoctor && enc.data.status === 'draft' && (isReviewVisit(enc.data.visit, cfg) || (lastDone?.prescription ?? []).length > 0) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
       loaded.current = true; justLoaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
-      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, notes: r.notes,
+      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, gapDays: r.gapDays ?? undefined, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
       // a copy kept on this computer that is newer than the server's: offer it back; an older one, or one for a signed pad, goes
       let kept: Kept | null = null; try { kept = JSON.parse(localStorage.getItem(localKey) ?? 'null'); } catch { kept = null; }
@@ -419,7 +421,7 @@ export function Encounter() {
     else if (t.kind === 'tests') { count((p.tests ?? []).map((x: any) => x.name), recs.filter((r) => r.kind === 'investigation').map((r) => norm(r.notes ?? ''))); for (const x of p.tests ?? []) addTestNamed(x.name); }
     else if (t.kind === 'symptom') { count((p.items ?? []).map((x: Sym) => x.name), asSym(data.complaint?.chief_complaint).map((s) => norm(s.name))); addSyms(p.items ?? []); }
     else if (t.kind === 'diagnosis') { count((p.items ?? []).map((x: Dx) => x.name), dNames); addDxs(p.items ?? []); }
-    else if (t.kind === 'procedure') { if (recs.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId)) had++; else { added++; setRecs((cur) => (cur.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId) ? cur : [...cur, { kind: 'procedure', procedureId: p.procedureId, sittings: p.sittings, notes: p.intervalDays ? `every ${p.intervalDays} days` : undefined }])); } }
+    else if (t.kind === 'procedure') { if (recs.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId)) had++; else { added++; setRecs((cur) => (cur.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId) ? cur : [...cur, { kind: 'procedure', procedureId: p.procedureId, sittings: p.sittings, gapDays: p.intervalDays || gapFor(p.procedureId) }])); } }
     markApplied(t.id); post(`/templates/${t.id}/use`).catch(() => {});
     return `${t.name}: ${added ? `added ${added}` : 'nothing new'}${had ? `, ${had} already there` : ''}.`;
   };
@@ -719,12 +721,13 @@ export function Encounter() {
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
           {recs.map((r, k) => r.kind !== 'procedure' ? null : (
             <span key={k} className="pick !mt-0 text-[13px]">
-              <select aria-label="Procedure" className="input !w-auto !py-1" value={r.procedureId ?? ''} disabled={readOnly} onChange={(ev) => { const pr = cfg.procedures.find((x: any) => x.id === ev.target.value); setRecs(recs.map((x, j) => (j === k ? { ...x, procedureId: ev.target.value, sittings: pr?.typicalSittings } : x))); }}>{cfg?.procedures.map((pr: any) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}</select>
+              <select aria-label="Procedure" className="input !w-auto !py-1" value={r.procedureId ?? ''} disabled={readOnly} onChange={(ev) => { const pr = cfg.procedures.find((x: any) => x.id === ev.target.value); setRecs(recs.map((x, j) => (j === k ? { ...x, procedureId: ev.target.value, sittings: pr?.typicalSittings, gapDays: gapFor(ev.target.value) } : x))); }}>{cfg?.procedures.map((pr: any) => <option key={pr.id} value={pr.id}>{pr.name}</option>)}</select>
               <NumInput aria-label="Sittings" max={50} className="input !w-14 !py-1" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, sittings: Number(ev.target.value) } : x)))} /><span className="text-xs text-muted">sittings</span>
+              {(r.sittings ?? 0) > 1 && <><span className="text-xs text-muted">every</span><NumInput aria-label="Days between sittings" max={365} className="input !w-14 !py-1" value={r.gapDays ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, gapDays: Number(ev.target.value) || undefined } : x)))} /><span className="text-xs text-muted">days</span></>}
               <input aria-label="Note for the coordinator" className="input !w-44 !py-1" placeholder="Note for the coordinator" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, notes: ev.target.value } : x)))} />
               {!readOnly && <button className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove ${procName(r.procedureId)}`} onClick={() => setRecs(recs.filter((_, j) => j !== k))}><Icon name="x" className="h-3 w-3" /></button>}
             </span>))}
-          {!readOnly && (cfg?.procedures ?? []).length > 0 && <button type="button" className="opt-add" onClick={() => setRecs([...recs, { kind: 'procedure', procedureId: cfg.procedures[0].id, sittings: cfg.procedures[0].typicalSittings }])}>Add a procedure</button>}
+          {!readOnly && (cfg?.procedures ?? []).length > 0 && <button type="button" className="opt-add" onClick={() => setRecs([...recs, { kind: 'procedure', procedureId: cfg.procedures[0].id, sittings: cfg.procedures[0].typicalSittings, gapDays: gapFor(cfg.procedures[0].id) }])}>Add a procedure</button>}
           </div>
         </div>
       </div></Card> : null,
@@ -767,7 +770,7 @@ export function Encounter() {
     tests: tests.length ? tests.map((r) => r.notes).join(', ') : null,
     results: testRecs.length ? `${testsIn} of ${testRecs.length} reports in` : null,
     followup: followup ? `Review in ${followup.intervalDays} days` : null,
-    procedures: txt(recs.filter((r) => r.kind === 'procedure').map((r) => `${procName(r.procedureId)}${r.sittings ? ` × ${r.sittings}` : ''}`)) || null,
+    procedures: txt(recs.filter((r) => r.kind === 'procedure').map((r) => `${procName(r.procedureId)}${r.sittings ? ` × ${r.sittings}` : ''}${r.sittings && r.sittings > 1 && r.gapDays ? `, every ${r.gapDays} days` : ''}`)) || null,
     notes: data.notes?.private ? String(data.notes.private).slice(0, 120) : null,
     referral: txt([data.referral?.to, data.referral?.speciality]) || null,
   };
@@ -782,7 +785,7 @@ export function Encounter() {
     advice: lines(adviceLines),
     tests: lines(tests.map((r) => `${r.notes}${r.status === 'done' ? ' · received' : ''}`)),
     followup: lines([followup && `Review in ${followup.intervalDays} days${data.plan?.followupNote ? ` · ${data.plan.followupNote}` : ''}`]),
-    procedures: lines(recs.filter((r) => r.kind === 'procedure').map((r) => `${procName(r.procedureId)}${r.sittings ? ` · ${r.sittings} sittings` : ''}`)),
+    procedures: lines(recs.filter((r) => r.kind === 'procedure').map((r) => `${procName(r.procedureId)}${r.sittings ? ` · ${r.sittings} sittings` : ''}${r.sittings && r.sittings > 1 && r.gapDays ? `, every ${r.gapDays} days` : ''}`)),
     notes: data.notes?.private ? String(data.notes.private) : null,
     referral: txt([data.referral?.to, data.referral?.speciality, data.referral?.reason]) || null,
   };
