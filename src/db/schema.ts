@@ -156,7 +156,7 @@ export const session = pgTable('session', {
   endTime: text('end_time').notNull(),
   capacity: integer('capacity').notNull(),
   note: text('note'),
-  source: text('source').notNull().default('manual'), // manual | routine
+  source: text('source').notNull().default('manual'), // manual | routine | extra (one-off hours a routine change keeps)
 }, (t) => [index('session_day').on(t.tenantId, t.day)]);
 
 export const appointment = pgTable('appointment', {

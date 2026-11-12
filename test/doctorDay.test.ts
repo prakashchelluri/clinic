@@ -135,3 +135,24 @@ test('templates: save, list most used first, same name replaces, use counts', as
   const R = as(await login('reception@demo.clinic'));
   assert.equal((await R('POST', '/rx-templates', { name: 'Reception try' })).statusCode, 403);
 });
+
+test('changed weekly hours show on a day that already has a booking, and extra hours stay', async () => {
+  const O = as(await login('owner@demo.clinic')); const R = as(await login('reception@demo.clinic'));
+  const second = (await O('GET', '/config')).json().practitioners.find((p: any) => p.name.includes('Second'));
+  let day = ''; let ws: any[] = [];
+  for (let i = 15; i < 30 && !day; i++) { const d = addDays(new Date().toISOString().slice(0, 10), i); const c = (await R('GET', `/sessions?day=${d}&practitionerId=${second.id}`)).json(); if (c.length >= 2) { day = d; ws = c; } }
+  assert.ok(day);
+  const wd = String(new Date(day + 'T00:00:00Z').getUTCDay());
+  const p = (await R('POST', '/patients', { fullName: 'Hours Change Patient', phone: '9876500077' })).json();
+  assert.ok((await R('POST', '/appointments', { sessionId: ws[0].id, patientId: p.id })).json().id); // a booked hour the change must keep
+  const extra = await O('POST', '/calendar/day-change', { practitionerId: second.id, day, kind: 'extra', time: '21:00', minutes: 60 });
+  assert.equal(extra.statusCode, 200);
+  const old = (await O('GET', '/config')).json().practitioners.find((x: any) => x.id === second.id).routine;
+  const routine = { ...old, days: { ...old.days, [wd]: [[ws[0].startTime, '18:00']] } };
+  const r = await app.inject({ method: 'PUT', url: `/api/calendar/routine/${second.id}`, cookies: { cc_session: await login('owner@demo.clinic') }, payload: routine });
+  assert.equal(r.statusCode, 200);
+  const after = (await R('GET', `/sessions?day=${day}&practitionerId=${second.id}`)).json().map((w: any) => w.startTime);
+  assert.ok(after.includes('17:00'), `new hours appear next to the booked one: ${after}`);
+  assert.ok(after.includes(ws[0].startTime) && after.includes('21:00'), 'the booked hour and the extra hour stay');
+  assert.equal(new Set(after).size, after.length, 'no hour twice');
+});

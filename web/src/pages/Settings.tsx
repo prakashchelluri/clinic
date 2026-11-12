@@ -85,7 +85,7 @@ export function Settings() {
   useEffect(() => { if (alias && tab) setTimeout(() => document.getElementById(alias[1])?.scrollIntoView({ block: 'start' }), 80); }, [asked, !!tab]);
   // from the groups to a topic is a step of its own (Back returns to the groups); topic to topic replaces it
   const setTab = (k: Tab | null) => { setParams(k ? { tab: k } : {}, { replace: tab !== null && k !== null }); window.scrollTo({ top: 0 }); };
-  const refresh = () => { qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['users'] }); qc.invalidateQueries({ queryKey: ['inactive'] }); };
+  const refresh = () => { ['config', 'users', 'inactive', 'sessions', 'calendar', 'frontdesk'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }; // hours changed here show at check-in at once
   // the header's search box finds a group by its name, its topics or common words (GST, password, WhatsApp…)
   const [find] = usePageSearch('Search settings', !tab);
   if (!cfg) return <div className="card"><Skeleton rows={5} /></div>;

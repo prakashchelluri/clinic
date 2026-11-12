@@ -44,18 +44,18 @@ export async function ensureDaySessions(tx: Tx, t: string, day: string) {
   const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
   const withRoutine = docs.filter((d) => d.routine?.days?.[String(weekday(day))]?.length);
   if (!withRoutine.length) return;
-  const existing = await tx.select({ p: session.practitionerId }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day)));
-  const have = new Set(existing.map((e) => e.p));
-  const todo = withRoutine.filter((d) => !have.has(d.id));
-  if (!todo.length) return;
-  const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
+  const existing = await tx.select({ p: session.practitionerId, s: session.startTime, e: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day)));
   const values: any[] = [];
-  for (const d of todo) {
+  for (const d of withRoutine) {
+    // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
+    const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
     const r = d.routine as Routine; const len = r.windowMinutes || 60;
     for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m + len <= toMin(end); m += len)
-      values.push({ tenantId: t, branchId: br.id, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(m + len), capacity: r.capacity || 7, source: 'routine' });
+      if (!mine.some(([s, e]) => s < m + len && e > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(m + len), capacity: r.capacity || 7, source: 'routine' });
   }
-  if (values.length) await tx.insert(session).values(values);
+  if (!values.length) return;
+  const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
+  await tx.insert(session).values(values.map((v) => ({ ...v, branchId: br.id })));
 }
 
 /**
@@ -143,9 +143,9 @@ export function schedulingRoutes(app: FastifyInstance) {
     const routine = RoutineIn.parse(req.body);
     const [row] = await tx.update(practitioner).set({ routine }).where(and(eq(practitioner.id, pid), eq(practitioner.tenantId, t))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
-    // Future routine-generated windows without bookings are dropped so they regenerate from the new routine.
+    // From today on, every unbooked hour except one-off extra hours is dropped, so the days rebuild from the new routine.
     const today = todayIn(req.ctx.timezone);
-    await tx.execute(sql`delete from session s where s.tenant_id = ${t} and s.practitioner_id = ${pid} and s.source = 'routine' and s.day >= ${today}
+    await tx.execute(sql`delete from session s where s.tenant_id = ${t} and s.practitioner_id = ${pid} and s.source <> 'extra' and s.day >= ${today}
       and not exists (select 1 from appointment a where a.session_id = s.id and a.status in ('booked','confirmed','arrived'))`);
     await emit(tx, req.ctx, 'routine.updated', 'practitioner', pid, routine);
     return row;
@@ -277,7 +277,7 @@ export function schedulingRoutes(app: FastifyInstance) {
     if (extra) {
       const len = (doc.routine as Routine | null)?.windowMinutes || 60; const cap = (doc.routine as Routine | null)?.capacity || 7;
       const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
-      const vals = []; for (let m = toMin(extra.startTime); m < toMin(extra.endTime); m += len) vals.push({ tenantId: t, branchId: br.id, practitionerId: b.practitionerId, day: b.day, startTime: toHHMM(m), endTime: toHHMM(Math.min(m + len, toMin(extra.endTime))), capacity: cap, note: 'Extra hours', source: 'manual' });
+      const vals = []; for (let m = toMin(extra.startTime); m < toMin(extra.endTime); m += len) vals.push({ tenantId: t, branchId: br.id, practitionerId: b.practitionerId, day: b.day, startTime: toHHMM(m), endTime: toHHMM(Math.min(m + len, toMin(extra.endTime))), capacity: cap, note: 'Extra hours', source: 'extra' });
       sessionRows = await tx.insert(session).values(vals).returning();
     }
     let moved = 0;
