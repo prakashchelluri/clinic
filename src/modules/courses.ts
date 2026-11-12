@@ -14,7 +14,7 @@ const sum = (rows: { n: number }[]) => rows[0]?.n ?? 0;
 const VOID = ['cancelled', 'waived']; // charges that no longer count
 
 /** Where the course stands in money: what was paid ahead, what sittings used, what is left to give back. */
-async function standing(tx: Tx, t: string, c: Course) {
+export async function standing(tx: Tx, t: string, c: Course) {
   const pays = await tx.select({ amount: payment.amountPaise, chargeId: payment.chargeId }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.courseId, c.id)));
   const advancePaise = pays.filter((p) => p.amount > 0).reduce((s, p) => s + p.amount, 0);
   const refundedPaise = -pays.filter((p) => p.amount < 0).reduce((s, p) => s + p.amount, 0);

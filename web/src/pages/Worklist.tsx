@@ -4,7 +4,7 @@ import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, today, errText } from '../api';
 import { ProcToday } from './ProcToday';
 import { ProcWeek } from './ProcWeek';
-import { ProcedureBoard, clashLabel } from '../procBoard';
+import { CourseList, clashLabel } from '../procBoard';
 import { Chip, Icon, Modal, PageHeader, Segmented, Skeleton, fmtDate, toast } from '../ui';
 
 type View = 'today' | 'week' | 'courses';
@@ -20,7 +20,7 @@ export function Worklist() {
       <PageHeader title="Procedures">
         <Segmented<View> value={view} onChange={setView} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'courses', label: 'Courses' }]} />
       </PageHeader>
-      {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <ProcedureBoard />}
+      {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <CourseList />}
     </div>
   );
 }

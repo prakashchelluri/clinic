@@ -53,6 +53,9 @@ test('week plan: draft, send, approve, change after sending, send back, own move
   assert.equal((await pending(s1.id)).length, 0, 'no reminder before approval');
   assert.equal((await O('GET', '/procedure-approvals')).body.pending, 0, 'a draft is not with the doctor');
   assert.equal((await C('GET', `/procedure-weeks/${mon}`)).body.sent, false);
+  const inList = (await C('GET', '/procedure-plans')).body.plans.find((x: any) => x.id === a.rec.id);
+  assert.equal(inList.stage, 'booked'); assert.equal(inList.next.approval, 'draft', 'Courses says it is not with the doctor yet');
+  assert.equal(inList.paidPaise, null, 'the coordinator sees no money');
 
   // the same doctor in the same hour: the next start where both fit, never an overlap
   const s2 = (await C('POST', '/procedure-sessions/place', { recommendationId: b.rec.id, day: mon, hour: 11 })).body;

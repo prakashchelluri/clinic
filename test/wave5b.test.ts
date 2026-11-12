@@ -83,12 +83,15 @@ test('quote: priced from the plan, valid for N days, replaced by a newer one, be
 
   let board = (await owner('GET', '/procedure-plans')).body;
   assert.equal(board.plans.find((x: any) => x.id === rec.id).state, 'advised');
+  assert.equal(board.plans.find((x: any) => x.id === rec.id).stage, 'advised', 'Courses list: not started');
   const agreed = await reception('POST', '/courses', { recommendationId: rec.id });
   assert.equal(agreed.status, 200, JSON.stringify(agreed.body)); assert.equal(agreed.body.totalPaise, 1300000, 'the quoted price');
   assert.equal((await owner('GET', `/quotes?recommendationId=${rec.id}`)).body.find((q: any) => q.id === q2.body.id).state, 'agreed');
   board = (await owner('GET', '/procedure-plans')).body;
   const plan = board.plans.find((x: any) => x.id === rec.id);
   assert.equal(plan.state, 'agreed'); assert.equal(plan.ledger.length, 6); assert.equal(plan.ledger[0].state, 'planned');
+  assert.ok(['due', 'behind'].includes(plan.stage), plan.stage); assert.equal(plan.totalPaise, 1300000); assert.equal(plan.paidPaise, 0); assert.equal(plan.stillToPayPaise, 1300000);
+  assert.ok(plan.patient.phone && plan.doctor, 'the list shows the phone and the doctor');
   assert.ok((await reception('GET', '/followups?tab=schedule')).body.rows.some((r: any) => r.patient.id === p.id), 'Advised moves to Procedures to schedule');
   assert.equal((await reception('GET', '/followups?tab=advised')).body.rows.some((r: any) => r.patient.id === p.id), false);
   assert.equal((await as('assistant@demo.clinic').then((j) => j('GET', '/procedure-plans'))).status, 403);

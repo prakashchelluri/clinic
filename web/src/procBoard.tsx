@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router';
-import { get } from './api';
-import { Chip, Empty, Skeleton, fmtDate, money } from './ui';
+import { useNavigate, useOutletContext } from 'react-router';
+import { get, qc, today } from './api';
+import { can } from './App';
+import { Empty, Icon, Skeleton, fmtDate, fmtTime, money, usePageSearch } from './ui';
 import { FlagChips } from './flags';
+import { ScheduleModal } from './pages/Worklist';
+import { CourseDialog } from './courses';
 
 /** A failed request is not an empty day: say so, with Retry. */
 export const LoadError = ({ onRetry }: { onRetry: () => void }) => (
@@ -13,36 +16,115 @@ export const LoadError = ({ onRetry }: { onRetry: () => void }) => (
 const CLASH: Record<string, string> = { room: 'Room in use', doctor: 'Doctor busy', room_blocked: 'Room closed', break: 'Doctor on break', leave: 'Doctor on leave', other: 'Doctor not available' };
 export const clashLabel = (k: string) => CLASH[k] ?? k;
 
-const COLS: [string, string, string][] = [['advised', 'Advised', 'Told the plan; has not said yes'], ['agreed', 'Agreed', 'Price agreed; sittings not all paid'], ['paid', 'Paid', 'Every sitting paid for']];
-const SIT: Record<string, string> = { planned: 'Not booked', confirmed: 'Booked', in_progress: 'Happening', done: 'Done', missed: 'Missed', cancelled: 'Cancelled', postponed: 'Postponed' };
+type Stage = 'behind' | 'due' | 'booked' | 'advised' | 'finished';
+const FILTERS: [Stage | 'all', string][] = [['all', 'All'], ['behind', 'Behind'], ['due', 'Due, not booked'], ['booked', 'Booked'], ['advised', 'Not started'], ['finished', 'Finished']];
+const ORDER: Stage[] = ['behind', 'due', 'booked', 'advised', 'finished'];
+const day = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+const daysLate = (d: string) => Math.round((Date.parse(today()) - Date.parse(d)) / 864e5);
+const refresh = () => ['procedure-plans', 'worklist', 'psessions', 'courses'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
-/** Every procedure plan on one board, and each plan's sittings: planned, done, paid, and what was done. */
-export function ProcedureBoard() {
-  const nav = useNavigate(); const [open, setOpen] = useState<string | null>(null);
-  const q = useQuery({ queryKey: ['procedure-plans'], queryFn: () => get('/procedure-plans'), refetchInterval: 30000 });
-  if (q.isError && !q.data) return <LoadError onRetry={() => q.refetch()} />;
-  if (!q.data) return <Skeleton rows={4} />;
-  const plans: any[] = q.data.plans;
-  if (!plans.length) return <div className="card"><Empty icon="check" title="No procedure plans yet" hint="They appear here when the doctor advises a procedure." /></div>;
+/** Where the course stands, in two lines: what, then why. */
+function standing(p: any): { t: string; sub: string; tone: string } {
+  const n = p.next?.sittingNo ?? p.doneSittings + 1;
+  if (p.stage === 'finished') return { t: p.finishedOn ? `Finished ${fmtDate(p.finishedOn)}` : 'Finished', sub: `all ${p.sittings} sittings done`, tone: 'text-muted' };
+  if (p.stage === 'booked') return { t: `${day(p.next.day)}, ${fmtTime(p.next.startTime)}`, sub: `sitting ${n} · ${p.next.approval !== 'approved' ? 'with the doctor to approve' : p.next.confirmed ? 'patient confirmed' : 'approved, to call'}`, tone: 'text-sage' };
+  if (p.stage === 'advised') {
+    const q = p.quote; const cold = q?.state === 'expired';
+    return { t: cold ? 'Went quiet' : 'Not agreed yet', sub: `advised ${fmtDate(p.advisedOn.slice(0, 10))}${q ? ` · quote ${cold ? 'expired' : 'valid to'} ${fmtDate(q.validUntil)}` : ' · no quote yet'}`, tone: cold ? 'text-rose' : 'text-amber' };
+  }
+  if (p.stage === 'behind') return p.missed ? { t: `Missed ${day(p.missed.day)}`, sub: `sitting ${p.missed.sittingNo ?? n} · not rebooked`, tone: 'text-rose' } : { t: `${daysLate(p.dueOn)} days late`, sub: `was due ${fmtDate(p.dueOn)} · not booked`, tone: 'text-rose' };
+  return { t: p.dueOn ? `Due ${day(p.dueOn)}` : 'Not booked', sub: `sitting ${n} · not booked yet`, tone: 'text-amber' };
+}
+/** The money on one line: balance first, or Paid, or the list price before the patient agrees. Null when the user cannot see fees. */
+function moneyLine(p: any): [string, string] | null {
+  if (p.listPaise == null) return null;
+  if (p.totalPaise == null) return p.stage === 'advised' ? [money(p.listPaise), 'list price'] : ['Per sitting', 'no package agreed'];
+  return p.stillToPayPaise ? [`${money(p.stillToPayPaise)} balance`, `${money(p.paidPaise ?? 0)} of ${money(p.totalPaise)} paid`] : ['Paid', `${money(p.totalPaise)} package`];
+}
+const Dots = ({ p }: { p: any }) => (
+  <span className="inline-flex flex-wrap items-center gap-1" aria-label={`${p.doneSittings} of ${p.sittings} done`}>
+    {Array.from({ length: p.sittings }, (_, i) => <i key={i} className={`inline-block h-2.5 w-2.5 rounded-full ${i < p.doneSittings ? 'bg-sage' : i === p.doneSittings && p.next ? 'ring-2 ring-inset ring-sage' : 'ring-[1.5px] ring-inset ring-line'}`} />)}
+  </span>
+);
+const SIT: Record<string, [string, string]> = { done: ['Done', 'bg-sage text-white'], confirmed: ['Booked', 'ring-2 ring-inset ring-sage text-sage'], in_progress: ['In the room', 'ring-2 ring-inset ring-sage text-sage'], missed: ['Missed', 'ring-2 ring-inset ring-rose text-rose'], planned: ['Not booked', 'ring-[1.5px] ring-inset ring-line text-muted'], cancelled: ['Not booked', 'ring-[1.5px] ring-inset ring-line text-muted'], postponed: ['Postponed', 'ring-[1.5px] ring-inset ring-line text-muted'] };
+
+/** Every procedure course in one list: filter by where it stands, a row opens the course on the right. */
+export function CourseList() {
+  const nav = useNavigate(); const { perms } = useOutletContext<any>();
+  const [f, setF] = useState<Stage | 'all'>('all'); const [sel, setSel] = useState<string | null>(null);
+  const [act, setAct] = useState<'schedule' | 'course' | null>(null);
+  const [q] = usePageSearch('Find a course: patient or procedure');
+  const r = useQuery({ queryKey: ['procedure-plans'], queryFn: () => get('/procedure-plans'), refetchInterval: 30000 });
+  if (r.isError && !r.data) return <LoadError onRetry={() => r.refetch()} />;
+  if (!r.data) return <Skeleton rows={6} />;
+  const all: any[] = [...r.data.plans].sort((a, b) => ORDER.indexOf(a.stage) - ORDER.indexOf(b.stage) || String(a.next?.day ?? a.dueOn ?? '').localeCompare(String(b.next?.day ?? b.dueOn ?? '')));
+  const needle = q.trim().toLowerCase();
+  const found = needle ? all.filter((p) => `${p.patient.fullName} ${p.patient.phone ?? ''} ${p.procedure}`.toLowerCase().includes(needle)) : all;
+  const rows = found.filter((p) => f === 'all' || p.stage === f);
+  const showMoney = all.some((p) => p.listPaise != null);
+  const d = all.find((p) => p.id === sel);
+  if (!all.length) return <div className="card"><Empty icon="check" title="No procedure courses yet" hint="They appear here when the doctor advises a procedure." /></div>;
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      {COLS.map(([k, label, hint]) => (
-        <div key={k}>
-          <div className="mb-2 flex items-baseline gap-2"><b className="text-sm">{label}</b><span className="text-xs text-muted">{q.data.counts[k]} · {hint}</span></div>
-          <div className="space-y-2">{plans.filter((p) => p.state === k).map((p) => (
-            <div key={p.id} className="card !p-3">
-              <button className="w-full text-left" onClick={() => setOpen(open === p.id ? null : p.id)} aria-expanded={open === p.id}>
-                <div className="flex flex-wrap items-center gap-1.5"><b className="text-sm">{p.patient.fullName}</b><FlagChips flags={p.patient.flags} /></div>
-                <div className="text-sm text-ink-2">{p.procedure} · {p.doneSittings} of {p.sittings} done{p.totalPaise != null ? ` · ${money(p.totalPaise)}` : p.listPaise ? ` · list ${money(p.listPaise)}` : ''}</div>
-                {p.quote && <div className="mt-1"><Chip tone={p.quote.state === 'expired' ? 'rose' : p.quote.state === 'open' ? 'sky' : ''}>{p.quote.number} {p.quote.state === 'expired' ? 'expired' : p.quote.state === 'open' ? `valid to ${fmtDate(p.quote.validUntil)}` : p.quote.state}</Chip></div>}
-              </button>
-              {open === p.id && <div className="mt-2 border-t border-line/60 pt-2">
-                <table className="w-full text-xs"><thead><tr className="text-left text-muted"><th className="py-1">#</th><th>Status</th><th>When</th><th>Paid</th></tr></thead>
-                  <tbody>{p.ledger.map((s: any) => <tr key={s.n} className="border-t border-line/40"><td className="py-1">{s.n}</td><td>{SIT[s.state] ?? s.state}{s.did ? <div className="text-muted">{s.did}</div> : null}</td><td>{s.day ? fmtDate(s.day) : '–'}{s.doctor ? <div className="text-muted">{s.doctor}</div> : null}</td><td>{s.paid ? (s.prepaid ? 'Prepaid' : 'Paid') : s.state === 'done' ? (s.amountPaise ? `${money(s.amountPaise)} due` : 'Due') : '—'}</td></tr>)}</tbody></table>
-                <button className="btn btn-sm mt-2" onClick={() => nav(`/patients/${p.patient.id}`)}>Open record</button></div>}
-            </div>))}
-            {!plans.some((p) => p.state === k) && <div className="rounded-xl border border-dashed border-line px-3 py-6 text-center text-xs text-muted">None</div>}</div>
-        </div>))}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Show courses">
+        {FILTERS.map(([k, t]) => { const n = k === 'all' ? found.length : found.filter((p) => p.stage === k).length;
+          return <button key={k} className={`toggle-opt ${f === k ? 'on' : ''}`} aria-pressed={f === k} onClick={() => { setF(k); setSel(null); }}>{t} <b className="ml-1">{n}</b></button>; })}
+      </div>
+      <div className="card !p-0 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead><tr className="bg-surface-2 text-left text-[11px] font-bold uppercase tracking-wider text-muted"><th className="px-4 py-2.5">Patient</th><th className="px-4">Procedure</th><th className="px-4">Progress</th><th className="px-4">Next sitting</th>{showMoney && <th className="px-4">Money</th>}<th className="px-4">Doctor</th></tr></thead>
+          <tbody>
+            {rows.map((p) => { const s = standing(p); const m = moneyLine(p);
+              return (
+                <tr key={p.id} className={`cursor-pointer border-t border-line/60 hover:bg-surface-2 ${sel === p.id ? '!bg-sage-soft' : ''}`} onClick={() => setSel(p.id)}>
+                  <td className="px-4 py-3"><button className="text-left font-bold" onClick={(e) => { e.stopPropagation(); setSel(p.id); }}>{p.patient.fullName}</button> <FlagChips flags={p.patient.flags} /><div className="text-xs text-muted">{p.patient.phone ?? p.patient.patientNo}</div></td>
+                  <td className="px-4">{p.procedure}<div className="text-xs text-muted">{p.gapDays ? `every ${p.gapDays} days` : `${p.sittings} sittings`}</div></td>
+                  <td className="px-4"><Dots p={p} /><div className="text-xs text-muted">{p.doneSittings} of {p.sittings} done</div></td>
+                  <td className="px-4"><b className={s.tone}>{s.t}</b><div className="text-xs text-muted">{s.sub}</div></td>
+                  {showMoney && <td className="px-4">{m?.[0]}<div className="text-xs text-muted">{m?.[1]}</div></td>}
+                  <td className="px-4">{p.doctor ?? '—'}</td>
+                </tr>); })}
+            {!rows.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted">No courses here{needle ? ` for “${q.trim()}”` : ''}.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {d && !act && <CourseSide p={d} canBook={can(perms, 'worklist.write')} onClose={() => setSel(null)} onSchedule={() => setAct('schedule')} onCourse={() => setAct('course')} onRecord={() => nav(`/patients/${d.patient.id}`)} />}
+      {d && act === 'schedule' && <ScheduleModal rec={{ id: d.id, procedureId: d.procedureId, sittings: d.sittings, dueOn: d.dueOn, patient: d.patient }} sitting={d.next ?? undefined} onClose={() => { setAct(null); refresh(); }} />}
+      {d && act === 'course' && <CourseDialog rec={{ id: d.id, procedureId: d.procedureId, procedure: d.procedure, sittings: d.sittings, patient: d.patient }} patientId={d.patient.id} patientName={d.patient.fullName} onClose={() => { setAct(null); refresh(); }} />}
     </div>
+  );
+}
+
+/** One course on the right: where it stands, each sitting, the money, and the one or two things to do next. */
+function CourseSide({ p, canBook, onClose, onSchedule, onCourse, onRecord }: { p: any; canBook: boolean; onClose: () => void; onSchedule: () => void; onCourse: () => void; onRecord: () => void }) {
+  const s = standing(p); const open = p.stage !== 'finished';
+  return (
+    <aside role="dialog" aria-label={`${p.patient.fullName} · ${p.procedure}`} className="side-drawer" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1"><b className="text-lg">{p.patient.fullName}</b><div className="text-sm text-muted">{p.procedure} · {p.sittings} sittings{p.gapDays ? `, every ${p.gapDays} days` : ''}{p.doctor ? ` · ${p.doctor}` : ''}</div></div>
+        <button className="btn btn-sm !px-2" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
+      </div>
+      <div className="rounded-xl bg-surface-2 px-4 py-3"><b className={s.tone}>{s.t}</b><div className="text-xs text-muted">{s.sub}</div></div>
+      <div>
+        <b className="text-sm">Sittings</b>
+        {p.ledger.map((l: any) => { const [label, cls] = SIT[l.state] ?? [l.state, '']; const isNext = p.next && l.n === (p.next.sittingNo ?? p.doneSittings + 1) && l.state !== 'done';
+          const what = isNext ? `Booked ${day(p.next.day)}, ${fmtTime(p.next.startTime)}` : l.day && l.state !== 'planned' && l.state !== 'cancelled' ? `${label} ${fmtDate(l.day)}` : l.n === p.doneSittings + 1 && open && p.stage !== 'advised' ? 'Due, not booked' : 'Not booked';
+          return <div key={l.n} className="grid grid-cols-[26px_minmax(0,1fr)_auto] items-center gap-2.5 border-t border-line/60 py-2 text-sm">
+            <span className={`grid h-[22px] w-[22px] place-items-center rounded-full text-[11px] font-bold ${isNext ? SIT.confirmed[1] : cls}`}>{l.n}</span>
+            <span>{what}{l.did ? <span className="block text-xs text-muted">{l.did}</span> : null}</span>
+            <span className="text-xs text-muted">{l.paid ? (l.prepaid ? 'prepaid' : 'paid') : l.state === 'done' && l.amountPaise ? `${money(l.amountPaise)} due` : ''}</span>
+          </div>; })}
+      </div>
+      {p.totalPaise != null && <div className="grid grid-cols-3 gap-2 text-xs text-muted">
+        {[['Package', p.totalPaise], ['Paid', p.paidPaise ?? 0], ['Balance', p.stillToPayPaise ?? 0]].map(([k, v]) => <div key={k} className="rounded-xl bg-surface-2 px-3 py-2.5">{k}<b className="block text-base text-ink">{money(v)}</b></div>)}
+      </div>}
+      {p.stage === 'advised' && p.quote && <div className="text-xs text-muted">Quote {p.quote.number}, {p.quote.state === 'expired' ? 'expired' : 'valid to'} {fmtDate(p.quote.validUntil)}</div>}
+      <div className="flex flex-wrap gap-2 border-t border-line/60 pt-4">
+        {p.stage === 'advised' ? <button className="btn btn-sm btn-primary" onClick={onCourse}>Price and quote</button>
+          : open && canBook ? <button className="btn btn-sm btn-primary" onClick={onSchedule}>{p.next ? 'Move sitting' : `Schedule sitting ${p.doneSittings + 1}`}</button> : null}
+        {p.stage !== 'advised' && (p.totalPaise == null ? open && p.listPaise != null : p.stillToPayPaise > 0) && <button className="btn btn-sm" onClick={onCourse}>{p.totalPaise == null ? 'Agree a price' : 'Take payment'}</button>}
+        <button className="btn btn-sm" onClick={onRecord}>Open record</button>
+      </div>
+    </aside>
   );
 }

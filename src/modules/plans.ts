@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
-import { charge, course, message, patient, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
+import { charge, course, encounter, message, patient, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
+import { standing } from './courses.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -74,8 +75,9 @@ export function planRoutes(app: FastifyInstance) {
   /** Procedure plans on one board: Advised (told the price), Agreed (price agreed, nothing paid yet), Paid (all sittings paid for). Each carries its sittings ledger. */
   route(app, 'get', '/procedure-plans', 'worklist.read', async (req, tx) => {
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone); const fees = can(req.perms, 'fees.see');
-    const recs = await tx.select({ r: recommendation, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, flags: patient.flags }, proc: procedureCatalog.name, price: procedureCatalog.pricePaise })
+    const recs = await tx.select({ r: recommendation, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, flags: patient.flags }, proc: procedureCatalog.name, price: procedureCatalog.pricePaise, prescriber: practitioner.name })
       .from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId))
+      .leftJoin(encounter, eq(encounter.id, recommendation.encounterId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
       .where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'), ne(recommendation.status, 'cancelled'))).orderBy(asc(recommendation.dueOn)).limit(300);
     const ids = recs.map((x) => x.r.id);
     if (!ids.length) return { counts: { advised: 0, agreed: 0, paid: 0 }, plans: [] };
@@ -85,6 +87,9 @@ export function planRoutes(app: FastifyInstance) {
     const sids = sessions.map((s) => s.ps.id);
     const charges = sids.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), inArray(charge.sessionId, sids), notInArray(charge.status, ['cancelled', 'waived']))) : [];
     const quotes = await tx.select().from(quote).where(and(eq(quote.tenantId, t), inArray(quote.recommendationId, ids))).orderBy(sql`${quote.createdAt} desc`);
+    // ponytail: money per agreed course is a few queries each; one grouped query if the list grows past a few hundred
+    const standings = new Map<string, Awaited<ReturnType<typeof standing>>>();
+    if (fees) for (const c of courses) standings.set(c.recommendationId, await standing(tx, t, c));
     const plans = recs.map((x) => {
       const c = courses.find((k) => k.recommendationId === x.r.id); const sit = x.r.sittings ?? 1;
       const mine = sessions.filter((s) => s.ps.recommendationId === x.r.id); const done = mine.filter((s) => s.ps.state === 'completed');
@@ -94,8 +99,21 @@ export function planRoutes(app: FastifyInstance) {
       const state = !c ? (mine.length > 0 ? 'agreed' : 'advised') : paidAll || x.r.status === 'done' ? 'paid' : 'agreed';
       const ledger = Array.from({ length: sit }, (_, i) => { const n = i + 1; const s = done[i] ?? mine.find((m) => m.ps.sittingNo === n && !['completed'].includes(m.ps.state)); const ks = ch.filter((z) => s && z.sessionId === s.ps.id); // two when the advance covered only part of the sitting
         return { n, state: done[i] ? 'done' : s ? s.ps.state : 'planned', day: s?.ps.day ?? null, doctor: s?.doctor ?? null, did: (done[i]?.ps.outcome as any)?.note ?? done[i]?.ps.notes ?? null, paid: ks.length > 0 && ks.every((k) => k.status === 'paid'), prepaid: ks.some((k) => k.prepaid), amountPaise: fees && ks.length ? ks.reduce((a, k) => a + k.amountPaise, 0) : null }; });
-      return { id: x.r.id, patient: x.p, procedure: x.proc ?? 'Procedure', sittings: sit, doneSittings: done.length, state, dueOn: x.r.dueOn, listPaise: fees ? (x.price ?? 0) * sit : null, totalPaise: fees ? c?.totalPaise ?? null : null,
-        quote: q ? { number: q.number, validUntil: q.validUntil, state: q.status === 'open' && q.validUntil < today ? 'expired' : q.status } : null, ledger };
+      // where the course stands, for the Courses list: the next sitting booked, a missed one not rebooked, or when the next falls due
+      // a booked sitting whose day has passed and was never started counts as missed here, not as booked
+      const next = mine.find((s) => s.ps.state === 'in_progress' || (s.ps.state === 'confirmed' && s.ps.day >= today));
+      const lastDone = done.at(-1)?.ps.day ?? null;
+      const missed = mine.filter((s) => (s.ps.state === 'missed' || (s.ps.state === 'confirmed' && s.ps.day < today)) && (!lastDone || s.ps.day > lastDone)).at(-1);
+      const quoteState = q ? (q.status === 'open' && q.validUntil < today ? 'expired' : q.status) : null;
+      const stage = x.r.status === 'done' || done.length >= sit ? 'finished' : next ? 'booked' : state === 'advised' ? 'advised' : missed || (x.r.dueOn && x.r.dueOn < today) ? 'behind' : 'due';
+      const m = standings.get(x.r.id);
+      return { id: x.r.id, patient: x.p, procedure: x.proc ?? 'Procedure', procedureId: x.r.procedureId, sittings: sit, gapDays: x.r.gapDays, doneSittings: done.length, state, stage, dueOn: x.r.dueOn, lastDone, finishedOn: stage === 'finished' ? lastDone : null,
+        doctor: next?.doctor ?? done.at(-1)?.doctor ?? x.prescriber ?? null, advisedOn: x.r.createdAt,
+        next: next ? { id: next.ps.id, day: next.ps.day, startTime: next.ps.startTime, endTime: next.ps.endTime, sittingNo: next.ps.sittingNo, practitionerId: next.ps.practitionerId, approval: next.ps.approval, confirmed: !!(next.ps.weekConfirmedAt || next.ps.patientConfirmedAt) } : null,
+        missed: missed && !next ? { day: missed.ps.day, sittingNo: missed.ps.sittingNo } : null,
+        listPaise: fees ? (x.price ?? 0) * sit : null, totalPaise: fees ? c?.totalPaise ?? null : null,
+        paidPaise: m ? m.advancePaise - m.refundedPaise + m.paidOnDayPaise : null, stillToPayPaise: m ? m.stillToPayPaise : null,
+        quote: q ? { number: q.number, validUntil: q.validUntil, state: quoteState } : null, ledger };
     });
     return { counts: { advised: plans.filter((p) => p.state === 'advised').length, agreed: plans.filter((p) => p.state === 'agreed').length, paid: plans.filter((p) => p.state === 'paid').length }, plans };
   });
