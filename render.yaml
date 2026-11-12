@@ -18,6 +18,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # This deployment is the demo: show the demo accounts on the sign-in page (read at build time). Never set it for a real clinic.
+      - key: VITE_DEMO_LOGIN
+        value: "1"
       - key: COOKIE_SECRET
         generateValue: true
       - key: DATABASE_URL
