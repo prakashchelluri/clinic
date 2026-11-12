@@ -191,7 +191,21 @@ function AdvanceHistory({ rows, kind }: { rows: any[]; kind: Record<string, stri
 }
 
 /** Money tiles above an invoice list. */
-function Totals({ t, advance, onAdvance, onCourses }: { t: any; advance?: number; onAdvance?: () => void; onCourses?: number }) {
+function Totals({ t, advance, onAdvance, onCourses, line }: { t: any; advance?: number; onAdvance?: () => void; onCourses?: number; line?: boolean }) {
+  // line: the totals as one strip of figures (inside a patient's record, where the bills themselves need the room)
+  if (line) {
+    const Fig = ({ label, value, tone = '' }: { label: string; value: string; tone?: string }) => <div className="flex items-baseline gap-1.5"><span className="text-[12.5px] text-muted">{label}</span><b className={`text-[16px] tabular-nums ${tone}`}>{value}</b></div>;
+    return (
+      <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl bg-surface-2/60 px-4 py-2.5">
+        <Fig label={`Billed (${t.n})`} value={money(t.billedPaise)} />
+        <Fig label="Collected" value={money(t.paidPaise - t.refundedPaise)} tone="text-sage" />
+        <Fig label={`Due (${t.withDue})`} value={money(t.duePaise)} tone={t.duePaise ? 'text-rose' : ''} />
+        <Fig label={`Refunded (${t.withRefund})`} value={money(t.refundedPaise)} />
+        {advance !== undefined && <Fig label="Advance" value={money(advance)} />}
+        {onCourses ? <span className="text-[12.5px] text-muted">{money(onCourses)} more paid ahead on courses</span> : null}
+      </div>
+    );
+  }
   return (
     <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
       <Stat label={`Billed (${t.n})`} value={money(t.billedPaise)} sub={`${money(t.paidPaise)} paid`} />
@@ -214,11 +228,13 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
   const bills: any[] = q.data?.bills ?? []; const hist: any[] = adv.data?.history ?? [];
   const KIND: Record<string, string> = { deposit: 'Deposit', used: 'Used on a bill', refund: 'Given back' };
   return (
-    <Section title="Billing history" aside={can(perms, 'payment.record') ? <button className="btn btn-sm" onClick={() => setAdvOpen('add')}><Icon name="wallet" className="h-3.5 w-3.5" />Advance {money(adv.data?.balancePaise ?? 0)} · add</button> : undefined}>
-      <div className="px-4 pt-2"><Tabs value={tab} onChange={setTab} options={[{ value: 'invoices', label: 'Invoices', count: bills.length }, { value: 'advance', label: 'Advance', count: hist.length }]} /></div>
+    // the record's tab already says Bills & payments: no title of its own, the advance button sits beside Invoices / Advance
+    <section className="card-flat overflow-hidden anim-fade-up">
+      <div className="flex flex-wrap items-end gap-x-4 px-4 pt-1.5"><Tabs className="min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'invoices', label: 'Invoices', count: bills.length }, { value: 'advance', label: 'Advance', count: hist.length }]} />
+        {can(perms, 'payment.record') && <button className="btn btn-sm mb-1.5" onClick={() => setAdvOpen('add')}><Icon name="wallet" className="h-3.5 w-3.5" />Advance {money(adv.data?.balancePaise ?? 0)} · add</button>}</div>
       <div className="p-4">
         {!q.data ? <div className="text-sm text-muted">Loading…</div> : tab === 'invoices' ? <>
-          <Totals t={q.data.totals} advance={adv.data?.balancePaise ?? 0} onCourses={onCourses} onAdvance={can(perms, 'payment.record') ? () => setAdvOpen('add') : undefined} />
+          <Totals line t={q.data.totals} advance={adv.data?.balancePaise ?? 0} onCourses={onCourses} />
           <div className="-mx-4"><InvoiceTable bills={bills} onView={(b) => setViewing(b.id)} onCollect={setCollecting} onRefund={setRefunding} empty="Add bill / payment makes the first one." /></div>
         </> : <>
           <div className="mb-3 flex flex-wrap items-center gap-2"><span className="text-[15px]">Balance <b className="tabular-nums">{money(adv.data?.balancePaise ?? 0)}</b></span><span className="flex-1" />
@@ -231,7 +247,7 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
       {refunding && <RefundBill bill={refunding} onClose={() => setRefunding(null)} />}
       {collecting && <TakePayment patientId={patientId} patientName={patientName} onlyBill={collecting.id} onClose={() => { setCollecting(null); refreshBills(); }} />}
       {advOpen && <AdvanceDialog patientId={patientId} patientName={patientName} start={advOpen} onClose={() => setAdvOpen(null)} />}
-    </Section>
+    </section>
   );
 }
 

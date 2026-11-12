@@ -14,7 +14,7 @@ import { SkinMapPanel } from '../skinmap';
 import { TakePayment } from '../takePayment';
 import { BillingHistory } from '../billing';
 import { CoursesCard } from '../courses';
-import { FlagChips, CarefulBanner, FlagEditor, GuardianPick, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
+import { FlagChips, FlagEditor, GuardianPick, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { DataTable, filterValue, pageOf, type FilterDef } from '../table';
 
 const SEEN: FilterDef<any> = { key: 'seen', label: 'Last visit', icon: 'clock', options: [{ value: '', label: 'Any time' }, { value: 'month', label: 'In the last 30 days' }, { value: 'quarter', label: 'In the last 90 days' }, { value: 'year_plus', label: 'Over a year ago' }, { value: 'never', label: 'Never visited' }] };
@@ -106,31 +106,33 @@ function Timeline({ id }: { id: string }) {
   const startEdit = () => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp });
   const Line = ({ label, children }: { label: string; children: React.ReactNode }) => <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className="text-[14px] font-semibold">{children}</div></div>;
   return (
-    <div className="space-y-4">
-      {/* who, how to reach them, and the record's few actions */}
-      <div className="card anim-fade-up">
-        <div className="flex flex-wrap items-center gap-4">
-          <Avatar name={p.fullName} size="h-12 w-12 text-[15px]" />
+    <div className="space-y-3">
+      {/* one compact card: who, how to reach them, the few actions, and the record's tabs along its bottom edge */}
+      <div className="card !p-0 anim-fade-up">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-2 pt-3">
+          <Avatar name={p.fullName} size="h-10 w-10 text-[13px]" />
           <div className="min-w-[240px] flex-1">
-            <h2 className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[22px] font-extrabold leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-[15px] font-medium text-muted">{[p.ageYears ? `${p.ageYears}` : '', p.sex ?? ''].filter(Boolean).join(' ')}</span><FlagChips flags={{ ...p.flags, careful: undefined }} />{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.language && p.language !== 'en' && <Chip>{p.language === 'te' ? 'Telugu' : 'Hindi'}</Chip>}{p.noWhatsapp && <Chip>No WhatsApp messages</Chip>}</h2>
-            <div className="mt-1 text-sm text-muted">{[p.phone ?? 'no phone', p.patientNo, p.dob ? `born ${fmtDate(p.dob)}` : null, p.locality, visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}` : 'no visit yet'].filter(Boolean).join(' · ')}</div>
-            {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1 text-sm text-ink-2">{guardian && <>Guardian: <button className="font-medium underline" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h2 className="text-[19px] font-extrabold leading-tight [overflow-wrap:anywhere]">{p.fullName}</h2>
+              <span className="text-[14px] font-medium text-muted">{[p.ageYears ? `${p.ageYears}` : '', p.sex ?? ''].filter(Boolean).join(' ')}</span>
+              <FlagChips flags={{ ...p.flags, careful: undefined }} />{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.language && p.language !== 'en' && <Chip>{p.language === 'te' ? 'Telugu' : 'Hindi'}</Chip>}{p.noWhatsapp && <Chip>No WhatsApp messages</Chip>}
+              {p.flags?.careful && <span role="note" className="rounded-md bg-amber-soft px-2 py-0.5 text-[12.5px] text-amber" title={`Set by ${p.flags.careful.by}, ${fmtDate(p.flags.careful.at)}`}><b>Handle carefully:</b> {p.flags.careful.note}</span>}
+            </div>
+            <div className="mt-0.5 text-[13px] text-muted">{[p.phone ?? 'no phone', p.patientNo, p.dob ? `born ${fmtDate(p.dob)}` : null, p.locality, visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}` : 'no visit yet'].filter(Boolean).join(' · ')}
+              {guardian && <> · Guardian: <button className="font-medium text-ink-2 underline" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button></>}{p.contactLabel ? ` · contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? ` · phone shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}{p.notes ? <span className="text-ink-2"> · {p.notes}</span> : null}</div>
           </div>
-          {(outstandingPaise > 0 || can(perms, 'payment.record')) && <div className="flex items-center gap-2">{outstandingPaise > 0 && <button type="button" className="text-sm font-bold text-rose hover:underline" onClick={() => setSec('bills')}>Due {money(outstandingPaise)}</button>}{can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}</div>}
+          {outstandingPaise > 0 && <button type="button" className="text-sm font-bold text-rose hover:underline" onClick={() => setSec('bills')}>Due {money(outstandingPaise)}</button>}
+          {can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
           {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
         </div>
-        <CarefulBanner flags={p.flags} />
-        {p.notes && <div className="mt-3 text-sm text-ink-2">{p.notes}</div>}
-        {can(perms, 'user.write') && <div className="mt-3 border-t border-line/70 pt-3"><SeenBy patientId={id} /></div>}
-      </div>
-
-      {/* the record's parts as the app's tabs; a part's own actions sit at the right of the row */}
-      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-        <Tabs<Sec> className="min-w-0 flex-1" value={sec} onChange={setSec} options={SECS.map(([k, n]) => ({ value: k, label: SEC_TITLE[k], count: n }))} />
-        {sec === 'reports' && <div className="flex flex-wrap items-center gap-2 pb-2"><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>
-          {can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(ev) => setForTest(ev.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((x: any) => <option key={x.id} value={x.id}>For test: {x.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((x: any) => x.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</div>}
+        {/* the record's parts as the app's tabs; a part's own actions sit at the right of the row */}
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-1 px-3">
+          <Tabs<Sec> className="min-w-0 flex-1 !border-b-0" value={sec} onChange={setSec} options={SECS.map(([k, n]) => ({ value: k, label: SEC_TITLE[k], count: n }))} />
+          {sec === 'reports' && <div className="flex flex-wrap items-center gap-2 pb-1.5"><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>
+            {can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(ev) => setForTest(ev.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((x: any) => <option key={x.id} value={x.id}>For test: {x.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((x: any) => x.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</div>}
+        </div>
       </div>
 
         <div className="space-y-4">
@@ -213,6 +215,7 @@ function Timeline({ id }: { id: string }) {
           {sec === 'missed' && <Section title={<>Missed <span className="font-normal text-muted">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
         </div>
 
+      {can(perms, 'user.write') && <div className="px-1 text-xs text-muted"><SeenBy patientId={id} /></div>}
       {paying && <TakePayment patientId={id} patientName={p.fullName} onClose={() => setPaying(false)} />}
       {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
