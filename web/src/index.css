@@ -254,15 +254,15 @@ h1 { letter-spacing: -0.025em; }
   .rail-item { @apply relative grid h-[44px] w-[44px] place-items-center rounded-full text-ink-2; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .rail-item:hover { @apply bg-ink/6 text-ink; }
   /* the labelled rail (S-C): an icon with its name under it, one size always */
-  .lrail-item { @apply relative flex w-[72px] shrink-0 flex-col items-center justify-center gap-[2px] rounded-[12px] px-0.5 py-1 text-center text-[10.5px] font-semibold leading-[1.15] text-ink-2; min-height: 46px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
+  .lrail-item { @apply relative flex w-[74px] flex-col items-center justify-center gap-[5px] rounded-[14px] px-0.5 py-1.5 text-center text-[10.5px] font-semibold leading-[1.15] text-ink-2; flex: 1 1 0; min-height: 46px; max-height: 68px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); } /* items share the height: roomy for a short menu, tighter only for a long one */
   .lrail-item:hover { @apply bg-ink/6 text-ink; }
-  .lrail-ic { @apply grid h-[24px] w-[36px] place-items-center rounded-[8px]; }
+  .lrail-ic { @apply grid h-[30px] w-[44px] place-items-center rounded-[10px]; }
   .lrail-item.active { @apply font-bold text-ink; }
   .lrail-item.active .lrail-ic { @apply bg-nav-active; color: var(--color-paper); }
-  .lrail-label { max-width: 68px; overflow-wrap: anywhere; }
-  .lrail-badge { @apply absolute right-[7px] top-[3px] min-w-[18px] rounded-full bg-clay px-1 text-center text-[10px] font-bold leading-[16px] tabular-nums; color: var(--color-paper); }
+  .lrail-label { max-width: 74px; letter-spacing: -0.01em; overflow-wrap: normal; word-break: keep-all; }
+  .lrail-badge { @apply absolute right-[5px] top-[3px] min-w-[19px] rounded-full bg-clay px-1 text-center text-[10.5px] font-bold leading-[17px] tabular-nums; color: var(--color-paper); }
   .lrail-badge.warn { @apply bg-amber; }
-  .lrail-sep { @apply my-0.5 block h-px w-9 shrink-0 bg-line; }
+  .lrail-sep { @apply my-1 block h-px w-9 shrink-0 bg-line; }
   .rail-item.active { @apply bg-nav-active; color: var(--color-paper); }
 
   .tip { position: relative; }

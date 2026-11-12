@@ -82,7 +82,7 @@ function LabelRail({ items, active, clinic, me, roles, badges = {}, onSignOut }:
     const on = active?.to === to;
     return (
       <Link key={to} to={to} viewTransition aria-current={on ? 'page' : undefined} aria-label={b ? `${label}, ${b.hint}` : label} title={b ? `${label} · ${b.hint}` : label} className={`lrail-item ${on ? 'active' : ''}`}>
-        <span className="lrail-ic"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
+        <span className="lrail-ic"><Icon name={icon} className="h-5 w-5" /></span>
         <span className="lrail-label">{label}</span>
         {b && <span className={`lrail-badge ${b.warn ? 'warn' : ''}`} aria-hidden="true">{b.n > 99 ? '99+' : b.n}</span>}
       </Link>
@@ -98,7 +98,7 @@ function LabelRail({ items, active, clinic, me, roles, badges = {}, onSignOut }:
       </nav>
       <div className="mt-2 flex shrink-0 flex-col items-center gap-1.5 border-t border-line pt-2.5">
         <span className="relative" title={`${me.name} · ${roles.map(roleLabel).join(', ')}`}><Avatar name={me.name} size="h-9 w-9 text-[12px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }} /></span>
-        <button onClick={onSignOut} aria-label="Sign out" title="Sign out" className="lrail-item !min-h-0 !py-1.5"><span className="lrail-ic !h-7"><Icon name="logout" className="h-4 w-4" /></span><span className="lrail-label">Sign out</span></button>
+        <button onClick={onSignOut} aria-label="Sign out" title="Sign out" className="lrail-item !min-h-0 !flex-none !py-1.5"><span className="lrail-ic !h-7"><Icon name="logout" className="h-4 w-4" /></span><span className="lrail-label">Sign out</span></button>
       </div>
     </div>
   );
