@@ -17,7 +17,7 @@ const RxItem = z.object({ id: z.string().uuid().optional(), medicineId: z.string
   frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
   intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), gapDays: z.number().int().min(1).max(365).nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
-const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false) });
+const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false), reviewed: z.boolean().default(false) });
 
 /** Validate submitted data against the form definition: required fields and option membership only. */
 /** Assistant-only users save intake and hand back to the doctor; a doctor who also holds assistant stays in consult. */
@@ -174,15 +174,14 @@ export function clinicalRoutes(app: FastifyInstance) {
       // The return visit for the reports is over for today whether the pad was closed or kept open for the rest.
       const back = await tx.select({ id: visit.id, details: visit.details }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.status, 'in_consult'), sql`${visit.details}->>'reportsEncounterId' = ${id}`));
       for (const b of back) await tx.update(visit).set({ status: 'done', details: { ...(b.details ?? {}), returnDoneAt: new Date().toISOString() } }).where(eq(visit.id, b.id));
-      // The patient sat with the doctor and the reports: those reports are reviewed and the patient told, in person.
-      // Reports that come in later still go to the doctor's To review as usual.
-      if (back.length) {
-        const now = new Date().toISOString();
-        await tx.update(recommendation).set({ reviewedAt: now, reviewOutcome: 'seen', reviewedBy: req.ctx.name, informedAt: now, informedHow: 'in_person', informedBy: req.ctx.name })
-          .where(and(eq(recommendation.tenantId, t), eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.receivedAt} is not null`, sql`${recommendation.reviewedAt} is null`));
-        // already reviewed from the list and not told yet: the doctor has now told them
-        await tx.update(recommendation).set({ informedAt: now, informedHow: 'in_person', informedBy: req.ctx.name })
-          .where(and(eq(recommendation.tenantId, t), eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.reviewedAt} is not null`, sql`${recommendation.informedAt} is null`));
+      // The doctor reviews in the consultation: Keep open for the rest or Complete is the review. The results in are
+      // reviewed (and the order is done; there is no separate step at the desk). Complete also closes the tests with no
+      // result added: the doctor saw them another way (paper reports in hand). The desk can still add those reports later.
+      if (isDoctor && (body.complete || body.reviewed)) {
+        const now = new Date().toISOString(); const mine = and(eq(recommendation.tenantId, t), eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.status} <> 'cancelled'`, sql`${recommendation.informedAt} is null`);
+        await tx.update(recommendation).set({ reviewedAt: now, reviewOutcome: 'seen', reviewedBy: req.ctx.name, informedAt: now })
+          .where(and(mine, body.complete ? sql`true` : sql`${recommendation.receivedAt} is not null`, sql`${recommendation.reviewedAt} is null`));
+        await tx.update(recommendation).set({ informedAt: now }).where(and(mine, sql`${recommendation.reviewedAt} is not null`)); // reviewed earlier from the list
       }
       if (body.complete) await emit(tx, req.ctx, 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, afterReports: true, newRx });
       else await emit(tx, req.ctx, 'encounter.kept_open', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, newRx });

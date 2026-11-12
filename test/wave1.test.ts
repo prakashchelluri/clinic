@@ -1,5 +1,5 @@
 // Wave 1: section templates (stacking sets, drafts for the owner), complaint checklists, medical history kept on the patient,
-// and test orders: one review per order once every report is in, a slow test split into its own order, informed only after the doctor.
+// and test orders: one review per order once every report is in, a slow test split into its own order, completed once the doctor reviews.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -89,7 +89,7 @@ test('medical history asked once is kept on the patient and shows at the next vi
   assert.deepEqual(again.data.screen.answers['Itching worse at night?'], { a: 'yes' });
 });
 
-test('test orders: reviewed once when every report is in; a slow test in its own order; informed only after the doctor', async () => {
+test('test orders: reviewed once when every report is in; a slow test in its own order; reviewed is completed', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic'); const doc2 = await as('doctor2@demo.clinic'); const pharmacy = await as('pharmacy@demo.clinic');
   const p = (await owner('POST', '/patients', { fullName: 'Orders Patient', phone: '9000022222' })).body;
   const v = (await owner('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
@@ -116,7 +116,6 @@ test('test orders: reviewed once when every report is in; a slow test in its own
   const body1 = { encounterId: e.id, orderNo: 1, outcome: 'normal' };
   assert.equal((await owner('POST', '/orders/review', body1)).body.code, 'NOT_ALL_RECEIVED');
   assert.equal((await reception('POST', '/orders/review', body1)).status, 403, 'only a doctor reviews');
-  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 1, how: 'phone' })).body.code, 'NOT_REVIEWED', 'the desk cannot explain before the doctor');
 
   // all in: ready for the doctor as one order
   assert.equal((await up([idOf(o1, 'TSH')], 'tsh.jpg')).status, 200);
@@ -125,10 +124,8 @@ test('test orders: reviewed once when every report is in; a slow test in its own
   assert.equal((await owner('POST', '/orders/review', { ...body1, note: 'x'.repeat(301) })).status, 400);
   assert.equal((await owner('POST', '/orders/review', { ...body1, outcome: 'will_call', note: 'LFT slightly high' })).status, 200);
   assert.equal((await owner('POST', '/orders/review', body1)).body.code, 'ALREADY_REVIEWED');
-  const call = (await mine('explain'))[0]; assert.equal(call.state, 'doctor_call'); assert.equal(call.note, 'LFT slightly high'); assert.equal(call.reviewedBy.length > 0, true);
-  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 1, how: 'phone' })).body.code, 'DOCTOR_WILL_CALL', 'the doctor said she will call');
-  assert.equal((await owner('POST', '/orders/inform', { encounterId: e.id, orderNo: 1, how: 'carrier pigeon' })).status, 400);
-  assert.equal((await owner('POST', '/orders/inform', { encounterId: e.id, orderNo: 1, how: 'phone' })).status, 200, 'the doctor closes it after she phoned');
+  // reviewed is done: no separate step at the desk
+  const call = (await mine('done')).find((o: any) => o.orderNo === 1); assert.equal(call.state, 'closed'); assert.equal(call.note, 'LFT slightly high'); assert.equal(call.reviewedBy.length > 0, true);
   assert.equal((await mine('done')).filter((o: any) => o.orderNo === 1).length, 1);
 
   // the biopsy was its own order: untouched until it arrives
@@ -139,13 +136,8 @@ test('test orders: reviewed once when every report is in; a slow test in its own
   assert.equal((await doc2('POST', '/orders/called', { id: idOf(o2, 'Skin biopsy') })).status, 403);
   assert.equal((await up([idOf(o2, 'Skin biopsy')], 'biopsy.pdf')).status, 200);
   assert.equal((await owner('POST', '/orders/review', { encounterId: e.id, orderNo: 2, outcome: 'needs_visit' })).status, 200);
-  // telling the patient happens on Test reports only, not on Calls; "needs a visit" closes once that visit is booked
+  // no report rows on Calls; reviewed is done
   assert.ok(!(await reception('GET', '/followups')).body.rows.some((r: any) => r.patient.id === p.id && r.kind === 'report'), 'no report rows on Calls');
-  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).body.code, 'BOOK_FIRST');
-  const slot = (await reception('GET', '/calendar/free?days=7')).body[0];
-  assert.equal((await reception('POST', '/appointments', { sessionId: slot.sessionId, patientId: p.id })).status, 200);
-  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).status, 200, 'the desk explains once the visit is booked');
-  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).body.code, 'ALREADY_INFORMED');
   assert.equal((await mine('')).filter((o: any) => o.state === 'closed').length, 2);
 });
 

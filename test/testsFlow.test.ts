@@ -1,5 +1,5 @@
-// Test reports from order to told: the desk sends what is in, a review closes the consultation, "needs a visit" waits for a booking,
-// and a patient back with the reports is reviewed and told at that visit. Holds at any hour: the test sets up its own doctor hours.
+// Test reports from order to review: the desk sends what is in, a review closes the consultation, the doctor reviews in the consultation,
+// and a patient back with the reports is reviewed at that visit. Holds at any hour: the test sets up its own doctor hours.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
@@ -28,7 +28,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' 
 before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); app = await buildApp(); });
 after(async () => { await app.close(); });
 
-test('reports: sent to the doctor, reviewed, a visit booked before closing, and reviewed in person when the patient is back', async () => {
+test('reports: sent to the doctor, reviewed in the consultation (Keep open / Complete), completed, and a report added afterwards', async () => {
   const doc = await as('owner@demo.clinic'); const desk = await as('reception@demo.clinic');
   const cfg = (await doc('GET', '/config')).body; const cat = cfg.feeCategories.find((c: any) => c.code === 'GEN') ?? cfg.feeCategories[0];
   const docId = cfg.practitioners[0].id; const branchId = cfg.branches[0].id;
@@ -67,19 +67,25 @@ test('reports: sent to the doctor, reviewed, a visit booked before closing, and 
   const r2 = await doc('POST', '/orders/review', { encounterId: a.enc, orderNo: vitD.orderNo, outcome: 'normal' });
   assert.equal(r2.body.closed, true); assert.equal(await encStatus(a.enc), 'completed');
 
-  // 2. "needs a visit": not closed until the visit is booked; the consultation waits for that visit
-  const b = await consult('Flow Visit', ['CBC']);
+  // 2. reviewed in the consultation: Keep open for the rest reviews what is in; Complete closes the rest too
+  //    (paper reports seen in person); the desk can still add that report afterwards
+  const b = await consult('Flow In Consult', ['CBC', 'LFT']);
   [o] = await orders(b.pid);
-  await values(b.pid, b.enc, o.tests[0], 'Hb 9.1');
-  assert.equal((await doc('POST', '/orders/review', { encounterId: b.enc, orderNo: o.orderNo, outcome: 'needs_visit' })).body.closed, false);
+  await values(b.pid, b.enc, o.tests.find((t: any) => t.name === 'CBC'), 'Hb 9.1');
+  const pad = async (extra: object) => { const e = (await doc('GET', `/encounters/${b.enc}`)).body; return doc('PATCH', `/encounters/${b.enc}`, { data: e.data, prescription: e.prescription, recommendations: e.recommendations.filter((r: any) => r.kind !== 'investigation'), ...extra }); };
+  assert.equal((await pad({ reviewed: true })).status, 200, 'Keep open for the rest');
+  [o] = await orders(b.pid);
+  assert.equal(o.state, 'partial', 'LFT still to come');
+  assert.ok(o.tests.find((t: any) => t.name === 'CBC').reviewedAt, 'CBC reviewed'); assert.equal(o.tests.find((t: any) => t.name === 'LFT').reviewedAt, null);
   assert.equal(await encStatus(b.enc), 'awaiting_reports');
-  assert.equal((await desk('POST', '/orders/inform', { encounterId: b.enc, orderNo: o.orderNo, how: 'phone' })).body.code, 'BOOK_FIRST');
-  const win = (await doc('POST', '/sessions', { branchId, practitionerId: docId, day: addDays(today(), 3), startTime: '06:00', endTime: '07:00', capacity: 5 })).body;
-  assert.equal((await desk('POST', '/appointments', { sessionId: win.id, patientId: b.pid })).status, 200);
-  assert.equal((await desk('POST', '/orders/inform', { encounterId: b.enc, orderNo: o.orderNo, how: 'phone' })).status, 200);
-  assert.equal((await orders(b.pid))[0].state, 'closed');
+  assert.equal((await pad({ complete: true })).status, 200, 'Complete');
+  [o] = await orders(b.pid);
+  assert.equal(o.state, 'closed', 'the doctor saw LFT on paper'); assert.equal(await encStatus(b.enc), 'completed');
+  await values(b.pid, b.enc, o.tests.find((t: any) => t.name === 'LFT'), 'SGPT 30');
+  [o] = await orders(b.pid);
+  assert.equal(o.state, 'closed', 'a report added later does not reopen it'); assert.ok(o.tests.find((t: any) => t.name === 'LFT').values.length);
 
-  // 3. back with the reports: added at check-in, the doctor reopens the same consultation, and that is the review and the telling
+  // 3. back with the reports: added at check-in, the doctor reopens the same consultation, and Complete is the review
   const c = await consult('Flow Back', ['Serum ferritin']);
   [o] = await orders(c.pid);
   const back = await desk('POST', '/visits', { patientId: c.pid, feeCategoryCode: cat.code, details: { reportsEncounterId: c.enc, complaint: 'Back with reports' }, idempotencyKey: `back-${Date.now()}` });
@@ -89,16 +95,9 @@ test('reports: sent to the doctor, reviewed, a visit booked before closing, and 
   assert.equal(opened.id, c.enc, 'the same consultation');
   assert.equal((await doc('PATCH', `/encounters/${c.enc}`, { data: opened.data, prescription: opened.prescription, recommendations: opened.recommendations.map((r: any) => ({ id: r.id, kind: r.kind, notes: r.notes })), complete: true })).status, 200);
   const closed = (await orders(c.pid))[0];
-  assert.equal(closed.state, 'closed'); assert.equal(closed.outcome, 'seen'); assert.equal(closed.informedHow, 'in_person');
+  assert.equal(closed.state, 'closed'); assert.equal(closed.outcome, 'seen');
   assert.equal(await encStatus(c.enc), 'completed');
 
-  // 4. reviewed inside the consultation (Review on Today opens it): it stays open for the doctor's changes and Complete
-  const d = await consult('Flow In Consult', ['TSH']);
-  [o] = await orders(d.pid);
-  await values(d.pid, d.enc, o.tests[0], '2.1');
-  assert.equal((await doc('POST', '/orders/review', { encounterId: d.enc, orderNo: o.orderNo, outcome: 'normal', inConsult: true })).body.closed, false);
-  assert.equal(await encStatus(d.enc), 'awaiting_reports');
-
-  // 5. informing the patient lives on Test reports only: nothing about reports on Calls
+  // 4. nothing about reports on Calls
   assert.ok(!(await desk('GET', '/followups')).body.rows.some((r: any) => r.kind === 'report'));
 });

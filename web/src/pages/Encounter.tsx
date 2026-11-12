@@ -20,7 +20,6 @@ import { VitalsCard, vitalFields, vitalsText } from '../vitals';
 import { LabResultsCard, ReportLink, reportFor } from '../labs';
 import { ReportList } from '../labHistory';
 import { BodyMap, SkinMapPanel, siteFor, usePins } from '../skinmap';
-import { ConsultOrder } from './TestReports';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
@@ -305,11 +304,9 @@ export function Encounter() {
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
-  // opened from Review on the doctor's Today (?review=order): the Reports tab, with that order's panel on the right
-  const [sp, setSp] = useSearchParams(); const [reviewKey, setReviewKey] = useState<string | null>(sp.get('review'));
-  const ordQ = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), enabled: !!id && can(perms, 'encounter.complete') });
-  const toReview = ((ordQ.data?.orders ?? []) as any[]).filter((o) => o.encounterId === id && o.state === 'ready');
-  const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>(sp.get('review') ? 'docs' : 'pad'); // the pad, or one of the patient's collections beside it
+  // opened from Review on the doctor's Today (?review): the Rxpad at Lab investigations, where the values and reports are
+  const [sp, setSp] = useSearchParams(); const wantReview = useRef(!!sp.get('review'));
+  const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
   useEffect(() => { if (sp.get('review')) { const n = new URLSearchParams(sp); n.delete('review'); setSp(n, { replace: true }); } }, []);
   // the doctor's choice: Stacked (every card, Eka) is the default; Focused (one section open, the rest folded) is the other
   const [layout, setLayout] = useState<'stacked' | 'focused'>(() => { try { return localStorage.getItem('pad-layout') === 'focused' ? 'focused' : 'stacked'; } catch { return 'stacked'; } });
@@ -326,6 +323,14 @@ export function Encounter() {
     if (viewRef.current === 'stacked') document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     else setTimeout(() => document.getElementById('pad-open')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
   };
+  // the cards draw a moment after the consultation loads: wait for Lab investigations, then bring it (and Lab results below it) up
+  useEffect(() => {
+    if (!wantReview.current || !enc.data) return; wantReview.current = false; setActive('tests');
+    // ponytail: the pad's load (focus on the type-anything bar) scrolls back to the top, so it scrolls once more after it settles
+    const up = () => document.getElementById('sec-tests')?.scrollIntoView({ block: 'start' });
+    let n = 0, later: any; const t = setInterval(() => { if (document.getElementById('sec-tests') || ++n > 40) { clearInterval(t); up(); later = setTimeout(up, 900); } }, 150);
+    return () => { clearInterval(t); clearTimeout(later); };
+  }, [!!enc.data]);
   const [capture, setCapture] = useState(false); const [compare, setCompare] = useState<[any, any] | null>(null);
   const loaded = useRef(false); const dirty = useRef(false); const justLoaded = useRef(false);
   const edits = useRef(0); // counts changes, so a save that was on its way while the doctor kept typing does not mark the pad saved
@@ -362,7 +367,7 @@ export function Encounter() {
   const [saveFailed, setSaveFailed] = useState<false | 'kept' | 'failed'>(false);
   const save = useMutation({
     // d: the data to send when it was changed in the same tick (the reason given at Finish), before React has re-rendered
-    mutationFn: ({ complete, d, back }: { complete: boolean; back?: boolean; d?: Record<string, any> }) => patch(`/encounters/${id}`, { data: d ?? data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete, screened: !!back && !canFinish }),
+    mutationFn: ({ complete, d, back, reviewed }: { complete: boolean; back?: boolean; reviewed?: boolean; d?: Record<string, any> }) => patch(`/encounters/${id}`, { reviewed: !!reviewed, data: d ?? data, prescription: cleanRx(), recommendations: recs.filter((r) => r.kind !== 'investigation' || (r.notes && r.status !== 'done')), complete, screened: !!back && !canFinish }),
     onMutate: () => edits.current,
     onSuccess: (_e, { complete, back }, sentAt) => {
       if (!restore) try { localStorage.removeItem(localKey); } catch { /* private mode */ } // still offered back: the copy stays until the doctor picks
@@ -567,8 +572,8 @@ export function Encounter() {
     if (held) { // after the reports: the prescription was signed when it went out
       if (!testsOpen) return save.mutate({ complete: true });
       const left = testRecs.filter((r: any) => r.status !== 'done').map((r: any) => r.notes || 'a test').join(', ');
-      // reports still to come: keeping it open is the usual step; closing now is the doctor's call, said out loud
-      void ask({ title: `${left} still pending. Close the consultation anyway?`, body: 'When they arrive they still come to you for review, from Test reports. Keep open for the rest keeps this consultation waiting for them.', confirmLabel: 'Close the consultation', cancelLabel: 'Go back' }).then((ok) => { if (ok) save.mutate({ complete: true }); });
+      // results not added yet: Complete means the doctor saw them another way (paper reports); said out loud first
+      void ask({ title: `No result added for ${left}. Complete anyway?`, body: 'Complete marks them as seen (for example the patient brought the paper reports) and closes the consultation. The desk can still add those reports later. To wait for them instead, choose Keep open for the rest.', confirmLabel: 'Complete', cancelLabel: 'Go back' }).then((ok) => { if (ok) save.mutate({ complete: true }); });
       return;
     }
     void toSheet(data);
@@ -1013,10 +1018,6 @@ export function Encounter() {
         {previous.length > 12 && <div className="pt-2 text-xs text-muted">Earlier · {previous.length - 12} more in the patient's file</div>}
         <div className="mt-3 border-t border-line pt-3"><ScreeningCard complaintText={arrivalText} lists={lists} answers={answers} history={hist} /></div>
       </div>}
-      {tab === 'docs' && isDoctor && toReview.length > 0 && <div className="card anim-fade-up flex flex-col gap-1.5">
-        <b className="text-sm">Results awaiting your review</b>
-        {toReview.map((o: any) => <div key={o.key} className="flex flex-wrap items-center gap-2 border-t border-line/60 pt-1.5 text-sm"><span className="min-w-0 flex-1">{o.tests.map((t: any) => t.name).join(', ')}{o.abnormal ? <b className="ml-1.5 text-rose">{o.abnormal} out of range</b> : null}</span><button className="btn btn-sm btn-primary" onClick={() => setReviewKey(o.key)}>Review</button></div>)}
-      </div>}
       {tab === 'docs' && <div className="card anim-fade-up">
         <div className="mb-2 flex items-center gap-2"><span className="text-xs text-muted">Lab reports and letters</span><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => qc.invalidateQueries({ queryKey: ['documents', p.id] })} />}</div>
         {myDocs.every((d: any) => d.kind === 'photo') ? <div className="text-xs text-muted">No reports yet.</div> : <ReportList docs={myDocs.filter((d: any) => d.kind !== 'photo')} patientId={p.id} encounterId={readOnly ? undefined : id} who={p.fullName} />}
@@ -1041,7 +1042,7 @@ export function Encounter() {
         {!readOnly && canFinish && <>
           <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className={B} onClick={() => { void preview(); }}>Preview</button>
-          {held && testsOpen && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+          {held && testsOpen && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
           <button type="button" className={held && testsOpen ? B : BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
         {readOnly && canFinish && e.status === 'completed' && <button type="button" className={B} onClick={() => { void amend(); }}>Amend</button>}
@@ -1059,7 +1060,7 @@ export function Encounter() {
         {!readOnly && canFinish && <>
           <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button>
-          {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+          {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
           <button type="button" className={`btn ${held && testsOpen ? 'btn-sm' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
         {readOnly && canFinish && e.status === 'completed' && <button type="button" className="btn btn-sm" onClick={() => { void amend(); }}>Amend</button>}
@@ -1068,7 +1069,6 @@ export function Encounter() {
       </>}
       {mapOpen && <Modal title="Skin map" subtitle={p.fullName} width="max-w-4xl" onClose={() => setMapOpen(false)}><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => { const s = siteFor(a, formSections.find((x) => x.key === 'complaint')?.fields.find((x: Field) => x.key === 'site')?.options ?? []); if (s) set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), s])); }} onFinding={onPinFinding} /></Modal>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
-      {reviewKey && <ConsultOrder orderKey={reviewKey} onClose={() => setReviewKey(null)} onReviewed={() => { setReviewKey(null); setTab('pad'); }} />}
       {checking && <ReasonSheet warnings={checking} onCancel={() => { setChecking(null); goTo('medicines'); }} onDone={giveReasons} />}
       {signing && <Modal title={amended ? 'Sign the amended prescription' : 'Sign the prescription'} subtitle={p.fullName} width="max-w-2xl" onClose={() => setSigning(false)}>
         {overrides.length > 0 && <div className="mb-3 rounded-[12px] bg-rose-soft px-4 py-2.5 text-[12.5px] text-rose" role="alert"><b>Prescribed despite these checks:</b>{overrides.map((o, k) => <div key={k} className="mt-1">{o.warnings.join(' ')} <span className="text-ink">Reason: {o.reason}</span></div>)}</div>}
