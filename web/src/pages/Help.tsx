@@ -275,7 +275,7 @@ function Owner() {
     ]} />
     <Warn>Settings has a <b>Clear everything and load test data</b> button at the bottom of Settings, Clinic details. It deletes every patient, visit, bill and message in the clinic and loads sample data. Use it only on a test clinic. You must type RESET.</Warn>
     <H2 id="owner-reports">Owner: reports</H2>
-    <P><b>Dashboard</b> shows a tile for each doctor (patients, new against review, money paid and pending), a line of patients per day, and the times that matter, each compared with the period before. <b>Reports</b> has the daily report and End of day. <b>Audit log</b> lists every change with who made it.</P>
+    <P><b>Reports</b> shows a period you pick (today, last 7 or 30 days, a month, or your own dates) against the period before it. <b>Overview</b>: patients, new and returning, collected, still due, sittings done, waiting time and no-shows, visits per day and each doctor. <b>Visits</b>: visit types, booked against walk-in, busiest day and hour. <b>Patients</b>: men and women, age, area, how often they came. <b>Clinical</b>: top diagnoses, medicines, tests and procedures. Pick a doctor at the top to see only theirs; a doctor sees only their own. <b>Day</b> has the daily report and End of day. Each tab downloads as a CSV file. <b>Audit log</b> lists every change with who made it.</P>
   </>);
 }
 

@@ -39,6 +39,13 @@ export const filterValue = (sp: URLSearchParams, f: FilterDef<any>) => sp.get(f.
 export const pageOf = (sp: URLSearchParams, size = 25) => ({ page: Math.max(1, Number(sp.get('p')) || 1), size: SIZES.includes(Number(sp.get('n'))) ? Number(sp.get('n')) : size });
 const readHidden = (id: string): string[] => { try { return JSON.parse(localStorage.getItem(`dt-cols:${id}`) ?? '[]'); } catch { return []; } };
 
+/** Rows to a .csv file the browser saves (with a BOM so Excel reads Telugu and ₹). */
+export function downloadCsv(name: string, rows: unknown[][]) {
+  const cell = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + rows.map((l) => l.map(cell).join(',')).join('\r\n')], { type: 'text/csv' }));
+  a.download = `${name}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
 /** The app's one list table: tabs, filters, sort, pages, selection, Columns and Export.
  *  Page, sort, filters and switches live in the address, so Back and a shared link keep them; search is the header's box (?q=). */
 export function DataTable<T>(p: Props<T>) {
@@ -88,13 +95,7 @@ export function DataTable<T>(p: Props<T>) {
   const go = (n: number) => write({ p: n > 1 ? String(n) : null }, true);
 
   const saveHidden = (h: string[]) => { setHidden(h); try { localStorage.setItem(`dt-cols:${p.id}`, JSON.stringify(h)); } catch { /* private window: the choice lasts this visit */ } };
-  const exportCsv = () => {
-    const ec = cols.filter((c) => c.csv || c.sort);
-    const cell = (v: unknown) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const text = [ec.map((c) => cell(c.label)), ...list.map((r) => ec.map((c) => cell((c.csv ?? c.sort)!(r))))].map((l) => l.join(',')).join('\r\n');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv' }));
-    a.download = `${p.exportName ?? p.id}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
+  const exportCsv = () => { const ec = cols.filter((c) => c.csv || c.sort); downloadCsv(p.exportName ?? p.id, [ec.map((c) => c.label), ...list.map((r) => ec.map((c) => (c.csv ?? c.sort)!(r)))]); };
   // the server checks the role and writes the audit record; a refusal shows as a message, nothing is downloaded
   const exportGuarded = () => listOut(`Downloaded the ${p.exportName ?? p.id} list (${list.length} row${list.length === 1 ? '' : 's'})`, list.length, exportCsv);
   // page numbers: the first, the last, and the two either side of this one

@@ -24,7 +24,7 @@ export function Clinic() {
   const fd = useQuery({ queryKey: ['frontdesk', t], queryFn: () => get(`/frontdesk?day=${t}`), refetchInterval: 30000 });
   const procs = useQuery({ queryKey: ['psessions', 'day', t, 'owner'], queryFn: () => get(`/procedure-sessions?day=${t}&active=1`), refetchInterval: 60000, enabled: can(perms, 'worklist.read') });
   const stock = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 60000, enabled: can(perms, 'stock.read') });
-  const dash = useQuery({ queryKey: ['dashboard', t, t], queryFn: () => get(`/dashboard?from=${t}&to=${t}`), refetchInterval: 60000 });
+  const dash = useQuery({ queryKey: ['analytics', t, t, ''], queryFn: () => get(`/reports/analytics?from=${t}&to=${t}`), refetchInterval: 60000 });
   const [open, setOpen] = useState<Need | null>(null);
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
 
@@ -63,7 +63,7 @@ export function Clinic() {
   ];
   const yc = s.yesterday.closed;
   const max = Math.max(1, ...s.week.map((w: any) => w.totalPaise));
-  const tiles: any[] = dash.data?.tiles ?? [];
+  const tiles: any[] = dash.data?.overview?.perDoctor ?? [];
 
   return (
     <div className="space-y-4">
@@ -110,7 +110,7 @@ export function Clinic() {
               <b key={d.id} className="truncate border-t border-line py-2.5">{d.name}</b>,
               <span key={d.id + 's'} className="border-t border-line py-2.5">{visits.filter((v) => v.practitionerId === d.id && v.status === 'done').length}</span>,
               <span key={d.id + 'w'} className="border-t border-line py-2.5">{waiting.filter((v) => v.practitionerId === d.id).length}</span>,
-              <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.paidPaise !== undefined ? money(d.paidPaise) : '—'}</span>])}
+              <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.collectedPaise !== null ? money(d.collectedPaise) : '—'}</span>])}
           </div>
           <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sittings, less refunds, from the same figures as End of day. Pharmacy and course advances are not split by doctor.</div>
         </section>

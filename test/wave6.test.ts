@@ -68,11 +68,16 @@ test('end of day: figures by type and mode, differences need notes, closing lock
   const hist = (await owner('GET', '/dayclose/history')).body;
   assert.equal(hist[0].day, today()); assert.deepEqual(hist[0].differences.sort(), ['Review', 'cash']);
 
-  // dashboard: tiles per doctor, a trend with its average, times against the month before
-  const d = (await owner('GET', '/dashboard')).body;
-  assert.ok(Array.isArray(d.tiles) && d.tiles.length >= 1);
-  assert.equal(d.trend.length, 30); assert.ok(d.visits >= 3);
-  assert.ok('waitMin' in d.times.now && 'waitMin' in d.times.before);
-  assert.equal(d.moneyHidden, false); assert.ok('revenuePaise' in d.tiles[0]);
-  assert.equal((await reception('GET', '/dashboard')).status, 403);
+  // reports: the period against the one before; the owner sees every doctor and the money, a doctor only their own, reception none
+  const d = (await owner('GET', '/reports/analytics')).body;
+  assert.ok(d.now.visits >= 3 && 'visits' in d.before); assert.equal(d.overview.trend.length, 30);
+  assert.ok('waitMin' in d.now && 'waitMin' in d.before); assert.equal(typeof d.now.collectedPaise, 'number');
+  assert.ok(Array.isArray(d.overview.perDoctor) && Array.isArray(d.doctors) && d.clinical);
+  assert.equal(d.now.newPatients + d.now.returning, d.now.patients);
+  const one = (await owner('GET', `/reports/analytics?doctor=${d.doctors[0].id}`)).body;
+  assert.equal(one.doctor, d.doctors[0].id); assert.equal(one.overview.perDoctor, null);
+  const dr = (await (await as('doctor2@demo.clinic'))('GET', `/reports/analytics?doctor=${d.doctors[0].id}`)).body;
+  assert.equal(dr.doctors, null); assert.notEqual(dr.doctor, null); assert.equal(dr.overview.perDoctor, null);
+  assert.equal((await owner('GET', '/reports/analytics?from=2026-02-01&to=2026-01-01')).status, 400);
+  assert.equal((await reception('GET', '/reports/analytics')).status, 403);
 });

@@ -19,7 +19,6 @@ import { Reports } from './pages/Reports';
 import { TestReports } from './pages/TestReports';
 import { Calls } from './pages/Followups';
 import { Help } from './pages/Help';
-import { Dashboard } from './pages/Dashboard';
 import { Clinic } from './pages/Clinic';
 import { PrintRx } from './pages/PrintRx';
 import { Pharmacy, InventoryPage } from './pages/Pharmacy';
@@ -54,8 +53,8 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/display/:slug/:token" element={<Display />} />
           <Route element={<App />}>
             <Route index element={<Home />} />
-            {/* ponytail: the old Overview (pages/Overview.tsx) is parked; its address goes to the Dashboard */}
-            <Route path="/overview" element={<Navigate to="/dashboard" replace />} />
+            {/* ponytail: the old Overview (pages/Overview.tsx) is parked; its address, and the Dashboard's, go to Reports */}
+            <Route path="/overview" element={<Navigate to="/reports" replace />} />
             <Route path="/today" element={<Today />} />
             <Route path="/today/week" element={<MyWeek />} />
             <Route path="/queue" element={<FrontDesk />} />
@@ -69,7 +68,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/calls" element={<Calls />} />
             <Route path="/followups" element={<Moved to="/calls" />} />
             <Route path="/help" element={<Help />} />
-            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/dashboard" element={<Navigate to="/reports" replace />} />
             <Route path="/clinic" element={<Clinic />} />
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/inventory" element={<InventoryPage />} />

@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, gte, isNull, lt, lte, sql } from 'drizzle-orm';
-import { appointment, charge, dayClose, encounter, expense, feeCategory, payment, pharmacySale, practitioner, procedureSession, session, visit } from '../db/schema.js';
+import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
+import { appointment, charge, dayClose, encounter, expense, feeCategory, patient, payment, pharmacySale, practitioner, prescriptionItem, procedureCatalog, procedureSession, recommendation, session, visit } from '../db/schema.js';
+import { clinical } from './patients.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { addDays, emit, todayIn } from '../lib/core.js';
@@ -128,40 +129,85 @@ export function dayCloseRoutes(app: FastifyInstance) {
     };
   });
 
-  /** Per-doctor tiles, a daily trend, and the times that matter, each against the month before rather than an outside benchmark. */
-  route(app, 'get', '/dashboard', 'report.read', async (req, tx) => {
-    const t = req.ctx.tenantId; const tz = req.ctx.timezone; const money = can(req.perms, 'fees.see'); const allMoney = can(req.perms, 'finance.read'); // a doctor sees only their own revenue
+  /** Reports: the basic figures of a period against the period before, by doctor. A doctor sees only their own patients and takings; the owner sees all and can pick a doctor. */
+  route(app, 'get', '/reports/analytics', 'report.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const tz = req.ctx.timezone; const money = can(req.perms, 'fees.see'); const allMoney = can(req.perms, 'finance.read');
     const q = req.query as any; const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to) ? q.to : todayIn(tz); const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from) ? q.from : addDays(to, -29);
-    const span = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1; const pFrom = addDays(from, -span); const pTo = addDays(from, -1);
-    const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
-    const vis = (a: string, b: string) => tx.select({ v: visit, code: feeCategory.code, name: feeCategory.name }).from(visit).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId)).where(and(eq(visit.tenantId, t), gte(visit.day, a), sql`${visit.day} <= ${b}`));
-    const cur = await vis(from, to);
-    const charges = cur.length ? await tx.select().from(charge).where(and(eq(charge.tenantId, t), sql`${charge.visitId} in (select id from visit where tenant_id = ${t} and day >= ${from} and day <= ${to})`)) : [];
-    const sitCharges = await tx.select({ c: charge, doc: procedureSession.practitionerId }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), gte(procedureSession.day, from), sql`${procedureSession.day} <= ${to}`));
-    // collected money comes from the same ledger as End of day and Reports: payments received in the range, net of refunds
-    const f = money ? await dayFigures(tx, t, tz, from, to) : null;
-    const tiles = docs.map((d) => {
-      const mine = cur.filter((x) => x.v.practitionerId === d.id); const cs = [...charges.filter((c) => mine.some((m) => m.v.id === c.visitId)), ...sitCharges.filter((s) => s.doc === d.id).map((s) => s.c)];
-      const paid = f?.byDoctor[d.id] ?? 0; const pending = cs.filter((c) => c.status === 'due').reduce((s, c) => s + c.amountPaise, 0);
-      const types = mine.map((m) => visitType(m.code, m.name));
-      return { id: d.id, name: d.name, patients: mine.length, newPatients: types.filter((x) => x === 'General' || x === 'Relatives and friends').length, reviews: types.filter((x) => x === 'Review' || x === 'Procedure follow-up').length,
-        ...(money && (allMoney || d.id === req.ctx.practitionerId) ? { revenuePaise: paid + pending, paidPaise: paid, pendingPaise: pending } : {}) };
-    });
-    const byDay = new Map<string, number>(); for (const x of cur) byDay.set(x.v.day, (byDay.get(x.v.day) ?? 0) + 1);
-    const trend = Array.from({ length: Math.min(span, 31) }, (_, i) => { const d = addDays(to, -(Math.min(span, 31) - 1 - i)); return { day: d, patients: byDay.get(d) ?? 0 }; });
-    const avg = trend.length ? Math.round((trend.reduce((s, x) => s + x.patients, 0) / trend.length) * 10) / 10 : 0;
-    const open = trend.filter((x) => x.patients > 0); const busiest = open.reduce((a, b) => (b.patients > (a?.patients ?? -1) ? b : a), undefined as any); const quietest = open.reduce((a, b) => (b.patients < (a?.patients ?? 1e9) ? b : a), undefined as any);
+    if (from > to) throw new HttpError(400, 'BAD_RANGE');
+    const span = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+    if (span > 366) throw new HttpError(400, 'RANGE_TOO_LONG');
+    const pFrom = addDays(from, -span); const pTo = addDays(from, -1);
+    const docs = await tx.select({ id: practitioner.id, name: practitioner.name }).from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
+    // the owner may narrow to one doctor; anyone else with a doctor record is held to their own patients
+    const doc: string | null = allMoney ? (docs.some((d) => d.id === q.doctor) ? q.doctor : null) : req.ctx.practitionerId ?? null;
+    const byDoc = (col: any) => (doc ? eq(col, doc) : undefined);
+    const inRange = (col: any, a: string, b: string) => and(gte(col, a), lte(col, b));
+
+    // ponytail: each period is read into memory and counted here; fine for one clinic's year, move the counts into SQL if it slows
+    const vis = (a: string, b: string) => tx.select({ v: visit, code: feeCategory.code, name: feeCategory.name, src: appointment.source }).from(visit).innerJoin(feeCategory, eq(feeCategory.id, visit.feeCategoryId))
+      .leftJoin(appointment, eq(appointment.id, visit.appointmentId)).where(and(eq(visit.tenantId, t), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
+    const firstVisit = async (ids: string[]) => new Map((ids.length ? await tx.select({ p: visit.patientId, d: sql<string>`min(${visit.day})::text` }).from(visit).where(and(eq(visit.tenantId, t), inArray(visit.patientId, ids))).groupBy(visit.patientId) : []).map((r) => [r.p, r.d]));
     const times = async (a: string, b: string) => {
-      const rows = await tx.select({ arrived: visit.arrivedAt, started: encounter.createdAt, done: encounter.completedAt }).from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).where(and(eq(encounter.tenantId, t), eq(encounter.status, 'completed'), gte(visit.day, a), sql`${visit.day} <= ${b}`));
+      const rows = await tx.select({ arrived: visit.arrivedAt, started: encounter.createdAt, done: encounter.completedAt }).from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).where(and(eq(encounter.tenantId, t), eq(encounter.status, 'completed'), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
       const m = (xs: number[]) => (xs.length ? Math.round((xs.reduce((s, x) => s + x, 0) / xs.length / 60000) * 10) / 10 : null);
       return { waitMin: m(rows.map((r) => Date.parse(r.started) - Date.parse(r.arrived)).filter((x) => x >= 0)), withDoctorMin: m(rows.filter((r) => r.done).map((r) => Date.parse(r.done!) - Date.parse(r.started)).filter((x) => x >= 0)) };
     };
-    const appts = async (a: string, b: string, status: string) => (await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.tenantId, t), eq(appointment.status, status), gte(session.day, a), sql`${session.day} <= ${b}`)))[0]?.n ?? 0;
-    const prev = await vis(pFrom, pTo);
+    const appts = async (a: string, b: string, status: string) => (await tx.select({ n: sql<number>`count(*)::int` }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.tenantId, t), eq(appointment.status, status), inRange(session.day, a, b), byDoc(session.practitionerId))))[0]?.n ?? 0;
+    const sittings = (a: string, b: string) => tx.select({ s: procedureSession, proc: procedureCatalog.name }).from(procedureSession).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.state, 'completed'), inRange(procedureSession.day, a, b), byDoc(procedureSession.practitionerId)));
+    // collected: the End of day ledger (payments in the range, net of refunds); a doctor's share is what was paid against their visits and sittings
+    const collected = async (a: string, b: string) => { if (!money) return null; const f = await dayFigures(tx, t, tz, a, b); return doc ? f.byDoctor[doc] ?? 0 : allMoney ? f.money.total.total : null; };
+    const due = async (a: string, b: string) => {
+      if (!money || (!allMoney && !doc)) return null;
+      const v = await tx.select({ n: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int` }).from(charge).innerJoin(visit, eq(visit.id, charge.visitId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
+      const s = await tx.select({ n: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int` }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(procedureSession.day, a, b), byDoc(procedureSession.practitionerId)));
+      return (v[0]?.n ?? 0) + (s[0]?.n ?? 0);
+    };
+    const period = async (a: string, b: string) => {
+      const vs = await vis(a, b); const pids = [...new Set(vs.map((x) => x.v.patientId))]; const first = await firstVisit(pids);
+      const fresh = pids.filter((p) => (first.get(p) ?? a) >= a).length;
+      return { vs, pids, first, figures: { patients: pids.length, visits: vs.length, newPatients: fresh, returning: pids.length - fresh, collectedPaise: await collected(a, b), duePaise: await due(a, b),
+        sittings: (await sittings(a, b)).length, ...(await times(a, b)), noShows: await appts(a, b, 'no_show'), cancelled: await appts(a, b, 'cancelled') } };
+    };
+    const now = await period(from, to); const before = await period(pFrom, pTo);
+    const cur = now.vs;
+
+    const byDay = new Map<string, number>(); for (const x of cur) byDay.set(x.v.day, (byDay.get(x.v.day) ?? 0) + 1);
+    const trend = Array.from({ length: Math.min(span, 92) }, (_, i) => { const d = addDays(to, -(Math.min(span, 92) - 1 - i)); return { day: d, visits: byDay.get(d) ?? 0 }; });
     const types: Record<string, number> = Object.fromEntries(COUNT_KEYS.map((k) => [k, 0])); for (const x of cur) types[visitType(x.code, x.name)]++;
-    return { from, to, previous: { from: pFrom, to: pTo }, tiles, trend, averagePerDay: avg, busiest: busiest ?? null, quietest: quietest ?? null, types, visits: cur.length, previousVisits: prev.length,
-      times: { now: await times(from, to), before: await times(pFrom, pTo) }, missed: { now: await appts(from, to, 'no_show'), before: await appts(pFrom, pTo, 'no_show') }, cancelled: { now: await appts(from, to, 'cancelled'), before: await appts(pFrom, pTo, 'cancelled') }, moneyHidden: !money,
-      // the clinic's takings, the End of day figure; the part not tied to an active doctor's tile is pharmacy, course advances and other money
-      collected: f && allMoney ? { totalPaise: f.money.total.total, pharmacyPaise: f.money.pharmacy.total, notTiedPaise: f.money.total.total - docs.reduce((s, d) => s + (f.byDoctor[d.id] ?? 0), 0) } : null };
+    const weekday = [0, 0, 0, 0, 0, 0, 0]; for (const x of cur) weekday[(new Date(x.v.day + 'T00:00:00Z').getUTCDay() + 6) % 7]++; // Mon first
+    const hour = (d: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hourCycle: 'h23' }).format(d));
+    const byHour: Record<number, number> = {}; for (const x of cur) { const h = hour(new Date(x.v.arrivedAt)); byHour[h] = (byHour[h] ?? 0) + 1; }
+    const walkIn = cur.filter((x) => !x.v.appointmentId || x.src === 'walk_in').length;
+
+    // per doctor: the owner's view of all doctors, only when not narrowed to one
+    const fAll = money && allMoney && !doc ? await dayFigures(tx, t, tz, from, to) : null;
+    const perDoctor = allMoney && !doc ? docs.map((d) => { const mine = cur.filter((x) => x.v.practitionerId === d.id); const ps = [...new Set(mine.map((m) => m.v.patientId))];
+      return { id: d.id, name: d.name, visits: mine.length, patients: ps.length, newPatients: ps.filter((p) => (now.first.get(p) ?? from) >= from).length, collectedPaise: fAll ? fAll.byDoctor[d.id] ?? 0 : null }; }) : null;
+
+    const people = now.pids.length ? await tx.select({ id: patient.id, sex: patient.sex, age: patient.ageYears, locality: patient.locality, card: patient.referralCard }).from(patient).where(and(eq(patient.tenantId, t), inArray(patient.id, now.pids))) : [];
+    const count = <T,>(xs: T[], key: (x: T) => string | null | undefined, n = 10) => { const m = new Map<string, number>(); for (const x of xs) { const k = key(x)?.trim(); if (k) m.set(k, (m.get(k) ?? 0) + 1); } return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([name, n]) => ({ name, n })); };
+    const band = (a: number | null) => a === null ? 'Not recorded' : a < 18 ? 'Under 18' : a <= 30 ? '18–30' : a <= 45 ? '31–45' : a <= 60 ? '46–60' : 'Over 60';
+    const visitsPer = new Map<string, number>(); for (const x of cur) visitsPer.set(x.v.patientId, (visitsPer.get(x.v.patientId) ?? 0) + 1);
+
+    let clinicalData = null;
+    if (clinical(req.perms)) {
+      const encs = await tx.select({ id: encounter.id, data: encounter.data }).from(encounter).innerJoin(visit, eq(visit.id, encounter.visitId)).where(and(eq(encounter.tenantId, t), eq(encounter.status, 'completed'), inRange(visit.day, from, to), byDoc(visit.practitionerId)));
+      const ids = encs.map((e) => e.id);
+      const dx = encs.flatMap((e) => ([] as any[]).concat((e.data as any)?.assessment?.diagnosis ?? []).map((x) => (typeof x === 'string' ? x : x?.name)));
+      const rx = ids.length ? await tx.select({ name: prescriptionItem.name }).from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), inArray(prescriptionItem.encounterId, ids))) : [];
+      const recs = ids.length ? await tx.select({ kind: recommendation.kind, notes: recommendation.notes }).from(recommendation).where(and(eq(recommendation.tenantId, t), inArray(recommendation.encounterId, ids))) : [];
+      const sits = await sittings(from, to);
+      clinicalData = { consultations: encs.length, diagnoses: count(dx, (x) => x), medicines: count(rx, (x) => x.name), tests: count(recs.filter((r) => r.kind === 'investigation'), (r) => r.notes),
+        procedures: count(sits, (s) => s.proc ?? 'Procedure'), coursesStarted: recs.filter((r) => r.kind === 'procedure').length };
+    }
+
+    return { from, to, previous: { from: pFrom, to: pTo }, doctor: doc, doctors: allMoney ? docs : null, now: now.figures, before: before.figures,
+      overview: { trend, averagePerDay: Math.round((cur.length / span) * 10) / 10, perDoctor },
+      visits: { types, weekday, byHour, walkIn, booked: cur.length - walkIn },
+      patients: { sex: count(people, (p) => (p.sex === 'M' ? 'Men' : p.sex === 'F' ? 'Women' : p.sex === 'O' ? 'Other' : 'Not recorded')), ages: count(people, (p) => band(p.age), 6),
+        localities: count(people, (p) => p.locality), referralCard: people.filter((p) => p.card).length,
+        frequency: count([...visitsPer.values()], (n) => (n >= 4 ? '4 or more visits' : `${n} visit${n === 1 ? '' : 's'}`), 4) },
+      clinical: clinicalData };
   });
 }
