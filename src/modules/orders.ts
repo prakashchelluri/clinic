@@ -65,7 +65,7 @@ export function orderRoutes(app: FastifyInstance) {
 
   /** The doctor looks at the whole order once and says what happens next. */
   route(app, 'post', '/orders/review', 'encounter.complete', async (req, tx) => {
-    const b = Key.extend({ outcome: z.enum(OUTCOMES), note: z.string().trim().max(300).optional() }).parse(req.body); const t = req.ctx.tenantId;
+    const b = Key.extend({ outcome: z.enum(OUTCOMES), note: z.string().trim().max(300).optional(), inConsult: z.boolean().optional() }).parse(req.body); const t = req.ctx.tenantId;
     const recs = await find(tx, t, b);
     if (recs.some((r) => !r.receivedAt)) throw new HttpError(409, 'NOT_ALL_RECEIVED');
     if (recs.every((r) => r.reviewedAt)) throw new HttpError(409, 'ALREADY_REVIEWED');
@@ -76,7 +76,8 @@ export function orderRoutes(app: FastifyInstance) {
     // Nothing more to do in the consultation: it closes once every test in it is reviewed. Changing medicines keeps it open
     // for the doctor to edit; "needs a visit" keeps it open so the visit reopens the same consultation.
     let closed = false;
-    if (b.outcome === 'normal' || b.outcome === 'will_call') {
+    // reviewed inside the consultation: the doctor closes it there, with Complete, after any changes
+    if (!b.inConsult && (b.outcome === 'normal' || b.outcome === 'will_call')) {
       const enc = await tx.select({ status: encounter.status, provenance: encounter.provenance }).from(encounter).where(and(eq(encounter.id, b.encounterId), eq(encounter.tenantId, t))).then((r: any[]) => r[0]);
       const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.encounterId, b.encounterId), eq(recommendation.kind, 'investigation'), ne(recommendation.status, 'cancelled'), sql`${recommendation.reviewedAt} is null`));
       if (enc?.status === 'awaiting_reports' && n === 0) {

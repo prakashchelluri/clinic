@@ -92,6 +92,13 @@ test('reports: sent to the doctor, reviewed, a visit booked before closing, and 
   assert.equal(closed.state, 'closed'); assert.equal(closed.outcome, 'seen'); assert.equal(closed.informedHow, 'in_person');
   assert.equal(await encStatus(c.enc), 'completed');
 
-  // 4. telling the patient lives on Test reports only: nothing about reports on Calls
+  // 4. reviewed inside the consultation (Review on Today opens it): it stays open for the doctor's changes and Complete
+  const d = await consult('Flow In Consult', ['TSH']);
+  [o] = await orders(d.pid);
+  await values(d.pid, d.enc, o.tests[0], '2.1');
+  assert.equal((await doc('POST', '/orders/review', { encounterId: d.enc, orderNo: o.orderNo, outcome: 'normal', inConsult: true })).body.closed, false);
+  assert.equal(await encStatus(d.enc), 'awaiting_reports');
+
+  // 5. informing the patient lives on Test reports only: nothing about reports on Calls
   assert.ok(!(await desk('GET', '/followups')).body.rows.some((r: any) => r.kind === 'report'));
 });

@@ -233,7 +233,7 @@ function Doctor() {
     ]}</Steps>
     <Tip>Saved your own set? Use &ldquo;Save only the medicines / advice / tests&rdquo; at the bottom. It waits as a draft until the owner approves it.</Tip>
     <H3>Reviewing test results</H3>
-    <P>Open <b>Test reports</b>; it opens on <b>Review pending</b>. Tap a row and review the order once: Normal, Change medicines, Visit needed, or I will call. The desk can send received results ahead of a slow one.</P>
+    <P>On <b>Today</b>, <b>Review</b> beside a result opens that consultation on its Reports tab with the results on the right; review it, change the medicines in the Rxpad if needed, then <b>Complete</b>. Or open <b>Test reports</b> (it opens on <b>Review pending</b>), tap a row and review the order once: Normal, Change medicines, Visit needed, or I will call. The desk can send received results ahead of a slow one.</P>
   </>);
 }
 

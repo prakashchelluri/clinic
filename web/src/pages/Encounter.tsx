@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useNavigate, useParams, useOutletContext } from 'react-router';
+import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon } from 'lucide-react';
@@ -20,6 +20,7 @@ import { VitalsCard, vitalFields, vitalsText } from '../vitals';
 import { LabResultsCard, ReportLink, reportFor } from '../labs';
 import { ReportList } from '../labHistory';
 import { BodyMap, SkinMapPanel, siteFor, usePins } from '../skinmap';
+import { ConsultOrder } from './TestReports';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
@@ -304,7 +305,12 @@ export function Encounter() {
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
-  const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
+  // opened from Review on the doctor's Today (?review=order): the Reports tab, with that order's panel on the right
+  const [sp, setSp] = useSearchParams(); const [reviewKey, setReviewKey] = useState<string | null>(sp.get('review'));
+  const ordQ = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), enabled: !!id && can(perms, 'encounter.complete') });
+  const toReview = ((ordQ.data?.orders ?? []) as any[]).filter((o) => o.encounterId === id && o.state === 'ready');
+  const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>(sp.get('review') ? 'docs' : 'pad'); // the pad, or one of the patient's collections beside it
+  useEffect(() => { if (sp.get('review')) { const n = new URLSearchParams(sp); n.delete('review'); setSp(n, { replace: true }); } }, []);
   // the doctor's choice: Stacked (every card, Eka) is the default; Focused (one section open, the rest folded) is the other
   const [layout, setLayout] = useState<'stacked' | 'focused'>(() => { try { return localStorage.getItem('pad-layout') === 'focused' ? 'focused' : 'stacked'; } catch { return 'stacked'; } });
   useEffect(() => { try { localStorage.setItem('pad-layout', layout); } catch { /* private mode */ } }, [layout]);
@@ -1001,6 +1007,10 @@ export function Encounter() {
         {previous.length > 12 && <div className="pt-2 text-xs text-muted">Earlier · {previous.length - 12} more in the patient's file</div>}
         <div className="mt-3 border-t border-line pt-3"><ScreeningCard complaintText={arrivalText} lists={lists} answers={answers} history={hist} /></div>
       </div>}
+      {tab === 'docs' && isDoctor && toReview.length > 0 && <div className="card anim-fade-up flex flex-col gap-1.5">
+        <b className="text-sm">Results awaiting your review</b>
+        {toReview.map((o: any) => <div key={o.key} className="flex flex-wrap items-center gap-2 border-t border-line/60 pt-1.5 text-sm"><span className="min-w-0 flex-1">{o.tests.map((t: any) => t.name).join(', ')}{o.abnormal ? <b className="ml-1.5 text-rose">{o.abnormal} out of range</b> : null}</span><button className="btn btn-sm btn-primary" onClick={() => setReviewKey(o.key)}>Review</button></div>)}
+      </div>}
       {tab === 'docs' && <div className="card anim-fade-up">
         <div className="mb-2 flex items-center gap-2"><span className="text-xs text-muted">Lab reports and letters</span><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => qc.invalidateQueries({ queryKey: ['documents', p.id] })} />}</div>
         {myDocs.every((d: any) => d.kind === 'photo') ? <div className="text-xs text-muted">No reports yet.</div> : <ReportList docs={myDocs.filter((d: any) => d.kind !== 'photo')} patientId={p.id} encounterId={readOnly ? undefined : id} who={p.fullName} />}
@@ -1052,6 +1062,7 @@ export function Encounter() {
       </>}
       {mapOpen && <Modal title="Skin map" subtitle={p.fullName} width="max-w-4xl" onClose={() => setMapOpen(false)}><SkinMapPanel patientId={p.id} patientName={p.fullName} encounterId={id} readOnly={readOnly} defaultDx={dxs[0]?.name} onAreaAdded={(a) => { const s = siteFor(a, formSections.find((x) => x.key === 'complaint')?.fields.find((x: Field) => x.key === 'site')?.options ?? []); if (s) set('complaint', 'site', uniq([...((data.complaint?.site ?? []) as string[]), s])); }} onFinding={onPinFinding} /></Modal>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
+      {reviewKey && <ConsultOrder orderKey={reviewKey} onClose={() => setReviewKey(null)} onReviewed={() => { setReviewKey(null); setTab('pad'); }} />}
       {checking && <ReasonSheet warnings={checking} onCancel={() => { setChecking(null); goTo('medicines'); }} onDone={giveReasons} />}
       {signing && <Modal title={amended ? 'Sign the amended prescription' : 'Sign the prescription'} subtitle={p.fullName} width="max-w-2xl" onClose={() => setSigning(false)}>
         {overrides.length > 0 && <div className="mb-3 rounded-[12px] bg-rose-soft px-4 py-2.5 text-[12.5px] text-rose" role="alert"><b>Prescribed despite these checks:</b>{overrides.map((o, k) => <div key={k} className="mt-1">{o.warnings.join(' ')} <span className="text-ink">Reason: {o.reason}</span></div>)}</div>}

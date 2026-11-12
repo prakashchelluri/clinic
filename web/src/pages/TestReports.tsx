@@ -121,7 +121,9 @@ const Steps = ({ state }: { state: Order['state'] }) => (
 );
 
 /** One order on the right: each test with its values and files, then the one thing to do next for whoever opened it. */
-function OrderDrawer({ o, perms, isDoctor, onAdd, onBook, onClose }: { o: Order; perms: string[]; isDoctor: boolean; onAdd: (testId: string) => void; onBook: () => void; onClose: () => void }) {
+/*  inConsult: opened inside the consultation (the Rxpad's Reports tab). Reviewing leaves it open: the doctor changes what
+ *  the results call for in the Rxpad, then closes it with Complete. */
+function OrderDrawer({ o, perms, isDoctor, onAdd, onBook, onClose, inConsult, onReviewed }: { o: Order; perms: string[]; isDoctor: boolean; onAdd: (testId: string) => void; onBook: () => void; onClose: () => void; inConsult?: boolean; onReviewed?: () => void }) {
   const nav = useNavigate();
   const canDesk = can(perms, 'worklist.write') || isDoctor; const canUpload = can(perms, 'document.write');
   const s = standing(o);
@@ -137,9 +139,10 @@ function OrderDrawer({ o, perms, isDoctor, onAdd, onBook, onClose }: { o: Order;
     setOutcome(k);
   };
   const review = useMutation({
-    mutationFn: () => post('/orders/review', { encounterId: o.encounterId, orderNo: o.orderNo, outcome, note: note.trim() || undefined }),
+    mutationFn: () => post('/orders/review', { encounterId: o.encounterId, orderNo: o.orderNo, outcome, note: note.trim() || undefined, inConsult: inConsult || undefined }),
     onSuccess: () => {
       refresh(); onClose();
+      if (inConsult) { toast('Reviewed. Change anything the results call for, then Complete.'); onReviewed?.(); return; }
       // changing medicines happens in the consultation itself, still open for these reports; Finish sends the new prescription
       if (outcome === 'change_medicines' && o.held) { toast('Change the medicines, then Complete'); nav(`/encounter/${o.encounterId}`); }
       else toast('Reviewed · the front desk will inform the patient');
@@ -258,4 +261,15 @@ export function TestReports() {
       {addFor && <ReportDialog order={addFor} testId={adding!} onClose={() => setAdding(null)} />}
     </div>
   );
+}
+
+/** One order opened inside the consultation, by its key: the same panel as on Test reports, review leaves the consultation open. */
+export function ConsultOrder({ orderKey, onClose, onReviewed }: { orderKey: string; onClose: () => void; onReviewed: () => void }) {
+  const { perms } = useOutletContext<any>();
+  const data = useQuery<{ orders: Order[] }>({ queryKey: ['orders'], queryFn: () => get('/orders') });
+  const [adding, setAdding] = useState<string | null>(null);
+  const o = data.data?.orders.find((x) => x.key === orderKey);
+  if (!o) return null;
+  if (adding) return <ReportDialog order={o} testId={adding} onClose={() => setAdding(null)} />;
+  return <OrderDrawer o={o} perms={perms} isDoctor={can(perms, 'encounter.complete')} onAdd={setAdding} onBook={() => {}} onClose={onClose} inConsult onReviewed={onReviewed} />;
 }
