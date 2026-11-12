@@ -22,14 +22,14 @@ type Badge = { n: number; warn?: boolean; hint: string };
 type Badges = Record<string, Badge | undefined>;
 export const NAV: NavItem[] = [
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
-  { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
-  { to: '/appointments', label: 'Appointments', icon: 'calendar', show: (c) => c('appointment.read') },
+  { to: '/queue', label: 'Front desk', icon: 'desk', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
+  { to: '/appointments', label: 'Appointments', icon: 'booked', show: (c) => c('appointment.read') },
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
-  { to: '/worklist', label: 'Procedures', icon: 'clock', show: (c) => c('worklist.read') },
+  { to: '/worklist', label: 'Procedures', icon: 'syringe', show: (c) => c('worklist.read') },
   { to: '/calls', label: 'Calls', icon: 'phone', show: (c) => c('worklist.read') },
-  { to: '/tests', label: 'Test reports', icon: 'inbox', show: (c) => c('worklist.read') || c('encounter.complete') },
+  { to: '/tests', label: 'Test reports', icon: 'tubes', show: (c) => c('worklist.read') || c('encounter.complete') },
   { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', show: (c) => c('pharmacy.read') },
-  { to: '/inventory', label: 'Inventory', icon: 'inbox', show: (c) => c('stock.read') },
+  { to: '/inventory', label: 'Inventory', icon: 'box', show: (c) => c('stock.read') },
   { to: '/clinic', label: 'Clinic', icon: 'home', show: (c) => c('finance.read') },
   { to: '/billing', label: 'Billing', icon: 'rupee', show: (c) => c('fees.see') && (c('payment.record') || c('finance.read')) },
   { to: '/accounts', label: 'Accounts', icon: 'wallet', show: (c) => c('finance.read') },
@@ -67,39 +67,44 @@ export function useTheme() {
   return [theme, () => setTheme((t) => (t === 'light' ? 'dark' : 'light'))] as const;
 }
 
-/** Open (icons with names, the default) or collapsed to an icon rail, kept on this device. */
 /** Role names as people say them; a custom role shows its own name from Settings. */
 const ROLE_LABEL: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', assistant: 'Junior doctor', receptionist: 'Reception', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const roleLabel = (r: string) => ROLE_LABEL[r] ?? r.replace(/_/g, ' ');
 
-export function useNav() {
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('nav') !== 'rail'; } catch { return true; } });
-  useEffect(() => { try { localStorage.setItem('nav', open ? 'open' : 'rail'); } catch { /* private mode */ } }, [open]);
-  return [open, () => setOpen((o) => !o)] as const;
-}
+/** Where a thin line goes in the rail: before the first page of each group (care, stock, money, the clinic). */
+const GROUP_START = new Set(['/worklist', '/pharmacy', '/clinic', '/billing', '/settings']);
 
-/** The collapsed rail: one icon per section with its name in a tooltip, for people who know the icons and want the width. */
-function Rail({ items, active, clinic, me, badges = {}, onSignOut, onExpand }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; badges?: Badges; onSignOut: () => void; onExpand: () => void }) {
+/** The menu (S-C): one size, always. Every page an icon with its name under it, counts as small badges, thin lines
+ *  between the groups. Nothing to open or collapse, so the only arrow on screen is the page's own Back. */
+function LabelRail({ items, active, clinic, me, roles, badges = {}, onSignOut }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void }) {
+  let first = true;
+  const item = (to: string, label: string, icon: string, b?: Badge) => {
+    const on = active?.to === to;
+    return (
+      <Link key={to} to={to} viewTransition aria-current={on ? 'page' : undefined} aria-label={b ? `${label}, ${b.hint}` : label} title={b ? `${label} · ${b.hint}` : label} className={`lrail-item ${on ? 'active' : ''}`}>
+        <span className="lrail-ic"><Icon name={icon} className="h-[18px] w-[18px]" /></span>
+        <span className="lrail-label">{label}</span>
+        {b && <span className={`lrail-badge ${b.warn ? 'warn' : ''}`} aria-hidden="true">{b.n > 99 ? '99+' : b.n}</span>}
+      </Link>
+    );
+  };
   return (
-    <div className="flex h-full flex-col items-center px-3 pb-3.5 pt-4">
-      <Link to="/" title={clinic} className="mb-2 grid h-[38px] w-[38px] place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
-      <button type="button" onClick={onExpand} aria-label="Show menu names" data-tip="Show menu names" className="tip rail-item mb-2 !h-8"><Icon name="chevR" className="h-4 w-4" /></button>
-      <nav className="flex w-full flex-col items-center gap-1 overflow-y-auto no-scrollbar" aria-label="Sections">
-        {items.map((n) => <span key={n.to} className="contents">
-          <Link to={n.to} viewTransition aria-current={active?.to === n.to ? 'page' : undefined} aria-label={badges[n.to] ? `${n.label}, ${badges[n.to]!.hint}` : n.label} data-tip={badges[n.to] ? `${n.label} · ${badges[n.to]!.hint}` : n.label} className={`tip rail-item ${active?.to === n.to ? 'active' : ''}`}>
-            <Icon name={n.icon} className="h-[18px] w-[18px]" />{badges[n.to] && <span className={`rail-dot ${badges[n.to]!.warn ? 'warn' : ''}`} aria-hidden="true" />}
-          </Link></span>)}
+    <div className="flex h-full flex-col items-center px-1.5 pb-3 pt-3">
+      <Link to="/" title={clinic} aria-label={clinic} className="mb-2 grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
+      <nav className="flex w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
+        {items.map((n) => { const line = !first && GROUP_START.has(n.to); first = false; return <span key={n.to} className="contents">{line && <span className="lrail-sep" aria-hidden="true" />}{item(n.to, n.label, n.icon, badges[n.to])}</span>; })}
+        <span className="lrail-sep" aria-hidden="true" />
+        {item('/help', 'Help', 'help')}
       </nav>
-      <Link to="/help" aria-label="Help" data-tip="Help" className="tip rail-item mt-auto"><Icon name="help" className="h-[18px] w-[18px]" /></Link>
-      <div className="relative mt-2 flex flex-col items-center gap-2 pt-1">
-        <span className="relative"><Avatar name={me.name} size="h-9 w-9 text-[12px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }} /></span>
-        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip rail-item !h-9"><Icon name="logout" className="h-4 w-4" /></button>
+      <div className="mt-2 flex shrink-0 flex-col items-center gap-1.5 border-t border-line pt-2.5">
+        <span className="relative" title={`${me.name} · ${roles.map(roleLabel).join(', ')}`}><Avatar name={me.name} size="h-9 w-9 text-[12px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }} /></span>
+        <button onClick={onSignOut} aria-label="Sign out" title="Sign out" className="lrail-item !min-h-0 !py-1.5"><span className="lrail-ic !h-7"><Icon name="logout" className="h-4 w-4" /></span><span className="lrail-label">Sign out</span></button>
       </div>
     </div>
   );
 }
 
-function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, onCollapse }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; onCollapse?: () => void }) {
+function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void}) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
@@ -110,7 +115,6 @@ function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onN
     <div className="flex h-full flex-col px-2.5 py-3">
       <div className="flex items-center gap-1 pb-3 pt-1">
         <Link to="/" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5 px-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
-        {onCollapse && <button type="button" onClick={onCollapse} aria-label="Collapse menu to icons" title="Collapse menu" className="btn btn-ghost btn-icon !h-8 !w-8 shrink-0"><Icon name="chevL" className="h-4 w-4" /></button>}
       </div>
       <nav className="flex flex-col gap-px overflow-y-auto no-scrollbar" aria-label="Sections">
         {items.map(link)}
@@ -155,10 +159,8 @@ export function App() {
   const pageRule = NAV.find((n) => n.to === '/' + sub) ?? (sub === 'encounter' ? { to: '', label: 'The consultation page', icon: '', show: (x: (p: string) => boolean) => x('encounter.intake') } : null);
   const blocked = !!pageRule && (platform ? pageRule.to !== '/platform' : pageRule.to === '/platform' || !pageRule.show(c));
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
-  const [padNav, setPadNav] = useState(false); // on a consultation the sidebar starts as icons, to give the pad the room; this opens it for now
   const [pageSearch, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
   const [theme, toggleTheme] = useTheme();
-  const [navOpen, toggleNav] = useNav();
   const online = useOnline(); const offlineAt = useOffline();
   // menu badges (a hook: above the early returns), under the Calls list's own key so logging a call refreshes them too
   const counts = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: c('worklist.read') && !platform, refetchInterval: 30000 });
@@ -173,8 +175,6 @@ export function App() {
   const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
   const onPad = loc.pathname.startsWith('/encounter'); // the pad: the patient sits in the top bar; clock, search, help and + step aside
   const onRecord = /^\/patients\/[^/]+$/.test(loc.pathname); // a patient's record: its card carries Back, so the top bar steps aside (phones keep it for the menu)
-  const wide = onPad ? padNav : navOpen;
-  const toggleWide = onPad ? () => setPadNav((o) => !o) : toggleNav;
   useEffect(() => {
     if (!idleMin || inConsult) return;
     let last = Date.now();
@@ -222,8 +222,8 @@ export function App() {
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
-      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
-        {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} badges={badges} onSignOut={signOut} onExpand={toggleWide} />}
+      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[84px] bg-sidebar md:block" style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)' }} aria-label="Main">
+        <LabelRail items={items} active={active} clinic={clinic} me={me.data} roles={roles} badges={badges} onSignOut={signOut} />
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
@@ -231,7 +231,7 @@ export function App() {
         </div>
       )}
 
-      <div className={`${wide ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
+      <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
         <header className={`app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7 ${onRecord ? 'md:hidden' : ''}`}>
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
           {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
