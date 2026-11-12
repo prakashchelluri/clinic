@@ -15,7 +15,8 @@ const OUT: Record<Out, string> = { booked: 'Booked', call_later: 'Call later', n
 /** The outcomes the procedure plans always used, each saved as one of the four call results. "Will come" books. */
 const OUTCOMES: { label: string; out: Out | 'book'; note?: string }[] = [
   { label: 'Will come', out: 'book' }, { label: 'Call later', out: 'call_later' }, { label: 'No answer', out: 'no_answer' },
-  { label: 'Wrong number', out: 'no_answer', note: 'Wrong number' }, { label: 'Declined', out: 'not_interested' }, { label: 'Done elsewhere', out: 'not_interested', note: 'Done elsewhere' },
+  // the closing ones take the patient off the list, each with its reason
+  { label: 'Declined', out: 'not_interested' }, { label: 'Done elsewhere', out: 'not_interested', note: 'Done elsewhere' }, { label: 'Moved away', out: 'not_interested', note: 'Moved away' }, { label: 'Wrong number', out: 'not_interested', note: 'Wrong number' },
 ];
 /** A booked sitting's confirm call: the patient says yes, does not pick up, wants another day (Move), or is not coming (the sitting is postponed). */
 const CONFIRM_OUTCOMES: { label: string; out: Out | 'move'; note?: string }[] = [
@@ -103,20 +104,18 @@ export function Calls() {
       </div>;
     } },
     { key: 'act', label: '', fixed: true, align: 'right', className: 'dt-act', cell: (r) => (
-      <div className="flex items-center justify-end gap-1">
-        {canWrite && <button type="button" className="dt-ghost" disabled={many.isPending} onClick={() => many.mutate({ list: [r], send: false })}>No answer</button>}
-        {canWrite && isConfirm(r) && <button type="button" className="dt-ghost" disabled={confirmed.isPending} onClick={() => confirmed.mutate(r)}><Icon name="check" className="h-3.5 w-3.5" />Confirmed</button>}
-        {canWrite && isConfirm(r) && <button type="button" className="dt-ghost" onClick={() => setMoving(r)}><Icon name="calendar" className="h-3.5 w-3.5" />Move</button>}
-        {canWrite && !isConfirm(r) && <button type="button" className="dt-ghost" onClick={() => setCalling({ row: r, out: 'call_later' })}>Call later</button>}
-        {bookable(r) && <button type="button" className="dt-ghost" onClick={() => book(r)}><Icon name="calendar" className="h-3.5 w-3.5" />Book</button>}
-        {r.kind === 'report' && canWrite && <button type="button" className="dt-ghost" disabled={told.isPending} onClick={() => told.mutate(r)}>Told</button>}
-        <MoreMenu label={`More for ${r.patient.fullName}`} items={[
-          { label: 'Other outcome…', hidden: !canWrite, onClick: () => setCalling({ row: r }) },
-          { label: 'Not coming…', hidden: !canWrite || !isConfirm(r), onClick: () => setCalling({ row: r, out: 'not_interested' }) },
-          { label: 'Open patient', onClick: () => nav(`/patients/${r.patient.id}`) },
-          { label: 'Copy phone number', hidden: !r.patient.phone, onClick: () => navigator.clipboard?.writeText(r.patient.phone).then(() => toast('Number copied'), () => toast('Could not copy', 'err')) },
-        ]} />
-      </div>) },
+      // one dropdown per row: what the patient said first, then closing with a reason, then the patient
+      <MoreMenu text="Outcome" label={`Outcome of the call to ${r.patient.fullName}`} items={[
+        { label: 'Confirmed', hidden: !canWrite || !isConfirm(r), onClick: () => confirmed.mutate(r) },
+        { label: 'Wants another day…', hidden: !canWrite || !isConfirm(r), onClick: () => setMoving(r) },
+        { label: 'Told the result', hidden: !canWrite || r.kind !== 'report', onClick: () => told.mutate(r) },
+        { label: 'Will come · book…', hidden: !bookable(r), onClick: () => book(r) },
+        { label: 'No answer', hidden: !canWrite, onClick: () => many.mutate({ list: [r], send: false }) },
+        { label: 'Call later…', hidden: !canWrite, onClick: () => setCalling({ row: r, out: 'call_later' }) },
+        { label: isConfirm(r) ? 'Not coming…' : 'Close with a reason…', hidden: !canWrite, onClick: () => setCalling({ row: r, out: 'not_interested' }) },
+        { label: 'Open patient', onClick: () => nav(`/patients/${r.patient.id}`) },
+        { label: 'Copy phone number', hidden: !r.patient.phone, onClick: () => navigator.clipboard?.writeText(r.patient.phone).then(() => toast('Number copied'), () => toast('Could not copy', 'err')) },
+      ]} />) },
   ];
 
   return (

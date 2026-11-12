@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { appointment, charge, dayClose, encounter, expense, feeCategory, patient, payment, pharmacySale, practitioner, prescriptionItem, procedureCatalog, procedureSession, recommendation, session, visit } from '../db/schema.js';
 import { clinical } from './patients.js';
+import { markMissed } from './followups.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { addDays, emit, todayIn } from '../lib/core.js';
@@ -131,6 +132,7 @@ export function dayCloseRoutes(app: FastifyInstance) {
 
   /** Reports: the basic figures of a period against the period before, by doctor. A doctor sees only their own patients and takings; the owner sees all and can pick a doctor. */
   route(app, 'get', '/reports/analytics', 'report.read', async (req, tx) => {
+    await markMissed(tx, req.ctx); // yesterday's unattended bookings count as no-shows before anything is counted
     const t = req.ctx.tenantId; const tz = req.ctx.timezone; const money = can(req.perms, 'fees.see'); const allMoney = can(req.perms, 'finance.read');
     const q = req.query as any; const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to) ? q.to : todayIn(tz); const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from) ? q.from : addDays(to, -29);
     if (from > to) throw new HttpError(400, 'BAD_RANGE');

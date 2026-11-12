@@ -5,9 +5,10 @@ import { appointment, callback, course, encounter, message, patient, procedureCa
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
-import { HttpError } from '../lib/auth.js';
+import { HttpError, type Ctx } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { clinical } from './patients.js';
+import { dayBounds } from './billing.js';
 
 const KINDS = ['review', 'missed_visit', 'missed_sitting', 'schedule', 'advised', 'report', 'confirm_week', 'confirm_day'] as const;
 type Kind = (typeof KINDS)[number];
@@ -64,10 +65,12 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   const from = addDays(today, -30);
   const noShows = await tx.select({ a: appointment, p: P, day: session.day, start: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).innerJoin(patient, eq(patient.id, appointment.patientId))
     .where(and(eq(appointment.tenantId, t), eq(appointment.status, 'no_show'), gte(session.day, from)));
-  // a missed visit is settled once the patient has a visit booked again
-  const rebooked = noShows.length ? new Set((await tx.select({ id: appointment.patientId }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
-    .where(and(eq(appointment.tenantId, t), inArray(appointment.patientId, noShows.map((x) => x.p.id)), inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today)))).map((x) => x.id)) : new Set<string>();
-  for (const x of noShows) if (!rebooked.has(x.p.id)) rows.push({ key: x.a.id, kind: 'missed_visit', refId: x.a.id, patient: x.p, what: `Visit on ${dayLabel(x.day)}, ${x.start}`, dueOn: x.day });
+  // a missed visit is settled once the patient has a visit booked again: booked on or after the missed day,
+  // not a later visit of a repeat series or one booked weeks ago, which were there before they missed
+  const nextBookings = noShows.length ? await tx.select({ id: appointment.patientId, at: appointment.createdAt }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+    .where(and(eq(appointment.tenantId, t), inArray(appointment.patientId, noShows.map((x) => x.p.id)), inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today))) : [];
+  const rebooked = (x: { p: { id: string }; day: string }) => nextBookings.some((b) => b.id === x.p.id && new Date(b.at).getTime() >= Date.parse(dayBounds(x.day, tz).start));
+  for (const x of noShows) if (!rebooked(x)) rows.push({ key: x.a.id, kind: 'missed_visit', refId: x.a.id, patient: x.p, what: `Visit on ${dayLabel(x.day)}, ${x.start}`, dueOn: x.day });
   for (const x of missed) if (!x.ps.recommendationId || !booked.has(x.ps.recommendationId)) rows.push({ key: x.ps.id, kind: 'missed_sitting', refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'}, sitting ${x.ps.sittingNo} on ${dayLabel(x.ps.day)}`, dueOn: x.ps.day, recId: x.ps.recommendationId, procedureId: x.ps.procedureId });
   // reports the doctor has reviewed and the patient has not been told yet; not the ones the doctor said she will call about herself
   const reps = await tx.select({ r: recommendation, p: P }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId))
@@ -109,8 +112,20 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   return out;
 }
 
+/** A booking whose day has passed with no visit for that patient that day is a "did not come": nobody has to remember to mark it.
+ *  Only days before today (late arrivals still check in while the doctor works), and only the last 30 days, the call list's reach. */
+export async function markMissed(tx: Tx, ctx: Ctx) {
+  const today = todayIn(ctx.timezone); const t = ctx.tenantId;
+  const rows = await tx.update(appointment).set({ status: 'no_show' }).where(and(eq(appointment.tenantId, t), inArray(appointment.status, ['booked', 'confirmed']),
+    sql`${appointment.sessionId} in (select id from session where tenant_id = ${t} and day < ${today} and day >= ${addDays(today, -30)})`,
+    sql`not exists (select 1 from visit v join session s on s.id = ${appointment.sessionId} where v.tenant_id = ${t} and v.patient_id = ${appointment.patientId} and v.day = s.day)`)).returning({ id: appointment.id });
+  if (rows.length) await emit(tx, ctx, 'appointment.marked_missed', 'tenant', t, { n: rows.length, ids: rows.map((r) => r.id) });
+  return rows.length;
+}
+
 export function followupRoutes(app: FastifyInstance) {
   route(app, 'get', '/followups', 'worklist.read', async (req, tx) => {
+    await markMissed(tx, req.ctx);
     // the reason for a review is the diagnosis: only clinical roles see it
     const all = await build(tx, req.ctx.tenantId, req.ctx.timezone, clinical(req.perms));
     const tab = (String((req.query as any).tab ?? 'all') as Tab); if (!Object.hasOwn(TABS, tab)) throw new HttpError(400, 'BAD_TAB');
@@ -121,6 +136,7 @@ export function followupRoutes(app: FastifyInstance) {
   /** The side menu's badges. Calls: what the Calls page lists by default (overdue, due today, or no date; not waiting for a call-back).
    *  Procedures: today's sittings still to happen, and how many of them nobody has confirmed with the patient. */
   route(app, 'get', '/followups/menu-counts', 'worklist.read', async (req, tx) => {
+    await markMissed(tx, req.ctx);
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
     const calls = (await build(tx, t, req.ctx.timezone, false)).filter((r) => !r.waiting && (!r.dueOn || r.dueOn <= today || (!!r.lastCall?.callbackOn && r.lastCall.callbackOn <= today))).length;
     const [s] = await tx.select({ n: sql<number>`count(*)::int`, unconfirmed: sql<number>`count(*) filter (where ${procedureSession.state} = 'confirmed' and ${procedureSession.patientConfirmedAt} is null)::int` })

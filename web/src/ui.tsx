@@ -252,14 +252,16 @@ export function Filter<T extends string>({ value, onChange, options, label, icon
   );
 }
 
-export function MoreMenu({ items, label = 'More' }: { items: MenuItem[]; label?: string }) {
+/** The ⋯ menu; with `text`, a labelled dropdown button instead (a row's one action control). */
+export function MoreMenu({ items, label = 'More', text }: { items: MenuItem[]; label?: string; text?: string }) {
   const [open, setOpen] = useState(false);
   const btn = useRef<HTMLButtonElement>(null);
   const shown = items.filter((i) => !i.hidden);
   if (!shown.length) return null;
   return (
     <>
-      <button ref={btn} type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" className="h-5 w-5" /></button>
+      {text ? <button ref={btn} type="button" className="btn btn-sm whitespace-nowrap" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>{text}<Icon name="chevR" className="h-3.5 w-3.5 rotate-90" /></button>
+        : <button ref={btn} type="button" className="btn btn-icon" aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" className="h-5 w-5" /></button>}
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)}>
         <div role="menu" className="menu-list">{shown.map((i) => i.href
           ? <a key={i.label} href={i.href} role="menuitem" className={i.danger ? 'danger' : ''} onClick={() => setOpen(false)}>{i.label}</a>

@@ -184,16 +184,16 @@ function Reception() {
     <P>Open <b>Follow-ups</b> each morning. It has four lists. Every row shows how many calls have been made and what happened last.</P>
     <Table head={['List', 'Who is in it']} rows={[
       ['Reviews due', 'The doctor asked to see them again.'],
-      ['Missed visits', 'Booked and did not come, and missed procedure sittings.'],
+      ['Missed visits', 'Booked and did not come, and missed procedure sittings. A booking whose day has passed with no check-in is marked "did not come" by itself the next day.'],
       ['Procedures to schedule', 'The price is agreed, but no sitting is booked.'],
       ['Advised, not agreed', 'The doctor advised a procedure and the patient has not said yes.'],
     ]} />
     <Steps>{[
       <>Tap <Btn>Call</Btn> to dial from a phone, or phone from your desk.</>,
-      <>Tap <Btn>Log the call</Btn> and choose the result: <b>Booked</b>, <b>Call later</b> (choose a date), <b>No answer</b>, or <b>Not interested</b> (type why).</>,
+      <>Tap <Btn>Outcome</Btn> on the row and choose what happened: <b>Will come · book</b>, <b>No answer</b>, <b>Call later</b> (choose a date), or <b>Close with a reason</b> (Declined, Done elsewhere, Moved away, Wrong number). A sitting's confirm call also has <b>Confirmed</b>, <b>Wants another day</b> and <b>Not coming</b>.</>,
       <>On <b>No answer</b> you can tick &ldquo;Send a short message with the clinic number&rdquo;. A Sunday date asks you to confirm.</>,
     ]}</Steps>
-    <Tip>Booked and Not interested take the patient off the list. Call later puts them at the bottom until that day.</Tip>
+    <Tip>Booking and closing with a reason take the patient off the list; the reason stays on the patient's record. Call later puts them at the bottom until that day.</Tip>
 
     <H2 id="patients">Patients and the record</H2>
     <P>Search by name, phone digits or ID. Each result shows age, last visit and the main problem, so two people with the same name can be told apart. Families may share one phone number: pick the right person.</P>
