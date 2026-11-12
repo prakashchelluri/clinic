@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
+import { Drawer, Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, UploadButton, joinList, rxState } from '../encounterDetail';
 import { LabHistoryDrawer, ReportList } from '../labHistory';
@@ -242,7 +242,7 @@ function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
   });
   const edit = (p: Partial<typeof f>) => { setDup(null); setF({ ...f, ...p }); };
   return (
-    <Modal title="Register patient" subtitle="Only the name is required now; the rest can be completed at arrival" onClose={() => onClose()} width="max-w-lg">
+    <Drawer title="Register patient" subtitle="Only the name is required now; the rest can be completed at arrival" onClose={() => onClose()} width="max-w-lg">
       <div className="space-y-3">
         <div><label className="label" htmlFor="np-name">Full name</label><input id="np-name" autoFocus maxLength={100} aria-invalid={nameBad} className={`input !py-3 ${nameBad ? '!border-rose' : ''}`} value={f.fullName} onChange={(e) => edit({ fullName: e.target.value })} />{nameBad && <div className="mt-1 text-xs text-rose">Enter the name (at least 2 letters).</div>}</div>
         <div className="grid grid-cols-3 gap-2">
@@ -261,6 +261,6 @@ function NewPatient({ onClose }: { onClose: (p?: any) => void }) {
         </div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={() => onClose()}>Cancel</button><button className="btn btn-primary" disabled={f.fullName.trim().length < 2 || flagDraftBad(flags) || create.isPending} onClick={() => create.mutate(false)}><Icon name="check" />Register</button></div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, qc, today, errText } from './api';
 import { FileText } from 'lucide-react';
-import { Chip, Icon, Modal, fmtDate, toast } from './ui';
+import { Drawer, Chip, Icon, fmtDate, toast } from './ui';
 import { openViewer } from './viewer';
 import { LabHistoryDrawer, dedupe } from './labHistory';
 
@@ -102,10 +102,10 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
             </div>); })}
         </div>)}
       {history !== null && <LabHistoryDrawer patientId={patientId} docs={docs} test={history || undefined} onClose={() => setHistory(null)} />}
-      {adding && <Modal title="Add lab values" subtitle="Typed from the report in hand. Units and ranges come from the clinic's list." onClose={() => setAdding(false)} width="max-w-2xl">
+      {adding && <Drawer title="Add lab values" subtitle="Typed from the report in hand. Units and ranges come from the clinic's list." onClose={() => setAdding(false)} width="max-w-2xl">
         <LabValuesEditor rows={draft} onChange={setDraft} params={params} />
         <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAdding(false)}>Cancel</button><button className="btn btn-primary" disabled={add.isPending || !draft.some((r) => r.test.trim() && r.value.trim())} onClick={() => add.mutate()}>Save values</button></div>
-      </Modal>}
+      </Drawer>}
     </div>
   );
 }

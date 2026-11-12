@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { get, post, today, uuid, ApiError, errText, useConfig } from '../api';
-import { Avatar, Chip, Empty, Icon, Modal, Skeleton, toast, NumInput, ask } from '../ui';
+import { Drawer, Avatar, Chip, Empty, Icon, Skeleton, toast, NumInput, ask } from '../ui';
 import { FlagChips } from '../flags';
 import { normPhone, searchText, looksLikePhone } from '../phone';
 import { told } from '../apptDrawer';
@@ -40,7 +40,7 @@ export function NewBooking({ cfg, me, initialPatient, initialDay, initialDoc, on
   const windows: any[] = (ws.data ?? []).filter((w: any) => (day > today() || w.endTime > now) && !(w.effectiveCapacity === 0 && (w.reductions ?? []).length));
   const pickDay = (d: string) => { if (d && d >= today()) { setDay(d); setWin(null); } };
   return (
-    <Modal title="New booking" subtitle={initialPatient ? `For ${initialPatient.name}` : 'Pick a time, then the patient'} onClose={onClose} width="max-w-xl">
+    <Drawer title="New booking" subtitle={initialPatient ? `For ${initialPatient.name}` : 'Pick a time, then the patient'} onClose={onClose} width="max-w-xl">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           {docs.length > 1 && <select aria-label="Doctor" className="input !w-auto" value={doc} onChange={(e) => { setDoc(e.target.value); setWin(null); }}>{docs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>}
@@ -67,7 +67,7 @@ export function NewBooking({ cfg, me, initialPatient, initialDay, initialDoc, on
         )}
         {win && <BookForm key={win.id + (initialPatient?.id ?? '')} session={win} initialPatient={initialPatient} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 35} onDone={onDone} />}
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 

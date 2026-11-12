@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { get, post, today } from './api';
-import { Chip, Icon, Modal, Skeleton, fmtDate, toast } from './ui';
+import { Drawer, Chip, Icon, Skeleton, fmtDate, toast } from './ui';
 import { openViewer } from './viewer';
 import { openPrint } from './printPreview';
 
@@ -58,7 +58,7 @@ export function EncounterDetail({ id }: { id: string }) {
 }
 
 export function EncounterModal({ id, onClose }: { id: string; onClose: () => void }) {
-  return <Modal title="Previous consultation" onClose={onClose} width="max-w-3xl"><EncounterDetail id={id} /></Modal>;
+  return <Drawer title="Previous consultation" onClose={onClose} width="max-w-3xl"><EncounterDetail id={id} /></Drawer>;
 }
 
 export function DocList({ docs, onDelete, who }: { docs: any[]; onDelete?: (id: string) => void; who?: string }) {

@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Icon, Modal, MoreMenu, PageHeader, fmtDate, toast } from '../ui';
+import { Drawer, Icon, MoreMenu, PageHeader, fmtDate, toast } from '../ui';
 import { FlagChips } from '../flags';
 import { DataTable, type Col, type FilterDef } from '../table';
 import { ScheduleModal } from './Worklist';
@@ -153,7 +153,7 @@ function CallDialog({ row, initial, onBook, onMove, onClose }: { row: any; initi
   });
   const bad = outcome === 'book' || outcome === 'move' || (outcome === 'call_later' && (!date || date < today())) || (outcome === 'not_interested' && !o.note && note.trim().length < 3);
   return (
-    <Modal title={row.patient.fullName} subtitle={`${row.what}${row.patient.phone ? ` · ${row.patient.phone}` : ''}`} onClose={onClose} width="max-w-md">
+    <Drawer title={row.patient.fullName} subtitle={`${row.what}${row.patient.phone ? ` · ${row.patient.phone}` : ''}`} onClose={onClose} width="max-w-md">
       <div className="space-y-3">
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How did the call go">{list.map((x, i) => (x.out !== 'book' || onBook) && (x.out !== 'move' || onMove) && <button key={x.label} type="button" role="radio" aria-checked={pick === i} className={`toggle-opt ${pick === i ? 'on' : ''}`} onClick={() => setPick(i)}>{x.label}</button>)}</div>
         {outcome === 'call_later' && <div><label className="label" htmlFor="cb">Call again on</label><input id="cb" type="date" min={today()} className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div>}
@@ -166,6 +166,6 @@ function CallDialog({ row, initial, onBook, onMove, onClose }: { row: any; initi
             : outcome === 'book' ? <button className="btn btn-primary" onClick={() => { onClose(); onBook?.(); }}><Icon name="calendar" />Book</button>
             : <button className="btn btn-primary" disabled={bad || go.isPending} onClick={() => go.mutate(undefined)}><Icon name="check" />Save</button>}</div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }

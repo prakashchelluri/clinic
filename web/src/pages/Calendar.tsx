@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, usePageSearch, useAddFromNew } from '../ui';
+import { Drawer, Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, usePageSearch, useAddFromNew } from '../ui';
 import { FlagChips } from '../flags';
 import { RoutineModal } from '../routine';
 import { BookForm, OnNumber, useOnNumber, whoLine, SEARCH_FAILED } from './Booking';
@@ -119,9 +119,9 @@ export function Calendar() {
       {openId && <AppointmentDrawer id={openId} cfg={cfg} canWrite={canBook} onClose={() => setOpenId(null)} />}
       {procId && <ProcedureDrawer id={procId} canAct={can(perms, 'worklist.write') || can(perms, 'encounter.complete')} onClose={() => setProcId(null)} />}
       {booking && (
-        <Modal title="Book" subtitle={`${label(booking.day, { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${docs.find((d) => d.id === booking.practitionerId) ? ` · ${docs.find((d) => d.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
+        <Drawer title="Book" subtitle={`${label(booking.day, { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${docs.find((d) => d.id === booking.practitionerId) ? ` · ${docs.find((d) => d.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
           <BookForm session={booking} arriveEarly={cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { refresh(); setBooking(null); }} />
-        </Modal>)}
+        </Drawer>)}
       {panel && <BookPanel initialPatient={panel.patient} defaultDoc={pick.k === 'doc' ? pick.id : undefined} docs={docs} services={cfg?.services ?? []} onClose={() => setPanel(null)} onDone={() => { refresh(); setPanel(null); }} />}
       {change && <ChangeMyDay practitionerId={change} name={docs.find((d) => d.id === change)?.name ?? 'Doctor'} initialKind="away" initialDay={day < today() ? today() : day} onClose={() => setChange(null)} onRoutine={canRoutine(change) ? () => { setRoutine(change); setChange(null); } : undefined} />}
       {routine && <RoutineModal practitionerId={routine} name={docs.find((d) => d.id === routine)?.name ?? 'Doctor'} initial={docs.find((d) => d.id === routine)?.routine} onClose={() => setRoutine(null)} />}
@@ -294,9 +294,9 @@ function AttentionStrip({ onOpen, onBook }: { onOpen: (id: string) => void; onBo
   if (d.waiting) items.push(<div key="w" className="flex flex-wrap items-center gap-2.5 rounded-2xl bg-surface px-3.5 py-2 text-sm"><i className="h-2 w-2 rounded-full bg-clay" /><b>Waiting list · {d.waiting}</b>{d.openToday > 0 && <span className="text-xs text-muted">{d.openToday} place{d.openToday === 1 ? '' : 's'} free today</span>}<button className="btn btn-sm" onClick={() => setShow('wait')}>Waiting list ({d.waiting})</button></div>);
   return (<>
     {items.length > 0 && <div className="flex flex-wrap gap-2">{items}</div>}
-    {show === 'call' && <Modal title="Patients to call" subtitle="Their doctor is away or leaves early when they are booked" onClose={() => setShow(null)} width="max-w-xl">
+    {show === 'call' && <Drawer title="Patients to call" subtitle="Their doctor is away or leaves early when they are booked" onClose={() => setShow(null)} width="max-w-xl">
       <div>{d.toCall.map((x: any) => <div key={x.id} className="flex flex-wrap items-center gap-2 border-t border-line/60 py-2.5 text-sm first:border-t-0"><b className="w-32 shrink-0">{label(x.day, { weekday: 'short', day: 'numeric', month: 'short' })} {x.startTime}</b><span className="min-w-0 flex-1">{x.name}<span className="block text-xs text-muted">{x.why}</span></span>{x.phone && <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-semibold tabular-nums text-ink-2"><Icon name="phone" className="h-3.5 w-3.5 text-muted" />{x.phone}</span>}<button className="btn btn-sm" onClick={() => { setShow(null); onOpen(x.id); }}>Move or cancel</button></div>)}</div>
-    </Modal>}
+    </Drawer>}
     {show === 'wait' && <WaitlistModal onClose={() => setShow(null)} onBook={(p) => { setShow(null); onBook(p); }} />}
   </>);
 }
@@ -305,7 +305,7 @@ function WaitlistModal({ onClose, onBook }: { onClose: () => void; onBook: (pati
   const q = useQuery({ queryKey: ['waitlist'], queryFn: () => get('/waitlist') });
   const rm = useMutation({ mutationFn: (id: string) => patch(`/waitlist/${id}`, { status: 'removed' }), onSuccess: () => { ['waitlist', 'calendar-attention'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Taken off the list', 'info'); }, onError: (e) => toast(errText(e), 'err') });
   return (
-    <Modal title="Waiting list" subtitle="Patients who want an earlier place. Booking them takes them off the list." onClose={onClose} width="max-w-xl">
+    <Drawer title="Waiting list" subtitle="Patients who want an earlier place. Booking them takes them off the list." onClose={onClose} width="max-w-xl">
       {q.isLoading ? <Skeleton rows={3} /> : (q.data ?? []).length === 0 ? <Empty icon="users" title="Nobody waiting" /> : q.data.map((w: any) => (
         <div key={w.id} className="flex flex-wrap items-center gap-2 border-t border-line/60 py-2.5 text-sm first:border-t-0">
           <span className="min-w-0 flex-1"><b>{w.patient.fullName}</b><span className="block text-xs text-muted">{[w.doctor ?? 'any doctor', w.note, w.untilDay ? `before ${label(w.untilDay, { day: 'numeric', month: 'short' })}` : null, `since ${label(w.createdAt.slice(0, 10), { day: 'numeric', month: 'short' })}`].filter(Boolean).join(' · ')}</span></span>
@@ -313,7 +313,7 @@ function WaitlistModal({ onClose, onBook }: { onClose: () => void; onBook: (pati
           <button className="btn btn-sm btn-primary" onClick={() => onBook(w.patient)}>Book</button>
           <button className="btn btn-ghost btn-sm" disabled={rm.isPending} onClick={() => rm.mutate(w.id)}>Remove</button>
         </div>))}
-    </Modal>
+    </Drawer>
   );
 }
 
@@ -354,7 +354,7 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
   const fam = useOnNumber(patient?.phone && /^\d{10}$/.test(patient.phone) ? patient.phone : '');
   const sameNumber = patient ? (fam.data ?? []).filter((p: any) => p.id !== patient.id) : [];
   return (
-    <Modal title="Book" subtitle="Who, when, which visit type." onClose={onClose} width="max-w-2xl">
+    <Drawer title="Book" subtitle="Who, when, which visit type." onClose={onClose} width="max-w-2xl">
       <div className="space-y-4">
         <div><div className="label">1 · Who</div>
           {patient ? <div className="flex items-center gap-2 rounded-xl bg-clay-soft px-3 py-2 text-sm text-clay-ink"><Icon name="check" className="h-4 w-4" /><b>{whoLine(patient)}</b><FlagChips flags={patient.flags} /><span className="text-xs">{[patient.patientNo, patient.phone].filter(Boolean).join(' · ')}</span><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatient(null); }}>change</button></div>
@@ -401,7 +401,7 @@ function BookPanel({ initialPatient, defaultDoc, docs, services, onClose, onDone
           <button className="btn btn-primary" disabled={!slot || book.isPending || (!patient && (name.length < 2 || needChoice || searchErr || checking)) || phoneBad} onClick={() => book.mutate()}><Icon name="check" />{needChoice ? 'Pick a patient or “Someone new”' : slot ? `Book ${label(slot.day, { weekday: 'short' })} ${slot.startTime}` : 'Book'}</button>
         </div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 

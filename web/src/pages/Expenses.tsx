@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, today, errText } from '../api';
 import { can } from '../App';
-import { Chip, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter, useAddFromNew } from '../ui';
+import { Drawer, Chip, Icon, Modal, MoneyInput, PageHeader, Section, Skeleton, Stat, money, toPaise, toast, Filter, useAddFromNew } from '../ui';
 import { DataTable } from '../table';
 
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -44,7 +44,7 @@ export function Expenses({ period }: { period?: { from: string; to: string } } =
       </PageHeader>}
 
       {canWrite && adding && (
-        <Modal title="Add an expense" subtitle="Stays open after each one, for the next" onClose={() => setAdding(false)} width="max-w-xl">
+        <Drawer title="Add an expense" subtitle="Stays open after each one, for the next" onClose={() => setAdding(false)} width="max-w-xl">
         <form onSubmit={(e) => { e.preventDefault(); if (valid(form) && !add.isPending) add.mutate(); }}>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 items-end">
             <div className="sm:col-span-2"><label className="label" htmlFor="ex-desc">What was paid for</label><input id="ex-desc" className="input" maxLength={200} placeholder="e.g. Gloves and syringes" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
@@ -59,7 +59,7 @@ export function Expenses({ period }: { period?: { from: string; to: string } } =
           </div>
           <div className="modal-foot"><button type="button" className="btn btn-ghost" onClick={() => setAdding(false)}>Done</button><button className="btn btn-primary" disabled={!valid(form) || add.isPending}><Icon name="plus" className="h-4 w-4" />Add expense</button></div>
         </form>
-        </Modal>
+        </Drawer>
       )}
 
       {!d ? <Skeleton rows={4} /> : (<>
@@ -99,7 +99,7 @@ export function Expenses({ period }: { period?: { from: string; to: string } } =
       </>)}
 
       {edit && (
-        <Modal title="Edit expense" onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
+        <Drawer title="Edit expense" onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div><label className="label">What was paid for</label><input className="input" maxLength={200} value={edit.description} onChange={(e) => setEdit({ ...edit, description: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3">
@@ -111,7 +111,7 @@ export function Expenses({ period }: { period?: { from: string; to: string } } =
             <div><label className="label">Note (optional)</label><input className="input" maxLength={500} value={edit.note} onChange={(e) => setEdit({ ...edit, note: e.target.value })} /></div>
             <div className="modal-foot"><span className="text-xs text-muted mr-auto">{why(edit)}</span><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!valid(edit) || save.isPending} onClick={() => save.mutate()}>Save</button></div>
           </div>
-        </Modal>)}
+        </Drawer>)}
       {voiding && (
         <Modal title="Remove this expense?" subtitle={voiding.e.description + ' · ' + money(voiding.e.amountPaise)} onClose={() => setVoiding(null)} width="max-w-md">
           <div className="space-y-3">

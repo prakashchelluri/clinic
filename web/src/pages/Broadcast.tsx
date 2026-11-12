@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from '../api';
 import { normPhone } from '../phone';
-import { Chip, Empty, Icon, Modal, Section, Skeleton, ask, fmtDate, toast } from '../ui';
+import { Drawer, Chip, Empty, Icon, Modal, Section, Skeleton, ask, fmtDate, toast } from '../ui';
 
 type Aud = 'all' | 'recent' | 'lapsed' | 'followup' | 'course' | 'pick';
 const AUDIENCES: { key: Aud; label: string; days?: number }[] = [
@@ -116,12 +116,12 @@ export function SentMessages() {
             <Chip tone="amber">{b.mode}</Chip>
           </button>))}
       </Section>
-      {open && <Modal title={detail.data?.title ?? 'Message'} subtitle={detail.data ? `${when(detail.data.createdAt)} · ${detail.data.audienceLabel} · ${detail.data.recipients} recipients` : undefined} onClose={() => setOpen(null)} width="max-w-lg">
+      {open && <Drawer title={detail.data?.title ?? 'Message'} subtitle={detail.data ? `${when(detail.data.createdAt)} · ${detail.data.audienceLabel} · ${detail.data.recipients} recipients` : undefined} onClose={() => setOpen(null)} width="max-w-lg">
         {!detail.data ? <Skeleton rows={4} /> : <div className="space-y-4">
           <div className="whitespace-pre-wrap rounded-2xl bg-[#DCF8C6] px-4 py-3 text-sm leading-relaxed">{detail.data.body}</div>
           <div><div className="label">Who got it</div><div className="card-flat max-h-64 overflow-y-auto">{detail.data.to.map((t: any, i: number) => <div key={i} className="row text-sm"><span className="min-w-0 flex-1 truncate">{t.name ?? 'Unknown'} <span className="text-xs text-muted">{t.phone}</span></span><Chip tone={t.status === 'sent' ? 'sage' : 'amber'}>{t.status === 'logged' ? 'demo' : t.status}</Chip></div>)}</div></div>
         </div>}
-      </Modal>}
+      </Drawer>}
     </div>
   );
 }

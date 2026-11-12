@@ -310,21 +310,27 @@ function useDialogFocus(panel: React.RefObject<HTMLDivElement | null>, active = 
 }
 const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]', 'max-w-4xl': 'sm:max-w-[900px]', 'max-w-5xl': 'sm:max-w-[1040px]', 'max-w-6xl': 'sm:max-w-[1160px]' };
 
+const DRAWER: Record<string, number> = { 'max-w-sm': 440, 'max-w-md': 440, 'max-w-lg': 520, 'max-w-xl': 560, 'max-w-2xl': 640, 'max-w-3xl': 720, 'max-w-4xl': 860, 'max-w-5xl': 960, 'max-w-6xl': 1040 };
+/** The side drawer: the same dialog docked on the right, the page behind still in view. For opening one thing from a list,
+ *  a calendar or the Rx pad. A popup (Modal) is for a short step to finish or cancel, or something that needs the full width. */
+export const Drawer = (p: Omit<Parameters<typeof Modal>[0], 'side'>) => <Modal {...p} side />;
+
 /** A dialog. A click on the dim area does nothing (a stray click must not lose a form); Esc and × close it.
  *  With `dirty`, Esc and × first ask "Discard changes?". */
-export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false, dirty = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean; dirty?: boolean }) {
+export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false, dirty = false, side = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean; dirty?: boolean; side?: boolean }) {
   const panel = useRef<HTMLDivElement>(null); const close = useRef(onClose); close.current = onClose; const id = useId();
   const isDirty = useRef(dirty); isDirty.current = dirty;
   const tryClose = useRef(async () => {
     if (isDirty.current && !(await ask({ title: 'Discard changes?', body: 'What you typed in this window will be lost.', confirmLabel: 'Discard', cancelLabel: 'Keep editing', tone: 'danger' }))) return;
     close.current();
   }).current;
-  useScrollLock(); useDialogFocus(panel);
+  useScrollLock(!side); useDialogFocus(panel);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const p = panel.current; if (!p) return;
+      const backs = document.querySelectorAll('.modal-back'); if (backs[backs.length - 1] !== p.parentElement) return; // only the top one answers keys
       if (e.key === 'Escape') { if (!pending) tryClose(); }
-      else if (e.key === 'Tab') trapTab(p, e);
+      else if (e.key === 'Tab' && !side) trapTab(p, e); // a drawer leaves the page behind usable
       else if (e.key === 'Enter' && submitOnEnter && e.target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'submit'].includes(e.target.type)) {
         const go = p.querySelector<HTMLButtonElement>('.modal-foot .btn-primary:not(:disabled),.modal-foot .btn-accent:not(:disabled)'); if (go) { e.preventDefault(); go.click(); }
       }
@@ -332,8 +338,8 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, [submitOnEnter]);
   return createPortal(
-    <div className="modal-back" role="dialog" aria-modal="true" aria-labelledby={id}>
-      <div ref={panel} tabIndex={-1} className={`modal-panel ${SIZE[width] ?? 'sm:max-w-[720px]'}`}>
+    <div className={`modal-back ${side ? 'is-drawer' : ''}`} role="dialog" aria-modal={!side} aria-labelledby={id}>
+      <div ref={panel} tabIndex={-1} className={`modal-panel ${side ? '' : SIZE[width] ?? 'sm:max-w-[720px]'}`} style={side ? { width: DRAWER[width] ?? 640 } : undefined}>
         <span className="modal-grab" aria-hidden />
         <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={tryClose} aria-label="Close"><Icon name="x" /></button></div>
         <div className="modal-body">{children}</div>

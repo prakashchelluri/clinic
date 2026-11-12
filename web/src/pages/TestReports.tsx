@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, errText, fmtTime } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Skeleton, Tabs, ask, fmtDate, toast } from '../ui';
+import { Drawer, Avatar, Chip, Empty, Icon, PageHeader, Skeleton, Tabs, ask, fmtDate, toast } from '../ui';
 import { LoadError } from '../procBoard';
 import { openViewer } from '../viewer';
 import { saveLabValues, findParam, flagFor, rangeText, isOut, type LabDraft } from '../labs';
@@ -62,7 +62,7 @@ export function ReportDialog({ order, testId, onClose, inVisit }: { order: Order
   const typed = (t: Test) => rowsFor(t).some((r) => r.test.trim() && r.value.trim());
   const blocker = !ids.length ? 'Pick which tests this is for' : !files.length && !ticked.every(typed) ? 'Add a page, or type the values for each test' : '';
   return (
-    <Modal title={`Report for ${order.patient.fullName}`} subtitle={`Order ${order.orderNo} · ${order.tests.map((t) => t.name).join(', ')}`} onClose={onClose} width="max-w-xl">
+    <Drawer title={`Report for ${order.patient.fullName}`} subtitle={`Order ${order.orderNo} · ${order.tests.map((t) => t.name).join(', ')}`} onClose={onClose} width="max-w-xl">
       <div className="space-y-4">
         <div>
           <span className="label">Pages</span>
@@ -96,7 +96,7 @@ export function ReportDialog({ order, testId, onClose, inVisit }: { order: Order
           {rest.length > 0 && !inVisit && <button className="btn" disabled={save.isPending || !!blocker} onClick={() => save.mutate(false)}>Save, wait for the rest</button>}
           <button className="btn btn-primary" disabled={save.isPending || !!blocker} onClick={() => save.mutate(!inVisit)}><Icon name="check" />{save.isPending ? 'Saving…' : inVisit ? 'Save report' : 'Save and send to the doctor'}</button></div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 
@@ -127,7 +127,7 @@ function ReviewDialog({ order, onClose }: { order: Order; onClose: () => void })
     onError: (e: any) => toast(e?.body?.code === 'NOT_ALL_RECEIVED' ? 'A report is still missing.' : errText(e), 'err'),
   });
   return (
-    <Modal title={`${order.patient.fullName} · ${order.tests.map((t) => t.name).join(', ')}`} subtitle={`${order.patient.patientNo} · all ${order.tests.length} received${order.doctor ? ` · ordered by ${order.doctor}` : ''}`} onClose={onClose} width="max-w-2xl">
+    <Drawer title={`${order.patient.fullName} · ${order.tests.map((t) => t.name).join(', ')}`} subtitle={`${order.patient.patientNo} · all ${order.tests.length} received${order.doctor ? ` · ordered by ${order.doctor}` : ''}`} onClose={onClose} width="max-w-2xl">
       <div className="space-y-4">
         {vals.length > 0 ? <div>
           <span className="label">Values{outOf.length > 0 && <b className="ml-1.5 text-rose">· {outOf.length} out of range</b>}</span>
@@ -153,7 +153,7 @@ function ReviewDialog({ order, onClose }: { order: Order; onClose: () => void })
         <div><label className="label" htmlFor="rev-note">Note for the front desk (optional)</label><input id="rev-note" className="input" maxLength={300} placeholder="“LFT slightly high, repeat in a month”" value={note} onChange={(e) => setNote(e.target.value)} /></div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted">{outcome ? 'The front desk sees your choice at once.' : 'Pick what happens next.'}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !outcome} onClick={() => save.mutate()}><Icon name="check" />Reviewed</button></div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
-import { Chip, Icon, Modal, PageHeader, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
+import { Drawer, Chip, Icon, Modal, PageHeader, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { vitalFields, DEFAULT_VITALS, BUILTIN_VITALS, type VitalField } from '../vitals';
@@ -259,7 +259,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div className="px-4 py-2 text-xs text-muted">A doctor who also signs in needs a staff account too: open it above and pick their name under "Signs prescriptions as".</div>
       </Section>
       {edit && (
-        <Modal title={edit.id ? 'Edit staff member' : 'New staff member'} subtitle="Pick what they do. Someone can be Doctor and Owner at once." onClose={() => setEdit(null)} width="max-w-md">
+        <Drawer title={edit.id ? 'Edit staff member' : 'New staff member'} subtitle="Pick what they do. Someone can be Doctor and Owner at once." onClose={() => setEdit(null)} width="max-w-md">
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
             {lockedOwner && <div className="rounded-xl bg-amber-soft px-3 py-2 text-sm text-[#6E4D10]">This person is an owner. Only an owner can change their email, password or whether they are active.</div>}
@@ -271,7 +271,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             {edit.id && !lockedOwner && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active (uncheck when staff leave)</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.name || !edit.email || !edit.roles.length} onClick={() => save.mutate({ id: edit.id, name: edit.name, email: edit.email, roles: edit.roles, practitionerId: edit.practitionerId, active: edit.active })}>Save</button></div>
           </div>
-        </Modal>
+        </Drawer>
       )}
       {shown && (
         <Modal title={`${shown.name}'s first password`} subtitle="Shown only now. Give it to them in person or on WhatsApp." onClose={() => setShown(null)} width="max-w-sm">
@@ -296,7 +296,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         </Modal>
       )}
       {doc && (
-        <Modal title={doc.id ? 'Edit doctor' : 'New doctor'} subtitle="Profile for the prescription, and the weekly routine that fills the calendar" onClose={() => setDoc(null)} width="max-w-xl">
+        <Drawer title={doc.id ? 'Edit doctor' : 'New doctor'} subtitle="Profile for the prescription, and the weekly routine that fills the calendar" onClose={() => setDoc(null)} width="max-w-xl">
           <div className="space-y-3">
             <div><label className="label">Name (as printed)</label><input className="input" value={doc.name} onChange={(e) => setDoc({ ...doc, name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="label">Registration no.</label><input className="input" value={doc.regNo ?? ''} onChange={(e) => setDoc({ ...doc, regNo: e.target.value })} /></div><div><label className="label">Qualification</label><input className="input" value={doc.qualification ?? ''} onChange={(e) => setDoc({ ...doc, qualification: e.target.value })} /></div></div>
@@ -304,7 +304,7 @@ function PeopleTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             {doc.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={doc.active} onChange={(e) => setDoc({ ...doc, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setDoc(null)}>Cancel</button><button className="btn btn-primary" disabled={!doc.name} onClick={() => saveDoc.mutate({ id: doc.id, name: doc.name, regNo: doc.regNo || null, qualification: doc.qualification || null, active: doc.active, routine: doc.routine })}>Save</button></div>
           </div>
-        </Modal>
+        </Drawer>
       )}
     </div>
   );
@@ -405,7 +405,7 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       <table className="table"><thead><tr><th className="pl-4">Code</th><th>Name</th><th className="text-right">Fee</th><th>Rule</th><th>Queue</th><th /></tr></thead>
         <tbody>{rows.map((c: any) => <tr key={c.id} className={c.active === false ? 'opacity-50' : ''}><td className="pl-4 font-mono text-xs">{c.code}</td><td>{c.name}{c.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-right">{money(c.amountPaise)}</td><td className="text-xs text-muted">{c.eligibilityNote ?? (c.eligibility ? 'auto-suggested by rule' : 'manual')}</td><td>{c.priority > 0 && <Chip tone="amber">jumps queue</Chip>}</td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...c, amount: c.amountPaise / 100 })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
-        <Modal title={edit.id ? `Edit ${edit.code}` : 'New category'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
+        <Drawer title={edit.id ? `Edit ${edit.code}` : 'New category'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2"><div><label className="label">Code</label><input className="input uppercase" maxLength={8} value={edit.code} disabled={!!edit.id} onChange={(e) => setEdit({ ...edit, code: e.target.value.toUpperCase() })} /></div><div className="col-span-2"><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div></div>
             <div className="grid grid-cols-2 gap-2"><div><label className="label">Fee (₹)</label><MoneyInput value={String(edit.amount ?? "")} onChange={(v) => setEdit({ ...edit, amount: v })} /></div><div><span className="label">Jumps the queue?</span><div className="flex gap-1" role="group" aria-label="Jumps the queue?">{([[false, 'No'], [true, 'Yes']] as const).map(([v, l]) => <button key={l} type="button" aria-pressed={(edit.priority > 0) === v} className={`toggle-opt ${(edit.priority > 0) === v ? 'on' : ''}`} onClick={() => setEdit({ ...edit, priority: v ? (edit.priority > 0 ? edit.priority : 10) : 0 })}>{l}</button>)}</div></div></div>
@@ -414,7 +414,7 @@ function FeesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !edit.code || !edit.name} onClick={() => confirmSave({ id: edit.id, code: edit.code, name: edit.name, amountPaise: Math.round(Number(edit.amount || 0) * 100), priority: edit.priority, affectsCapacity: edit.affectsCapacity, eligibilityNote: edit.eligibilityNote || null, active: edit.active })}>Save</button></div>
           </div>
-        </Modal>
+        </Drawer>
       )}
     </Section>
   );
@@ -432,7 +432,7 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Form</th><th>Schedule</th><th>Price</th><th>Default</th><th /></tr></thead>
         <tbody>{list.map((m: any) => <tr key={m.id}><td className="pl-4 font-medium">{m.name}</td><td className="text-muted">{m.form}</td><td><Chip tone={m.scheduleClass === 'OTC' ? '' : 'amber'}>{m.scheduleClass ?? '—'}</Chip></td><td className={m.mrpPaise ? '' : 'text-rose text-xs'}>{m.mrpPaise ? `${money(m.mrpPaise)} · ${m.gstBp / 100}%` : 'not set'}</td><td className="text-xs text-muted">{[m.defaults?.dose, m.defaults?.frequency, m.defaults?.durationDays ? `${m.defaults.durationDays}d` : null].filter(Boolean).join(' · ')}</td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...m, defaults: m.defaults ?? {} })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
-        <Modal title={edit.id ? 'Edit medicine' : 'New medicine'} onClose={() => setEdit(null)} width="max-w-lg">
+        <Drawer title={edit.id ? 'Edit medicine' : 'New medicine'} onClose={() => setEdit(null)} width="max-w-lg">
           <div className="space-y-3">
             <div><label className="label">Name (with strength)</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
             <div className="grid grid-cols-2 gap-2">
@@ -467,7 +467,7 @@ function MedicinesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             <LeafletField med={edit} onChange={(leafletUrl) => setEdit({ ...edit, leafletUrl })} onSaved={onSaved} />
             <div className="modal-foot !justify-between">{edit.id ? <button className="btn btn-ghost text-rose" onClick={() => del.mutate(edit.id)}>Delete</button> : <span />}<div className="flex gap-2"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name || !(Number(edit.packSize ?? 1) >= 1)} onClick={() => save.mutate({ id: edit.id, name: edit.name, form: edit.form, scheduleClass: edit.scheduleClass, generic: edit.generic?.trim() || null, allergyClass: edit.allergyClass?.trim().toLowerCase() || null, defaults: edit.defaults, mrp: edit.mrp, mrpPaise: edit.mrpPaise, gstBp: edit.gstBp, hsn: edit.hsn, leafletUrl: edit.leafletUrl?.trim() || null, packSize: Number(edit.packSize ?? 1), reorderLevel: Number(edit.reorderLevel ?? 0) })}>Save</button></div></div>
           </div>
-        </Modal>
+        </Drawer>
       )}
     </Section>
   );
@@ -509,7 +509,7 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       <table className="table"><thead><tr><th className="pl-4">Name</th><th>Typical</th><th>Sittings</th><th>Needs room with</th><th className="text-right">Price</th><th>GST</th><th>Rules</th><th /></tr></thead>
         <tbody>{rows.map((p: any) => <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}><td className="pl-4 font-medium">{p.name}{p.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-muted">{p.typicalMinutes} min{p.bufferMinutes ? ` +${p.bufferMinutes}` : ''}</td><td>{p.typicalSittings}</td><td>{p.requiredCapability ? <Chip>{p.requiredCapability}</Chip> : <span className="text-muted text-xs">any</span>}</td><td className="text-right">{p.pricePaise != null ? money(p.pricePaise) : '—'}</td><td className="text-xs text-muted">{p.taxRateBp ? `${p.taxRateBp / 100}%` : 'exempt'}</td><td><div className="flex gap-1 flex-wrap">{p.requiresMainDoctor && <Chip tone="clay">doctor</Chip>}</div></td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...p, price: p.pricePaise != null ? p.pricePaise / 100 : '', requiredCapability: p.requiredCapability ?? '' })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
-        <Modal title={edit.id ? 'Edit procedure' : 'New procedure'} onClose={() => setEdit(null)} width="max-w-lg">
+        <Drawer title={edit.id ? 'Edit procedure' : 'New procedure'} onClose={() => setEdit(null)} width="max-w-lg">
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
             <div className="grid grid-cols-4 gap-2">
@@ -524,7 +524,7 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name} onClick={() => save.mutate({ id: edit.id, name: edit.name, typicalMinutes: edit.typicalMinutes, bufferMinutes: edit.bufferMinutes ?? 0, typicalSittings: edit.typicalSittings, pricePaise: edit.price === '' ? null : Math.round(Number(edit.price) * 100), taxRateBp: edit.taxRateBp, requiresMainDoctor: edit.requiresMainDoctor, requiresReview: edit.requiresReview, requiredCapability: edit.requiredCapability || null, active: edit.active })}>Save</button></div>
           </div>
-        </Modal>
+        </Drawer>
       )}
     </Section>
   );
@@ -542,7 +542,7 @@ function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       {rows.map((r: any) => <div key={r.id} className={`row ${r.active === false ? 'opacity-50' : ''}`}><div className="flex-1"><div className="text-sm font-medium">{r.name}{r.active === false && <> <Chip tone="rose">inactive</Chip></>}</div></div><div className="flex gap-1 flex-wrap">{r.capabilities.map((c: string) => <Chip key={c}>{c}</Chip>)}</div><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...r, newCap: '' })}><Icon name="edit" /></button></div>)}
       <div className="px-4 py-2 text-xs text-muted">Tick what each room has. A procedure is only booked into a room that has it.</div>
       {edit && (
-        <Modal title={edit.id ? 'Edit room' : 'New room'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
+        <Drawer title={edit.id ? 'Edit room' : 'New room'} onClose={() => setEdit(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div><label className="label">Name</label><input className="input" value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></div>
             <div><label className="label">What this room has</label><div className="flex flex-wrap gap-1">{allCaps.map((c) => <button key={c} className={`toggle-opt ${edit.capabilities.includes(c) ? 'on' : ''}`} onClick={() => setEdit({ ...edit, capabilities: edit.capabilities.includes(c) ? edit.capabilities.filter((x: string) => x !== c) : [...edit.capabilities, c] })}>{c}</button>)}</div>
@@ -550,7 +550,7 @@ function RoomsTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             {edit.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> Active</label>}
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button><button className="btn btn-primary" disabled={!edit.name} onClick={() => save.mutate({ id: edit.id, name: edit.name, capabilities: edit.capabilities, active: edit.active })}>Save</button></div>
           </div>
-        </Modal>
+        </Drawer>
       )}
     </Section>
   );

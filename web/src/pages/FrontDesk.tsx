@@ -8,7 +8,7 @@ import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { FlagChips, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { CourseDialog } from '../courses';
-import { Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
+import { Drawer, Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
@@ -302,8 +302,8 @@ export function FrontDesk() {
                   onClick={() => { const v = moving; upVisit.mutate({ id: v.id, practitionerId: x.id }, { onSuccess: () => { setMoving(null); toast(`${v.patient.fullName} moved to ${x.name}'s queue`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, practitionerId: v.practitionerId ?? null }) }); }, onError: (e) => toast(errText(e), 'err') }); }}>
                   <span>{x.name}{on ? ' (now)' : ''}</span><span className="text-[12.5px] font-medium text-muted">{n} waiting</span></button>); })}
             </div></Modal>}
-          {booking && <Modal title="Book" subtitle={`${booking.day === day ? 'Today' : new Date(booking.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId) ? ` · ${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
-            <BookForm session={booking} arriveEarly={cfg?.tenant?.settings?.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); setBooking(null); }} /></Modal>}
+          {booking && <Drawer title="Book" subtitle={`${booking.day === day ? 'Today' : new Date(booking.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId) ? ` · ${(d?.doctors ?? []).find((x: any) => x.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
+            <BookForm session={booking} arriveEarly={cfg?.tenant?.settings?.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); setBooking(null); }} /></Drawer>}
           {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onArrive={canDesk ? (a) => { setApptId(null); setArrive({ patientId: a.patient.id ?? a.patientId, appointmentId: a.id, name: a.patient.fullName }); } : undefined} onClose={() => { setApptId(null); qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); }} />}
           {selV && <JourneyPanel key={selV.id} v={selV} order={reportsOpen.find((o) => o.encounterId === selV.encounterId)} screening={screening} inLine={waiting.findIndex((x) => x.id === selV.id) + 1} canDesk={canDesk}
               canSend={canSend} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })} onToJunior={(id) => { const v = visitsAll.find((x) => x.id === id); if (v) toJunior(v); }} onClose={() => setPickV('')}

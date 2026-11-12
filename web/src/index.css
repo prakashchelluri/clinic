@@ -327,6 +327,16 @@ h1 { letter-spacing: -0.025em; }
   .modal-foot > .btn-primary, .modal-foot > .btn-accent { flex: 1 1 auto; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) { .modal-back, .modal-panel { animation: none; } }
+/* The side drawer: the same dialog, docked on the right with the page behind still in view and still usable
+   (a click behind goes to the page; a drawer opened from a drawer covers it, × goes back). */
+.modal-back.is-drawer { justify-content: flex-end; align-items: stretch; padding: 0; background: transparent; backdrop-filter: none; pointer-events: none; animation: none; }
+.modal-back.is-drawer .modal-panel { pointer-events: auto; max-width: 100vw; max-height: none; height: 100dvh; border-radius: 0; border-left: 1px solid var(--color-line); box-shadow: -24px 0 48px -32px rgba(16,32,24,.45); animation: slide-in-right 0.2s var(--ease) both; }
+/* a short form keeps its Save row at the bottom of the drawer, where a drawer's buttons belong */
+.modal-back.is-drawer .modal-body { display: flex; flex-direction: column; }
+.modal-back.is-drawer .modal-body > :only-child { flex: 1 0 auto; display: flex; flex-direction: column; }
+.modal-back.is-drawer .modal-body > :only-child > .modal-foot:last-child { margin-top: auto; }
+@media (max-width: 639px) { .modal-back.is-drawer .modal-panel { width: 100vw !important; } .modal-back.is-drawer .modal-grab { display: none; } .modal-back.is-drawer .modal-head { padding-top: 1.375rem; } }
+@media (prefers-reduced-motion: reduce) { .modal-back.is-drawer .modal-panel { animation: none; } }
 
 /* Printing a document from the popup: only #print-area is printed */
 @media print { body.printing-doc > *:not(#print-area) { display: none !important; } body.printing-doc #print-area { display: block !important; } }

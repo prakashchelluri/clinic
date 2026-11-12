@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, get, patch, post, qc, errText } from '../api';
-import { Chip, Empty, Icon, Modal, MoreMenu, NumInput, MoneyInput, Skeleton, ask, money, toPaise, toast, Tabs, useAddFromNew } from '../ui';
+import { Drawer, Chip, Empty, Icon, MoreMenu, NumInput, MoneyInput, Skeleton, ask, money, toPaise, toast, Tabs, useAddFromNew } from '../ui';
 import { KINDS, norm, type Linked, type Tmpl, type TmplKind } from '../templates';
 
 const FREQ = ['1-0-0', '0-0-1', '1-0-1', '1-1-1', 'at night', 'once daily', 'twice daily', 'alternate days', 'weekly', 'SOS'];
@@ -53,7 +53,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
   });
   const upd = (k: number, x: Partial<Row>) => setItems(items.map((r, j) => (j === k ? { ...r, ...x } : r)));
   return (
-    <Modal title={initial ? `Edit ${meta.one}` : `New ${meta.one}`} subtitle={meta.hint} onClose={onClose} width="max-w-3xl">
+    <Drawer title={initial ? `Edit ${meta.one}` : `New ${meta.one}`} subtitle={meta.hint} onClose={onClose} width="max-w-3xl">
       <div className="space-y-5">
         <div><label className="label" htmlFor="t-name">{kind === 'complaint' ? 'Complaint (the check-in chip)' : 'Name'}</label><input id="t-name" autoFocus className="input" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === 'medicine' ? 'e.g. Rashes · itch relief' : kind === 'complaint' ? 'e.g. Hair fall' : ''} /></div>
 
@@ -111,7 +111,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
         </div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !!blocker} onClick={() => save.mutate()}><Icon name="check" />Save {meta.one}</button></div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }
 

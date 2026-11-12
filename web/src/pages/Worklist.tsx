@@ -5,7 +5,7 @@ import { get, post, today, errText } from '../api';
 import { ProcToday } from './ProcToday';
 import { ProcWeek } from './ProcWeek';
 import { CourseList, clashLabel } from '../procBoard';
-import { Chip, Icon, Modal, PageHeader, Skeleton, Tabs, fmtDate, toast } from '../ui';
+import { Drawer, Chip, Icon, PageHeader, Skeleton, Tabs, fmtDate, toast } from '../ui';
 
 type View = 'today' | 'week' | 'courses';
 /** Procedures: today's sittings by the hour, the week the coordinator plans and sends to the doctors, and every course on one board. */
@@ -46,7 +46,7 @@ export function ScheduleModal({ rec, sitting, at, onClose }: { rec: any; sitting
   for (const s of slots.data?.slots ?? []) (byRoom[s.room] ??= []).push(s);
   const existing = useQuery({ queryKey: ['psessions', rec.id], queryFn: () => get(`/procedure-sessions?recommendationId=${rec.id}`) });
   return (
-    <Modal title={`${sitting ? 'Reschedule' : 'Schedule'} · ${proc?.name ?? 'procedure'}`} subtitle={`${rec.patient.fullName} · ${rec.patient.phone ?? ''}${rec.sittings ? ` · ${rec.sittings} ${rec.sittings === 1 ? 'sitting' : 'sittings'} planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
+    <Drawer title={`${sitting ? 'Reschedule' : 'Schedule'} · ${proc?.name ?? 'procedure'}`} subtitle={`${rec.patient.fullName} · ${rec.patient.phone ?? ''}${rec.sittings ? ` · ${rec.sittings} ${rec.sittings === 1 ? 'sitting' : 'sittings'} planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
       <div className="space-y-4">
         {(existing.data ?? []).length > 0 && <div className="text-xs text-muted flex flex-wrap gap-1.5 items-center">Previous sittings: {existing.data.map((s: any) => <Chip key={s.id} tone={s.state === 'completed' ? 'sage' : s.state === 'confirmed' ? 'sky' : ''}>{fmtDate(s.day)} · {({ confirmed: 'Booked', in_progress: 'In room', completed: 'Done', missed: 'Missed', cancelled: 'Cancelled', postponed: 'Postponed' } as Record<string, string>)[s.state] ?? s.state}</Chip>)}</div>}
         <div className="grid grid-cols-3 gap-3">
@@ -69,6 +69,6 @@ export function ScheduleModal({ rec, sitting, at, onClose }: { rec: any; sitting
         {conf && <div className="rounded-xl bg-amber-soft text-amber text-sm p-3 anim-fade-up"><div className="font-medium mb-1">This slot clashes:</div>{conf.map((c, i) => <div key={i}>• {clashLabel(c.kind)}: {c.who} ({c.startTime}–{c.endTime})</div>)}<button className="btn btn-sm mt-2" onClick={() => save.mutate(true)}>Schedule anyway</button></div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || (!pick && !manual.startTime)} onClick={() => save.mutate(false)}><Icon name="check" />Book {new Date(day + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}{(pick?.startTime ?? manual.startTime) ? `, ${pick?.startTime ?? manual.startTime}` : ''}</button></div>
       </div>
-    </Modal>
+    </Drawer>
   );
 }

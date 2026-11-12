@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
-import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, useAddFromNew } from '../ui';
+import { Drawer, Chip, Empty, Icon, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, useAddFromNew } from '../ui';
 import { DataTable, type Col, type FilterDef } from '../table';
 
 type Go = (next: Record<string, string>) => void;
@@ -176,7 +176,7 @@ export function DecisionDialog({ id, onClose }: { id: string; onClose: () => voi
   const d = q.data;
   const extra = d ? d.lines.reduce((n: number, l: any) => n + l.extraPaise, 0) : 0; const short = d ? d.lines.reduce((n: number, l: any) => n + l.freeShort, 0) : 0;
   return (
-    <Modal title={d ? `${d.vendor?.name ?? 'Opening stock'} · bill ${d.billNo ?? d.docNo}` : 'Delivery'} subtitle={d ? `${d.docNo} · received ${fmtDate(d.createdAt)} by ${d.createdByName}` : ''} onClose={onClose} width="max-w-3xl">
+    <Drawer title={d ? `${d.vendor?.name ?? 'Opening stock'} · bill ${d.billNo ?? d.docNo}` : 'Delivery'} subtitle={d ? `${d.docNo} · received ${fmtDate(d.createdAt)} by ${d.createdByName}` : ''} onClose={onClose} width="max-w-3xl">
       {!d ? <Skeleton rows={4} /> : <div className="space-y-4">
         <table className="table"><thead><tr><th className="!pl-0">Medicine</th><th className="!text-right">Promised</th><th className="!text-right">Received</th><th className="!text-right !pr-0">Difference</th></tr></thead>
           <tbody>{d.lines.map((l: any) => <tr key={l.medicineId}><td className="!pl-0"><div className="font-medium">{l.name}</div><div className="text-xs text-muted">batch {l.batchNo} · {exp(l.expiry)}</div></td>
@@ -195,7 +195,7 @@ export function DecisionDialog({ id, onClose }: { id: string; onClose: () => voi
           : d.decision && <div className="text-sm">Decided by {d.decision.by}: <b>{d.decision.choice === 'owe' ? 'vendor owes the free units' : d.decision.choice === 'debit' ? `ask vendor to return ${money(d.decision.debitPaise ?? 0)}` : 'accepted as billed'}</b>{d.decision.reason ? ` · ${d.decision.reason}` : ''}</div>}
       </div>}
       <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Close</button>{d?.status === 'review' && can(perms, 'stock.approve') && <button className="btn btn-primary" disabled={decide.isPending || (choice === 'accept' && reason.trim().length < 3)} onClick={() => decide.mutate()}>Save decision</button>}</div>
-    </Modal>
+    </Drawer>
   );
 }
 
@@ -260,7 +260,7 @@ function ReturnDialog({ medicine, batches, vendorId, onClose }: { medicine?: any
   const save = useMutation({ mutationFn: () => post('/stock/returns', { vendorId: v, reason: reason.trim(), lines: [{ batchId, qty: Number(qty) }] }), onSuccess: (r: any) => { toast(`Return ${r.docNo} saved`); refresh(); onClose(); }, onError: (e) => toast(errText(e), 'err') });
   const problem = !v ? 'Pick the vendor.' : !batchId ? 'Pick the batch.' : !(Number(qty) > 0) ? 'Enter the quantity.' : b && Number(qty) > b.qty ? `Only ${b.qty} in this batch.` : reason.trim().length < 3 ? 'Give a reason.' : '';
   return (
-    <Modal title="Return stock to the vendor" subtitle={medicine?.name} onClose={onClose} width="max-w-lg">
+    <Drawer title="Return stock to the vendor" subtitle={medicine?.name} onClose={onClose} width="max-w-lg">
       <div className="space-y-3">
         <label className="block"><span className="label">Vendor</span><select className="input" value={v} onChange={(e) => setV(e.target.value)}><option value="">Choose</option>{(vendors.data ?? []).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
         {!medicine && <label className="block"><span className="label">Medicine</span><select className="input" value={medId} onChange={(e) => setMedId(e.target.value)}><option value="">Choose</option>{(meds.data ?? []).filter((m: any) => m.onHand > 0).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label>}
@@ -270,7 +270,7 @@ function ReturnDialog({ medicine, batches, vendorId, onClose }: { medicine?: any
         {problem && (qty || reason) && <div className="text-xs text-rose">{problem}</div>}
       </div>
       <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!problem || save.isPending} onClick={() => save.mutate()}>Save return</button></div>
-    </Modal>
+    </Drawer>
   );
 }
 
@@ -396,11 +396,11 @@ function OrdersTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
 function DocDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const q = useQuery({ queryKey: ['stockdocs', id], queryFn: () => get(`/stock/docs/${id}`) }); const d = q.data;
   return (
-    <Modal title={d ? `${d.docNo} · ${d.vendor?.name ?? ''}` : '…'} subtitle={d ? `${fmtDate(d.createdAt)} · ${d.createdByName}${d.dueDate ? ` · deliver by ${fmtDate(d.dueDate)}` : ''}${d.note ? ` · ${d.note}` : ''}` : ''} onClose={onClose} width="max-w-2xl">
+    <Drawer title={d ? `${d.docNo} · ${d.vendor?.name ?? ''}` : '…'} subtitle={d ? `${fmtDate(d.createdAt)} · ${d.createdByName}${d.dueDate ? ` · deliver by ${fmtDate(d.dueDate)}` : ''}${d.note ? ` · ${d.note}` : ''}` : ''} onClose={onClose} width="max-w-2xl">
       {!d ? <Skeleton rows={3} /> : <table className="table"><thead><tr><th className="!pl-0">Medicine</th><th className="!text-right">Qty</th><th className="!text-right">{d.kind === 'return' ? 'Batch' : 'Free'}</th><th className="!text-right !pr-0">{d.kind === 'return' ? 'Credit' : 'Rate'}</th></tr></thead>
         <tbody>{d.lines.map((l: any, i: number) => <tr key={i}><td className="!pl-0">{l.name}{l.scheme ? <div className="text-xs text-muted">{l.scheme}</div> : null}</td><td className="text-right">{l.qty}</td><td className="text-right">{d.kind === 'return' ? l.batchNo : l.freeQty}</td><td className="text-right !pr-0">{d.kind === 'return' ? money(l.creditPaise) : `${rupees2(l.ratePaise)}${l.discBp ? ` less ${l.discBp / 100}%` : ''}`}</td></tr>)}</tbody></table>}
       <div className="modal-foot"><button className="btn" onClick={onClose}>Close</button></div>
-    </Modal>
+    </Drawer>
   );
 }
 
@@ -598,7 +598,7 @@ function VendorDialog({ v, onClose }: { v: any; onClose: () => void }) {
     onSuccess: () => { toast('Vendor saved'); refresh(); onClose(); }, onError: (e) => toast(errText(e), 'err') });
   const problem = f.name.trim().length < 2 ? 'Enter the vendor name.' : f.phone && !/^[0-9]{10}$/.test(f.phone) ? 'Phone must be 10 digits.' : f.gstin && f.gstin.trim().length !== 15 ? 'GSTIN has 15 characters.' : '';
   return (
-    <Modal title={v.id ? 'Edit vendor' : 'Add vendor'} onClose={onClose} width="max-w-lg" submitOnEnter>
+    <Drawer title={v.id ? 'Edit vendor' : 'Add vendor'} onClose={onClose} width="max-w-lg" submitOnEnter>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="sm:col-span-2"><span className="label">Name</span><input className={`input ${tried && f.name.trim().length < 2 ? '!border-rose' : ''}`} maxLength={100} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} autoFocus /></label>
         <label><span className="label">WhatsApp number</span><input className={`input ${f.phone && !/^[0-9]{10}$/.test(f.phone) ? '!border-rose' : ''}`} inputMode="numeric" maxLength={10} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '') })} placeholder="10 digits" /></label>
@@ -609,7 +609,7 @@ function VendorDialog({ v, onClose }: { v: any; onClose: () => void }) {
       </div>
       {tried && problem && <div className="mt-2 text-sm text-rose">{problem}</div>}
       <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending} onClick={() => { setTried(true); if (!problem) save.mutate(); }}>Save</button></div>
-    </Modal>
+    </Drawer>
   );
 }
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, api, qc, errText, post } from '../api';
-import { Chip, Empty, Icon, Modal, Segmented, Skeleton, toast, Filter, usePageSearch, ask, money } from '../ui';
+import { Drawer, Chip, Empty, Icon, Segmented, Skeleton, toast, Filter, usePageSearch, ask, money } from '../ui';
 
 const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Junior doctor', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -108,7 +108,7 @@ export function PrivacyTab() {
         </section>
       </div>
 
-      {adding && <Modal title="Add an internet address" subtitle="The clinic's address, or a range if your internet company changes it" onClose={() => setAdding(null)} width="max-w-md" submitOnEnter>
+      {adding && <Drawer title="Add an internet address" subtitle="The clinic's address, or a range if your internet company changes it" onClose={() => setAdding(null)} width="max-w-md" submitOnEnter>
         <div className="space-y-3">
           <div><label className="label" htmlFor="ip-label">Name</label><input id="ip-label" className="input" maxLength={60} placeholder="e.g. Backup Jio Fiber" value={adding.label} onChange={(e) => setAdding({ ...adding, label: e.target.value })} /></div>
           <div className="flex gap-1.5" role="radiogroup" aria-label="One address or a range">{[[false, 'One address'], [true, 'A range']].map(([v, l]) => <button key={String(v)} role="radio" aria-checked={adding.range === v} className={`toggle-opt ${adding.range === v ? 'on' : ''}`} onClick={() => setAdding({ ...adding, range: v as boolean })}>{l as string}</button>)}</div>
@@ -119,7 +119,7 @@ export function PrivacyTab() {
           {adding.from && addBad && <div className="text-xs text-rose">{!adding.label.trim() ? 'Give it a name.' : adding.range ? 'Both ends must look like 106.51.0.0.' : 'That does not look like an internet address.'}</div>}
           <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAdding(null)}>Cancel</button><button className="btn btn-primary" disabled={!!addBad || save.isPending} onClick={() => { allow(adding.label.trim(), adding.from.trim(), adding.range ? adding.to.trim() : undefined); setAdding(null); }}><Icon name="check" />Add</button></div>
         </div>
-      </Modal>}
+      </Drawer>}
     </div>
   );
 }
@@ -175,14 +175,14 @@ export function AuditLog() {
           </table></div>)}
         {rows.length === 200 && <div className="p-3 text-center text-xs text-muted">Showing the latest 200. Narrow the filters to see older ones.</div>}
       </section>
-      {open && <Modal title={open.summary} subtitle={`${when(open.at)} · ${open.userName ?? ''}${open.ip ? ` · ${open.ip}` : ''}`} onClose={() => setOpen(null)} width="max-w-2xl">
+      {open && <Drawer title={open.summary} subtitle={`${when(open.at)} · ${open.userName ?? ''}${open.ip ? ` · ${open.ip}` : ''}`} onClose={() => setOpen(null)} width="max-w-2xl">
         <div className="space-y-3 text-sm">
           {open.patient && <div>Patient: <b>{open.patient}</b> {open.patientNo}</div>}
           {open.unusual && <div className="rounded-xl bg-amber-soft px-3 py-2 text-[#6E4D10]">Unusual: {open.kind === 'view' ? 'opened by someone who did not register them, with no visit, booking, sale or procedure for this patient that day, or outside clinic hours' : open.kind === 'print' ? 'a list of patients left the app' : 'outside the usual pattern'}.</div>}
           <Changes before={open.before} after={open.after} />
           <div className="text-xs text-muted">{open.action}</div>
         </div>
-      </Modal>}
+      </Drawer>}
     </div>
   );
 }

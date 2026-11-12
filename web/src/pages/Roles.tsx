@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, errText } from '../api';
 import { NAV, can } from '../App';
-import { Chip, Icon, Modal, NumInput, Skeleton, toast, useAddFromNew } from '../ui';
+import { Drawer, Chip, Icon, NumInput, Skeleton, toast, useAddFromNew } from '../ui';
 
 /** Every permission the system knows, in plain words. Mirrors the server list (src/lib/auth.ts). */
 export const useRoles = () => useQuery({ queryKey: ['roles'], queryFn: () => get('/admin/roles'), staleTime: 30_000 });
@@ -82,13 +82,13 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
       </div>
 
       {adding && (
-        <Modal title="New role" subtitle="Give it a name, then tick what it can do" onClose={() => setAdding(null)} width="max-w-md" submitOnEnter>
+        <Drawer title="New role" subtitle="Give it a name, then tick what it can do" onClose={() => setAdding(null)} width="max-w-md" submitOnEnter>
           <div className="space-y-3">
             <div><label className="label" htmlFor="role-name">Role name</label><input id="role-name" autoFocus className="input" maxLength={100} placeholder="e.g. Lab technician" value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} /></div>
             <div><label className="label" htmlFor="role-from">Start from</label><select id="role-from" className="input" value={adding.from} onChange={(e) => setAdding({ ...adding, from: e.target.value })}>{list.map((r) => <option key={r.key} value={r.key}>{r.name}'s permissions</option>)}</select></div>
             <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAdding(null)}>Cancel</button><button className="btn btn-primary" disabled={adding.name.trim().length < 1 || create.isPending} onClick={() => create.mutate()}>Create role</button></div>
           </div>
-        </Modal>)}
+        </Drawer>)}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api, qc, errText } from './api';
-import { Icon, Modal, toast, NumInput } from './ui';
+import { Drawer, Icon, toast, NumInput } from './ui';
 
 export type Routine = { days: Record<string, [string, string][]>; capacity: number; windowMinutes: number };
 const DAYS: [string, string][] = [['1', 'Mon'], ['2', 'Tue'], ['3', 'Wed'], ['4', 'Thu'], ['5', 'Fri'], ['6', 'Sat'], ['0', 'Sun']];
@@ -60,9 +60,9 @@ export function RoutineModal({ practitionerId, name, initial, onClose }: { pract
   const [r, setR] = useState<Routine>(initial && Object.keys(initial.days ?? {}).length ? initial : DEFAULT_ROUTINE);
   const save = useMutation({ mutationFn: () => api('PUT', `/calendar/routine/${practitionerId}`, r), onSuccess: () => { toast('Routine saved · windows follow it from today'); qc.invalidateQueries({ queryKey: ['config'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); qc.invalidateQueries({ queryKey: ['sessions'] }); onClose(); }, onError: (e: any) => toast(String(e?.body?.code ?? '').startsWith('FORBIDDEN') ? 'Only the owner can change weekly hours.' : errText(e), 'err') });
   return (
-    <Modal title="Weekly routine" subtitle={`${name} · set once; every day's OP windows are made from this`} onClose={onClose} width="max-w-xl">
+    <Drawer title="Weekly routine" subtitle={`${name} · set once; every day's OP windows are made from this`} onClose={onClose} width="max-w-xl">
       <RoutineEditor value={r} onChange={setR} />
       <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !Object.values(r.days).some((v) => v.length)} onClick={() => save.mutate()}><Icon name="check" />Save routine</button></div>
-    </Modal>
+    </Drawer>
   );
 }

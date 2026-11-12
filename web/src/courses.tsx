@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText, NO_WHATSAPP } from './api';
 import { can } from './App';
-import { Chip, Icon, Modal, MoneyInput, Section, money, toPaise, toast } from './ui';
+import { Drawer, Chip, Icon, MoneyInput, Section, money, toPaise, toast } from './ui';
 import { printReceipt } from './invoices';
 import { ScheduleModal } from './pages/Worklist';
 import type { Pkg } from './packages';
@@ -79,7 +79,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   const ledger: any[] = c?.ledger ?? []; const booked = ledger.find((l: any) => l.state && !['done', 'planned'].includes(l.state));
   if (booking) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} onClose={() => { setBooking(false); refresh(); }} />;
   return (
-    <Modal title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${sittings} sittings planned`} onClose={onClose} width="max-w-lg">
+    <Drawer title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${sittings} sittings planned`} onClose={onClose} width="max-w-lg">
       {!cs.data ? <div className="text-sm text-muted">Loading…</div> : !c ? (
         <div className="space-y-4">
           <div className="text-sm">List price: <b>{money(list)}</b> for {sittings} sittings ({money(proc?.pricePaise ?? 0)} each).</div>
@@ -118,7 +118,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
           <div className="modal-foot">{can(perms, 'refund.course') && c.unusedPaise > 0 && !rf && <button className="btn btn-sm mr-auto" onClick={() => setRf({ amount: String(c.unusedPaise / 100), mode: 'upi', why: '' })}>Refund unused sittings</button>}<button className="btn btn-ghost" onClick={onClose}>Close</button></div>
         </div>
       )}
-    </Modal>
+    </Drawer>
   );
 }
 
