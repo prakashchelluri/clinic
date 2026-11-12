@@ -198,7 +198,7 @@ export function Today() {
           </section>
 
           {otherCount > 0 && <section className="fd-sheet p-4 sm:p-5 anim-fade-up">
-            <b className="text-[15px]">Also waiting on you</b>
+            <b className="text-[15px]">Needs your attention</b>
             <div className="mt-1">
               {drafts.map((v: any) => <Attn key={v.id} title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}
