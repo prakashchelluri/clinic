@@ -6,7 +6,8 @@ import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { Drawer, Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
-import { EncounterModal, UploadButton, joinList, rxState } from '../encounterDetail';
+import { EncounterDetail, UploadButton, joinList } from '../encounterDetail';
+import { enabledVitals } from '../vitals';
 import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
 import { SkinMapPanel } from '../skinmap';
@@ -61,137 +62,171 @@ export function Patients() {
   );
 }
 
+type Sec = 'visits' | 'reports' | 'photos' | 'plans' | 'bills' | 'messages' | 'missed';
+const SEC_TITLE: Record<Sec, string> = { visits: 'Visit summary', reports: 'Test reports', photos: 'Photos & skin map', plans: 'Plans & sittings', bills: 'Bills & payments', messages: 'Messages', missed: 'Missed' };
+
+/** One patient (P-F): the person and the record's sections down the left, the section on the right under a band that holds
+ *  only that section's actions. Visit summary = vitals by date and the history beside one visit at a time. */
 function Timeline({ id }: { id: string }) {
   const nav = useNavigate();
   const t = useQuery({ queryKey: ['timeline', id], queryFn: () => get(`/patients/${id}/timeline`) });
   const docs = useQuery({ queryKey: ['documents', id], queryFn: () => get(`/patients/${id}/documents`) });
-  const { perms } = useOutletContext<any>();
+  const { perms, me, cfg } = useOutletContext<any>();
   const waitingTests = useQuery({ queryKey: ['worklist', 'investigation'], queryFn: () => get('/worklist?kind=investigation'), enabled: can(perms, 'worklist.read') });
   const pendingTests: any[] = (waitingTests.data ?? []).filter((r: any) => r.patient.id === id);
   const [forTest, setForTest] = useState(''); const [labHist, setLabHist] = useState(false);
   const [edit, setEdit] = useState<any>(null);
-  const [viewing, setViewing] = useState<string | null>(null);
-  const [flagging, setFlagging] = useState(false); const [tab, setTab] = useState<'visits' | 'photos' | 'reports' | 'plans' | 'bills' | 'messages' | 'missed'>('visits');
+  const [flagging, setFlagging] = useState(false); const [sec, setSec] = useState<Sec>('visits');
+  const [whoOpen, setWhoOpen] = useState(false); const [vi, setVi] = useState(0); // the visit shown, newest first
   const [paying, setPaying] = useState(false);
-  const { me } = useOutletContext<any>(); const isOwner = (me?.roles ?? []).includes('owner'); const [merging, setMerging] = useState(false);
+  const isOwner = (me?.roles ?? []).includes('owner'); const [merging, setMerging] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); }, onError: (e: any) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
   const { patient: p, encounters, recommendations, charges, outstandingPaise, visits, guardian, sharingPhone } = t.data;
   const openPlans = recommendations.filter((r: any) => !['done', 'cancelled'].includes(r.status));
   const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo');
+  const photos = (docs.data ?? []).filter((d: any) => d.kind === 'photo');
   const missed: any[] = t.data.missed ?? []; const sessions: any[] = t.data.sessions ?? [];
-  // At a glance: what a doctor needs in ten seconds, worked out from the visits already on file
   const hist = p.history ?? {};
-  const allergies = p.allergies || (hist.drugAllergies ?? []).map((a: any) => a.name).join(', ');
-  const conditions = (hist.conditions ?? []).map((c: any) => c.name).join(', ');
-  const problems: { name: string; at: string }[] = [];
-  for (const e of encounters) for (const name of joinList(e.data?.assessment?.diagnosis).split(', ').filter(Boolean)) if (!problems.some((x) => x.name === name)) problems.push({ name, at: e.createdAt });
   const onNow = new Map<string, Date>();
   for (const e of encounters) for (const i of e.prescription) { if (!i.durationDays) continue; const till = new Date(new Date(e.createdAt).getTime() + i.durationDays * 864e5); if (till >= new Date() && !(onNow.get(i.name)! > till)) onNow.set(i.name, till); }
   const planText = (r: any) => (r.kind === 'followup' ? 'Review' : r.kind === 'investigation' ? `Test: ${r.notes}` : `Procedure${r.notes ? `: ${r.notes}` : ''}${r.sittings ? ` · ${r.sittings} sittings` : ''}`);
-  const Glance = ({ label, children }: { label: string; children: React.ReactNode }) => <div className="flex flex-col gap-1 border-t border-line/70 px-5 py-3"><span className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</span>{children}</div>;
-  type Tab = typeof tab;
+  // vitals as the desk took them at check-in, one column per visit (the last three that have any)
+  const vf = enabledVitals(cfg?.tenant?.settings);
+  const vCols = (visits as any[]).filter((v) => vf.some((f) => v.details?.[f.key] !== undefined && v.details[f.key] !== null && v.details[f.key] !== '')).slice(0, 3);
+  const showBills = can(perms, 'fees.see') || can(perms, 'payment.record');
+  const SECS: [Sec, number | undefined][] = [
+    ['visits', encounters.length || undefined], ['reports', reports.length || undefined], ['photos', photos.length || undefined], ['plans', openPlans.length || undefined],
+    ...(showBills ? [['bills', charges.length || undefined] as [Sec, number | undefined]] : []),
+    ...(can(perms, 'appointment.read') ? [['messages', undefined] as [Sec, number | undefined]] : []),
+    ...(missed.length ? [['missed', missed.length] as [Sec, number | undefined]] : []),
+  ];
+  const e = encounters[Math.min(vi, Math.max(0, encounters.length - 1))];
+  const startEdit = () => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp });
+  const Line = ({ label, children }: { label: string; children: React.ReactNode }) => <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className="text-[14px] font-semibold">{children}</div></div>;
   return (
-    <div className="space-y-4">
-      {p.mergedInto && <div className="card flex flex-wrap items-center gap-3 !py-3 text-sm" role="status"><span className="flex-1">This record was merged into another one and is kept only for the record.</span><button className="btn btn-sm btn-primary" onClick={() => nav(`/patients/${p.mergedInto}`)}>Open the kept record</button></div>}
-
-      {/* who, how to reach them, and only the action that fits now */}
-      <div className="card anim-fade-up">
-        <div className="flex flex-wrap items-center gap-4">
-          <Avatar name={p.fullName} size="h-12 w-12 text-[15px]" />
-          <div className="min-w-[240px] flex-1">
-            <h2 className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[22px] font-extrabold leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-[15px] font-medium text-muted">{[p.ageYears ? `${p.ageYears}` : '', p.sex ?? ''].filter(Boolean).join(' ')}</span><FlagChips flags={p.flags} />{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.language && p.language !== 'en' && <Chip>{p.language === 'te' ? 'Telugu' : 'Hindi'}</Chip>}{p.noWhatsapp && <Chip>No WhatsApp messages</Chip>}</h2>
-            <div className="mt-1 text-sm text-muted">{[p.patientNo, p.phone ?? 'no phone', p.locality, visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}` : 'no visit yet'].filter(Boolean).join(' · ')}</div>
-            {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1 text-sm text-ink-2">{guardian && <>Guardian: <button className="underline font-medium" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start">
+      {/* left: who, then the sections of the record */}
+      <nav aria-label="Patient record" className="card-flat anim-fade-up flex flex-col gap-1 p-3 lg:sticky lg:top-4">
+        <button type="button" className="flex w-full items-center gap-3 rounded-2xl bg-surface-2/70 p-3 text-left hover:bg-surface-2" aria-expanded={whoOpen} onClick={() => setWhoOpen(!whoOpen)}>
+          <Avatar name={p.fullName} size="h-11 w-11 text-[14px]" />
+          <span className="min-w-0 flex-1"><b className="block text-[16px] leading-tight [overflow-wrap:anywhere]">{p.fullName}</b><span className="text-[13px] text-muted">{[[p.ageYears, p.sex].filter(Boolean).join(' '), p.phone ?? 'no phone'].filter(Boolean).join(' · ')}</span></span>
+          <Icon name="chevR" className={`h-4 w-4 shrink-0 text-muted transition-transform ${whoOpen ? 'rotate-90' : ''}`} />
+        </button>
+        <div className="flex flex-wrap gap-1 px-1 pt-1"><FlagChips flags={p.flags} />{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.noWhatsapp && <Chip>No WhatsApp</Chip>}</div>
+        {whoOpen && <div className="flex flex-col gap-2.5 rounded-2xl bg-surface-2/50 p-3 anim-fade-up">
+          <Line label="Patient no.">{p.patientNo}</Line>
+          {p.dob && <Line label="Date of birth">{fmtDate(p.dob)}</Line>}
+          {(p.locality || p.language) && <Line label="Area · language">{[p.locality, p.language === 'te' ? 'Telugu' : p.language === 'hi' ? 'Hindi' : p.language === 'en' ? 'English' : null].filter(Boolean).join(' · ')}</Line>}
+          {(guardian || p.contactLabel || sharingPhone > 0) && <div className="text-[13px] text-ink-2">{guardian && <>Guardian: <button className="font-medium underline" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button>. </>}{p.contactLabel ? `Contact is ${p.contactLabel}. ` : ''}{sharingPhone > 0 ? `Phone shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}.` : ''}</div>}
+          {p.notes && <div className="text-[13px] text-ink-2">{p.notes}</div>}
+          <div className="flex flex-wrap gap-1.5">
+            {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit profile</button>}
+            {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
+            {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
           </div>
-          {(outstandingPaise > 0 || can(perms, 'payment.record')) && <div className="flex items-center gap-2">{outstandingPaise > 0 && <span className="text-sm font-bold text-rose">Due {money(outstandingPaise)}</span>}{can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}</div>}
-          {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
-          {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp })}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
-          {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
+        </div>}
+        {outstandingPaise > 0 && <button type="button" className="mx-1 mt-1 rounded-xl bg-rose-soft px-3 py-2 text-left text-[13px] font-semibold text-rose" onClick={() => setSec('bills')}>Due {money(outstandingPaise)}</button>}
+        <div className="mt-2 flex flex-col gap-0.5">
+          {SECS.map(([k, n]) => <button key={k} type="button" aria-current={sec === k ? 'page' : undefined} onClick={() => setSec(k)}
+            className={`flex h-11 items-center gap-2 rounded-xl px-3 text-left text-[14.5px] font-semibold ${sec === k ? 'bg-clay-soft text-clay-ink shadow-[inset_3px_0_0_var(--color-clay)]' : 'text-ink-2 hover:bg-surface-2'}`}>
+            <span className="flex-1">{SEC_TITLE[k]}</span>{n !== undefined && <span className={`text-[12px] font-bold ${k === 'missed' ? 'text-rose' : 'text-muted'}`}>{n}</span>}</button>)}
         </div>
-        <CarefulBanner flags={p.flags} />
-        {edit && (
-          <div className="grid grid-cols-3 gap-3 mt-5 pt-4 border-t border-line anim-fade-up">
-            {[['fullName', 'Full name'], ['phone', 'Phone'], ['locality', 'Area / town'], ['allergies', 'Allergies'], ['notes', 'Notes']].map(([k, l]) => <div key={k} className={k === 'notes' ? 'col-span-3' : ''}><label className="label">{l}</label><input className="input" value={edit[k]} onChange={(e) => setEdit({ ...edit, [k]: e.target.value })} /></div>)}
-            <div><label className="label" htmlFor="np-age">Age</label><NumInput id="np-age" max={120} className="input" value={edit.ageYears} onChange={(e) => setEdit({ ...edit, ageYears: e.target.value })} /></div>
-            <div><span className="label">Sex</span><div className="flex gap-1" role="group" aria-label="Sex">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
-            <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={edit.referralCard} onChange={(e) => setEdit({ ...edit, referralCard: e.target.checked })} /> RMP/PMP referral card</label>
-            <div><label className="label">Who answers this phone</label><input className="input" placeholder="mother, father…" maxLength={40} value={edit.contactLabel} onChange={(e) => setEdit({ ...edit, contactLabel: e.target.value })} /></div>
-            <div className="col-span-2"><label className="label">Guardian (for a minor)</label><GuardianPick selfId={id} value={edit.guardian} onChange={(g) => setEdit({ ...edit, guardian: g })} /></div>
-            <div className="col-span-3"><MessagePrefs language={edit.language} noWhatsapp={edit.noWhatsapp} onChange={(v) => setEdit({ ...edit, ...v })} /></div>
-            <div className="col-span-3 flex gap-2 justify-end"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={() => save.mutate({ ...edit, guardian: undefined, guardianId: edit.guardian?.id ?? null, language: edit.language || null, contactLabel: edit.contactLabel.trim() || null, phone: edit.phone || null, ageYears: edit.ageYears === '' ? null : Number(edit.ageYears), sex: edit.sex || null, locality: edit.locality || null, allergies: edit.allergies || null, notes: edit.notes || null })}>Save</button></div>
-          </div>
-        )}
-      </div>
+        {can(perms, 'user.write') && <div className="mt-2 border-t border-line/70 px-1 pt-3"><SeenBy patientId={id} /></div>}
+      </nav>
 
-      {/* left: the chart in ten seconds; right: one part of the record at a time */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
-        <aside className="card-flat anim-fade-up overflow-hidden" aria-label="At a glance">
-          <div className="px-5 pb-2 pt-3.5 text-[15px] font-bold">At a glance</div>
-          <Glance label="Allergies">{allergies ? <span className="font-semibold text-rose">{allergies}</span> : <span className="text-sm text-muted">None recorded</span>}</Glance>
-          {conditions && <Glance label="Conditions"><span className="font-semibold">{conditions}</span></Glance>}
-          <Glance label="Problems">{problems.length ? problems.slice(0, 5).map((x) => <span key={x.name} className="font-semibold">{x.name} <span className="text-sm font-medium text-muted">· {fmtDate(x.at)}</span></span>) : <span className="text-sm text-muted">No diagnosis yet</span>}</Glance>
-          <Glance label="On now">{onNow.size ? [...onNow].map(([name, till]) => <span key={name} className="font-semibold">{name} <span className="text-sm font-medium text-muted">· till {fmtDate(till.toISOString())}</span></span>) : <span className="text-sm text-muted">No running medicines</span>}</Glance>
-          <Glance label="Next">{openPlans.length ? openPlans.slice(0, 3).map((r: any) => <span key={r.id} className="font-semibold">{planText(r)}{r.dueOn && <span className="text-sm font-medium text-muted"> · due {fmtDate(r.dueOn)}</span>}</span>) : <span className="text-sm text-muted">Nothing pending</span>}</Glance>
-          {missed.length > 0 && <Glance label="Missed"><button className="text-left font-semibold text-rose underline-offset-2 hover:underline" onClick={() => setTab('missed')}>{missed.length} missed · last {fmtDate(missed[0].day)}{missed[0].calls.length ? '' : ', no call logged'}</button></Glance>}
-          {p.notes && <Glance label="Notes"><span className="text-sm text-ink-2">{p.notes}</span></Glance>}
-          {can(perms, 'user.write') && <div className="border-t border-line/70 px-5 py-3"><SeenBy patientId={id} /></div>}
-        </aside>
+      <div className="min-w-0">
+        {/* the band: where you are, and only this section's actions */}
+        <div className="flex flex-wrap items-center gap-2 rounded-[22px] bg-[#0B6B47] px-6 pb-14 pt-5 text-white anim-fade-up">
+          <h2 className="min-w-[200px] flex-1 text-[22px] font-extrabold" style={{ color: '#fff' }}>{SEC_TITLE[sec]}</h2>
+          {sec === 'reports' && <><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>
+            {can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(ev) => setForTest(ev.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((x: any) => <option key={x.id} value={x.id}>For test: {x.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((x: any) => x.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</>}
+          {sec === 'bills' && can(perms, 'payment.record') && <button className="btn btn-sm" onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}
+        </div>
 
-        <div className="min-w-0 space-y-4">
-          <Tabs<Tab> value={tab} onChange={setTab} options={[
-            { value: 'visits', label: 'Visits', count: encounters.length || undefined },
-            { value: 'photos', label: 'Photos & skin map' },
-            { value: 'reports', label: 'Reports', count: reports.length || undefined },
-            { value: 'plans', label: 'Plans & sittings', count: openPlans.length || undefined },
-            ...(can(perms, 'fees.see') || can(perms, 'payment.record') ? [{ value: 'bills' as Tab, label: 'Bills', count: charges.length || undefined }] : []),
-            ...(can(perms, 'appointment.read') ? [{ value: 'messages' as Tab, label: 'Messages' }] : []),
-            ...(missed.length ? [{ value: 'missed' as Tab, label: 'Missed', count: missed.length }] : []),
-          ]} />
+        <div className="-mt-10 space-y-4 px-2 sm:px-4">
+          {p.mergedInto && <div className="card flex flex-wrap items-center gap-3 !py-3 text-sm" role="status"><span className="flex-1">This record was merged into another one and is kept only for the record.</span><button className="btn btn-sm btn-primary" onClick={() => nav(`/patients/${p.mergedInto}`)}>Open the kept record</button></div>}
+          <CarefulBanner flags={p.flags} />
+          {edit && (
+            <div className="card grid grid-cols-3 gap-3 anim-fade-up">
+              <div className="col-span-3 text-[15px] font-bold">Edit profile</div>
+              {[['fullName', 'Full name'], ['phone', 'Phone'], ['locality', 'Area / town'], ['allergies', 'Allergies'], ['notes', 'Notes']].map(([k, l]) => <div key={k} className={k === 'notes' ? 'col-span-3' : ''}><label className="label">{l}</label><input className="input" value={edit[k]} onChange={(ev) => setEdit({ ...edit, [k]: ev.target.value })} /></div>)}
+              <div><label className="label" htmlFor="np-age">Age</label><NumInput id="np-age" max={120} className="input" value={edit.ageYears} onChange={(ev) => setEdit({ ...edit, ageYears: ev.target.value })} /></div>
+              <div><span className="label">Sex</span><div className="flex gap-1" role="group" aria-label="Sex">{['M', 'F', 'O'].map((s) => <button key={s} type="button" className={`toggle-opt ${edit.sex === s ? 'on' : ''}`} onClick={() => setEdit({ ...edit, sex: s })}>{s}</button>)}</div></div>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" className="accent-clay" checked={edit.referralCard} onChange={(ev) => setEdit({ ...edit, referralCard: ev.target.checked })} /> RMP/PMP referral card</label>
+              <div><label className="label">Who answers this phone</label><input className="input" placeholder="mother, father…" maxLength={40} value={edit.contactLabel} onChange={(ev) => setEdit({ ...edit, contactLabel: ev.target.value })} /></div>
+              <div className="col-span-2"><label className="label">Guardian (for a minor)</label><GuardianPick selfId={id} value={edit.guardian} onChange={(g) => setEdit({ ...edit, guardian: g })} /></div>
+              <div className="col-span-3"><MessagePrefs language={edit.language} noWhatsapp={edit.noWhatsapp} onChange={(v) => setEdit({ ...edit, ...v })} /></div>
+              <div className="col-span-3 flex justify-end gap-2"><button className="btn btn-ghost" onClick={() => setEdit(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={() => save.mutate({ ...edit, guardian: undefined, guardianId: edit.guardian?.id ?? null, language: edit.language || null, contactLabel: edit.contactLabel.trim() || null, phone: edit.phone || null, ageYears: edit.ageYears === '' ? null : Number(edit.ageYears), sex: edit.sex || null, locality: edit.locality || null, allergies: edit.allergies || null, notes: edit.notes || null })}>Save</button></div>
+            </div>
+          )}
 
-          {tab === 'visits' && <section className="card-flat anim-fade-up overflow-hidden">
-            {encounters.length === 0 ? <div className="p-5 text-sm text-muted">No consultations yet.</div> : encounters.map((e: any) => (
-              <button key={e.id} className="row w-full !items-start text-left hover:bg-surface-2/60" onClick={() => setViewing(e.id)}>
-                <div className="w-[88px] shrink-0 pt-0.5 text-sm font-bold">{fmtDate(e.createdAt)}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[15px] font-semibold">{joinList(e.data?.assessment?.diagnosis) || joinList(e.data?.complaint?.chief_complaint) || 'Consultation'}{e.data?.assessment?.severity ? <span className="font-medium text-muted"> ({e.data.assessment.severity})</span> : ''}{e.status !== 'completed' && <Chip tone="amber" className="ml-2">{e.status}</Chip>}</div>
-                  {joinList(e.data?.assessment?.diagnosis) && joinList(e.data?.complaint?.chief_complaint) && <div className="text-[13px] text-muted">{joinList(e.data.complaint.chief_complaint)}</div>}
-                  {e.prescription.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1.5">{e.prescription.map((i: any) => { const s = rxState(i, e); return <Chip key={i.id} tone={s?.tone ?? ''}><Icon name="pill" className="h-3 w-3" />{i.name}{i.durationDays ? ` · ${i.durationDays}d` : ''}{s ? ` · ${s.text}` : ''}</Chip>; })}</div>}
+          {/* Visit summary: vitals by date and the history on the left, one visit at a time on the right */}
+          {sec === 'visits' && <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,400px)_minmax(0,1fr)] xl:items-start">
+            <div className="flex min-w-0 flex-col gap-4">
+              <section className="card-flat overflow-hidden anim-fade-up">
+                <div className="flex items-center gap-2 border-b border-line/70 px-5 py-3"><b className="flex-1 text-[15px]">Vitals</b>{vCols.length > 0 && <span className="text-xs text-muted">last {vCols.length} visit{vCols.length === 1 ? '' : 's'}</span>}</div>
+                {vCols.length === 0 ? <div className="px-5 py-4 text-sm text-muted">No vitals taken yet.</div> : <div className="overflow-x-auto"><table className="table">
+                  <thead><tr><th>Name</th>{vCols.map((v: any) => <th key={v.id}>{fmtDate(v.arrivedAt)}</th>)}</tr></thead>
+                  <tbody>{vf.map((f) => <tr key={f.key}><td className="text-ink-2">{f.label}{f.unit ? ` (${f.unit})` : ''}</td>{vCols.map((v: any, k: number) => <td key={v.id} className={k === 0 ? 'font-bold' : ''}>{v.details?.[f.key] ?? '—'}</td>)}</tr>)}</tbody>
+                </table></div>}
+              </section>
+              <section className="card-flat overflow-hidden anim-fade-up">
+                <div className="border-b border-line/70 px-5 py-3"><b className="text-[15px]">Medical history</b></div>
+                <div className="flex flex-col gap-3 px-5 py-4">
+                  {(cfg?.historyCategories ?? []).map((c: any) => { const xs: any[] = hist[c.key] ?? []; const legacy = c.key === 'drugAllergies' && !xs.length && p.allergies; if (!xs.length && !legacy) return null;
+                    return <Line key={c.key} label={c.label}><span className={c.key === 'drugAllergies' ? 'text-rose' : ''}>{legacy ? p.allergies : xs.map((x) => x.note ? `${x.name} (${x.note})` : x.name).join(', ')}</span></Line>; })}
+                  {!(cfg?.historyCategories ?? []).some((c: any) => (hist[c.key] ?? []).length) && !p.allergies && <div className="text-sm text-muted">No medical history recorded. Allergies: none recorded.</div>}
                 </div>
-                <Icon name="chevR" className="mt-1 h-4 w-4 shrink-0 text-muted" />
-              </button>
-            ))}
-          </section>}
+              </section>
+              <section className="card-flat overflow-hidden anim-fade-up">
+                <div className="border-b border-line/70 px-5 py-3"><b className="text-[15px]">Now and next</b></div>
+                <div className="flex flex-col gap-3 px-5 py-4">
+                  <Line label="On now">{onNow.size ? [...onNow].map(([name, till]) => <div key={name}>{name} <span className="text-[13px] font-medium text-muted">· till {fmtDate(till.toISOString())}</span></div>) : <span className="text-sm font-medium text-muted">No running medicines</span>}</Line>
+                  <Line label="Next">{openPlans.length ? openPlans.slice(0, 3).map((r: any) => <div key={r.id}>{planText(r)}{r.dueOn && <span className="text-[13px] font-medium text-muted"> · due {fmtDate(r.dueOn)}</span>}</div>) : <span className="text-sm font-medium text-muted">Nothing pending</span>}</Line>
+                </div>
+              </section>
+            </div>
+            <section className="card-flat min-w-0 overflow-hidden anim-fade-up">
+              {!e ? <div className="p-5 text-sm text-muted">No consultations yet.</div> : <>
+                <div className="flex flex-wrap items-center gap-2 border-b border-line/70 px-5 py-3">
+                  <div className="min-w-0 flex-1"><b className="text-[15px]">{joinList(e.data?.assessment?.diagnosis) || joinList(e.data?.complaint?.chief_complaint) || 'Consultation'}</b><div className="text-xs text-muted">{fmtDate(e.createdAt)}</div></div>
+                  <button className="btn btn-sm !px-2" aria-label="Newer visit" disabled={vi === 0} onClick={() => setVi(vi - 1)}><Icon name="chevL" className="h-4 w-4" /></button>
+                  <b className="min-w-[48px] text-center text-sm">{Math.min(vi, encounters.length - 1) + 1} / {encounters.length}</b>
+                  <button className="btn btn-sm !px-2" aria-label="Older visit" disabled={vi >= encounters.length - 1} onClick={() => setVi(vi + 1)}><Icon name="chevR" className="h-4 w-4" /></button>
+                </div>
+                <div className="px-5 py-4"><EncounterDetail key={e.id} id={e.id} /></div>
+              </>}
+            </section>
+          </div>}
 
-          {tab === 'photos' && <>
+          {sec === 'photos' && <>
             <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />
             <Section title="Skin map"><div className="p-4"><SkinMapPanel patientId={id} patientName={p.fullName} readOnly={!can(perms, 'encounter.intake')} /></div></Section>
           </>}
 
-          {tab === 'reports' && <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>}
-            aside={<><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>{can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</>}>
-            <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos.</div> : <ReportList docs={reports} patientId={id} who={p.fullName} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
+          {sec === 'reports' && <section className="card-flat overflow-hidden anim-fade-up">
+            <div className="p-3">{reports.length === 0 ? <div className="p-1 text-sm text-muted">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos.</div> : <ReportList docs={reports} patientId={id} who={p.fullName} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
             {labHist && <LabHistoryDrawer patientId={id} docs={reports} onClose={() => setLabHist(false)} />}
-          </Section>}
+          </section>}
 
-          {tab === 'plans' && <>
+          {sec === 'plans' && <>
             <Section title="Open plans">
               {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
-                openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 text-clay shrink-0" /><div className="flex-1 text-sm min-w-0 truncate">{planText(r)}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
+                openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 shrink-0 text-clay" /><div className="min-w-0 flex-1 truncate text-sm">{planText(r)}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
             </Section>
             {sessions.length > 0 && <Section title="Sittings">{sessions.map((s: any) => <div key={s.id} className="row"><div className="min-w-0 flex-1 text-sm"><b>{s.procedure ?? 'Procedure'}</b> · sitting {s.sittingNo}<div className="text-xs text-muted">{fmtDate(s.day)} {s.startTime}{s.doctor ? ` · ${s.doctor}` : ''}</div></div><Chip tone={s.state === 'completed' ? 'sage' : s.state === 'missed' ? 'rose' : ''}>{s.state}</Chip></div>)}</Section>}
             <CoursesCard patientId={id} patientName={p.fullName} />
           </>}
 
-          {tab === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}
-          {tab === 'messages' && <PatientMessages id={id} />}
-          {tab === 'missed' && <Section title={<>Missed <span className="text-muted font-normal">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
+          {sec === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}
+          {sec === 'messages' && <PatientMessages id={id} />}
+          {sec === 'missed' && <Section title={<>Missed <span className="font-normal text-muted">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
         </div>
       </div>
 
-      {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {paying && <TakePayment patientId={id} patientName={p.fullName} onClose={() => setPaying(false)} />}
       {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
