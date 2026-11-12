@@ -11,7 +11,7 @@ import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
 import { SkinMapPanel } from '../skinmap';
 import { TakePayment } from '../takePayment';
-import { Invoices, BillTotals } from '../invoices';
+import { BillingHistory } from '../billing';
 import { CoursesCard } from '../courses';
 import { FlagChips, CarefulBanner, FlagEditor, GuardianPick, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { DataTable, filterValue, pageOf, type FilterDef } from '../table';
@@ -185,7 +185,7 @@ function Timeline({ id }: { id: string }) {
             <CoursesCard patientId={id} patientName={p.fullName} />
           </>}
 
-          {tab === 'bills' && <><BillTotals patientId={id} charges={charges} payments={t.data.payments} duePaise={outstandingPaise} canRefund={can(perms, 'payment.refund')} /><Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} /></>}
+          {tab === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}
           {tab === 'messages' && <PatientMessages id={id} />}
           {tab === 'missed' && <Section title={<>Missed <span className="text-muted font-normal">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
         </div>

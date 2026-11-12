@@ -22,6 +22,7 @@ type Badge = { n: number; warn?: boolean; hint: string };
 type Badges = Record<string, Badge | undefined>;
 export const NAV: NavItem[] = [
   { to: '/clinic', label: 'Clinic', icon: 'home', show: (c) => c('finance.read') },
+  { to: '/billing', label: 'Billing', icon: 'rupee', show: (c) => c('fees.see') && (c('payment.record') || c('finance.read')) },
   { to: '/accounts', label: 'Accounts', icon: 'wallet', show: (c) => c('finance.read') },
   { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
   { to: '/queue', label: 'Front desk', icon: 'queue', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },

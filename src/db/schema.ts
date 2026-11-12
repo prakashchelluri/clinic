@@ -444,7 +444,15 @@ export const charge = pgTable('charge', {
   courseId: uuid('course_id'),            // a sitting of a procedure course
   sessionId: uuid('session_id'),          // the sitting this invoice came from (one invoice per sitting)
   prepaid: boolean('prepaid').notNull().default(false), // paid from the course's advance
+  billId: uuid('bill_id'),                 // the invoice this line is on; a trigger makes a new numbered bill when none is given
 });
+
+// An invoice: one number, one or more lines (charges). Paid, due and refunded come from its lines' payments and its refunds.
+export const bill = pgTable('bill', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  invoiceNo: text('invoice_no').notNull(),
+}, (t) => [uniqueIndex('bill_no').on(t.tenantId, t.invoiceNo), index('bill_patient').on(t.tenantId, t.patientId)]);
 
 export const payment = pgTable('payment', {
   ...tenantCols,
@@ -459,6 +467,7 @@ export const payment = pgTable('payment', {
   settledAt: ts('settled_at'),           // EMI: when the lender's money reached the bank; null = awaiting settlement
   feePaise: integer('fee_paise'),        // EMI: what the lender kept
   advance: boolean('advance').notNull().default(false), // the patient's advance: + money in, − used on a bill (method 'advance') or given back
+  billId: uuid('bill_id'),               // a refund of this invoice (negative, no charge), so the lines' dues never grow back
 
   receivedBy: uuid('received_by').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
@@ -702,7 +711,7 @@ export const domainEvent = pgTable('domain_event', {
 
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
-  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'callback', 'quote', 'day_close', 'charge', 'payment',
+  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'bill', 'callback', 'quote', 'day_close', 'charge', 'payment',
   'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'body_pin', 'lab_result',
 ];
 

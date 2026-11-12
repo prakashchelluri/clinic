@@ -27,6 +27,7 @@ import { Platform } from './pages/Platform';
 import { AuditLog } from './pages/Privacy';
 import { Expenses } from './pages/Expenses';
 import { Accounts } from './pages/Accounts';
+import { Billing } from './billing';
 import { Appointments } from './pages/Bookings';
 import { PatientLink } from './pages/PatientLink';
 import { Display } from './pages/Display';
@@ -64,6 +65,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/encounter/:id" element={<EncounterById />} />
             <Route path="/worklist" element={<Worklist />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/billing" element={<Billing />} />
             <Route path="/tests" element={<TestReports />} />
             <Route path="/calls" element={<Calls />} />
             <Route path="/followups" element={<Moved to="/calls" />} />

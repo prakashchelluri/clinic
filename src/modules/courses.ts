@@ -81,13 +81,14 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.name) : null;
   const what = `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}`;
   // the advance pays what it can; a partly covered sitting gets two charges: the part from the advance (paid) and the balance (due)
-  const fromAdvance = Math.min(amount, st.unusedPaise);
+  const fromAdvance = Math.min(amount, st.unusedPaise); let billId: string | undefined; // both parts of one sitting are one invoice
   if (fromAdvance > 0) {
     const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: fromAdvance < amount ? `${what} (from advance)` : what, amountPaise: fromAdvance, courseId: c.id, sessionId: ps.id, prepaid: true, status: 'paid' }).returning();
+    billId = row.billId ?? undefined;
     await emit(tx, ctx, 'course.sitting_drawn', 'charge', row.id, { courseId: c.id, amountPaise: fromAdvance });
   }
   if (amount > fromAdvance) {
-    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: fromAdvance ? `${what} (balance)` : what, amountPaise: amount - fromAdvance, courseId: c.id, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, billId, description: fromAdvance ? `${what} (balance)` : what, amountPaise: amount - fromAdvance, courseId: c.id, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
     await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: c.id, amountPaise: amount - fromAdvance });
   }
 }

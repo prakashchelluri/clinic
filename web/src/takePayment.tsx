@@ -56,21 +56,22 @@ function DiscountBox({ v, unit, onV, onUnit, label, disabled }: { v: string; uni
  * up to four payment modes; part payment leaves the rest due. Prices come from the price list: a reduction is a discount,
  * and above the clinic limit (or from someone without the discount permission) it waits for an approver.
  */
-export function TakePayment({ patientId, patientName, ahead, onClose }: { patientId: string; patientName: string; ahead?: { recommendationId: string }; onClose: () => void }) {
+export function TakePayment({ patientId, patientName, ahead, onlyBill, onClose }: { patientId: string; patientName: string; ahead?: { recommendationId: string }; onlyBill?: string; onClose: () => void }) {
   const { cfg, perms } = useOutletContext<any>();
   const t = useQuery({ queryKey: ['timeline', patientId], queryFn: () => get(`/patients/${patientId}/timeline`) });
   const cs = useQuery({ queryKey: ['courses', patientId], queryFn: () => get(`/courses?patientId=${patientId}`) });
   const asks = useQuery({ queryKey: ['discount-asks', patientId], queryFn: () => get(`/discount-asks?patientId=${patientId}`) });
   const adv = useQuery({ queryKey: ['advance', patientId], queryFn: () => get(`/patients/${patientId}/advance`) });
-  const ready = t.data && cs.data && asks.data && adv.data;
+  const bl = useQuery({ queryKey: ['bills', 'patient', patientId], queryFn: () => get(`/patients/${patientId}/bills`) });
+  const ready = t.data && cs.data && asks.data && adv.data && bl.data;
   return (
     <Modal title="Add bill / payment" subtitle={`${patientName} · prices from the clinic price list, GST included`} onClose={onClose} width="max-w-6xl">
-      {!ready ? <div className="text-sm text-muted">Loading…</div> : <BillForm patientId={patientId} patientName={patientName} ahead={ahead} tl={t.data} courses={cs.data} asks={asks.data} advPaise={adv.data.balancePaise} cfg={cfg} perms={perms} onClose={onClose} />}
+      {!ready ? <div className="text-sm text-muted">Loading…</div> : <BillForm patientId={patientId} patientName={patientName} ahead={ahead} onlyBill={onlyBill} invoiceNo={Object.fromEntries((bl.data?.bills ?? []).map((b: any) => [b.id, b.invoiceNo]))} tl={t.data} courses={cs.data} asks={asks.data} advPaise={adv.data.balancePaise} cfg={cfg} perms={perms} onClose={onClose} />}
     </Modal>
   );
 }
 
-function BillForm({ patientId, patientName, ahead, tl, courses, asks, advPaise, cfg, perms, onClose }: { patientId: string; patientName: string; ahead?: { recommendationId: string }; tl: any; courses: any[]; asks: any[]; advPaise: number; cfg: any; perms: string[]; onClose: () => void }) {
+function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, courses, asks, advPaise, cfg, perms, onClose }: { patientId: string; patientName: string; ahead?: { recommendationId: string }; onlyBill?: string; invoiceNo: Record<string, string>; tl: any; courses: any[]; asks: any[]; advPaise: number; cfg: any; perms: string[]; onClose: () => void }) {
   const waiting = useMemo(() => { const m = new Map<string, number>(); for (const a of asks.filter((x) => x.status === 'pending')) for (const l of a.lines) m.set(l.chargeId ?? l.courseId, (m.get(l.chargeId ?? l.courseId) ?? 0) + l.offPaise); return m; }, [asks]);
   const paidOn = (id: string) => tl.payments.filter((p: any) => p.chargeId === id).reduce((s: number, p: any) => s + p.amountPaise, 0);
   const procs: any[] = (cfg?.procedures ?? []).filter((p: any) => p.pricePaise > 0);
@@ -100,10 +101,10 @@ function BillForm({ patientId, patientName, ahead, tl, courses, asks, advPaise, 
       const paid = paidOn(c.id); const owing = c.amountPaise - paid - (waiting.get(c.id) ?? 0);
       if (owing <= 0) return null;
       const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 ? 'Part paid: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
-      return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: true, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
+      return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
     }).filter(Boolean);
     const a = ahead ? aheadLine(ahead.recommendationId) : null;
-    return a ? [...due.map((l) => ({ ...l, on: false })), a] : due;
+    return a ? [...due.map((l) => ({ ...l, on: false })), a] : onlyBill ? [...due.filter((l) => l.on), ...due.filter((l) => !l.on)] : due;
   });
   const [xv, setXv] = useState(''); const [xUnit, setXUnit] = useState<Unit>('pct'); const [why, setWhy] = useState('');
   const [parts, setParts] = useState<Part[]>([{ method: 'upi', amount: '', reference: '', lender: '' }]);

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, ilike, gte, lte, lt, or, inArray, gt, isNull } from 'drizzle-orm';
-import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, tenant, practitioner, stockBatch, message, type SaleLine } from '../db/schema.js';
+import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, bill, tenant, practitioner, stockBatch, message, type SaleLine } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
@@ -344,7 +344,8 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
   const when = body.at ?? new Date().toISOString();
   const n = await nextNumber(tx, t, 'pharmacy_invoice', 'tenant');
   const invoiceNo = `PH-${String(n).padStart(5, '0')}`;
-  const [ch] = await tx.insert(charge).values({ tenantId: t, patientId: pid, description: `Pharmacy · ${body.encounterId ? 'Prescription' : 'Counter sale'} · ${invoiceNo}`, amountPaise: total, taxRateBp: 0, status: 'paid', createdAt: when }).returning();
+  const [pb] = await tx.insert(bill).values({ tenantId: t, patientId: pid, invoiceNo, createdAt: when }).returning(); // the pharmacy's own number is the invoice number
+  const [ch] = await tx.insert(charge).values({ billId: pb.id, tenantId: t, patientId: pid, description: `Pharmacy · ${body.encounterId ? 'Prescription' : 'Counter sale'} · ${invoiceNo}`, amountPaise: total, taxRateBp: 0, status: 'paid', createdAt: when }).returning();
   for (const p of pays) await tx.insert(payment).values({ tenantId: t, patientId: pid, chargeId: ch.id, amountPaise: p.amountPaise, method: p.method, reference: p.method === 'cash' ? null : p.reference, receivedBy: a.userId, receivedAt: when, createdAt: when });
   const method = pays.length > 1 ? 'split' : pays[0].method;
   const [sale] = await tx.insert(pharmacySale).values({ tenantId: t, invoiceNo, patientId: pid, chargeId: ch.id, encounterId: body.encounterId ?? null, items: lines, grossPaise: gross, discountPaise: body.discountPaise, gstPaise: gst, totalPaise: total,

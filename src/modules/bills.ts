@@ -125,9 +125,10 @@ export function billRoutes(app: FastifyInstance) {
     const ask = off > 0 && (!can(req.perms, 'discount.give') || (pct > cap && !can(req.perms, 'discount.approve')));
 
     // new items become invoices; a discount that may be given now comes off at once
+    let newBill: string | undefined; // everything added on this screen is one invoice
     for (const i of items) if (i.isNew) {
-      const [row] = await tx.insert(charge).values({ tenantId: t, patientId: b.patientId, description: i.what, amountPaise: i.gross, taxRateBp: i.tax ?? 0, status: 'due' }).returning();
-      i.chargeId = row.id; i.at = row.createdAt;
+      const [row] = await tx.insert(charge).values({ billId: newBill, tenantId: t, patientId: b.patientId, description: i.what, amountPaise: i.gross, taxRateBp: i.tax ?? 0, status: 'due' }).returning();
+      i.chargeId = row.id; i.at = row.createdAt; newBill = row.billId ?? undefined;
     }
     let askId: string | null = null;
     if (off > 0 && !ask) {
@@ -178,9 +179,6 @@ export function billRoutes(app: FastifyInstance) {
     if (total) await emit(tx, ctx, 'payment.recorded', 'patient', b.patientId, { amountPaise: total, methods: b.parts.map((p) => p.method), receiptNo });
     return { ...out, repeated: false };
   });
-
-  /** What is left of the patient's advance. */
-  route(app, 'get', '/patients/:id/advance', 'fees.see', async (req, tx) => ({ balancePaise: await advanceBalance(tx, req.ctx.tenantId, (req.params as any).id) }));
 
   /** Give back what is left of the advance: money out today, with a reason, by someone who may refund. */
   route(app, 'post', '/patients/:id/advance/refund', 'payment.refund', async (req, tx) => {
