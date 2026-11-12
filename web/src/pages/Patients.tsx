@@ -109,7 +109,7 @@ function Timeline({ id }: { id: string }) {
     <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[272px_minmax(0,1fr)] lg:items-start">
       {/* left: who, then the sections of the record */}
       <nav aria-label="Patient record" className="flex flex-col gap-1 border-b border-line bg-sidebar p-3.5 lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto lg:border-b-0 lg:border-r">
-        <button type="button" className="btn btn-ghost btn-sm self-start" onClick={() => ((window.history.state?.idx ?? 0) > 0 ? nav(-1) : nav('/patients'))}><Icon name="chevL" className="h-4 w-4" />Back</button>
+        <button type="button" className="btn mb-1 self-start" style={{ minHeight: 44, height: 44, padding: '0 18px', fontSize: 15 }} onClick={() => ((window.history.state?.idx ?? 0) > 0 ? nav(-1) : nav('/patients'))}><Icon name="chevL" className="h-5 w-5" />Back</button>
         <button type="button" className="flex w-full items-center gap-3 rounded-2xl bg-surface p-3 text-left shadow-[inset_0_0_0_1px_rgba(35,43,51,.08)] hover:bg-surface-2" aria-expanded={whoOpen} onClick={() => setWhoOpen(!whoOpen)}>
           <Avatar name={p.fullName} size="h-11 w-11 text-[14px]" />
           <span className="min-w-0 flex-1"><b className="block text-[16px] leading-tight [overflow-wrap:anywhere]">{p.fullName}</b><span className="text-[13px] text-muted">{[[p.ageYears, p.sex].filter(Boolean).join(' '), p.phone ?? 'no phone'].filter(Boolean).join(' · ')}</span></span>
