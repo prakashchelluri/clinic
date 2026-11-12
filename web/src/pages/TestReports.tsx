@@ -32,38 +32,35 @@ async function prepare(file: File): Promise<{ title: string; mime: string; dataB
   return { title: file.name.replace(/\.\w+$/, '') + '.jpg', mime: 'image/jpeg', dataBase64: c.toDataURL('image/jpeg', 0.85) };
 }
 
-/** The receptionist's report: pick or photograph the pages, say which tests they are for, save. Several tests can share one report. */
-/** inVisit: added at check-in, the patient is about to see the doctor with these reports, so nothing is sent ahead. */
+/** The result for one test: photograph or pick its pages, and/or type its values, save. One test per form, so it is always
+ *  clear which pages and values belong to which test (a lab PDF covering two tests is added under each).
+ *  inVisit: added at check-in, the patient is about to see the doctor with it, so nothing is sent ahead. */
 export function ReportDialog({ order, testId, onClose, inVisit }: { order: Order; testId: string; onClose: () => void; inVisit?: boolean }) {
-  const open = order.tests.filter((t) => !t.receivedAt);
-  const [ids, setIds] = useState<string[]>([testId]); const [files, setFiles] = useState<File[]>([]); const [note, setNote] = useState('');
-  // the values asked for under each test: its usual ones already named (CBC: Hb, WBC, platelets…), plus any the desk adds
-  const [vals, setVals] = useState<Record<string, LabDraft[]>>({}); const { cfg } = useOutletContext<any>();
-  const rowsFor = (t: Test): LabDraft[] => vals[t.id] ?? ((t.params ?? []).length ? t.params : [t.name]).map((n) => ({ test: n, value: '', note: '' }));
-  const setRow = (t: Test, i: number, p: Partial<LabDraft>) => setVals({ ...vals, [t.id]: rowsFor(t).map((r, j) => (j === i ? { ...r, ...p } : r)) });
-  const ticked = open.filter((t) => ids.includes(t.id));
+  const t = order.tests.find((x) => x.id === testId)!;
+  const rest = order.tests.filter((x) => !x.receivedAt && x.id !== testId); // still to come after this one
+  const [files, setFiles] = useState<File[]>([]); const [note, setNote] = useState('');
+  // the values asked for under the test: its usual ones already named (CBC: Hb, WBC, platelets…), plus any the desk adds
+  const { cfg } = useOutletContext<any>();
+  const [rows, setRows] = useState<LabDraft[]>(() => ((t.params ?? []).length ? t.params : [t.name]).map((n) => ({ test: n, value: '', note: '' })));
+  const setRow = (i: number, p: Partial<LabDraft>) => setRows(rows.map((r, j) => (j === i ? { ...r, ...p } : r)));
   const input = useRef<HTMLInputElement>(null);
-  // tests not in this report: wait for them, or send what is in to the doctor now (the rest become an order of their own)
-  const rest = open.filter((t) => !ids.includes(t.id));
   const save = useMutation({
-    mutationFn: async (send: boolean) => {
+    mutationFn: async () => {
       let firstDoc: string | null = null;
-      for (const f of files) { const x = await prepare(f); const d: any = await post('/documents', { patientId: order.patient.id, encounterId: order.encounterId, recommendationIds: ids, kind: 'report', note: note.trim() || undefined, ...x }); firstDoc ??= d?.id ?? null; }
+      for (const f of files) { const x = await prepare(f); const d: any = await post('/documents', { patientId: order.patient.id, encounterId: order.encounterId, recommendationIds: [t.id], kind: 'report', note: note.trim() || undefined, ...x }); firstDoc ??= d?.id ?? null; }
       // the numbers the doctor will compare, typed from the page in hand; the pages are saved either way
-      let saved = 0; for (const t of ticked) saved += (await saveLabValues({ patientId: order.patient.id, encounterId: order.encounterId, recommendationId: t.id, documentId: firstDoc, rows: rowsFor(t) })).length;
-      // values with no file (read out on the phone, a WhatsApp text): the values mark the tests received
-      if (!files.length) await post('/orders/received', { ids: ticked.map((t) => t.id), note: note.trim() || undefined });
-      if (send && rest.length) await post('/orders/split', { ids: rest.map((t) => t.id) });
-      return { saved, sent: !inVisit && (send || !rest.length) };
+      const saved = (await saveLabValues({ patientId: order.patient.id, encounterId: order.encounterId, recommendationId: t.id, documentId: firstDoc, rows })).length;
+      // values with no file (read out on the phone, a WhatsApp text): the values mark the test received
+      if (!files.length) await post('/orders/received', { ids: [t.id], note: note.trim() || undefined });
+      return saved;
     },
-    onSuccess: ({ saved: n, sent }) => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['documents'] }); toast(`Saved for ${ids.map((i) => order.tests.find((t) => t.id === i)?.name).join(', ')}${n ? ` · ${n} value${n === 1 ? '' : 's'}` : ''}${sent ? ' · sent to the doctor' : ''}`); onClose(); },
+    onSuccess: (n: number) => { qc.invalidateQueries({ queryKey: ['orders'] }); qc.invalidateQueries({ queryKey: ['documents'] }); toast(`${t.name} saved${n ? ` · ${n} value${n === 1 ? '' : 's'}` : ''}${!rest.length && !inVisit ? ' · sent to the doctor' : ''}`); onClose(); },
     onError: (e: any) => toast(e?.body?.code === 'UNSUPPORTED_TYPE' ? 'Only JPG, PNG, WebP and PDF files can be added.' : e?.body?.code === 'TOO_LARGE' ? 'That file is too large (10 MB at most).' : errText(e), 'err'),
   });
-  // a file, or typed values for every ticked test (values alone are fine: labs often send them on WhatsApp)
-  const typed = (t: Test) => rowsFor(t).some((r) => r.test.trim() && r.value.trim());
-  const blocker = !ids.length ? 'Pick which tests this is for' : !files.length && !ticked.every(typed) ? 'Add a page, or type the values for each test' : '';
+  // a file, or at least one typed value (values alone are fine: labs often send them on WhatsApp)
+  const blocker = !files.length && !rows.some((r) => r.test.trim() && r.value.trim()) ? 'Add a page, or type the values' : '';
   return (
-    <Drawer title={`Report for ${order.patient.fullName}`} subtitle={`Order ${order.orderNo} · ${order.tests.map((t) => t.name).join(', ')}`} onClose={onClose} width="max-w-xl">
+    <Drawer title={`${t.name} · ${order.patient.fullName}`} subtitle={`Order ${order.orderNo}${rest.length ? ` · still to come: ${rest.map((x) => x.name).join(', ')}` : ''}`} onClose={onClose} width="max-w-xl">
       <div className="space-y-4">
         <div>
           <span className="label">Pages</span>
@@ -72,30 +69,26 @@ export function ReportDialog({ order, testId, onClose, inVisit }: { order: Order
             <button type="button" className="btn !min-h-12" onClick={() => input.current?.click()}><Icon name="plus" className="h-4 w-4" />{files.length ? 'Another page' : 'Photo or file'}</button>
           </div>
           <input ref={input} type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { setFiles([...files, ...Array.from(e.target.files ?? [])].slice(0, 12)); e.target.value = ''; }} />
-          <div className="mt-1.5 text-xs text-muted">A PDF or photo from WhatsApp, or take a photo with the camera. JPG, PNG, WebP or PDF. No file? Type the values below.</div>
+          <div className="mt-1.5 text-xs text-muted">The {t.name} report: a PDF or photo from WhatsApp, or a photo with the camera. JPG, PNG, WebP or PDF. No file? Type the values below.</div>
         </div>
-        <div><span className="label">Which tests is this for</span><div className="flex flex-wrap gap-1.5">{open.map((t) => <button key={t.id} type="button" aria-pressed={ids.includes(t.id)} className={`toggle-opt !py-2 ${ids.includes(t.id) ? 'on' : ''}`} onClick={() => setIds(ids.includes(t.id) ? ids.filter((x) => x !== t.id) : [...ids, t.id])}>{t.name}</button>)}</div></div>
-        {ticked.length > 0 && <div>
+        <div>
           <span className="label">Values <span className="font-normal text-muted">· type what the report says; leave a box empty to skip it</span></span>
           <datalist id="lab-params">{(cfg?.labParams ?? []).map((p: any) => <option key={p.name} value={p.name} />)}</datalist>
-          <div className="space-y-3">{ticked.map((t) => (
-            <div key={t.id} className="rounded-2xl bg-paper-2/60 p-3">
-              <div className="mb-1.5 text-[14px] font-semibold">{t.name}</div>
-              {rowsFor(t).map((r, i) => { const p = findParam(r.test, cfg?.labParams ?? []); const fl = flagFor(r.value, p); const named = i < ((t.params ?? []).length || 1);
-                return (
-                  <div key={i} className="mt-1.5 grid grid-cols-[minmax(0,1.4fr)_130px_minmax(0,1fr)] items-center gap-2">
-                    {named ? <span className="truncate text-[13.5px] text-ink-2">{r.test}</span>
-                      : <input list="lab-params" aria-label={`Value name under ${t.name}`} className="input !py-1.5" placeholder="Name, e.g. Vitamin D" value={r.test} onChange={(e) => setRow(t, i, { test: e.target.value })} />}
-                    <input aria-label={`${r.test || 'Value'} for ${t.name}`} className={`input !py-1.5 ${isOut(fl) ? '!text-rose !shadow-[inset_0_0_0_1.5px_var(--color-rose)]' : ''}`} placeholder={p?.expect ? p.expect : ''} value={r.value} onChange={(e) => setRow(t, i, { value: e.target.value })} />
-                    <span className="truncate text-[12px] text-muted">{[p?.unit, rangeText(p)].filter(Boolean).join(' · ')}{fl && fl !== 'normal' && <b className="ml-1.5 text-rose">{fl}</b>}</span>
-                  </div>); })}
-              <button type="button" className="btn btn-ghost btn-sm mt-1.5" onClick={() => setVals({ ...vals, [t.id]: [...rowsFor(t), { test: '', value: '', note: '' }] })}><Icon name="plus" className="h-3.5 w-3.5" />Another value</button>
-            </div>))}</div>
-        </div>}
+          <div className="rounded-2xl bg-paper-2/60 p-3">
+            {rows.map((r, i) => { const p = findParam(r.test, cfg?.labParams ?? []); const fl = flagFor(r.value, p); const named = i < ((t.params ?? []).length || 1);
+              return (
+                <div key={i} className="mt-1.5 grid grid-cols-[minmax(0,1.4fr)_130px_minmax(0,1fr)] items-center gap-2 first:mt-0">
+                  {named ? <span className="truncate text-[13.5px] text-ink-2">{r.test}</span>
+                    : <input list="lab-params" aria-label={`Value name under ${t.name}`} className="input !py-1.5" placeholder="Name, e.g. Vitamin D" value={r.test} onChange={(e) => setRow(i, { test: e.target.value })} />}
+                  <input aria-label={`${r.test || 'Value'} for ${t.name}`} className={`input !py-1.5 ${isOut(fl) ? '!text-rose !shadow-[inset_0_0_0_1.5px_var(--color-rose)]' : ''}`} placeholder={p?.expect ? p.expect : ''} value={r.value} onChange={(e) => setRow(i, { value: e.target.value })} />
+                  <span className="truncate text-[12px] text-muted">{[p?.unit, rangeText(p)].filter(Boolean).join(' · ')}{fl && fl !== 'normal' && <b className="ml-1.5 text-rose">{fl}</b>}</span>
+                </div>); })}
+            <button type="button" className="btn btn-ghost btn-sm mt-1.5" onClick={() => setRows([...rows, { test: '', value: '', note: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Another value</button>
+          </div>
+        </div>
         <div><label className="label" htmlFor="rep-note">Note (optional)</label><input id="rep-note" className="input" maxLength={200} placeholder="Anything the doctor should know" value={note} onChange={(e) => setNote(e.target.value)} /></div>
-        <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker || (inVisit ? 'The doctor goes over it in the consultation' : rest.length ? `${rest.map((t) => t.name).join(', ')} still to come. Wait for ${rest.length === 1 ? 'it' : 'them'}, or send what is in now.` : 'Goes to the doctor’s Today, under Results to review')}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          {rest.length > 0 && !inVisit && <button className="btn" disabled={save.isPending || !!blocker} onClick={() => save.mutate(false)}>Save, wait for the rest</button>}
-          <button className="btn btn-primary" disabled={save.isPending || !!blocker} onClick={() => save.mutate(!inVisit)}><Icon name="check" />{save.isPending ? 'Saving…' : inVisit ? 'Save report' : 'Save and send to the doctor'}</button></div>
+        <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker || (inVisit ? 'The doctor goes over it in the consultation' : rest.length ? 'The doctor sees the order when every result is in' : 'The last result: the order goes to the doctor for review')}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={save.isPending || !!blocker} onClick={() => save.mutate()}><Icon name="check" />{save.isPending ? 'Saving…' : rest.length || inVisit ? 'Save result' : 'Save and send to the doctor'}</button></div>
       </div>
     </Drawer>
   );
