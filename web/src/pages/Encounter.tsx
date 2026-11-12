@@ -7,7 +7,7 @@ import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon } from 'lucide-react';
 import { Avatar, Chip, Floating, Icon, Modal, Segmented, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
-import { EncounterModal, DocList, UploadButton, asList, joinList } from '../encounterDetail';
+import { EncounterModal, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
 import { parseRxLine, qtyFor, ageText } from '../rxLine';
 import { allergyHit, rxProblems, needsReason, pregnancyFlag, firstName, type Override } from '../rxSafety';
@@ -18,6 +18,7 @@ import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, t
 import { HistoryChips } from '../historyChips';
 import { VitalsCard, vitalFields, vitalsText } from '../vitals';
 import { LabResultsCard, ReportLink, reportFor } from '../labs';
+import { ReportList } from '../labHistory';
 import { BodyMap, SkinMapPanel, siteFor, usePins } from '../skinmap';
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
@@ -1002,7 +1003,7 @@ export function Encounter() {
       </div>}
       {tab === 'docs' && <div className="card anim-fade-up">
         <div className="mb-2 flex items-center gap-2"><span className="text-xs text-muted">Lab reports and letters</span><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => qc.invalidateQueries({ queryKey: ['documents', p.id] })} />}</div>
-        {myDocs.length === 0 ? <div className="text-xs text-muted">No reports yet.</div> : <DocList docs={myDocs.slice(0, 12)} />}
+        {myDocs.every((d: any) => d.kind === 'photo') ? <div className="text-xs text-muted">No reports yet.</div> : <ReportList docs={myDocs.filter((d: any) => d.kind !== 'photo')} patientId={p.id} encounterId={readOnly ? undefined : id} who={p.fullName} />}
       </div>}
       {tab === 'photos' && <div className="card anim-fade-up">
         {thenNow && <button className="mb-2 grid w-full max-w-md grid-cols-2 gap-1.5" onClick={() => setCompare(thenNow)} aria-label="Compare first and latest photo">{thenNow.map((x, k) => <span key={x.id} className="relative block aspect-square overflow-hidden rounded-lg bg-paper-2"><img src={`/api/documents/${x.id}/file`} alt={`${k ? 'Latest' : 'First'} ${x.area ?? ''}`} className="h-full w-full object-cover" /><span className="absolute bottom-1 left-1 rounded-md bg-black/55 px-1.5 text-[10px] font-semibold text-white">{fmtDate(x.takenAt)}</span></span>)}</button>}

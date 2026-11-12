@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { api, qc, errText } from './api';
 import { Icon, Modal, Skeleton, ask, fmtDate, toast } from './ui';
+import { ReportValues } from './labHistory';
 
 export type VDoc = { id: string; title: string; mime: string; kind?: string; createdAt?: string; sizeBytes?: number };
-type View = { docs: VDoc[]; index?: number; who?: string; canDelete?: boolean; onOpen?: (d: VDoc) => void };
+/** patientId: show the values typed from a report beside it; encounterId: and let the doctor copy them into this consultation. */
+type View = { docs: VDoc[]; index?: number; who?: string; canDelete?: boolean; onOpen?: (d: VDoc) => void; patientId?: string; encounterId?: string };
 
 let current: View | null = null; const subs = new Set<() => void>();
 const set = (v: View | null) => { current = v; subs.forEach((s) => s()); };
@@ -45,6 +47,7 @@ function Viewer({ v }: { v: View }) {
   if (!d) return null;
 
   const isImg = d.mime.startsWith('image/');
+  const panel = !!v.patientId && d.kind !== 'photo';
   const print = () => {
     if (!url) return;
     if (!isImg) { frame.current?.contentWindow?.focus(); frame.current?.contentWindow?.print(); return; }
@@ -63,6 +66,7 @@ function Viewer({ v }: { v: View }) {
 
   return (
     <Modal title={d.title} subtitle={sub} onClose={close} width="max-w-5xl">
+      <div className={panel ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]' : ''}>
       <div className="relative">
         <div className="min-h-[200px] overflow-auto rounded-2xl bg-[#6b6862]/90" style={{ height: 'min(68vh, 720px)' }}>
           {err ? <div className="grid h-full place-items-center p-6 text-center text-sm text-white">This file could not be opened. It may have been removed.</div>
@@ -73,6 +77,8 @@ function Viewer({ v }: { v: View }) {
         {list.length > 1 && <>
           <button aria-label="Previous document" disabled={i === 0} onClick={() => go(-1)} className="absolute left-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-surface/95 text-ink text-lg shadow-lg disabled:opacity-30"><Icon name="chevL" /></button>
           <button aria-label="Next document" disabled={i === list.length - 1} onClick={() => go(1)} className="absolute right-3 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full bg-surface/95 text-ink text-lg shadow-lg disabled:opacity-30"><Icon name="chevR" /></button></>}
+      </div>
+      {panel && <div className="min-h-0 overflow-hidden rounded-2xl bg-paper-2/60" style={{ height: 'min(68vh, 720px)' }}><ReportValues key={d.id} doc={d} patientId={v.patientId!} encounterId={v.encounterId} /></div>}
       </div>
       {list.length > 1 && <div className="mt-3 flex flex-wrap items-center gap-1.5"><span className="text-xs text-muted">Other documents</span>{list.map((x, j) => <button key={x.id} className={`toggle-opt !py-1 !text-xs ${j === i ? 'on' : ''}`} onClick={() => setI(j)}>{x.title.length > 26 ? x.title.slice(0, 24) + '…' : x.title}</button>)}</div>}
       <div className="modal-foot">

@@ -1,15 +1,16 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, qc, today, errText } from './api';
 import { FileText } from 'lucide-react';
-import { Chip, Floating, Icon, Modal, fmtDate, toast } from './ui';
+import { Chip, Icon, Modal, fmtDate, toast } from './ui';
 import { openViewer } from './viewer';
+import { LabHistoryDrawer, dedupe } from './labHistory';
 
 /** The report file behind a result or an ordered test: the one the value was typed from, else one uploaded against that test. */
 export const reportFor = (docs: any[], documentId: string | null | undefined, recommendationId: string | null | undefined) =>
   (documentId ? docs.find((d) => d.id === documentId) : null) ?? (recommendationId ? docs.find((d) => d.kind !== 'photo' && (d.recommendationId === recommendationId || (d.recommendationIds ?? []).includes(recommendationId))) : null) ?? null;
 /** Opens the report (PDF or image) over the page, in the app's own viewer: the Rxpad stays where it was. */
-export const ReportLink = ({ doc, label = 'View PDF' }: { doc: any; label?: string }) => <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px]" title={doc.title ?? 'Report'} onClick={() => openViewer({ docs: [doc] })}><FileText className="h-3.5 w-3.5" aria-hidden />{/pdf/i.test(doc.mime ?? '') ? label : 'View report'}</button>;
+export const ReportLink = ({ doc, label = 'View PDF', patientId, encounterId }: { doc: any; label?: string; patientId?: string; encounterId?: string }) => <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px]" title={doc.title ?? 'Report'} onClick={() => openViewer({ docs: [doc], patientId, encounterId })}><FileText className="h-3.5 w-3.5" aria-hidden />{/pdf/i.test(doc.mime ?? '') ? label : 'View report'}</button>;
 
 /** Lab values typed from a report: the editor the receptionist uses, the card the doctor sees, and the per-test history. */
 export type LabParam = { name: string; unit?: string; low?: number; high?: number; expect?: string; aliases?: string[] };
@@ -64,27 +65,16 @@ export async function saveLabValues(b: { patientId: string; encounterId?: string
   return rows as LabRow[];
 }
 
-/** All values of one test, newest on the right, out-of-range in colour. */
-function History({ test, rows }: { test: string; rows: LabRow[] }) {
-  const xs = [...rows].filter((r) => r.test === test).sort((a, b) => a.takenOn.localeCompare(b.takenOn));
-  return (
-    <div className="p-2">
-      <div className="mb-2 text-[13px] font-semibold">{test} <span className="font-normal text-muted">· {xs.length} result{xs.length === 1 ? '' : 's'}{xs[0]?.unit ? ` · ${xs[0].unit}` : ''}{rangeText(xs[0]) ? ` · normal ${rangeText(xs[0])}` : ''}</span></div>
-      <div className="flex flex-wrap gap-x-5 gap-y-2 text-[13px]">{xs.map((r) => <div key={r.id}><div className="text-xs text-muted">{fmtDate(r.takenOn)}</div><div className={`font-semibold ${out(r.flag) ? 'text-rose' : ''}`}>{r.value}</div>{r.note && <div className="text-xs text-muted">{r.note}</div>}</div>)}</div>
-    </div>
-  );
-}
 
 /** The pad's Lab results card body: this consultation's values first, else the latest of each test; earlier values beside; history on tap; the doctor can correct a value or add more. */
 export function LabResultsCard({ patientId, encounterId, recIds, params, readOnly, printOut, onPrintOut, docs = [] }: { patientId: string; encounterId: string; recIds: string[]; params: LabParam[]; readOnly: boolean; printOut: boolean; onPrintOut: (v: boolean) => void; docs?: any[] }) {
   const q = useLabResults(patientId);
-  const [hist, setHist] = useState<string | null>(null); const anchor = useRef<HTMLButtonElement>(null);
-  const [adding, setAdding] = useState(false); const [draft, setDraft] = useState<LabDraft[]>([]);
+  const [adding, setAdding] = useState(false); const [draft, setDraft] = useState<LabDraft[]>([]); const [history, setHistory] = useState<string | null>(null); // '' the whole table, a name that test's trend
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
   const all = q.data ?? [];
   const mine = all.filter((r) => r.encounterId === encounterId || (r.recommendationId && recIds.includes(r.recommendationId)));
   const shown = (mine.length ? mine : Object.values(all.reduce((m, r) => (m[r.test] && m[r.test].takenOn >= r.takenOn ? m : { ...m, [r.test]: r }), {} as Record<string, LabRow>))).sort((a, b) => Number(out(b.flag)) - Number(out(a.flag)) || a.test.localeCompare(b.test));
-  const earlier = (r: LabRow) => all.filter((x) => x.test === r.test && x.takenOn < r.takenOn).sort((a, b) => a.takenOn.localeCompare(b.takenOn)).slice(-3);
+  const earlier = (r: LabRow) => dedupe(all).filter((x) => x.test === r.test && x.takenOn < r.takenOn).sort((a, b) => a.takenOn.localeCompare(b.takenOn)).slice(-3);
   const fix = useMutation({ mutationFn: (x: { id: string; value: string }) => patch(`/lab-results/${x.id}`, { value: x.value }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['labs', patientId] }); setEditing(null); }, onError: (e) => toast(errText(e), 'err') });
   const add = useMutation({ mutationFn: () => saveLabValues({ patientId, encounterId, rows: draft }), onSuccess: (rows) => { toast(rows.length ? `${rows.length} value${rows.length === 1 ? '' : 's'} saved` : 'Nothing to save', rows.length ? 'ok' : 'info'); setAdding(false); setDraft([]); }, onError: (e) => toast(errText(e), 'err') });
   return (
@@ -93,7 +83,8 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
         {shown.length > 0 && <span>{mine.length ? 'Values for this consultation' : 'Latest values on record'}</span>}
         {shown.length === 0 && <span>{q.isLoading ? 'Loading…' : 'No values yet.'}</span>}
         {shown.length > 0 && <label className="ml-auto inline-flex items-center gap-1.5 font-medium text-ink-2"><input type="checkbox" className="accent-ink" checked={printOut} disabled={readOnly} onChange={(e) => onPrintOut(e.target.checked)} />Print only out-of-range</label>}
-        {!readOnly && <button type="button" className={`btn btn-sm ${shown.length ? "" : "ml-auto"}`} onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add values</button>}
+        {all.length > 0 && <button type="button" className={`btn btn-sm ${shown.length ? '' : 'ml-auto'}`} onClick={() => setHistory('')}><Icon name="chart" className="h-3.5 w-3.5" />See history</button>}
+        {!readOnly && <button type="button" className={`btn btn-sm ${shown.length || all.length ? "" : "ml-auto"}`} onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add values</button>}
       </div>
       {q.isLoading || shown.length === 0 ? null : (
         <div className="grid grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_96px_28px] items-center gap-x-2 text-[13px]">
@@ -106,11 +97,11 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
               <span className="truncate border-t border-line py-2 text-xs text-muted">{r.unit ?? ''}</span>
               <span className="truncate border-t border-line py-2 text-xs text-muted">{rangeText(r)}</span>
               <span className="truncate border-t border-line py-2 text-xs text-muted">{e.length ? e.map((x) => `${x.value} (${fmtDate(x.takenOn)})`).join(' → ') + ' → ' : 'first time'}{e.length ? <b className={out(r.flag) ? 'text-rose' : 'text-ink'}>{r.value}</b> : ''}</span>
-              <span className="border-t border-line py-1">{(() => { const d = reportFor(docs, r.documentId, r.recommendationId); return d ? <ReportLink doc={d} /> : <span className="text-xs text-muted">—</span>; })()}</span>
-              <span className="border-t border-line py-2"><button ref={hist === r.test ? anchor : undefined} type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`History of ${r.test}`} title="All results of this test" onClick={(ev) => { (anchor as any).current = ev.currentTarget; setHist(hist === r.test ? null : r.test); }}><Icon name="chart" className="h-3.5 w-3.5" /></button></span>
+              <span className="border-t border-line py-1">{(() => { const d = reportFor(docs, r.documentId, r.recommendationId); return d ? <ReportLink doc={d} patientId={patientId} encounterId={readOnly ? undefined : encounterId} /> : <span className="text-xs text-muted">—</span>; })()}</span>
+              <span className="border-t border-line py-2"><button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Trend of ${r.test}`} title="All results of this test" onClick={() => setHistory(r.test)}><Icon name="chart" className="h-3.5 w-3.5" /></button></span>
             </div>); })}
         </div>)}
-      <Floating anchor={anchor} open={!!hist} onClose={() => setHist(null)} width={420}>{hist && <History test={hist} rows={all} />}</Floating>
+      {history !== null && <LabHistoryDrawer patientId={patientId} docs={docs} test={history || undefined} onClose={() => setHistory(null)} />}
       {adding && <Modal title="Add lab values" subtitle="Typed from the report in hand. Units and ranges come from the clinic's list." onClose={() => setAdding(false)} width="max-w-2xl">
         <LabValuesEditor rows={draft} onChange={setDraft} params={params} />
         <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAdding(false)}>Cancel</button><button className="btn btn-primary" disabled={add.isPending || !draft.some((r) => r.test.trim() && r.value.trim())} onClick={() => add.mutate()}>Save values</button></div>

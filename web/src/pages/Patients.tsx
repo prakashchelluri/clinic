@@ -6,7 +6,8 @@ import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
-import { EncounterModal, DocList, UploadButton, joinList, rxState } from '../encounterDetail';
+import { EncounterModal, UploadButton, joinList, rxState } from '../encounterDetail';
+import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
 import { SkinMapPanel } from '../skinmap';
 import { TakePayment } from '../takePayment';
@@ -68,7 +69,7 @@ function Timeline({ id }: { id: string }) {
   const { perms } = useOutletContext<any>();
   const waitingTests = useQuery({ queryKey: ['worklist', 'investigation'], queryFn: () => get('/worklist?kind=investigation'), enabled: can(perms, 'worklist.read') });
   const pendingTests: any[] = (waitingTests.data ?? []).filter((r: any) => r.patient.id === id);
-  const [forTest, setForTest] = useState('');
+  const [forTest, setForTest] = useState(''); const [labHist, setLabHist] = useState(false);
   const [edit, setEdit] = useState<any>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const [flagging, setFlagging] = useState(false); const [tab, setTab] = useState<'visits' | 'photos' | 'reports' | 'plans' | 'bills' | 'messages' | 'missed'>('visits');
@@ -171,8 +172,9 @@ function Timeline({ id }: { id: string }) {
           </>}
 
           {tab === 'reports' && <Section title={<>Reports and files <span className="text-muted font-normal">· {reports.length}</span></>}
-            aside={can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}>
-            <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos.</div> : <DocList docs={reports} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
+            aside={<><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>{can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(e) => setForTest(e.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((t: any) => <option key={t.id} value={t.id}>For test: {t.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((t: any) => t.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</>}>
+            <div className="p-3">{reports.length === 0 ? <div className="text-sm text-muted p-1">Lab reports, scans and letters. Upload a PDF or a photo of the paper. Clinical photos live under Photos.</div> : <ReportList docs={reports} patientId={id} who={p.fullName} onDelete={can(perms, 'document.write') ? (d) => del.mutate(d) : undefined} />}</div>
+            {labHist && <LabHistoryDrawer patientId={id} docs={reports} onClose={() => setLabHist(false)} />}
           </Section>}
 
           {tab === 'plans' && <>
