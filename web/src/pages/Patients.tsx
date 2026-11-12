@@ -65,8 +65,8 @@ export function Patients() {
 type Sec = 'visits' | 'reports' | 'photos' | 'plans' | 'bills' | 'messages' | 'missed';
 const SEC_TITLE: Record<Sec, string> = { visits: 'Visit summary', reports: 'Test reports', photos: 'Photos & skin map', plans: 'Plans & sittings', bills: 'Bills & payments', messages: 'Messages', missed: 'Missed' };
 
-/** One patient (P-F): the person and the record's sections down the left, the section on the right under a band that holds
- *  only that section's actions. Visit summary = vitals by date and the history beside one visit at a time. */
+/** One patient: who they are on top, the record's parts as tabs below; a part's own actions sit beside the tabs. Visit summary =
+ *  vitals by date and the history beside one visit at a time. */
 function Timeline({ id }: { id: string }) {
   const nav = useNavigate();
   const t = useQuery({ queryKey: ['timeline', id], queryFn: () => get(`/patients/${id}/timeline`) });
@@ -77,7 +77,7 @@ function Timeline({ id }: { id: string }) {
   const [forTest, setForTest] = useState(''); const [labHist, setLabHist] = useState(false);
   const [edit, setEdit] = useState<any>(null);
   const [flagging, setFlagging] = useState(false); const [sec, setSec] = useState<Sec>('visits');
-  const [whoOpen, setWhoOpen] = useState(false); const [vi, setVi] = useState(0); // the visit shown, newest first
+  const [vi, setVi] = useState(0); // the visit shown, newest first
   const [paying, setPaying] = useState(false);
   const isOwner = (me?.roles ?? []).includes('owner'); const [merging, setMerging] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); }, onError: (e: any) => toast(errText(e), 'err') });
@@ -106,48 +106,34 @@ function Timeline({ id }: { id: string }) {
   const startEdit = () => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp });
   const Line = ({ label, children }: { label: string; children: React.ReactNode }) => <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className="text-[14px] font-semibold">{children}</div></div>;
   return (
-    <div className="grid min-h-dvh grid-cols-1 lg:grid-cols-[272px_minmax(0,1fr)] lg:items-start">
-      {/* left: who, then the sections of the record */}
-      <nav aria-label="Patient record" className="flex flex-col gap-1 border-b border-line bg-sidebar p-3.5 lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto lg:border-b-0 lg:border-r">
-        <button type="button" className="btn mb-1 self-start" style={{ minHeight: 44, height: 44, padding: '0 18px', fontSize: 15 }} onClick={() => ((window.history.state?.idx ?? 0) > 0 ? nav(-1) : nav('/patients'))}><Icon name="chevL" className="h-5 w-5" />Back</button>
-        <button type="button" className="flex w-full items-center gap-3 rounded-2xl bg-surface p-3 text-left shadow-[inset_0_0_0_1px_rgba(35,43,51,.08)] hover:bg-surface-2" aria-expanded={whoOpen} onClick={() => setWhoOpen(!whoOpen)}>
-          <Avatar name={p.fullName} size="h-11 w-11 text-[14px]" />
-          <span className="min-w-0 flex-1"><b className="block text-[16px] leading-tight [overflow-wrap:anywhere]">{p.fullName}</b><span className="text-[13px] text-muted">{[[p.ageYears, p.sex].filter(Boolean).join(' '), p.phone ?? 'no phone'].filter(Boolean).join(' · ')}</span></span>
-          <Icon name="chevR" className={`h-4 w-4 shrink-0 text-muted transition-transform ${whoOpen ? 'rotate-90' : ''}`} />
-        </button>
-        <CarefulBanner flags={p.flags} />
-        <div className="flex flex-wrap gap-1 px-1 pt-1"><FlagChips flags={{ ...p.flags, careful: undefined }} />{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.noWhatsapp && <Chip>No WhatsApp</Chip>}</div>
-        {whoOpen && <div className="flex flex-col gap-2.5 rounded-2xl bg-surface-2/50 p-3 anim-fade-up">
-          <Line label="Patient no.">{p.patientNo}</Line>
-          {p.dob && <Line label="Date of birth">{fmtDate(p.dob)}</Line>}
-          {(p.locality || p.language) && <Line label="Area · language">{[p.locality, p.language === 'te' ? 'Telugu' : p.language === 'hi' ? 'Hindi' : p.language === 'en' ? 'English' : null].filter(Boolean).join(' · ')}</Line>}
-          {(guardian || p.contactLabel || sharingPhone > 0) && <div className="text-[13px] text-ink-2">{guardian && <>Guardian: <button className="font-medium underline" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button>. </>}{p.contactLabel ? `Contact is ${p.contactLabel}. ` : ''}{sharingPhone > 0 ? `Phone shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}.` : ''}</div>}
-          {p.notes && <div className="text-[13px] text-ink-2">{p.notes}</div>}
-          <div className="flex flex-wrap gap-1.5">
-            {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit profile</button>}
-            {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
-            {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
+    <div className="space-y-4">
+      {/* who, how to reach them, and the record's few actions */}
+      <div className="card anim-fade-up">
+        <div className="flex flex-wrap items-center gap-4">
+          <Avatar name={p.fullName} size="h-12 w-12 text-[15px]" />
+          <div className="min-w-[240px] flex-1">
+            <h2 className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[22px] font-extrabold leading-tight [overflow-wrap:anywhere]">{p.fullName} <span className="text-[15px] font-medium text-muted">{[p.ageYears ? `${p.ageYears}` : '', p.sex ?? ''].filter(Boolean).join(' ')}</span><FlagChips flags={{ ...p.flags, careful: undefined }} />{p.referralCard && <Chip tone="sky">Special card</Chip>}{p.language && p.language !== 'en' && <Chip>{p.language === 'te' ? 'Telugu' : 'Hindi'}</Chip>}{p.noWhatsapp && <Chip>No WhatsApp messages</Chip>}</h2>
+            <div className="mt-1 text-sm text-muted">{[p.phone ?? 'no phone', p.patientNo, p.dob ? `born ${fmtDate(p.dob)}` : null, p.locality, visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}` : 'no visit yet'].filter(Boolean).join(' · ')}</div>
+            {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1 text-sm text-ink-2">{guardian && <>Guardian: <button className="font-medium underline" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
           </div>
-        </div>}
-        {outstandingPaise > 0 && <button type="button" className="mx-1 mt-1 rounded-xl bg-rose-soft px-3 py-2 text-left text-[13px] font-semibold text-rose" onClick={() => setSec('bills')}>Due {money(outstandingPaise)}</button>}
-        <div className="mt-2 flex flex-col gap-0.5">
-          {SECS.map(([k, n]) => <button key={k} type="button" aria-current={sec === k ? 'page' : undefined} onClick={() => setSec(k)}
-            className={`flex h-11 items-center gap-2 rounded-xl px-3 text-left text-[14.5px] font-semibold ${sec === k ? 'bg-clay-soft text-clay-ink shadow-[inset_3px_0_0_var(--color-clay)]' : 'text-ink-2 hover:bg-surface-2'}`}>
-            <span className="flex-1">{SEC_TITLE[k]}</span>{n !== undefined && <span className={`text-[12px] font-bold ${k === 'missed' ? 'text-rose' : 'text-muted'}`}>{n}</span>}</button>)}
+          {(outstandingPaise > 0 || can(perms, 'payment.record')) && <div className="flex items-center gap-2">{outstandingPaise > 0 && <button type="button" className="text-sm font-bold text-rose hover:underline" onClick={() => setSec('bills')}>Due {money(outstandingPaise)}</button>}{can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}</div>}
+          {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
+          {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
+          {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
         </div>
-        {can(perms, 'user.write') && <div className="mt-2 border-t border-line/70 px-1 pt-3"><SeenBy patientId={id} /></div>}
-      </nav>
+        <CarefulBanner flags={p.flags} />
+        {p.notes && <div className="mt-3 text-sm text-ink-2">{p.notes}</div>}
+        {can(perms, 'user.write') && <div className="mt-3 border-t border-line/70 pt-3"><SeenBy patientId={id} /></div>}
+      </div>
 
-      <div className="min-w-0">
-        {/* the band: where you are, and only this section's actions */}
-        <div className="flex flex-wrap items-center gap-2 bg-clay px-7 py-5" style={{ color: 'var(--color-paper)' }}>
-          <h2 className="min-w-[200px] flex-1 text-[22px] font-extrabold" style={{ color: 'var(--color-paper)' }}>{SEC_TITLE[sec]}</h2>
-          {sec === 'reports' && <><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>
-            {can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(ev) => setForTest(ev.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((x: any) => <option key={x.id} value={x.id}>For test: {x.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((x: any) => x.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</>}
-          {sec === 'bills' && can(perms, 'payment.record') && <button className="btn btn-sm" onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}
-        </div>
+      {/* the record's parts as the app's tabs; a part's own actions sit at the right of the row */}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <Tabs<Sec> className="min-w-0 flex-1" value={sec} onChange={setSec} options={SECS.map(([k, n]) => ({ value: k, label: SEC_TITLE[k], count: n }))} />
+        {sec === 'reports' && <div className="flex flex-wrap items-center gap-2 pb-2"><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>
+          {can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(ev) => setForTest(ev.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((x: any) => <option key={x.id} value={x.id}>For test: {x.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((x: any) => x.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</div>}
+      </div>
 
-        <div className="space-y-4 px-4 pb-8 pt-5 sm:px-7">
+        <div className="space-y-4">
           {p.mergedInto && <div className="card flex flex-wrap items-center gap-3 !py-3 text-sm" role="status"><span className="flex-1">This record was merged into another one and is kept only for the record.</span><button className="btn btn-sm btn-primary" onClick={() => nav(`/patients/${p.mergedInto}`)}>Open the kept record</button></div>}
           {edit && (
             <div className="card grid grid-cols-3 gap-3 anim-fade-up">
@@ -226,7 +212,6 @@ function Timeline({ id }: { id: string }) {
           {sec === 'messages' && <PatientMessages id={id} />}
           {sec === 'missed' && <Section title={<>Missed <span className="font-normal text-muted">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
         </div>
-      </div>
 
       {paying && <TakePayment patientId={id} patientName={p.fullName} onClose={() => setPaying(false)} />}
       {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
