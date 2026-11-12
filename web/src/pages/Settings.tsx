@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
-import { Drawer, Chip, Icon, Modal, PageHeader, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
+import { Drawer, Chip, Icon, Modal, PageHeader, PageSearchBox, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, DiscountCap, useRoles } from './Roles';
 import { vitalFields, DEFAULT_VITALS, BUILTIN_VITALS, type VitalField } from '../vitals';
@@ -95,7 +95,7 @@ export function Settings() {
     const groups = GROUPS.map(([g, icon, about, words, tabs]) => ({ g, icon, about, tabs: tabs.filter(([k]) => visible(k)), words })).filter((x) => x.tabs.length && (!q || `${x.g} ${x.about} ${x.words} ${x.tabs.map((t) => `${t[1]} ${t[2]}`).join(' ')}`.toLowerCase().includes(q)));
     return (
       <div>
-        <PageHeader title="Settings" subtitle="How the clinic runs. A change applies for everyone once saved." />
+        <PageHeader title="Settings" subtitle="How the clinic runs. A change applies for everyone once saved."><PageSearchBox placeholder="Search settings" className="!h-9 w-full sm:w-[300px]" /></PageHeader>
         {groups.length === 0 && <div className="card py-10 text-center text-muted">No setting matches “{find}”.</div>}
         {groups.length > 0 && <section className="settings-group card-flat max-w-[860px]" style={{ '--tone': 'var(--color-clay)' } as React.CSSProperties}>
           {groups.map(({ g, icon, about, tabs }, i) => (

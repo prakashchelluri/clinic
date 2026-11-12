@@ -110,7 +110,6 @@ function Timeline({ id }: { id: string }) {
       {/* one compact card: back, who, how to reach them and the few actions; the record's tabs in their own row below */}
       <div className="card !p-0 anim-fade-up">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 sm:px-4">
-          <button type="button" className="btn btn-ghost btn-icon hidden !h-10 !w-10 shrink-0 md:inline-flex" aria-label="Back" title="Back" onClick={() => ((window.history.state?.idx ?? 0) > 0 ? nav(-1) : nav('/patients'))}><Icon name="chevL" className="h-5 w-5" /></button>
           <Avatar name={p.fullName} size="h-10 w-10 text-[13px]" />
           <div className="min-w-[240px] flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">

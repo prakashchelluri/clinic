@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, today, errText, ApiError, uuid, dialable } from '../api';
 import { can } from '../App';
-import { Drawer, Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, usePageSearch, useAddFromNew } from '../ui';
+import { Drawer, Chip, Empty, Icon, Modal, Num, Segmented, Skeleton, ask, toast, Filter, PageSearchBox, usePageSearch, useAddFromNew } from '../ui';
 import { FlagChips } from '../flags';
 import { RoutineModal } from '../routine';
 import { BookForm, OnNumber, useOnNumber, whoLine, SEARCH_FAILED } from './Booking';
@@ -269,8 +269,9 @@ function SearchBox({ onOpen, onBook }: { onOpen: (id: string) => void; onBook?: 
   const qs = searchText(q);
   const found = useQuery({ queryKey: ['patients', qs], queryFn: () => get(`/patients?q=${encodeURIComponent(qs)}`), enabled: qs.length >= 2 && !sel });
   const appts = useQuery({ queryKey: ['appointments', 'patient', sel?.id], queryFn: () => get(`/appointments?patientId=${sel.id}`), enabled: !!sel });
-  if (q.trim().length < 2) return null;
-  return (
+  const box = <PageSearchBox placeholder="Find a patient’s bookings: name, phone or OP no." className="!h-9 w-full max-w-xl" />;
+  if (q.trim().length < 2) return box;
+  return (<div className="flex w-full max-w-xl flex-col gap-2">{box}
     <div className="card-flat anim-fade-up w-full max-w-xl !p-1.5" aria-label="Patients found">
       {!sel ? (found.isLoading ? <div className="p-3 text-sm text-muted">Searching…</div> : found.isError ? <div className="p-3 text-sm text-rose" role="alert">{SEARCH_FAILED}</div> : (found.data ?? []).length === 0 ? <div className="p-3 text-sm text-muted">No patient found.</div>
         : found.data.slice(0, 8).map((p: any) => <button key={p.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-paper" onClick={() => setSel(p)}><b>{whoLine(p)}</b><FlagChips flags={p.flags} /><span className="text-xs text-muted">{[p.patientNo, p.phone].filter(Boolean).join(' · ')}</span></button>))
@@ -281,7 +282,7 @@ function SearchBox({ onOpen, onBook }: { onOpen: (id: string) => void; onBook?: 
           {onBook && <button className="btn btn-sm mt-1.5 w-full justify-center" onClick={() => { onBook(sel); setQ(''); }}><Icon name="plus" className="h-3.5 w-3.5" />Book {sel.fullName.split(' ')[0]}</button>}
         </div>}
     </div>
-  );
+  </div>);
 }
 
 /** What the front desk must handle, empty most days: patients to call after a doctor's change, the waiting list. */

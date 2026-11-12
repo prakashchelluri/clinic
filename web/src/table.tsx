@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
-import { Floating, Icon, Skeleton, Tabs, usePageSearch } from './ui';
+import { Floating, Icon, PageSearchBox, Skeleton, Tabs, usePageSearch } from './ui';
 import { listOut, qc, useMe } from './api';
 import './table.css';
 
@@ -110,8 +110,10 @@ export function DataTable<T>(p: Props<T>) {
 
       {picked.length > 0 && p.bulk ? (
         <div className="dt-bulk"><b>{picked.length} selected</b>{p.bulk(picked, () => setSel(new Set()))}<div className="flex-1" /><button type="button" className="dt-link" onClick={() => setSel(new Set())}>Clear selection</button></div>
-      ) : (filters.length > 0 || toggles.length > 0 || offerable.length > 0 || p.toolbar) && (
+      ) : (p.search || filters.length > 0 || toggles.length > 0 || offerable.length > 0 || p.toolbar) && (
         <div className="dt-tool">
+          {/* the list's own search, first in its toolbar (it used to sit in the app's top bar) */}
+          {p.search && <PageSearchBox placeholder={p.search.placeholder} className="!h-9 w-full sm:w-[300px]" />}
           {filters.map((f) => {
             const v = fv(f), set = v !== f.options[0].value, cur = f.options.find((o) => o.value === v) ?? f.options[0];
             const base = shown.filter((r) => passes(r, f.key));

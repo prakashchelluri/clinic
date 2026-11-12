@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, api, qc, errText, post } from '../api';
-import { Drawer, Chip, Empty, Icon, Segmented, Skeleton, toast, Filter, usePageSearch, ask, money } from '../ui';
+import { Drawer, Chip, Empty, Icon, PageSearchBox, Segmented, Skeleton, toast, Filter, usePageSearch, ask, money } from '../ui';
 
 const ROLE_NAMES: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', receptionist: 'Reception', assistant: 'Junior doctor', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const when = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
@@ -147,7 +147,8 @@ export function AuditLog() {
   };
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3 anim-fade-up"><div className="mr-auto"><h1 className="sr-only">Audit log</h1><div className="text-[14px] text-muted">Every action by every user, kept a year. Nobody can edit or delete it.</div></div>
+      <div className="flex flex-wrap items-end gap-3 anim-fade-up">
+        <PageSearchBox placeholder="Find a patient’s actions: name, phone or OP no." className="order-last !h-9 w-full sm:w-[300px]" /><div className="mr-auto"><h1 className="sr-only">Audit log</h1><div className="text-[14px] text-muted">Every action by every user, kept a year. Nobody can edit or delete it.</div></div>
         {canDownload && <button className="btn" disabled={!rows.length} onClick={download}><Icon name="download" className="h-4 w-4" />Download</button>}</div>
       <div className="flex flex-wrap items-center gap-2">
         <Filter icon="calendar" value={days} onChange={setDays} options={[{ value: '1', label: 'Today' }, { value: '7', label: 'Last 7 days' }, { value: '30', label: 'Last 30 days' }, { value: '365', label: 'Last year' }]} />

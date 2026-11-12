@@ -8,7 +8,7 @@ import { ScheduleModal } from './Worklist';
 import { can } from '../App';
 import { FlagChips, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { CourseDialog } from '../courses';
-import { Drawer, Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
+import { Drawer, PageSearchBox, Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
@@ -266,7 +266,7 @@ export function FrontDesk() {
                 ? [['now', 'To do', nowCount, nowCount > 0], ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest {waitText(longest)}</span>], ['scheduled', 'Not here yet', scheduled.length, false]]
                 : [['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest {waitText(longest)}</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false]]) as [Tab, string, number, boolean, React.ReactNode?][]}
               extra={<>{docFilter && tab !== 'now' && view !== 'schedule' && <span className="fd-chip">{docOptions.find((o) => o.value === docFilter)?.label}<button type="button" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button></span>}
-              {canDesk && <span className="self-center shrink-0 ml-auto"><ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} /></span>}
+              <span className="ml-auto flex shrink-0 items-center gap-2 self-center"><PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[260px]" />{canDesk && <ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} />}</span>
               <span className={`fd-day ${canDesk ? '!ml-0' : ''}`}>{dayLabel}</span>
               {canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>}</>} />}
             {sel && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-[13px] text-paper anim-fade-up" role="toolbar" aria-label="Selected rows">
@@ -280,7 +280,7 @@ export function FrontDesk() {
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} tools={<ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} />} />
+                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} tools={<><PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[260px]" /><ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} /></>} />
               {waitingPanel}</div>
             : tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}

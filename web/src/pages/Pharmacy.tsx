@@ -4,7 +4,7 @@ import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router'
 import { get, post, qc, today, fmtTime, errText, NO_WHATSAPP } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
+import { Chip, Empty, Icon, Modal, PageSearchBox, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
@@ -196,6 +196,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
     <div>
       {/* the two numbers that matter at the counter, Vialo-style */}
       <div className="anim-fade-up mb-4 flex flex-wrap items-center gap-x-8 gap-y-3">
+        <PageSearchBox placeholder="Find a prescription: name, phone or OP no." className="order-last ml-auto !h-9 w-full sm:w-[300px]" />
         <div className="flex items-center gap-3"><span className="grid h-11 w-11 place-items-center rounded-full bg-surface shadow-[var(--shadow-soft)]"><Icon name="list" className="h-5 w-5 text-ink-2" /></span><span><b className="block text-[20px] leading-tight">{waiting}</b><small className="text-[12.5px] text-muted">prescriptions to fill today</small></span></div>
         <div className="flex items-center gap-3"><span className={`grid h-11 w-11 place-items-center rounded-full transition-colors ${issuing.length ? 'bg-clay text-white' : 'bg-surface text-ink-2 shadow-[var(--shadow-soft)]'}`}><Icon name="rupee" className="h-5 w-5" /></span><span><b className="block text-[20px] leading-tight"><span key={total} className="bump">{money(total)}</span></b><small className="text-[12.5px] text-muted">on this bill · {units} {units === 1 ? 'item' : 'items'}</small></span></div>
       </div>

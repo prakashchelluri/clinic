@@ -3,7 +3,7 @@ import { Link, Navigate, Outlet, useLocation, useNavigate, useSearchParams } fro
 import { useQuery } from '@tanstack/react-query';
 import { useMe, useConfig, post, get, patch, qc, ApiError, clearOfflineCache } from './api';
 import { useOffline } from './offline';
-import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, useOnline, PageSearchCtx, PageSearchBox, revealTheme } from './ui';
+import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, useOnline, PageSearchCtx, revealTheme } from './ui';
 import { CommandPalette, createActions } from './palette';
 import { NewBooking } from './pages/Booking';
 import { settingsTopic } from './pages/Settings';
@@ -90,7 +90,6 @@ function LabelRail({ items, active, clinic, me, roles, badges = {}, onSignOut }:
   };
   return (
     <div className="flex h-full flex-col items-center px-1.5 pb-3 pt-3">
-      <Link to="/" title={clinic} aria-label={clinic} className="mb-2 grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[12px] bg-brand text-[16px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.slice(0, 1)}</Link>
       <nav className="flex w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
         {items.map((n) => { const line = !first && GROUP_START.has(n.to); first = false; return <span key={n.to} className="contents">{line && <span className="lrail-sep" aria-hidden="true" />}{item(n.to, n.label, n.icon, badges[n.to])}</span>; })}
         <span className="lrail-sep" aria-hidden="true" />
@@ -159,7 +158,7 @@ export function App() {
   const pageRule = NAV.find((n) => n.to === '/' + sub) ?? (sub === 'encounter' ? { to: '', label: 'The consultation page', icon: '', show: (x: (p: string) => boolean) => x('encounter.intake') } : null);
   const blocked = !!pageRule && (platform ? pageRule.to !== '/platform' : pageRule.to === '/platform' || !pageRule.show(c));
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
-  const [pageSearch, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
+  const [, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
   const [theme, toggleTheme] = useTheme();
   const online = useOnline(); const offlineAt = useOffline();
   // menu badges (a hook: above the early returns), under the Calls list's own key so logging a call refreshes them too
@@ -174,7 +173,6 @@ export function App() {
   const idleMin: number = me.data?.privacy?.idleMinutes ?? 0;
   const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
   const onPad = loc.pathname.startsWith('/encounter'); // the pad: the patient sits in the top bar; clock, search, help and + step aside
-  const onRecord = /^\/patients\/[^/]+$/.test(loc.pathname); // a patient's record: its card carries Back, so the top bar steps aside (phones keep it for the menu)
   useEffect(() => {
     if (!idleMin || inConsult) return;
     let last = Date.now();
@@ -222,7 +220,32 @@ export function App() {
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
-      <aside className="no-print fixed inset-y-0 left-0 z-20 hidden w-[84px] bg-sidebar md:block" style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)' }} aria-label="Main">
+      {/* one top row across the whole screen: the Cubott logo over the menu, the clinic, where you are, and the few app actions.
+          A page's search lives with its own table, not up here. */}
+      <header className="app-top no-print sticky top-0 z-30 flex h-[60px] items-center bg-paper/90 backdrop-blur-xl" style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
+        <button className="btn btn-ghost btn-icon ml-2 md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
+        <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:w-[84px]"><img src="/cubott.png" alt="Cubott" className="h-9 w-9 object-contain" /></Link>
+        <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 md:pr-7">
+          {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
+          {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[18px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
+          <span className="ml-auto" />
+          {/* the clinic you are working in: a quiet pill in the app colour, so it reads as a place, not a heading */}
+          <span className="mr-2 hidden max-w-[340px] items-center gap-2 rounded-full bg-clay-soft py-1.5 pl-2 pr-3.5 text-[14px] font-bold text-clay-ink shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-clay)_22%,transparent)] sm:inline-flex" title={clinic}><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-clay" style={{ color: 'var(--color-paper)' }}><Icon name="home" className="h-3.5 w-3.5" /></span><span className="truncate">{clinic}</span></span>
+          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="btn btn-icon hidden sm:inline-flex" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
+          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-icon hidden sm:inline-flex"><Icon name="help" className="h-4 w-4" /></Link>}
+          {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
+            <div className="relative shrink-0">
+              <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-10 !min-h-10 !w-10 !rounded-[11px] !p-0 justify-center"><Icon name="plus" className="h-5 w-5" /></button>
+              {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
+                <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
+            </div>); })()}
+          <div className="relative md:hidden">
+            <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-8 w-8 text-xs" /></button>
+            {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted">{roles.map(roleLabel).join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
+          </div>
+        </div>
+      </header>
+      <aside className="no-print fixed bottom-0 left-0 top-[60px] z-20 hidden w-[84px] bg-sidebar md:block" style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)' }} aria-label="Main">
         <LabelRail items={items} active={active} clinic={clinic} me={me.data} roles={roles} badges={badges} onSignOut={signOut} />
       </aside>
       {drawer && (
@@ -232,31 +255,10 @@ export function App() {
       )}
 
       <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-        <header className={`app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7 ${onRecord ? 'md:hidden' : ''}`}>
-          <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-          {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
-          {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[22px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-5 w-5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
-          {!onPad && <span className="ml-auto" />}
-          {!onPad && pageSearch && <PageSearchBox key={pageSearch} placeholder={pageSearch} className="mr-1 hidden w-[300px] md:inline-flex" />}
-          {!platform && !onPad && !pageSearch && <button onClick={() => setPalette(true)} className="toppill mr-1 hidden w-[280px] !font-medium !text-muted lg:inline-flex" aria-label="Search patients (Ctrl K)"><Icon name="search" className="h-4 w-4" /><span className="flex-1 truncate text-left">Patients, phone or ID…</span><span className="kbd">Ctrl K</span></button>}
-          {!platform && !onPad && !pageSearch && <button onClick={() => setPalette(true)} aria-label="Search patients" title="Search patients (Ctrl K)" className="btn btn-icon lg:hidden"><Icon name="search" /></button>}
-          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="btn btn-icon hidden sm:inline-flex" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
-          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="btn btn-icon hidden sm:inline-flex"><Icon name="help" className="h-4 w-4" /></Link>}
-            {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
-              <div className="relative shrink-0">
-                <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-10 !min-h-10 !w-10 !rounded-[11px] !p-0 justify-center"><Icon name="plus" className="h-5 w-5" /></button>
-                {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
-                  <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
-              </div>); })()}
-            <div className="relative md:hidden">
-              <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-8 w-8 text-xs" /></button>
-              {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted">{roles.map(roleLabel).join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
-            </div>
-        </header>
-        {offlineAt !== null && <div role="status" className="no-print sticky top-[68px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
+        {offlineAt !== null && <div role="status" className="no-print sticky top-[60px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
 
         <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
-          <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}>{pageSearch && <PageSearchBox placeholder={pageSearch} className="mb-3 flex w-full md:hidden" />}<PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>
+          <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}><PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>
         </div>
       </div>
       <PrintHost />

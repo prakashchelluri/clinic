@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, errText, fmtTime } from '../api';
 import { can } from '../App';
-import { Drawer, Empty, Icon, PageHeader, Skeleton, ask, fmtDate, toast, usePageSearch } from '../ui';
+import { Drawer, Empty, Icon, PageHeader, PageSearchBox, Skeleton, ask, fmtDate, toast, usePageSearch } from '../ui';
 import { FlagChips } from '../flags';
 import { LoadError } from '../procBoard';
 import { openViewer } from '../viewer';
@@ -198,6 +198,7 @@ export function TestReports() {
       {!data.data ? <Skeleton rows={6} /> : !all.length ? <div className="card"><Empty icon="check" title="No tests ordered" hint="Tests the doctor orders appear here until the doctor has reviewed them." /></div> : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Show orders">
+            <PageSearchBox placeholder="Find a patient: name, phone or patient no." className="order-last ml-auto !h-9 w-full sm:w-[300px]" />
             {FILTERS.map(([k, t]) => { const n = k === 'all' ? found.length : found.filter((o) => stageOf(o) === k).length;
               return <button key={k} className={`toggle-opt ${f === k ? 'on' : ''}`} aria-pressed={f === k} onClick={() => { setF(k); setSel(null); }}>{t} <b className="ml-1">{n}</b></button>; })}
           </div>

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, qc, today } from './api';
 import { can } from './App';
-import { Empty, Icon, Skeleton, fmtDate, fmtTime, money, usePageSearch } from './ui';
+import { Empty, Icon, PageSearchBox, Skeleton, fmtDate, fmtTime, money, usePageSearch } from './ui';
 import { FlagChips } from './flags';
 import { ScheduleModal } from './pages/Worklist';
 import { CourseDialog } from './courses';
@@ -67,6 +67,7 @@ export function CourseList() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Show courses">
+        <PageSearchBox placeholder="Find a course: patient or procedure" className="order-last ml-auto !h-9 w-full sm:w-[300px]" />
         {FILTERS.map(([k, t]) => { const n = k === 'all' ? found.length : found.filter((p) => p.stage === k).length;
           return <button key={k} className={`toggle-opt ${f === k ? 'on' : ''}`} aria-pressed={f === k} onClick={() => { setF(k); setSel(null); }}>{t} <b className="ml-1">{n}</b></button>; })}
       </div>
