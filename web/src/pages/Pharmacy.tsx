@@ -4,7 +4,7 @@ import { Link, Navigate, useOutletContext, useSearchParams } from 'react-router'
 import { get, post, qc, today, fmtTime, errText, NO_WHATSAPP } from '../api';
 import { can } from '../App';
 import { openPrint } from '../printPreview';
-import { Chip, Empty, Icon, Modal, Segmented, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
+import { Chip, Empty, Icon, Modal, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, usePageSearch } from '../ui';
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
@@ -44,9 +44,7 @@ export function Pharmacy() {
   return (
     <div>
       {/* the page name is in the top bar; here only the sections and the counter's main action */}
-      <div className="anim-fade-up mb-5 flex flex-wrap items-center gap-3">
-        <Segmented<Tab> value={tab} onChange={(v) => go({ tab: v })} options={tabs} />
-      </div>
+      <Tabs<Tab> className="anim-fade-up mb-5" value={tab} onChange={(v) => go({ tab: v })} options={tabs} />
       {tab === 'counter' && <Counter sel={sp.get('rx')} pick={(rx) => go(rx ? { tab: 'counter', rx } : { tab: 'counter' })} />}
       {tab === 'bills' && <Bills sel={sp.get('bill')} pick={(bill) => setSp((p) => { const n = new URLSearchParams(p); bill ? n.set('bill', bill) : n.delete('bill'); return n; })} onIssue={(rx) => go({ tab: 'counter', rx })} />}
       {tab === 'register' && <RegisterTab clinic={cfg?.tenant?.name ?? ''} licence={cfg?.tenant?.settings?.print?.drugLicence ?? cfg?.tenant?.settings?.drugLicence} />}

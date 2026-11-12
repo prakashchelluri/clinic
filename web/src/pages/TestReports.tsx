@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, errText, fmtTime } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Segmented, Skeleton, ask, fmtDate, toast } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, PageHeader, Skeleton, Tabs, ask, fmtDate, toast } from '../ui';
 import { LoadError } from '../procBoard';
 import { openViewer } from '../viewer';
 import { saveLabValues, findParam, flagFor, rangeText, isOut, type LabDraft } from '../labs';
@@ -214,8 +214,8 @@ export function TestReports() {
   return (
     <div>
       <PageHeader title="Test reports" subtitle={tab === 'review' ? 'Reports the doctor has not looked at yet' : tab === 'collect' ? 'Tests ordered that have not come back' : tab === 'explain' ? 'The doctor has reviewed these. Tell the patient.' : 'Closed today'}>
-        <Segmented<Tab> value={tab} onChange={(t) => setSp({ tab: t }, { replace: true })} options={[...(isDoctor ? [{ value: 'review' as Tab, label: 'To review', count: c?.review || undefined }] : []), { value: 'collect', label: 'To collect', count: c?.collect || undefined }, { value: 'explain', label: 'To explain', count: c?.explain || undefined }, { value: 'done', label: 'Done today', count: c?.done || undefined }]} />
       </PageHeader>
+      <Tabs<Tab> className="mb-4" value={tab} onChange={(t) => setSp({ tab: t }, { replace: true })} options={[...(isDoctor ? [{ value: 'review' as Tab, label: 'To review', count: c?.review || undefined }] : []), { value: 'collect', label: 'To collect', count: c?.collect || undefined }, { value: 'explain', label: 'To explain', count: c?.explain || undefined }, { value: 'done', label: 'Done today', count: c?.done || undefined }]} />
       {data.isLoading ? <div className="card"><Skeleton rows={4} /></div> : data.isError && !data.data ? <LoadError onRetry={() => data.refetch()} /> : groups.length === 0 ? <div className="card"><Empty icon="check" title={tab === 'review' ? 'Nothing to review' : tab === 'collect' ? 'No reports to collect' : tab === 'explain' ? 'Nobody to explain to' : 'Nothing closed yet today'} hint={tab === 'collect' ? 'When the doctor orders tests, each order shows here until every report is in.' : tab === 'review' ? 'An order appears here when every report in it has been added.' : undefined} /></div> : (
         <div className="space-y-3 anim-fade-up">
           {tab === 'review' && rows.length === 0 && <div className="text-sm text-muted">Nothing is complete yet. These are waiting for reports:</div>}

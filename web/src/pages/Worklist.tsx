@@ -5,7 +5,7 @@ import { get, post, today, errText } from '../api';
 import { ProcToday } from './ProcToday';
 import { ProcWeek } from './ProcWeek';
 import { CourseList, clashLabel } from '../procBoard';
-import { Chip, Icon, Modal, PageHeader, Segmented, Skeleton, fmtDate, toast } from '../ui';
+import { Chip, Icon, Modal, PageHeader, Skeleton, Tabs, fmtDate, toast } from '../ui';
 
 type View = 'today' | 'week' | 'courses';
 /** Procedures: today's sittings by the hour, the week the coordinator plans and sends to the doctors, and every course on one board. */
@@ -17,9 +17,8 @@ export function Worklist() {
   const setView = (v: View) => setSp((p) => { p.set('tab', v); return p; }, { replace: true });
   return (
     <div>
-      <PageHeader title="Procedures">
-        <Segmented<View> value={view} onChange={setView} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'courses', label: 'Courses' }]} />
-      </PageHeader>
+      <PageHeader title="Procedures" />
+      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sittings" }, { value: 'week', label: 'Week plan' }, { value: 'courses', label: 'All courses' }]} />
       {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <CourseList />}
     </div>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
-import { Floating, Icon, Skeleton, usePageSearch } from './ui';
+import { Floating, Icon, Skeleton, Tabs, usePageSearch } from './ui';
 import { listOut, qc, useMe } from './api';
 import './table.css';
 
@@ -106,8 +106,7 @@ export function DataTable<T>(p: Props<T>) {
 
   return (
     <section className="dt">
-      {p.tabs && <div className="dt-tabs" role="tablist">{p.tabs.map((t) => (
-        <button key={t.value} type="button" role="tab" aria-selected={p.tab === t.value} className={p.tab === t.value ? 'on' : ''} onClick={() => p.onTab?.(t.value)}>{t.label}{t.count != null && <span className="c">{t.count}</span>}</button>))}</div>}
+      {p.tabs && <Tabs<string> className="overflow-x-auto px-5 !flex-nowrap" value={p.tab ?? ''} onChange={(v) => p.onTab?.(v)} options={p.tabs} />}
 
       {picked.length > 0 && p.bulk ? (
         <div className="dt-bulk"><b>{picked.length} selected</b>{p.bulk(picked, () => setSel(new Set()))}<div className="flex-1" /><button type="button" className="dt-link" onClick={() => setSel(new Set())}>Clear selection</button></div>

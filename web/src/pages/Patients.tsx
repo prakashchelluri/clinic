@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
+import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterModal, UploadButton, joinList, rxState } from '../encounterDetail';
 import { LabHistoryDrawer, ReportList } from '../labHistory';
@@ -36,9 +36,8 @@ export function Patients() {
     <div>
       {/* One record is a full page; the list is a full-width search. Nobody flips between patients the way they flip between mails. */}
       {id ? null
-        : <PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone">
-          {canMsg && <Segmented<'patients' | 'sent'> value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}
-        </PageHeader>}
+        : <><PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone" />
+          {canMsg && <Tabs<'patients' | 'sent'> className="mb-4" value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}</>}
       {id ? <Timeline key={id} id={id} /> : canMsg && view === 'sent' ? <SentMessages /> : <div className="space-y-3">
         <DataTable
           id="patients" exportName={`patients-${new Date().toISOString().slice(0, 10)}`} rows={list.data?.rows ?? []} rowKey={(p: any) => p.id}

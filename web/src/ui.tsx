@@ -225,9 +225,12 @@ export function Tabs<T extends string>({ value, onChange, options, className = '
   const box = useRef<HTMLDivElement>(null); const [mark, setMark] = useState<{ left: number; width: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const measure = () => { const el = box.current?.querySelector<HTMLElement>('button.on'); setMark(el ? { left: el.offsetLeft, width: el.offsetWidth, top: el.offsetTop + el.offsetHeight - 2.5 } : null); };
+    // counts arrive after the first paint and widen a tab: watch the buttons, as the pills do
+    const ro = typeof ResizeObserver !== 'undefined' && box.current ? new ResizeObserver(measure) : null;
+    if (ro && box.current) { ro.observe(box.current); box.current.querySelectorAll('button').forEach((b) => ro.observe(b)); }
     measure(); window.addEventListener('resize', measure); document.fonts?.ready.then(measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [value, options.length]);
+    return () => { window.removeEventListener('resize', measure); ro?.disconnect(); };
+  }, [value, options.length, options.map((o) => o.count).join(',')]);
   return (
     <div role="tablist" ref={box} className={`tabs has-mark relative ${className}`}>{mark && <span aria-hidden="true" className="tabs-mark" style={{ left: mark.left, width: mark.width, top: mark.top }} />}{options.map((o) => <button key={o.value} type="button" role="tab" aria-selected={value === o.value} className={value === o.value ? 'on' : ''} onClick={() => onChange(o.value)}>
       {o.label}{o.count ? <span className="tab-count">{o.count}</span> : null}</button>)}</div>

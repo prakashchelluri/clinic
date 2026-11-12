@@ -2,12 +2,6 @@
    A solid sheet with a hairline edge, the page's lists as tabs on its top edge, filter tokens, a grey header,
    status as a dot and words, and a footer with the range and the pager. Tokens only, so dark follows. */
 .dt { background: var(--color-surface); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--color-line-2), 0 1px 2px rgba(16, 24, 20, .04), 0 8px 24px -16px rgba(16, 24, 20, .12); }
-.dt-tabs { display: flex; gap: 24px; padding: 0 20px; border-bottom: 1px solid var(--color-line); overflow-x: auto; scrollbar-width: none; }
-.dt-tabs button { position: relative; display: inline-flex; align-items: center; gap: 8px; height: 48px; padding: 0; border: 0; background: none; font-size: 13.5px; font-weight: 600; color: var(--color-muted); white-space: nowrap; cursor: pointer; }
-.dt-tabs button:hover, .dt-tabs button.on { color: var(--color-ink); }
-.dt-tabs button.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--color-clay); animation: tab-line .25s var(--ease); }
-.dt-tabs .c { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 6px; border-radius: 6px; background: var(--color-surface-2); color: var(--color-ink-2); font-size: 12px; font-weight: 700; }
-.dt-tabs button.on .c { background: var(--color-clay-soft); color: var(--color-clay-ink); }
 
 .dt-tool { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 20px; border-bottom: 1px solid var(--color-line); min-height: 52px; box-sizing: border-box; }
 .dt-tok { display: inline-flex; align-items: center; height: 30px; border-radius: 8px; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; }
@@ -77,5 +71,5 @@
   .dt-tok .x { padding: 0 14px; }
   .dt-cb { width: 22px; height: 22px; }
 }
-@media (prefers-reduced-motion: reduce) { .dt-tabs button.on::after { animation: none; } }
-@media print { .dt-tool, .dt-foot, .dt-tabs, .dt-table .chk { display: none; } }
+
+@media print { .dt-tool, .dt-foot, .dt > .tabs, .dt-table .chk { display: none; } }

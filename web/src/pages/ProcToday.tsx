@@ -70,7 +70,7 @@ export function ProcToday() {
         <span className="ml-auto text-[13.5px] text-muted">{live.length ? `${live.length} sitting${live.length === 1 ? '' : 's'}${notYes ? ` · ${notYes} not confirmed` : ''}` : ''}</span>
       </div>
       {q.isLoading ? <div className="p-4"><Skeleton rows={4} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div>
-        : !all.length ? <div className="border-t border-line"><Empty icon="calendar" title={day === t ? 'No sittings today' : 'No sittings this day'} hint="Sittings are planned on the Week tab." /></div> : (
+        : !all.length ? <div className="border-t border-line"><Empty icon="calendar" title={day === t ? 'No sittings today' : 'No sittings this day'} hint="Sittings are planned on Week plan." /></div> : (
         hours.map((h) => {
           const key = `T|${h}`; const here = inHour(all, h); const fill = fillsHour(all, h);
           const why = drag.hoverWhy(key);
