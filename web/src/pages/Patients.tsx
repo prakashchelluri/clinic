@@ -37,7 +37,7 @@ export function Patients() {
     <div>
       {/* One record is a full page; the list is a full-width search. Nobody flips between patients the way they flip between mails. */}
       {id ? null
-        : <><PageHeader title="Patients" subtitle="One record per person, even when a family shares a phone" />
+        : <><PageHeader title="Patients" />
           {canMsg && <Tabs<'patients' | 'sent'> className="mb-4" value={view} onChange={setView} options={[{ value: 'patients', label: 'Patients' }, { value: 'sent', label: 'Sent messages' }]} />}</>}
       {id ? <Timeline key={id} id={id} /> : canMsg && view === 'sent' ? <SentMessages /> : <div className="space-y-3">
         <DataTable

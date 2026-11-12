@@ -60,7 +60,7 @@ export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, 
   };
   if (!bills.length) return <Empty icon="rupee" title="No invoices" hint={empty} />;
   return (
-    <div className="overflow-x-auto"><table className="table min-w-[860px]">
+    <div className="overflow-x-auto overflow-y-hidden"><table className="table min-w-[860px]">
       <thead><tr><th className="pl-4">#</th><th>Invoice no &amp; date</th>{showPatient && <th>Patient</th>}<th>Items</th><th className="text-right">Billed</th><th className="text-right">Paid</th><th className="text-right">Due</th><th className="text-right">Refund</th><th>Status</th><th className="pr-4 text-right">Action</th></tr></thead>
       <tbody>{bills.map((b, i) => { const [label, tone] = STATUS[b.status] ?? [b.status, ''];
         return <tr key={b.id} className="cursor-pointer hover:bg-surface-2/60" onClick={() => onView(b)}>
