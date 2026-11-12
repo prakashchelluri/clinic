@@ -1,87 +1,29 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
-import { get, patch, post, qc, today, errText } from '../api';
-import { can } from '../App';
-import { PhotoCapture } from '../photos';
-import { ProcSchedule } from './ProcSchedule';
-import { ProcedureBoard, LoadError, clashLabel } from '../procBoard';
-import { Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Segmented, Skeleton, fmtDate, toast, ask } from '../ui';
+import { useOutletContext, useSearchParams } from 'react-router';
+import { get, post, today, errText } from '../api';
+import { ProcToday } from './ProcToday';
+import { ProcWeek } from './ProcWeek';
+import { ProcedureBoard, clashLabel } from '../procBoard';
+import { Chip, Icon, Modal, PageHeader, Segmented, Skeleton, fmtDate, toast } from '../ui';
 
-/** Plan status in the desk's words. */
-const STATUS: Record<string, string> = { open: 'Not called', contacted: 'Called', scheduled: 'Booked', cancelled: 'Declined', done: 'Done' };
-
-/** Procedures: sittings by day, the board, and plans to schedule. Calls about plans (and reviews) are logged on the one Calls list. */
+type View = 'today' | 'week' | 'courses';
+/** Procedures: today's sittings by the hour, the week the coordinator plans and sends to the doctors, and every course on one board. */
 export function Worklist() {
-  const { perms } = useOutletContext<any>();
   const [sp, setSp] = useSearchParams();
-  const view: 'schedule' | 'plans' | 'board' = sp.get('tab') === 'plans' ? 'plans' : sp.get('tab') === 'board' ? 'board' : 'schedule'; // the schedule by date is the first thing you see
-  const setView = (v: 'schedule' | 'plans' | 'board') => setSp((p) => { p.set('tab', v); return p; }, { replace: true });
-  const proc = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure'), refetchInterval: 15000 });
-  const sessions = useQuery({ queryKey: ['psessions-upcoming'], queryFn: () => get(`/procedure-sessions?day=${today()}`), refetchInterval: 30000 });
-  const nav = useNavigate();
-  const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: () => { qc.invalidateQueries({ queryKey: ['worklist'] }); toast('Updated'); } });
-  const [scheduling, setScheduling] = useState<any>(null);
-  const [rescheduling, setRescheduling] = useState<any>(null);
-  const [cap, setCap] = useState<any>(null);
-  const t = today();
-  // plans the doctor made today that nobody has acted on yet
-  const isNew = (r: any) => r.status === 'open' && new Date(r.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === t;
-  const newPlans = (proc.data ?? []).filter(isNew).length;
-  const list = proc;
-  const rows: any[] = list.data ?? [];
-  const overdue = rows.filter((r) => r.dueOn && r.dueOn < t && r.status !== 'scheduled');
+  const tab = sp.get('tab');
+  // older links: schedule = today, plans = week (Pending schedules), board = courses
+  const view: View = tab === 'week' || tab === 'plans' ? 'week' : tab === 'courses' || tab === 'board' ? 'courses' : 'today';
+  const setView = (v: View) => setSp((p) => { p.set('tab', v); return p; }, { replace: true });
   return (
     <div>
-      <PageHeader title="Procedures" subtitle={view === 'schedule' ? 'Sittings by day' : overdue.length ? <span className="text-rose">{overdue.length} overdue</span> : 'Plans not booked yet'}>
-        <Segmented<'schedule' | 'plans' | 'board'> value={view} onChange={setView} options={[{ value: 'schedule', label: 'Schedule' }, { value: 'board', label: 'Board' }, { value: 'plans', label: newPlans ? `Plans to schedule · ${newPlans} new` : 'Plans to schedule', count: (proc.data ?? []).filter((r: any) => !r.next && r.status !== 'scheduled').length || undefined }]} />
+      <PageHeader title="Procedures">
+        <Segmented<View> value={view} onChange={setView} options={[{ value: 'today', label: 'Today' }, { value: 'week', label: 'Week' }, { value: 'courses', label: 'Courses' }]} />
       </PageHeader>
-      {view === 'schedule' ? <ProcSchedule onPlans={() => setView('plans')} /> : view === 'board' ? <ProcedureBoard /> : (<>
-      {(sessions.data ?? []).length > 0 && (
-        <div className="card anim-fade-up mb-4 flex items-center gap-3 flex-wrap text-sm"><Icon name="stetho" className="h-4 w-4 text-sky" /><span className="font-medium">Today in the rooms:</span>
-          {(sessions.data ?? []).map((s: any) => <span key={s.id} className="inline-flex items-center gap-1"><Chip tone="sky">{s.startTime} {s.patient.fullName} · {s.room ?? 'no room'}</Chip>{can(perms, 'document.write') && !['cancelled', 'postponed'].includes(s.state) && <button className="btn btn-ghost btn-icon !h-8 !w-8" aria-label={`Take photos for ${s.patient.fullName}`} data-tip="Photos" onClick={() => setCap(s)}><Icon name="spark" className="h-3.5 w-3.5" /></button>}</span>)}
-          <a className="btn btn-sm ml-auto" href="/appointments">Open appointments<Icon name="chevR" className="h-3.5 w-3.5" /></a></div>
-      )}
-      {list.isError && !list.data ? <LoadError onRetry={() => list.refetch()} /> : <Section>
-        {list.isLoading ? <Skeleton rows={4} /> : rows.length === 0 ? <Empty icon="check" title="Nothing pending" hint="When the doctor plans a procedure, it shows here." /> :
-          rows.map((r, i) => <Row key={r.id} r={r} i={i} today={t} canWrite={can(perms, 'worklist.write')} onUpdate={(b) => upd.mutate({ id: r.id, ...b })} onOpen={() => nav(`/patients/${r.patient.id}`, { viewTransition: true })} onCalls={() => nav('/calls?tab=procedures')} onSchedule={() => setScheduling(r)} onReschedule={() => setRescheduling(r)} onCancelSitting={async () => { const a = await ask({ title: 'Cancel the booked sitting?', body: `${r.patient.fullName} · ${r.procedure ?? 'procedure'} on ${fmtDate(r.next.day)} ${r.next.startTime}. The room and doctor are freed and it goes back to Plans to schedule.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { try { await patch(`/procedure-sessions/${r.next.id}`, { state: 'cancelled', reason: a.value || undefined }); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); toast('Sitting cancelled', 'info'); } catch (e: any) { toast(errText(e), 'err'); } } }} />)}
-      </Section>}
-      {cap && <PhotoCapture patient={{ id: cap.patient.id, fullName: cap.patient.fullName }} sitting={{ id: cap.id, label: `${cap.procedure ?? 'Procedure'} · sitting ${cap.sittingNo}` }} onClose={() => setCap(null)} />}
-      {rescheduling && <ScheduleModal rec={rescheduling} sitting={rescheduling.next} onClose={() => { setRescheduling(null); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
-      {scheduling && <ScheduleModal rec={scheduling} onClose={() => { setScheduling(null); qc.invalidateQueries({ queryKey: ['worklist'] }); qc.invalidateQueries({ queryKey: ['psessions-upcoming'] }); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
-      </>)}
+      {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <ProcedureBoard />}
     </div>
   );
 }
-
-function Row({ r, i, today, canWrite, onUpdate, onOpen, onSchedule, onReschedule, onCancelSitting, onCalls }: { r: any; i: number; today: string; canWrite: boolean; onUpdate: (b: any) => void; onOpen: () => void; onSchedule: () => void; onReschedule: () => void; onCancelSitting: () => void; onCalls: () => void }) {
-  const late = r.dueOn && r.dueOn < today && r.status !== 'scheduled';
-  return (
-    <div className="border-t border-line first:border-t-0 anim-fade-up" style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
-      <div className="flex items-center gap-3 px-4 py-3 flex-wrap">
-        <Avatar name={r.patient.fullName} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap"><button className="font-medium hover:text-clay transition-colors py-2 -my-2" onClick={onOpen}>{r.patient.fullName}</button><span className="text-xs text-muted">{r.patient.phone ?? 'no phone'} · {r.patient.patientNo}</span></div>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {r.procedure && <Chip tone="sky">{r.procedure}{r.sittings ? ` · ${r.sittings} ${r.sittings === 1 ? 'sitting' : 'sittings'}` : ''}</Chip>}
-            {r.dueOn && <Chip tone={late ? 'rose' : ''}>{late ? 'overdue · ' : r.status === 'scheduled' ? 'on ' : 'due '}{fmtDate(r.dueOn)}</Chip>}
-            <Chip tone={r.status === 'scheduled' ? 'sage' : r.status === 'contacted' ? 'amber' : ''}>{STATUS[r.status] ?? r.status}</Chip>
-            {r.next && <Chip tone="sage"><Icon name="calendar" className="h-3 w-3 inline -mt-0.5 mr-1" />Next: {fmtDate(r.next.day)} {r.next.startTime}{r.next.room ? ` · ${r.next.room}` : ''}</Chip>}
-            {r.notes && <span className="text-xs text-ink-2">{r.notes}</span>}
-          </div>
-          {r.contactLog.length > 0 && <div className="text-[11px] text-muted mt-1">{r.contactLog.slice(-2).map((c: any, k: number) => <span key={k} className="mr-3">{fmtDate(c.at)} · {c.by.split(' ')[0]}: {c.outcome}{c.note ? ` — ${c.note}` : ''}</span>)}</div>}
-        </div>
-        {canWrite && (
-          <div className="flex items-center gap-1.5">
-            {r.next ? <button className="btn btn-sm btn-primary" onClick={onReschedule}><Icon name="calendar" className="h-3.5 w-3.5" />Reschedule</button> : <button className="btn btn-sm btn-primary" onClick={onSchedule}><Icon name="calendar" className="h-3.5 w-3.5" />{r.status === 'scheduled' ? 'Schedule next' : 'Schedule'}</button>}
-            <MoreMenu items={[{ label: 'Schedule another sitting', hidden: !r.next, onClick: onSchedule }, { label: 'Cancel the booked sitting', danger: true, hidden: !r.next, onClick: onCancelSitting }, { label: 'Log a call (on Calls)', onClick: onCalls }, { label: 'Mark done', onClick: () => onUpdate({ status: 'done' }) }]} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 /** Pick a day; the server lists rooms with the right capability and the free slots; conflicts are explained, override is explicit. */
 export function ScheduleModal({ rec, sitting, at, onClose }: { rec: any; sitting?: any; at?: { day: string; roomId: string; startTime: string }; onClose: () => void }) {
   const { cfg } = useOutletContext<any>();

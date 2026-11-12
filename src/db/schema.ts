@@ -315,9 +315,23 @@ export const procedureSession = pgTable('procedure_session', {
   outcome: jsonb('outcome').$type<Record<string, any>>(),
   patientConfirmedAt: ts('patient_confirmed_at'), // the coordinator spoke to the patient; cleared when the sitting moves
   weekConfirmedAt: ts('week_confirmed_at'),       // confirmed on the call a week before (or booked within the week); cleared when the sitting moves
+  // the doctor's say on the coordinator's week plan: draft (not sent) | sent (with the doctor) | approved | change (sent back with a note)
+  approval: text('approval').notNull().default('approved'),
+  approvalNote: text('approval_note'),
+  approvedBy: text('approved_by'),
+  approvedAt: ts('approved_at'),
+  changed: boolean('changed').notNull().default(false), // moved or added after its week was sent
+  bookedBy: uuid('booked_by'),                          // the user who booked or last moved it
 }, (t) => [index('psession_day').on(t.tenantId, t.day)]);
 
 // doctor's plan → worklists. One table serves both follow-up and procedure recommendations.
+/** A week of procedure sittings the coordinator has sent to the doctors (once; later changes go to the doctor straight away). */
+export const procedureWeek = pgTable('procedure_week', {
+  ...tenantCols,
+  weekStart: date('week_start').notNull(), // the Monday
+  sentBy: text('sent_by'),
+}, (t) => [uniqueIndex('proc_week_start').on(t.tenantId, t.weekStart)]);
+
 export const recommendation = pgTable('recommendation', {
   ...tenantCols,
   encounterId: uuid('encounter_id').notNull().references(() => encounter.id),
@@ -671,7 +685,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'callback', 'quote', 'day_close', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'numbering_sequence', 'domain_event', 'service', 'message', 'body_pin', 'lab_result',
+  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'body_pin', 'lab_result',
 ];
 
 export type FormField = {

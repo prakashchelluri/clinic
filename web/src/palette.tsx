@@ -13,7 +13,7 @@ export const createActions = (can: (p: string) => boolean, path = ''): Action[] 
   can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/queue?arrive=1' },
   can('appointment.write') && { key: 'B', label: 'New booking', icon: 'calendar', hint: 'Pick a window', to: '/appointments?add=book' },
   can('patient.write') && { key: 'R', label: 'Register a patient', icon: 'user', hint: 'New record', to: '/patients?new=1' },
-  can('worklist.write') && { key: 'P', label: 'Schedule a procedure', icon: 'stetho', hint: 'Plans waiting for a date', to: '/worklist?tab=plans' },
+  can('worklist.write') && { key: 'P', label: 'Schedule a procedure', icon: 'stetho', hint: 'Pending schedules', to: '/worklist?tab=week' },
   can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: can('finance.read') ? 'Accounts' : 'Expenses', to: can('finance.read') ? '/accounts?tab=spend&add=expense' : '/expenses?add=expense' },
   can('pharmacy.bill') && { key: 'S', label: 'New pharmacy sale', icon: 'pill', hint: 'Without a prescription', to: '/pharmacy?sale=1' },
   can('stock.write') && { key: 'O', label: 'New purchase order', icon: 'list', hint: 'Order from a vendor', to: '/inventory?tab=orders&order=new' },

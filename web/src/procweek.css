@@ -1,0 +1,87 @@
+/* Procedures for the coordinator (Today, Week) and the doctor's review: blocks by the hour, the week grid, the lifted box. */
+
+/* a sitting block: time and status, patient, procedure, doctor and room */
+.pw-blk { display: flex; flex-direction: column; gap: 2px; width: 236px; max-width: 100%; padding: 9px 11px; border-radius: 12px; text-align: left; box-sizing: border-box;
+  background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-line-2); font-size: 12.5px; color: var(--color-ink-2); cursor: grab; touch-action: none; user-select: none;
+  transition: opacity .15s ease, transform .15s ease, box-shadow .15s ease; }
+.pw-blk:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px var(--color-line-2), 0 10px 20px -14px rgb(0 0 0 / .45); }
+.pw-blk:focus-visible { outline: 2px solid var(--color-clay); outline-offset: 2px; }
+.pw-blk b { font-size: 14.5px; font-weight: 700; color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-blk span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-blk .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; color: var(--color-muted); }
+.pw-blk .st { font-weight: 700; flex-shrink: 0; }
+.pw-blk.warn .st { color: var(--color-rose); }
+.pw-blk.amber .st { color: var(--color-amber); }
+.pw-blk.room { background: var(--color-nav-active, var(--color-ink)); color: color-mix(in srgb, var(--color-paper) 85%, transparent); box-shadow: none; cursor: pointer; }
+.pw-blk.room b, .pw-blk.room .top { color: var(--color-paper); }
+.pw-blk.done { background: transparent; color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line); cursor: pointer; }
+.pw-blk.done b { color: var(--color-muted); }
+.pw-blk.fixed { cursor: pointer; }
+.pw-blk.draft { box-shadow: none; outline: 1.5px dashed var(--color-line-2); outline-offset: -1.5px; }
+.pw-blk.sent { box-shadow: inset 0 0 0 1.5px var(--color-ink-2); }
+.pw-blk.change { box-shadow: inset 0 0 0 1.5px var(--color-rose); }
+.pw-blk.change .st { color: var(--color-rose); }
+.pw-blk.sel { outline: 3px solid var(--color-clay); outline-offset: 1px; }
+.pw-blk.lifted { opacity: .3; transform: scale(.97); outline: 1.5px dashed var(--color-line-2); box-shadow: none; }
+@keyframes pw-land { 0% { transform: scale(.86); box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-clay) 45%, transparent); } 55% { transform: scale(1.04); } 100% { transform: scale(1); } }
+.pw-blk.landed { animation: pw-land .5s cubic-bezier(.2, .8, .2, 1); }
+.pw-stub { font-size: 11.5px; font-weight: 600; color: var(--color-muted); padding: 4px 8px; border-radius: 8px; background: var(--color-surface-2); border-left: 3px solid var(--color-line-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Today: one row per hour */
+.pw-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); border-top: 1px solid var(--color-line); }
+.pw-row.now { box-shadow: inset 3px 0 0 var(--color-clay); background: color-mix(in srgb, var(--color-clay) 4%, transparent); }
+.pw-row .t { padding: 14px 12px; font-size: 13.5px; font-weight: 700; color: var(--color-ink-2); }
+.pw-row.past .t { color: var(--color-muted); }
+.pw-row .t small { display: block; font-size: 11.5px; font-weight: 700; color: var(--color-clay); margin-top: 2px; }
+.pw-slots { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; min-height: 44px; padding: 10px 12px; border-left: 1px solid var(--color-line); transition: background-color .15s, box-shadow .15s, opacity .15s; }
+.pw-free { align-self: center; font-size: 13px; color: var(--color-muted); opacity: .7; }
+
+/* Week: hours down, days across */
+.pw-week { display: grid; grid-template-columns: 76px repeat(6, minmax(0, 1fr)); min-width: 900px; }
+.pw-week .hd { position: sticky; top: 0; z-index: 1; padding: 9px 8px; font-size: 13px; font-weight: 700; background: var(--color-surface-2); border-left: 1px solid var(--color-line); }
+.pw-week .hd small { display: block; font-size: 11.5px; font-weight: 600; color: var(--color-muted); }
+.pw-week .hd small.red { color: var(--color-rose); }
+.pw-week .hd.today { color: var(--color-clay); }
+.pw-week .t { white-space: nowrap; padding: 11px 8px; font-size: 12.5px; font-weight: 700; color: var(--color-ink-2); border-top: 1px solid var(--color-line); }
+.pw-week .c { min-height: 64px; padding: 5px; display: flex; flex-direction: column; gap: 5px; min-width: 0; border-left: 1px solid var(--color-line); border-top: 1px solid var(--color-line); transition: background-color .15s, box-shadow .15s, opacity .15s; }
+.pw-week .c.past { background: var(--color-surface-2); }
+.pw-week .c.away { background: repeating-linear-gradient(135deg, var(--color-surface-2) 0 6px, var(--color-paper-2) 6px 12px); }
+.pw-week .pw-blk { width: 100%; padding: 6px 8px; font-size: 11.5px; gap: 1px; }
+.pw-week .pw-blk b { font-size: 13px; }
+.pw-week .pw-blk .top { font-size: 11px; }
+
+/* the lifted box and the cells it passes over */
+.pw-can { background: color-mix(in srgb, var(--color-clay) 7%, transparent) !important; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-clay) 35%, transparent); }
+.pw-cant { opacity: .45; }
+.pw-hov-ok { background: color-mix(in srgb, var(--color-clay) 16%, transparent) !important; box-shadow: inset 0 0 0 2.5px var(--color-clay); }
+.pw-hov-bad { box-shadow: inset 0 0 0 2.5px var(--color-rose); }
+.pw-drop { font-size: 11.5px; font-weight: 700; color: var(--color-clay); }
+.pw-why { font-size: 11.5px; font-weight: 700; color: var(--color-rose); }
+.pw-put { height: 30px; border-radius: 8px; background: var(--color-surface); box-shadow: inset 0 0 0 1.5px var(--color-clay); font-size: 12px; font-weight: 700; color: var(--color-clay); }
+.pw-ghost { position: fixed; z-index: 80; pointer-events: none; display: flex; flex-direction: column; justify-content: center; gap: 1px; min-height: 68px; padding: 6px 9px; box-sizing: border-box;
+  border-radius: 10px; background: var(--color-surface); font-size: 11.5px; color: var(--color-muted); transform: rotate(-1.5deg);
+  box-shadow: 0 0 0 2px var(--color-clay), 0 18px 30px -12px rgb(0 0 0 / .5); }
+.pw-ghost b { font-size: 13px; font-weight: 700; color: var(--color-ink); }
+.pw-ghost span, .pw-ghost b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-ghost.back { transition: left .24s cubic-bezier(.3, .7, .2, 1), top .24s cubic-bezier(.3, .7, .2, 1), transform .24s, opacity .24s; transform: none; opacity: .5; }
+
+/* Pending schedules */
+.pw-q { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-top: 1px solid var(--color-line); cursor: grab; touch-action: none; user-select: none; transition: background-color .15s, opacity .15s; }
+.pw-q:hover { background: var(--color-surface-2); }
+.pw-q.lifted { opacity: .3; }
+.pw-pend-can { outline: 2px dashed var(--color-clay-line); outline-offset: -6px; }
+.pw-pend-hov { outline: 2.5px solid var(--color-clay); outline-offset: -6px; background: var(--color-clay-soft) !important; }
+
+/* the week header: the range opens a month to pick any week */
+.pw-range { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; border-radius: 10px; font-size: 17px; font-weight: 800; color: var(--color-ink); }
+.pw-range:hover { background: var(--color-surface-2); }
+.pw-cal { width: 292px; padding: 12px; }
+.pw-cal .row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; padding: 2px 0; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--color-ink-2); }
+.pw-cal button.row:hover { background: var(--color-surface-2); }
+.pw-cal .row.on { background: var(--color-clay-soft); box-shadow: inset 0 0 0 1.5px var(--color-clay); }
+.pw-cal .row span { height: 32px; display: grid; place-items: center; border-radius: 8px; }
+.pw-cal .row.head { font-size: 11.5px; font-weight: 700; color: var(--color-muted); }
+.pw-cal .row span.out { color: var(--color-muted); opacity: .6; }
+.pw-cal .row span.today { background: var(--color-clay); color: var(--color-paper); }
+
+@media (prefers-reduced-motion: reduce) { .pw-blk, .pw-ghost.back { transition: none; } .pw-blk.landed { animation: none; } }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, gte, lte, inArray } from 'drizzle-orm';
-import { procedureSession, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant } from '../db/schema.js';
+import { procedureSession, procedureWeek, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant } from '../db/schema.js';
 import { bookingSettings, localToUtc } from '../lib/booking.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { auditView } from '../lib/audit.js';
@@ -9,7 +9,7 @@ import { normHistory } from '../lib/history.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
-import { HttpError, can } from '../lib/auth.js';
+import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
 import { drawSitting, reverseSitting, sittingMoney } from './courses.js';
 
@@ -33,6 +33,8 @@ const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\
 export const daysFrom = (from: string, to: string) => Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 864e5);
 /** The day-before WhatsApp goes out at this clinic-local time, inside sending hours, so the desk can call those who did not answer the same afternoon. */
 export const REMINDER_AT = '10:00';
+/** No sitting runs past this (minutes after midnight); the same limit the free-slot list uses. */
+const DAY_END = 20 * 60;
 
 /**
  * The WhatsApp reminder the day before a sitting. Any reminder not yet sent is dropped first, so booking, moving,
@@ -44,7 +46,7 @@ export async function planSittingReminder(tx: Tx, t: string, sittingId: string) 
     .innerJoin(patient, eq(patient.id, procedureSession.patientId)).innerJoin(tenant, eq(tenant.id, procedureSession.tenantId))
     .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))
     .where(and(eq(procedureSession.id, sittingId), eq(procedureSession.tenantId, t))).then((x) => x[0]);
-  if (!r || r.ps.state !== 'confirmed') return null;
+  if (!r || r.ps.state !== 'confirmed' || r.ps.approval !== 'approved') return null; // the patient hears of it once the doctor has approved it
   const at = localToUtc(addDays(r.ps.day, -1), REMINDER_AT, r.ten.timezone);
   if (at.getTime() <= Date.now()) return null; // booked for tomorrow after the hour: the booking itself was the confirmation
   const cfg = bookingSettings(r.ten.settings).messages;
@@ -58,6 +60,24 @@ export async function planSittingReminder(tx: Tx, t: string, sittingId: string) 
     params: { patient: r.p.fullName, date, time: r.ps.startTime, doctor: '', link: '', lang }, status, sendAfter: at.toISOString(),
     error: status === 'skipped' ? (noPhone ? 'no mobile number' : r.p.noWhatsapp ? 'patient asked for no WhatsApp messages' : 'messages are switched off') : null }).returning();
   return row;
+}
+
+/** The Monday of the week a day falls in. */
+export const weekOf = (day: string) => addDays(day, -((new Date(day + 'T00:00:00Z').getUTCDay() + 6) % 7));
+
+/**
+ * The doctor's say on a sitting someone books or moves. Its own doctor booking or moving it approves it. Anyone else's goes to
+ * that doctor: straight away when its week was already sent (or is this week or earlier), otherwise it waits as a draft until
+ * the coordinator sends the week. A sitting with no doctor has nobody to approve it.
+ */
+export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string) {
+  const now = new Date().toISOString();
+  const set = (approval: 'approved' | 'sent' | 'draft', changed: boolean) => ({ approval, approvalNote: null, approvedBy: approval === 'approved' ? ctx.name : null, approvedAt: approval === 'approved' ? now : null, changed, bookedBy: ctx.userId });
+  if (!practitionerId || practitionerId === ctx.practitionerId) return set('approved', false);
+  const wk = weekOf(day);
+  if (wk <= weekOf(todayIn(ctx.timezone))) return set('sent', false);
+  const sent = await tx.select({ id: procedureWeek.id }).from(procedureWeek).where(and(eq(procedureWeek.tenantId, ctx.tenantId), eq(procedureWeek.weekStart, wk))).then((r) => r[0]);
+  return sent ? set('sent', true) : set('draft', false);
 }
 
 /** Room and doctor conflicts for a proposed slot. App-level check inside the transaction; rooms are row-locked. */
@@ -102,9 +122,11 @@ export function procedureRoutes(app: FastifyInstance) {
     return { minutes, rooms: rooms.map((r) => ({ id: r.id, name: r.name })), requiredCapability: proc.requiredCapability, slots };
   });
 
-  const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false) });
+  const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
+    // planned: placed on the coordinator's week, not booked with the patient, so it does not count as the patient's yes
+    planned: z.boolean().default(false) });
   /** Schedule a sitting. Blocks the doctor's OP time when a doctor is assigned, so booking capacity drops automatically. */
-  route(app, 'post', '/procedure-sessions', 'worklist.write', async (req, tx) => {
+  const book = async (req: { ctx: Ctx; body: unknown }, tx: Tx) => {
     const body = ScheduleIn.parse(req.body); const t = req.ctx.tenantId;
     const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t))).then((r) => r[0]);
     if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
@@ -122,13 +144,14 @@ export function procedureRoutes(app: FastifyInstance) {
     // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
     const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
-      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 ? now : null, patientConfirmedAt: ahead <= 1 ? now : null }).returning();
+      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).returning();
     await planSittingReminder(tx, t, ps.id);
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${n + 1}`, procedureSessionId: ps.id });
     await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
     await emit(tx, req.ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day: body.day, startTime: body.startTime, endTime, roomId: body.roomId, practitionerId: body.practitionerId, forced: c.length > 0 });
     return { ...ps, warnings: c };
-  });
+  };
+  route(app, 'post', '/procedure-sessions', 'worklist.write', book);
 
   /** Sittings per day for the date strip. Cancelled and postponed ones are not counted. */
   route(app, 'get', '/procedure-sessions/counts', 'worklist.read', async (req, tx) => {
@@ -164,7 +187,9 @@ export function procedureRoutes(app: FastifyInstance) {
       if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     }
     if (body.supervisorId && body.supervisorId === body.practitionerId) throw new HttpError(400, 'SUPERVISOR_IS_THE_DOCTOR');
-    const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId, ...(body.supervisorId !== undefined ? { supervisorId: body.supervisorId } : {}) }).where(eq(procedureSession.id, id)).returning();
+    const who = body.practitionerId !== ps.practitionerId ? await approvalFor(tx, req.ctx, body.practitionerId, ps.day) : {};
+    const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId, ...who, ...(body.supervisorId !== undefined ? { supervisorId: body.supervisorId } : {}) }).where(eq(procedureSession.id, id)).returning();
+    await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: ps.roomId, day: ps.day, startTime: ps.startTime, endTime: ps.endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
     await emit(tx, req.ctx, 'procedure_session.doctor_assigned', 'procedure_session', id, { practitionerId: body.practitionerId });
@@ -215,7 +240,7 @@ export function procedureRoutes(app: FastifyInstance) {
   });
 
   /** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */
-  route(app, 'post', '/procedure-sessions/:id/reschedule', 'worklist.write', async (req, tx) => {
+  const move = async (req: { ctx: Ctx; body: unknown; params: unknown }, tx: Tx) => {
     const body = ScheduleIn.omit({ recommendationId: true }).extend({ reason: z.string().trim().max(200).optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
@@ -232,7 +257,7 @@ export function procedureRoutes(app: FastifyInstance) {
     if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     // a move inside the week counts as the week's confirmation; the day-before call is still made (the clinic may have moved it)
     const ahead = daysFrom(todayIn(req.ctx.timezone), body.day);
-    const [moved] = await tx.update(procedureSession).set({ day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 ? new Date().toISOString() : null, notes: body.notes ?? ps.notes }).where(eq(procedureSession.id, id)).returning();
+    const [moved] = await tx.update(procedureSession).set({ day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 && !body.planned ? new Date().toISOString() : null, notes: body.notes ?? ps.notes, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).where(eq(procedureSession.id, id)).returning();
     await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
@@ -240,6 +265,105 @@ export function procedureRoutes(app: FastifyInstance) {
     if (rec) await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Sitting rescheduled', note: `${ps.day} ${ps.startTime} → ${body.day} ${body.startTime}${body.reason ? ` · ${body.reason}` : ''}` }] }).where(eq(recommendation.id, rec.id));
     await emit(tx, req.ctx, 'procedure_session.rescheduled', 'procedure_session', id, { from: { day: ps.day, startTime: ps.startTime, roomId: ps.roomId }, to: { day: body.day, startTime: body.startTime, roomId: body.roomId }, reason: body.reason, forced: c.length > 0 });
     return { ...moved, warnings: c };
+  };
+  route(app, 'post', '/procedure-sessions/:id/reschedule', 'worklist.write', move);
+
+  /**
+   * Drop a sitting on an hour: the coordinator's week (a course's next sitting, or one already booked), or a doctor moving their own.
+   * The server takes the first start in that hour, in 15-minute steps, where the whole sitting fits a suitable room and the doctor,
+   * and says why when nothing does. A new sitting goes to the doctor who prescribed the course; a moved one keeps its doctor and tries its room first.
+   */
+  route(app, 'post', '/procedure-sessions/place', null, async (req, tx) => {
+    const body = z.object({ recommendationId: z.string().uuid().optional(), sittingId: z.string().uuid().optional(), day: DAY, hour: z.number().int().min(0).max(23) })
+      .refine((b) => !!b.recommendationId !== !!b.sittingId, 'one of recommendationId or sittingId').parse(req.body);
+    const t = req.ctx.tenantId;
+    const ps = body.sittingId ? await tx.select().from(procedureSession).where(and(eq(procedureSession.id, body.sittingId), eq(procedureSession.tenantId, t))).then((r) => r[0]) : null;
+    if (body.sittingId && !ps) throw new HttpError(404, 'NOT_FOUND');
+    const ownMove = !!ps && !!req.ctx.practitionerId && ps.practitionerId === req.ctx.practitionerId && can(req.perms, 'encounter.complete');
+    if (!can(req.perms, 'worklist.write') && !ownMove) throw new HttpError(403, 'FORBIDDEN:worklist.write');
+    const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, ps?.recommendationId ?? body.recommendationId!), eq(recommendation.tenantId, t))).then((r) => r[0]);
+    if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
+    const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
+    const buffer = proc?.bufferMinutes ?? 0;
+    const minutes = ps ? Math.max(5, toMin(ps.endTime) - toMin(ps.startTime) - buffer) : proc?.typicalMinutes ?? 30;
+    const doctor = ps ? ps.practitionerId : await tx.select({ d: encounter.practitionerId }).from(encounter).where(eq(encounter.id, rec.encounterId)).then((r) => r[0]?.d ?? null);
+    const rooms = (await tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true)))).filter((r) => !proc?.requiredCapability || r.capabilities.includes(proc.requiredCapability))
+      .sort((a, b) => Number(b.id === ps?.roomId) - Number(a.id === ps?.roomId));
+    const today = todayIn(req.ctx.timezone);
+    const nowMin = toMin(new Intl.DateTimeFormat('en-GB', { timeZone: req.ctx.timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()));
+    let why = body.day < today ? 'that day is past' : !rooms.length ? (proc?.requiredCapability ? `No room has ${proc.requiredCapability}` : 'No rooms are set up') : '';
+    let at: { startTime: string; roomId: string } | null = null;
+    if (!why) for (let m = body.hour * 60; m < body.hour * 60 + 60 && !at; m += 15) {
+      if (body.day === today && m < nowMin) { why = 'that time is past'; continue; }
+      if (m + minutes + buffer > DAY_END) { why = `${minutes} min runs past ${toHHMM(DAY_END)}, closing time`; break; }
+      for (const r of rooms) {
+        const c = await conflicts(tx, t, body.day, toHHMM(m), toHHMM(m + minutes + buffer), r.id, doctor, ps?.id);
+        if (!c.length) { at = { startTime: toHHMM(m), roomId: r.id }; break; }
+        why = c[0].kind === 'room' ? `${c[0].who.replace(' · ', ' has ')} till ${c[0].endTime}` : c[0].kind === 'doctor' ? `the doctor has ${c[0].who} till ${c[0].endTime}` : c[0].kind === 'leave' ? 'the doctor is away' : c[0].who;
+      }
+    }
+    if (!at) throw new HttpError(409, 'NO_FIT', { why: why || 'no free time in that hour' });
+    const args = { day: body.day, startTime: at.startTime, minutes, roomId: at.roomId, practitionerId: doctor, force: false, planned: true };
+    return ps ? move({ ctx: req.ctx, body: args, params: { id: ps.id } }, tx) : book({ ctx: req.ctx, body: { ...args, recommendationId: rec.id } }, tx);
+  });
+
+  /** A week of sittings, for the coordinator: whether it went to the doctors, and the doctors' leave in it. This week and earlier count as sent. */
+  route(app, 'get', '/procedure-weeks/:start', 'worklist.read', async (req, tx) => {
+    const start = weekOf(DAY.parse((req.params as any).start)); const t = req.ctx.tenantId;
+    const sent = await tx.select().from(procedureWeek).where(and(eq(procedureWeek.tenantId, t), eq(procedureWeek.weekStart, start))).then((r) => r[0] ?? null);
+    const away = await tx.select({ practitionerId: calendarBlock.practitionerId, day: calendarBlock.day, startTime: calendarBlock.startTime, endTime: calendarBlock.endTime }).from(calendarBlock)
+      .where(and(eq(calendarBlock.tenantId, t), gte(calendarBlock.day, start), lte(calendarBlock.day, addDays(start, 6)), eq(calendarBlock.kind, 'leave')));
+    return { start, sent: !!sent || start <= weekOf(todayIn(req.ctx.timezone)), sentAt: sent?.createdAt ?? null, sentBy: sent?.sentBy ?? null, away };
+  });
+
+  /** Send a week to the doctors: each draft in it goes to its own doctor. From then on, a change in that week reaches the doctor straight away. */
+  route(app, 'post', '/procedure-weeks/:start/send', 'worklist.write', async (req, tx) => {
+    const start = weekOf(DAY.parse((req.params as any).start)); const t = req.ctx.tenantId;
+    await tx.insert(procedureWeek).values({ tenantId: t, weekStart: start, sentBy: req.ctx.name }).onConflictDoNothing();
+    const wk = await tx.select().from(procedureWeek).where(and(eq(procedureWeek.tenantId, t), eq(procedureWeek.weekStart, start))).then((r) => r[0]);
+    const rows = await tx.update(procedureSession).set({ approval: 'sent' })
+      .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, start), lte(procedureSession.day, addDays(start, 6)), eq(procedureSession.approval, 'draft'))).returning({ id: procedureSession.id });
+    await emit(tx, req.ctx, 'procedure_week.sent', 'procedure_week', wk.id, { start, sittings: rows.length });
+    return { start, sent: rows.length };
+  });
+
+  /** The doctor's sittings waiting for their approval, with the rest of those weeks around them, the course behind each, and their leave. */
+  route(app, 'get', '/procedure-approvals', 'encounter.complete', async (req, tx) => {
+    const me = req.ctx.practitionerId; const t = req.ctx.tenantId;
+    if (!me) return { pending: 0, weeks: [], sittings: [], away: [] };
+    const waiting = await tx.select({ day: procedureSession.day }).from(procedureSession)
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.practitionerId, me), eq(procedureSession.approval, 'sent'), eq(procedureSession.state, 'confirmed'), gte(procedureSession.day, todayIn(req.ctx.timezone))));
+    if (!waiting.length) return { pending: 0, weeks: [], sittings: [], away: [] };
+    const weeks = [...new Set(waiting.map((w) => weekOf(w.day)))].sort();
+    const from = weeks[0], to = addDays(weeks[weeks.length - 1], 6);
+    const rows = await tx.select({ ps: procedureSession, patient: patient.fullName, procedure: procedureCatalog.name, room: room.name, of: recommendation.sittings, gapDays: recommendation.gapDays })
+      .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
+      .leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.practitionerId, me), gte(procedureSession.day, from), lte(procedureSession.day, to), sql`${procedureSession.state} not in ('cancelled','postponed')`))
+      .orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
+    // the last sitting done on each course, so the review can say when it was and flag one booked too soon
+    const recIds = [...new Set(rows.map((r) => r.ps.recommendationId))];
+    const last = new Map((await tx.select({ rec: procedureSession.recommendationId, day: sql<string>`max(${procedureSession.day})` }).from(procedureSession)
+      .where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, recIds), eq(procedureSession.state, 'completed'))).groupBy(procedureSession.recommendationId)).map((x) => [x.rec, x.day]));
+    const away = await tx.select({ day: calendarBlock.day, startTime: calendarBlock.startTime, endTime: calendarBlock.endTime }).from(calendarBlock)
+      .where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.practitionerId, me), eq(calendarBlock.kind, 'leave'), gte(calendarBlock.day, from), lte(calendarBlock.day, to)));
+    return { pending: waiting.length, weeks, away,
+      sittings: rows.map((r) => ({ ...r.ps, patient: r.patient, procedure: r.procedure, room: r.room, of: r.of, gapDays: r.gapDays, lastDone: last.get(r.ps.recommendationId) ?? null })) };
+  });
+
+  /** The doctor approves their sittings (one, or all at once), or sends some back to the coordinator with a note. Only sittings waiting for them. */
+  route(app, 'post', '/procedure-approvals', 'encounter.complete', async (req, tx) => {
+    const body = z.object({ ids: z.array(z.string().uuid()).min(1).max(300), action: z.enum(['approve', 'change']), note: z.string().trim().max(200).optional() }).parse(req.body);
+    const me = req.ctx.practitionerId; const t = req.ctx.tenantId;
+    if (!me) throw new HttpError(403, 'NOT_A_DOCTOR');
+    const set = body.action === 'approve' ? { approval: 'approved', approvedBy: req.ctx.name, approvedAt: new Date().toISOString(), approvalNote: null, changed: false } : { approval: 'change', approvalNote: body.note || 'Change asked' };
+    const rows = await tx.update(procedureSession).set(set)
+      .where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.id, body.ids), eq(procedureSession.practitionerId, me), eq(procedureSession.approval, 'sent'))).returning({ id: procedureSession.id });
+    for (const r of rows) {
+      if (body.action === 'approve') await planSittingReminder(tx, t, r.id);
+      await emit(tx, req.ctx, body.action === 'approve' ? 'procedure_session.approved' : 'procedure_session.change_asked', 'procedure_session', r.id, body.action === 'change' ? { note: set.approvalNote } : {});
+    }
+    return { updated: rows.length };
   });
 
   /** State changes keep history: postponing records the reason and frees the doctor's time; the course stays open. */

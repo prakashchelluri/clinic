@@ -9,6 +9,7 @@ import { Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
 import { ChangeMyDay, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 import { ageText } from '../rxLine';
+import { ProcReview, useApprovals } from '../procReview';
 import '../frontdesk.css';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -48,6 +49,9 @@ export function Today() {
   const open = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }), onError: (e) => toast(errText(e), 'err') });
   const take = useMutation({ mutationFn: (id: string) => post(`/procedure-sessions/${id}/assign`, { practitionerId: doc }), onSuccess: () => { ['calendar', 'psessions'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('The sitting is yours'); }, onError: (e) => toast(errText(e), 'err') });
   const [change, setChange] = useState<{ kind: ChangeKind; day?: string } | null>(null);
+  // sittings the coordinator sent for this doctor's approval
+  const approvals = useApprovals(!!doc); const [reviewing, setReviewing] = useState(false);
+  const toApprove: number = approvals.data?.pending ?? 0;
   const [picked, setPicked] = useState<Item | null>(null);
 
   const d = fd.data; const c = cal.data;
@@ -122,7 +126,7 @@ export function Today() {
   const overdue = (fus.data?.rows ?? []).filter((r: any) => r.dueOn && r.dueOn < today() && !r.waiting);
   const noDoc = (allProcs.data ?? []).filter((p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId);
   const stopped: any[] = secq.data?.security?.ipLock?.enabled ? secq.data.stopped : [];
-  const otherCount = stopped.length + drafts.length + noDoc.length + (overdue.length ? 1 : 0);
+  const otherCount = stopped.length + drafts.length + noDoc.length + (overdue.length ? 1 : 0) + (toApprove ? 1 : 0);
 
   const tw: any[] = tom.data?.windows ?? [];
   const tBooked = tw.reduce((n, w) => n + (w.appointments ?? []).length, 0);
@@ -200,8 +204,9 @@ export function Today() {
           {otherCount > 0 && <section className="fd-sheet p-4 sm:p-5 anim-fade-up">
             <b className="text-[15px]">Needs your attention</b>
             <div className="mt-1">
+              {toApprove > 0 && <Attn title={`${toApprove} procedure sitting${toApprove === 1 ? '' : 's'} to approve`} sub={`from the coordinator${approvals.data?.weeks?.length ? ` · week of ${new Date(approvals.data.weeks[0] + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : ''}`} action="Review" onClick={() => setReviewing(true)} />}
               {drafts.map((v: any) => <Attn key={v.id} title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
-              {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}
+              {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=today&day=${today()}`)} />)}
               {overdue.length > 0 && <Attn title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Still on the desk's Calls list" action="See" onClick={() => nav('/calls?tab=reviews')} />}
               {stopped.map((x: any) => <Attn key={x.id} title={`${x.name} was stopped`} sub={`new internet address ${x.ip}: at the clinic? allow it`} action="Open" onClick={() => nav('/settings?tab=privacy')} />)}
             </div>
@@ -216,6 +221,7 @@ export function Today() {
         </div>
       </div>
       {picked && <DayDrawer item={picked} cfg={cfg} canOpen={can(perms, 'encounter.intake')} busy={open.isPending} onStart={(id) => open.mutate(id)} onClose={() => setPicked(null)} />}
+      {reviewing && <ProcReview onClose={() => setReviewing(false)} />}
       {change && doc && <ChangeMyDay practitionerId={doc} name={docName} initialKind={change.kind} initialDay={change.day} onClose={() => setChange(null)} />}
     </div>
   );
@@ -247,7 +253,7 @@ function DayDrawer({ item, cfg, canOpen, busy, onStart, onClose }: { item: Item;
         {canOpen && v && ['waiting', 'screened'].includes(v.status) && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Start consultation</button>}
         {canOpen && v && v.status === 'in_consult' && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Back to the prescription</button>}
         {canOpen && v && v.status === 'done' && v.encounterStatus === 'draft' && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Finish the note</button>}
-        {item.proc && <button className="btn" onClick={() => nav(`/worklist?tab=schedule&day=${today()}`)}>Open procedures</button>}
+        {item.proc && <button className="btn" onClick={() => nav(`/worklist?tab=today&day=${today()}`)}>Open procedures</button>}
         {item.patientId && <button className="btn" onClick={() => nav(`/patients/${item.patientId}`)}>Open record</button>}
       </div>
     </aside>, document.body);

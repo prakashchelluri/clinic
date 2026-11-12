@@ -269,13 +269,15 @@ export function clinicalRoutes(app: FastifyInstance) {
       .orderBy(asc(recommendation.dueOn))
       .then(async (rows) => {
         // the next sitting still to happen, so the list can offer Reschedule instead of Schedule
-        const next = new Map<string, any>();
+        const next = new Map<string, any>(); const done = new Map<string, number>();
         if (kind === 'procedure' && rows.length) {
           const upcoming = await tx.select({ ps: procedureSession, room: room.name, doctor: practitioner.name }).from(procedureSession).leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
             .where(and(eq(procedureSession.tenantId, req.ctx.tenantId), inArray(procedureSession.recommendationId, rows.map((x) => x.r.id)), eq(procedureSession.state, 'confirmed'))).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
           for (const u of upcoming) if (!next.has(u.ps.recommendationId)) next.set(u.ps.recommendationId, { ...u.ps, room: u.room, doctor: u.doctor });
+          // sittings done on each course, so the coordinator's Pending schedules leaves out courses that are finished
+          for (const d of await tx.select({ rec: procedureSession.recommendationId, n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, req.ctx.tenantId), inArray(procedureSession.recommendationId, rows.map((x) => x.r.id)), eq(procedureSession.state, 'completed'))).groupBy(procedureSession.recommendationId)) done.set(d.rec, d.n);
         }
-        return rows.map((x) => ({ ...x.r, patient: x.p, procedure: x.procedure, next: next.get(x.r.id) ?? null }));
+        return rows.map((x) => ({ ...x.r, patient: x.p, procedure: x.procedure, next: next.get(x.r.id) ?? null, done: done.get(x.r.id) ?? 0 }));
       });
   });
 

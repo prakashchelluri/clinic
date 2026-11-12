@@ -83,7 +83,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   // booked sittings to confirm: a week before, and the day before
   const ahead = await tx.select({ ps: procedureSession, p: P, proc: procedureCatalog.name, of: recommendation.sittings }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
     .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))
-    .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.state, 'confirmed'), gte(procedureSession.day, today), lte(procedureSession.day, addDays(today, WEEK_CALL.to)), sql`${procedureSession.patientConfirmedAt} is null`));
+    .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.state, 'confirmed'), eq(procedureSession.approval, 'approved'), gte(procedureSession.day, today), lte(procedureSession.day, addDays(today, WEEK_CALL.to)), sql`${procedureSession.patientConfirmedAt} is null`)); // patients are called once the doctor has approved
   for (const x of ahead) {
     const n = Math.round((Date.parse(x.ps.day) - Date.parse(today)) / 864e5);
     const kind: Kind | null = n <= DAY_CALL ? 'confirm_day' : n >= WEEK_CALL.from && !x.ps.weekConfirmedAt ? 'confirm_week' : null;
