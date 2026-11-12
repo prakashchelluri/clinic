@@ -24,7 +24,7 @@ export function orderRoutes(app: FastifyInstance) {
   route(app, 'get', '/orders', 'document.read', async (req, tx) => {
     const t = req.ctx.tenantId; const tab = String((req.query as any).tab ?? '');
     const today = todayIn(req.ctx.timezone);
-    const rows = await tx.select({ r: recommendation, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }, doctor: practitioner.name, encStatus: encounter.status })
+    const rows = await tx.select({ r: recommendation, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, flags: patient.flags }, doctor: practitioner.name, encStatus: encounter.status })
       .from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).innerJoin(encounter, eq(encounter.id, recommendation.encounterId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
       .where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'investigation'), ne(recommendation.status, 'cancelled'),
         sql`(${recommendation.informedAt} is null or (${recommendation.informedAt} at time zone ${req.ctx.timezone})::date = ${today}::date)`));

@@ -80,7 +80,7 @@ function Overview() {
       ['Course', 'A procedure the patient agreed to, for example 6 chemical peels at one price.'],
       ['Advance', 'Money paid ahead for some sittings of a course. The price is locked from the first payment.'],
       ['Test order', 'The tests the doctor asked for in one visit. The doctor reviews the order once, when every report is in.'],
-      ['Informed', 'The patient has been told the result. Only reception or the doctor marks this, and only after the doctor reviewed.'],
+      ['Patient informed', 'The patient has been given the result. Only reception or the doctor marks this, and only after the doctor reviewed.'],
       ['Handle carefully', 'A flag with a written reason, shown beside the patient’s name. Read the reason before you speak to them.'],
       ['Waive', 'Take no fee for a visit, with a reason. Only some people may do this.'],
       ['EMI awaiting settlement', 'The lender approved the payment, but its money has not reached the bank yet.'],
@@ -138,15 +138,15 @@ function Reception() {
     <Flow label="Life of a test order. The patient never needs a login: you add the photo.">
       <Step n={1} who="doctor" title="Doctor orders tests">Appear on Checkout as Tests.</Step>
       <Step n={2} who="reception" title="Explained">Patient goes to the lab.</Step>
-      <Step n={3} who="reception" title="Add each report">On Test reports, tap the order and take a photo with the phone.</Step>
-      <Step n={4} who="doctor" title="Doctor reviews">When all are in. Or &ldquo;Review what is in&rdquo; to split off a missing one.</Step>
-      <Step n={5} who="reception" title="Tell the patient">In person, by phone or WhatsApp. Mark Informed.</Step>
+      <Step n={3} who="reception" title="Add each result">On Test reports, tap the patient's row and add a photo, file or the values. Send to the doctor.</Step>
+      <Step n={4} who="doctor" title="Doctor reviews">When all results are in, or earlier if the desk sends the received ones.</Step>
+      <Step n={5} who="reception" title="Inform the patient">In person, by phone or WhatsApp. Book a visit first if the doctor asked. Mark Patient informed.</Step>
     </Flow>
     <Steps>{[
-      <>Open <b>Test reports</b>. Your tabs are <Btn>To collect</Btn> (add reports), <Btn>To explain</Btn> (tell the patient) and <Btn>Done today</Btn>.</>,
-      <>Under To collect, tap the order, then <Btn>Add report</Btn>. Take a clear photo of each page with the phone camera, or choose a file. Large photos are made smaller automatically.</>,
+      <>Open <b>Test reports</b>. One list shows every order; the chips above it filter by status: <Btn>Results pending</Btn>, <Btn>Review pending</Btn>, <Btn>Patient update pending</Btn> and <Btn>Completed today</Btn>.</>,
+      <>Tap a row: the order opens on the right. Under each test, tap <Btn>Add result</Btn>. Take a clear photo of each page, choose a file, or type the values. Then <Btn>Save and send to the doctor</Btn>.</>,
       <>If the lab has not sent a report and you phoned them, tap <Btn>Called the lab</Btn> so the next person knows.</>,
-      <>After the doctor has reviewed, the order shows under To explain. Tell the patient, then tap <Btn>Informed</Btn> and choose how (in person, phone or WhatsApp).</>,
+      <>After the doctor has reviewed, the order shows under Patient update pending with the doctor's note. If a visit is needed, tap <Btn>Book visit</Btn> first. Then tap <Btn>Patient informed</Btn> and choose how (in person, phone or WhatsApp).</>,
     ]}</Steps>
     <Warn>You cannot mark a result as told before the doctor has reviewed it. If the doctor chose &ldquo;I will call&rdquo;, only the doctor can close it.</Warn>
 
@@ -233,7 +233,7 @@ function Doctor() {
     ]}</Steps>
     <Tip>Saved your own set? Use &ldquo;Save only the medicines / advice / tests&rdquo; at the bottom. It waits as a draft until the owner approves it.</Tip>
     <H3>Reviewing test results</H3>
-    <P>Open <b>Test reports</b> &rarr; <b>To review</b>. When every report in an order is in, review it once: Normal, Change medicines, Needs a visit, or I will call. If one report is slow, tap <b>Review what is in</b> to split the missing one off.</P>
+    <P>Open <b>Test reports</b>; it opens on <b>Review pending</b>. Tap a row and review the order once: Normal, Change medicines, Visit needed, or I will call. The desk can send received results ahead of a slow one.</P>
   </>);
 }
 
