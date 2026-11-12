@@ -93,12 +93,10 @@ export function Login() {
       else setErr(x instanceof ApiError && x.body.code === 'TOO_MANY_ATTEMPTS' ? `Too many wrong attempts. Try again in ${Math.ceil((x.body.retryAfterSeconds ?? 600) / 60)} minutes.` : 'That email or password is not right.');
     } finally { setBusy(false); }
   };
-  const brand = <div className="flex items-center gap-3"><img src="/cubott.png" alt="Cubott" className="h-[38px] w-[30px] object-contain" /><span className="text-[18px] font-bold tracking-[-0.02em] text-ink">Cubott <span className="font-semibold text-muted">OPD</span></span></div>;
   return (
     <div className="min-h-dvh flex flex-wrap items-stretch bg-paper text-ink">
       {/* The story: one patient, every role */}
       <section aria-label="One patient through the clinic" className="hidden lg:flex flex-[1.45_1_660px] min-w-0 flex-col gap-2 py-10 pl-14 pr-10 min-h-dvh anim-fade-up">
-        {brand}
         <div className="flex-1 flex flex-col justify-center gap-3">
           <Stage />
           <ol className="grid grid-cols-4 gap-3.5 max-w-[700px] w-full self-center">
@@ -114,10 +112,9 @@ export function Login() {
       {/* Sign in */}
       <main className="flex-[1_1_440px] min-w-0 flex items-center justify-center px-6 py-10 lg:px-14 bg-surface min-h-dvh" style={{ boxShadow: 'inset 1px 0 0 var(--color-line)' }}>
         <form onSubmit={submit} className="w-full max-w-[380px] flex flex-col gap-4 anim-fade-up">
-          <div className="lg:hidden mb-2">{brand}</div>
-          <div className="flex flex-col gap-3 mb-1">
-            <h1 className="text-[42px] leading-[1.02] tracking-[-0.03em] text-ink" style={{ fontWeight: 700, textWrap: 'pretty' }}>One patient.<br />Four hands.<br /><span className="text-clay">One sign-in.</span></h1>
-            <p className="text-[15px] leading-relaxed text-ink-2">Whoever you are in that walk, sign in here. Your email finds the clinic, your role opens your step.</p>
+          <div className="flex items-center gap-4 mb-3">
+            <img src="/cubott.png" alt="" className="h-[66px] w-[52px] object-contain" />
+            <h1 className="text-[34px] leading-none tracking-[-0.03em] text-ink" style={{ fontWeight: 700 }}>Cubott <span className="text-muted" style={{ fontWeight: 600 }}>OPD</span></h1>
           </div>
 
           {blocked !== null && <div className="rounded-2xl bg-amber-soft p-4 text-center anim-fade-up" role="alert">
@@ -132,8 +129,7 @@ export function Login() {
           <div><label htmlFor="login-password" className="label">Password</label><input id="login-password" className="input !py-3" type="password" autoComplete="current-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
           {clinics && <div className="rounded-2xl bg-surface-2 p-3 anim-fade-up"><div className="text-xs text-muted mb-2">This email belongs to more than one clinic. Which one?</div><div className="flex flex-col gap-1">{clinics.map((c) => <button type="button" key={c.slug} className="btn justify-start" onClick={() => submit(undefined, f.email, c.slug)}>{c.name}</button>)}</div></div>}
           {err && <div className="text-sm text-rose anim-fade-in" role="alert">{err}</div>}
-          <button className="btn btn-primary w-full !py-3.5 !text-[15px]" disabled={busy || !f.email}>{busy ? 'Signing in…' : 'Take my step'}<Icon name="chevR" /></button>
-          <p className="text-[12.5px] leading-relaxed text-muted">Auto sign-out after a quiet spell. Every record opened is logged against your role.</p>
+          <button className="btn btn-primary w-full !py-3.5 !text-[15px]" disabled={busy || !f.email}>{busy ? 'Signing in…' : 'Login'}<Icon name="chevR" /></button>
 
           {DEMO.length > 0 && <div className="mt-3">
             <div className="label">Demo accounts · password demo1234</div>
