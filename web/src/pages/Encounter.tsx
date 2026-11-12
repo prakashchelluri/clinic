@@ -564,7 +564,13 @@ export function Encounter() {
     if (missing.length) { setShowMissing(true); goTo(secOf(missing[0].path)); if (viewRef.current === 'stacked') toast(`Cannot finish yet: ${missing.map((m) => m.message.replace(/ is required$/, '')).join(', ')}`, 'err'); return; } // Focused and Review: the bar lists it, no toast on top
     // allergy, pregnancy or a serious interaction: a reason for each first (kept in data.overrides, never printed)
     if (unanswered.length) { setChecking(unanswered); return; }
-    if (held) return save.mutate({ complete: true }); // after the reports: the prescription was signed when it went out
+    if (held) { // after the reports: the prescription was signed when it went out
+      if (!testsOpen) return save.mutate({ complete: true });
+      const left = testRecs.filter((r: any) => r.status !== 'done').map((r: any) => r.notes || 'a test').join(', ');
+      // reports still to come: keeping it open is the usual step; closing now is the doctor's call, said out loud
+      void ask({ title: `${left} still pending. Close the consultation anyway?`, body: 'When they arrive they still come to you for review, from Test reports. Keep open for the rest keeps this consultation waiting for them.', confirmLabel: 'Close the consultation', cancelLabel: 'Go back' }).then((ok) => { if (ok) save.mutate({ complete: true }); });
+      return;
+    }
     void toSheet(data);
   };
   /** Save first, so the sign-off sheet shows exactly what will print; a failed save does not open it. */
@@ -1035,8 +1041,8 @@ export function Encounter() {
         {!readOnly && canFinish && <>
           <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className={B} onClick={() => { void preview(); }}>Preview</button>
-          {held && testsOpen && <button type="button" className={B} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
-          <button type="button" className={BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+          {held && testsOpen && <button type="button" className={BP} disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+          <button type="button" className={held && testsOpen ? B : BP} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
         {readOnly && canFinish && e.status === 'completed' && <button type="button" className={B} onClick={() => { void amend(); }}>Amend</button>}
         {readOnly && <button type="button" className={BP} onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
@@ -1053,8 +1059,8 @@ export function Encounter() {
         {!readOnly && canFinish && <>
           <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
           <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button>
-          {held && testsOpen && <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
-          <button type="button" className="btn btn-primary" disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+          {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Keep open for the rest</button>}
+          <button type="button" className={`btn ${held && testsOpen ? 'btn-sm' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
         </>}
         {readOnly && canFinish && e.status === 'completed' && <button type="button" className="btn btn-sm" onClick={() => { void amend(); }}>Amend</button>}
         {readOnly && <button type="button" className="btn btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
