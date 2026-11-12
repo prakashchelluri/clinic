@@ -172,6 +172,7 @@ export function App() {
   const idleMin: number = me.data?.privacy?.idleMinutes ?? 0;
   const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
   const onPad = loc.pathname.startsWith('/encounter'); // the pad: the patient sits in the top bar; clock, search, help and + step aside
+  const onRecord = /^\/patients\/[^/]+$/.test(loc.pathname); // a patient's record: its card carries Back, so the top bar steps aside (phones keep it for the menu)
   const wide = onPad ? padNav : navOpen;
   const toggleWide = onPad ? () => setPadNav((o) => !o) : toggleNav;
   useEffect(() => {
@@ -231,7 +232,7 @@ export function App() {
       )}
 
       <div className={`${wide ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
-        <header className="app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
+        <header className={`app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7 ${onRecord ? 'md:hidden' : ''}`}>
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
           {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
           {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[22px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-5 w-5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}

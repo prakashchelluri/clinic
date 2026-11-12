@@ -107,9 +107,10 @@ function Timeline({ id }: { id: string }) {
   const Line = ({ label, children }: { label: string; children: React.ReactNode }) => <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className="text-[14px] font-semibold">{children}</div></div>;
   return (
     <div className="space-y-3">
-      {/* one compact card: who, how to reach them, the few actions, and the record's tabs along its bottom edge */}
+      {/* one compact card: back, who, how to reach them and the few actions; the record's tabs in their own row below */}
       <div className="card !p-0 anim-fade-up">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-2 pt-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 sm:px-4">
+          <button type="button" className="btn btn-ghost btn-icon hidden !h-10 !w-10 shrink-0 md:inline-flex" aria-label="Back" title="Back" onClick={() => ((window.history.state?.idx ?? 0) > 0 ? nav(-1) : nav('/patients'))}><Icon name="chevL" className="h-5 w-5" /></button>
           <Avatar name={p.fullName} size="h-10 w-10 text-[13px]" />
           <div className="min-w-[240px] flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -127,13 +128,13 @@ function Timeline({ id }: { id: string }) {
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
           {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
         </div>
+      </div>
         {/* the record's parts as the app's tabs; a part's own actions sit at the right of the row */}
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-1 px-3">
-          <Tabs<Sec> className="min-w-0 flex-1 !border-b-0" value={sec} onChange={setSec} options={SECS.map(([k, n]) => ({ value: k, label: SEC_TITLE[k], count: n }))} />
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
+          <Tabs<Sec> className="min-w-0 flex-1" value={sec} onChange={setSec} options={SECS.map(([k, n]) => ({ value: k, label: SEC_TITLE[k], count: n }))} />
           {sec === 'reports' && <div className="flex flex-wrap items-center gap-2 pb-1.5"><button className="btn btn-sm" onClick={() => setLabHist(true)}><Icon name="chart" className="h-3.5 w-3.5" />Test history</button>
             {can(perms, 'document.write') && <>{pendingTests.length > 0 && <select aria-label="Which test is this for" className="input !w-auto !py-1.5 !text-xs" value={forTest} onChange={(ev) => setForTest(ev.target.value)}><option value="">Not for a waiting test</option>{pendingTests.map((x: any) => <option key={x.id} value={x.id}>For test: {x.notes}</option>)}{pendingTests.length > 1 && <option value="all">For all waiting tests</option>}</select>}<UploadButton patientId={id} recommendationIds={forTest === 'all' ? pendingTests.map((x: any) => x.id) : forTest ? [forTest] : undefined} onDone={() => { ['documents', 'worklist', 'results', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setForTest(''); toast('Uploaded'); }} /></>}</div>}
         </div>
-      </div>
 
         <div className="space-y-4">
           {p.mergedInto && <div className="card flex flex-wrap items-center gap-3 !py-3 text-sm" role="status"><span className="flex-1">This record was merged into another one and is kept only for the record.</span><button className="btn btn-sm btn-primary" onClick={() => nav(`/patients/${p.mergedInto}`)}>Open the kept record</button></div>}
