@@ -37,10 +37,11 @@ test('course: agree below list needs the discount permission, advance locks the 
   const rec = (await owner('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
   const list = peel.pricePaise * 6; // 6 x 2,500 = 15,000
 
-  // a price below list needs the discount permission; the owner can go beyond the cap
-  assert.equal((await reception('POST', '/courses', { recommendationId: rec.id, totalPaise: 1200000 })).status, 403);
-  assert.equal((await owner('POST', '/courses', { recommendationId: rec.id, totalPaise: list + 1 })).status, 400, 'not above list');
-  const agreed = await owner('POST', '/courses', { recommendationId: rec.id, totalPaise: 1200000 });
+  // fixed prices: nobody types a course price; a clinic package is the only other price
+  assert.equal((await owner('POST', '/courses', { recommendationId: rec.id, totalPaise: list - 1 })).status, 400, 'no typed price');
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'peel6', name: 'Peel x6', procedureId: peel.id, sittings: 6, intervalDays: 14, pricePaise: 1200000 }] } })).status, 200);
+  assert.equal((await reception('POST', '/courses', { recommendationId: rec.id, packageId: 'nope' })).status, 404);
+  const agreed = await reception('POST', '/courses', { recommendationId: rec.id, packageId: 'peel6' });
   assert.equal(agreed.status, 200, JSON.stringify(agreed.body));
   assert.equal(agreed.body.perSittingPaise, 200000); assert.equal(agreed.body.lockedAt, null);
   assert.equal((await owner('POST', '/courses', { recommendationId: rec.id })).status, 409, 'agreed once');

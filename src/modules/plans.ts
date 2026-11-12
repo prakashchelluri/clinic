@@ -13,23 +13,22 @@ const money = (p: number) => '₹' + (p / 100).toLocaleString('en-IN', { maximum
 export function planRoutes(app: FastifyInstance) {
   /** A quote for a procedure plan: the price, how long it holds, and what is not in it. Sent on WhatsApp or printed. */
   route(app, 'post', '/quotes', 'worklist.write', async (req, tx) => {
-    const b = z.object({ recommendationId: z.string().uuid(), validDays: z.number().int().min(1).max(365).default(15), totalPaise: z.number().int().positive().optional(),
-      extras: z.array(z.object({ name: z.string().trim().min(1).max(60), pricePaise: z.number().int().min(0) })).max(10).default([]), send: z.enum(['whatsapp', 'print']).optional() }).parse(req.body);
+    // fixed prices: the quote says the list price or a clinic package, never a typed one
+    const b = z.object({ recommendationId: z.string().uuid(), validDays: z.number().int().min(1).max(365).default(15), packageId: z.string().min(1).max(40).optional(),
+      extras: z.array(z.object({ name: z.string().trim().min(1).max(60), pricePaise: z.number().int().min(0) })).max(10).default([]), send: z.enum(['whatsapp', 'print']).optional() }).strict().parse(req.body);
     const t = req.ctx.tenantId;
     if (!can(req.perms, 'fees.see')) throw new HttpError(403, 'FORBIDDEN:fees.see');
     const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, b.recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'))).then((r) => r[0]);
     if (!rec || !rec.procedureId) throw new HttpError(404, 'PLAN_NOT_FOUND');
     const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
-    const sittings = rec.sittings ?? 1; const list = (proc?.pricePaise ?? 0) * sittings;
-    if (!list && !b.totalPaise) throw new HttpError(400, 'PRICE_NEEDED');
-    const total = b.totalPaise ?? list;
-    if (list && total > list) throw new HttpError(400, 'ABOVE_LIST_PRICE', { listPaise: list });
-    if (list && total < list) {
-      if (!can(req.perms, 'discount.give')) throw new HttpError(403, 'FORBIDDEN:discount.give');
+    let sittings = rec.sittings ?? 1; let total = (proc?.pricePaise ?? 0) * sittings;
+    if (b.packageId) {
       const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
-      const cap = Number((ten?.settings as any)?.discountCapPct ?? 10); const pct = Math.round(((list - total) / list) * 1000) / 10;
-      if (pct > cap && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'DISCOUNT_ABOVE_CAP_NEEDS_OWNER', { capPct: cap, pct });
+      const k = ((ten?.settings as any)?.packages ?? []).find((x: any) => x.id === b.packageId && x.procedureId === rec.procedureId);
+      if (!k) throw new HttpError(404, 'PACKAGE_NOT_FOUND');
+      sittings = k.sittings; total = k.pricePaise;
     }
+    if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
     const p = await tx.select().from(patient).where(eq(patient.id, rec.patientId)).then((r) => r[0]);
     const number = 'Q-' + String(await nextNumber(tx, t, 'quote_no', 'tenant')).padStart(4, '0');
     const validUntil = addDays(todayIn(req.ctx.timezone), b.validDays);

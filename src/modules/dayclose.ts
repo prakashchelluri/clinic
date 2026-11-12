@@ -44,6 +44,7 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
   // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
   for (const { p, c, vDoc, sDoc, sale } of pays) {
     if (sale) continue; // a pharmacy bill's payment and refund rows mirror the sale; the sale and its returns below are what count, once
+    if (p.method === 'advance') continue; // paid from the patient's advance: that money was counted the day the advance came in
 
     add(p.receivedAt, p.courseId || c?.courseId ? 'procedure' : c?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
     const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;

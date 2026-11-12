@@ -165,18 +165,7 @@ export function billingRoutes(app: FastifyInstance) {
     await emit(tx, req.ctx, 'charge.excluded', 'charge', c.id, { reason: b.reason, amountPaise: c.amountPaise });
     return row;
   });
-  /** A discount comes off an unpaid invoice. Up to the clinic-wide cap the permission is enough; above it only the owner may. */
-  route(app, 'post', '/charges/:id/discount', 'discount.give', async (req, tx) => {
-    const b = z.object({ amountPaise: z.number().int().positive(), reason: z.string().trim().min(3, 'Say why').max(200) }).parse(req.body); const c = await chargeOf(req, tx);
-    if (c.status !== 'due' || (await paidOn(tx, c.id)) > 0) throw new HttpError(409, 'ONLY_UNPAID_INVOICES');
-    if (b.amountPaise >= c.amountPaise) throw new HttpError(400, 'USE_WAIVE_FOR_THE_WHOLE_AMOUNT');
-    const ten = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any) => r[0]);
-    const cap = Number(ten?.settings?.discountCapPct ?? 10); const list = c.amountPaise + c.discountPaise; const pct = Math.round(((c.discountPaise + b.amountPaise) / list) * 1000) / 10;
-    if (pct > cap && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'DISCOUNT_ABOVE_CAP_NEEDS_OWNER', { capPct: cap, pct });
-    const [row] = await tx.update(charge).set({ amountPaise: c.amountPaise - b.amountPaise, discountPaise: c.discountPaise + b.amountPaise, discountReason: b.reason }).where(eq(charge.id, c.id)).returning();
-    await emit(tx, req.ctx, 'charge.discounted', 'charge', c.id, { reason: b.reason, discountPaise: b.amountPaise, pct });
-    return row;
-  });
+  // Discounts are given on the bill (POST /bills), where above the clinic limit they wait for an approver.
   /** Everything taken in one go, for printing. */
   route(app, 'get', '/receipts/:no', 'payment.record', async (req, tx) => {
     if (!can(req.perms, 'fees.see')) throw new HttpError(403, 'FORBIDDEN:fees.see');
@@ -185,7 +174,7 @@ export function billingRoutes(app: FastifyInstance) {
     if (!rows.length) throw new HttpError(404, 'NOT_FOUND');
     const ten = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any) => r[0]);
     return { receiptNo: (req.params as any).no, at: rows[0].p.receivedAt, patient: { fullName: rows[0].pt.fullName, patientNo: rows[0].pt.patientNo }, clinic: { name: ten?.name, print: ten?.settings?.print ?? {} }, receivedBy: [...new Set(rows.map((r) => r.by).filter(Boolean))].join(', ') || '—', // who took the money, not who is printing
-      lines: rows.map((r) => ({ description: r.c?.description ?? 'Payment', amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0, method: r.p.method, reference: r.p.reference, lender: r.p.lender })), totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0),
+      lines: rows.map((r) => ({ description: r.c?.description ?? (r.p.advance ? 'Advance' : r.p.courseId ? 'Sittings paid ahead' : 'Payment'), amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0, method: r.p.method, reference: r.p.reference, lender: r.p.lender })), totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0),
       tax: gstSummary(ten?.settings?.gstin, rows.map((r) => ({ amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0 }))) };
   });
 
@@ -246,7 +235,7 @@ export function billingRoutes(app: FastifyInstance) {
     const t = req.ctx.tenantId; const day = String((req.query as any).day ?? todayIn(req.ctx.timezone));
     const { start, end } = dayBounds(day, req.ctx.timezone);
     const byMethod = await tx.select({ method: payment.method, total: sql<number>`sum(${payment.amountPaise})::int`, n: sql<number>`count(*)::int` })
-      .from(payment).where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end))).groupBy(payment.method);
+      .from(payment).where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end), sql`${payment.method} <> 'advance'`)).groupBy(payment.method);
     const byCategory = await tx.select({ code: feeCategory.code, name: feeCategory.name, visits: sql<number>`count(*)::int`,
       billed: sql<number>`coalesce(sum(case when ${charge.status} in ('paid','due') and ${charge.excludedAt} is null then ${charge.amountPaise} end),0)::int`,
       waived: sql<number>`coalesce(sum(case when ${charge.status}='waived' then ${charge.amountPaise} end),0)::int`,

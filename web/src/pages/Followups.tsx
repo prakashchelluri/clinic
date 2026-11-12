@@ -22,7 +22,7 @@ const OUTCOMES: { label: string; out: Out | 'book'; note?: string }[] = [
 const CONFIRM_OUTCOMES: { label: string; out: Out | 'move'; note?: string }[] = [
   { label: 'Confirmed', out: 'confirmed' }, { label: 'No answer', out: 'no_answer' }, { label: 'Call later', out: 'call_later' }, { label: 'Wants another day', out: 'move' }, { label: 'Not coming', out: 'not_interested' },
 ];
-const KIND: Record<string, string> = { review: 'Review', missed_visit: 'Missed visit', missed_sitting: 'Missed sitting', schedule: 'Price agreed', advised: 'Advised, not agreed', report: 'Reports to tell', confirm_week: 'Week-before call', confirm_day: 'Day-before call' };
+const KIND: Record<string, string> = { review: 'Review', missed_visit: 'Missed visit', missed_sitting: 'Missed sitting', schedule: 'Paid, to book', advised: 'Advised, not started', report: 'Reports to tell', confirm_week: 'Week-before call', confirm_day: 'Day-before call' };
 const isConfirm = (r: any) => r.kind === 'confirm_week' || r.kind === 'confirm_day';
 const refresh = () => ['followups', 'worklist', 'bookings', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 

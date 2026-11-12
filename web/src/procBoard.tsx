@@ -30,15 +30,15 @@ function standing(p: any): { t: string; sub: string; tone: string } {
   if (p.stage === 'booked') return { t: `${day(p.next.day)}, ${fmtTime(p.next.startTime)}`, sub: `sitting ${n} · ${p.next.approval !== 'approved' ? 'with the doctor to approve' : p.next.confirmed ? 'patient confirmed' : 'approved, to call'}`, tone: 'text-sage' };
   if (p.stage === 'advised') {
     const q = p.quote; const cold = q?.state === 'expired';
-    return { t: cold ? 'Went quiet' : 'Not agreed yet', sub: `advised ${fmtDate(p.advisedOn.slice(0, 10))}${q ? ` · quote ${cold ? 'expired' : 'valid to'} ${fmtDate(q.validUntil)}` : ' · no quote yet'}`, tone: cold ? 'text-rose' : 'text-amber' };
+    return { t: cold ? 'Went quiet' : 'Not started', sub: `advised ${fmtDate(p.advisedOn.slice(0, 10))}${q ? ` · quote ${cold ? 'expired' : 'valid to'} ${fmtDate(q.validUntil)}` : ' · no quote yet'}`, tone: cold ? 'text-rose' : 'text-amber' };
   }
   if (p.stage === 'behind') return p.missed ? { t: `Missed ${day(p.missed.day)}`, sub: `sitting ${p.missed.sittingNo ?? n} · not rebooked`, tone: 'text-rose' } : { t: `${daysLate(p.dueOn)} days late`, sub: `was due ${fmtDate(p.dueOn)} · not booked`, tone: 'text-rose' };
   return { t: p.dueOn ? `Due ${day(p.dueOn)}` : 'Not booked', sub: `sitting ${n} · not booked yet`, tone: 'text-amber' };
 }
-/** The money on one line: balance first, or Paid, or the list price before the patient agrees. Null when the user cannot see fees. */
+/** The money on one line: balance first, or Paid, or the list price before anything is paid. Null when the user cannot see fees. */
 function moneyLine(p: any): [string, string] | null {
   if (p.listPaise == null) return null;
-  if (p.totalPaise == null) return p.stage === 'advised' ? [money(p.listPaise), 'list price'] : ['Per sitting', 'no package agreed'];
+  if (p.totalPaise == null) return p.stage === 'advised' ? [money(p.listPaise), 'list price'] : [money(p.listPaise), 'list price, paid per sitting'];
   return p.stillToPayPaise ? [`${money(p.stillToPayPaise)} balance`, `${money(p.paidPaise ?? 0)} of ${money(p.totalPaise)} paid`] : ['Paid', `${money(p.totalPaise)} package`];
 }
 const Dots = ({ p }: { p: any }) => (
@@ -120,9 +120,9 @@ function CourseSide({ p, canBook, onClose, onSchedule, onCourse, onRecord }: { p
       </div>}
       {p.stage === 'advised' && p.quote && <div className="text-xs text-muted">Quote {p.quote.number}, {p.quote.state === 'expired' ? 'expired' : 'valid to'} {fmtDate(p.quote.validUntil)}</div>}
       <div className="flex flex-wrap gap-2 border-t border-line/60 pt-4">
-        {p.stage === 'advised' ? <button className="btn btn-sm btn-primary" onClick={onCourse}>Price and quote</button>
+        {p.stage === 'advised' ? <button className="btn btn-sm btn-primary" onClick={onCourse}>Quote and payment</button>
           : open && canBook ? <button className="btn btn-sm btn-primary" onClick={onSchedule}>{p.next ? 'Move sitting' : `Schedule sitting ${p.doneSittings + 1}`}</button> : null}
-        {p.stage !== 'advised' && (p.totalPaise == null ? open && p.listPaise != null : p.stillToPayPaise > 0) && <button className="btn btn-sm" onClick={onCourse}>{p.totalPaise == null ? 'Agree a price' : 'Take payment'}</button>}
+        {p.stage !== 'advised' && (p.totalPaise == null ? open && p.listPaise != null : p.stillToPayPaise > 0) && <button className="btn btn-sm" onClick={onCourse}>{p.totalPaise == null ? 'Pay for sittings' : 'Take payment'}</button>}
         <button className="btn btn-sm" onClick={onRecord}>Open record</button>
       </div>
     </aside>

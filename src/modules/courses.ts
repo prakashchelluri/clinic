@@ -23,9 +23,41 @@ export async function standing(tx: Tx, t: string, c: Course) {
   const paidOnDayPaise = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, sittingCharges.length ? sittingCharges.map((x) => x.id) : ['00000000-0000-4000-8000-000000000000']))));
   const done = sum(await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))));
   const perSittingPaise = Math.round(c.totalPaise / c.sittings);
-  const unusedPaise = Math.max(0, advancePaise - refundedPaise - drawnPaise);
+  const credit = c.creditPaise ?? 0; // an approved discount on sittings paid ahead pays for sittings like the advance
+  const unusedPaise = Math.max(0, advancePaise + credit - refundedPaise - drawnPaise);
   return { ...c, perSittingPaise, advancePaise, refundedPaise, drawnPaise, unusedPaise, paidOnDayPaise, doneSittings: done, unusedSittings: perSittingPaise ? Math.floor(unusedPaise / perSittingPaise) : 0,
-    stillToPayPaise: Math.max(0, c.totalPaise - (advancePaise - refundedPaise) - paidOnDayPaise) };
+    refundablePaise: Math.max(0, unusedPaise - credit), // the discount is never handed back as money
+    stillToPayPaise: Math.max(0, c.totalPaise - (advancePaise + credit - refundedPaise) - paidOnDayPaise) };
+}
+
+type Pkg = { id: string; name: string; procedureId: string; sittings: number; pricePaise: number };
+/** The course for a procedure plan, made on first need at a fixed price: list price × sittings, or a clinic package. Nobody types a price. */
+export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, packageId?: string) {
+  const t = ctx.tenantId;
+  const have = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, recommendationId))).then((r) => r[0]);
+  if (have) { if (packageId) throw new HttpError(409, 'COURSE_ALREADY_PRICED'); return have; }
+  const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'))).then((r) => r[0]);
+  if (!rec || !rec.procedureId) throw new HttpError(404, 'PLAN_NOT_FOUND');
+  const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
+  let sittings = rec.sittings ?? 1; let total = (proc?.pricePaise ?? 0) * sittings;
+  const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
+  const pkgs = (((ten?.settings as any)?.packages ?? []) as Pkg[]).filter((x) => x.procedureId === rec.procedureId);
+  if (!packageId) { // a quote still open for a package: the patient was told that price
+    const told = await tx.select().from(quote).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open'))).orderBy(desc(quote.createdAt)).limit(1).then((r) => r[0]);
+    if (told && told.validUntil >= todayIn(ctx.timezone)) packageId = pkgs.find((x) => x.pricePaise === told.totalPaise && x.sittings === told.sittings)?.id;
+  }
+  if (packageId) {
+    const k = pkgs.find((x) => x.id === packageId);
+    if (!k) throw new HttpError(404, 'PACKAGE_NOT_FOUND');
+    sittings = k.sittings; total = k.pricePaise;
+    if (rec.sittings !== sittings) await tx.update(recommendation).set({ sittings }).where(eq(recommendation.id, rec.id)); // the package says how many sittings
+  }
+  if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
+  const list = Math.max(total, (proc?.pricePaise ?? 0) * sittings);
+  const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name }).returning();
+  await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
+  await emit(tx, ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings, packageId: packageId ?? null });
+  return row;
 }
 
 /** A sitting was done: invoice it, from the advance when there is enough, otherwise due on the day. One invoice per sitting.
@@ -94,32 +126,11 @@ export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommen
 }
 
 export function courseRoutes(app: FastifyInstance) {
-  /** The patient agreed to a procedure plan at a price. Below the list price needs the discount permission; above the clinic cap, the owner. */
+  /** Start the course at its fixed price: list price × sittings, or a clinic package. There is no price to type: a reduction is a discount on a bill. */
   route(app, 'post', '/courses', 'worklist.write', async (req, tx) => {
-    const b = z.object({ recommendationId: z.string().uuid(), totalPaise: z.number().int().positive().optional() }).parse(req.body);
-    const t = req.ctx.tenantId;
-    const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, b.recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'))).then((r) => r[0]);
-    if (!rec || !rec.procedureId) throw new HttpError(404, 'PLAN_NOT_FOUND');
-    if (await tx.select({ id: course.id }).from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, rec.id))).then((r) => r.length)) throw new HttpError(409, 'ALREADY_AGREED');
-    const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
-    const sittings = rec.sittings ?? 1; const per = proc?.pricePaise;
-    if (!per && !b.totalPaise) throw new HttpError(400, 'PRICE_NEEDED');
-    const list = (per ?? 0) * sittings || b.totalPaise!;
-    // a quote already told the patient a price: that is the default when the patient agrees
-    const told = await tx.select().from(quote).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open'))).orderBy(desc(quote.createdAt)).limit(1).then((r) => r[0]);
-    const total = b.totalPaise ?? (told && told.validUntil >= todayIn(req.ctx.timezone) ? told.totalPaise : list);
-    if (total > list) throw new HttpError(400, 'ABOVE_LIST_PRICE', { listPaise: list });
-    const quoted = b.totalPaise === undefined && !!told && told.validUntil >= todayIn(req.ctx.timezone); // the discount was approved when the quote was made
-    if (total < list && !quoted) {
-      if (!can(req.perms, 'discount.give')) throw new HttpError(403, 'FORBIDDEN:discount.give');
-      const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
-      const cap = Number((ten?.settings as any)?.discountCapPct ?? 10); const pct = Math.round(((list - total) / list) * 1000) / 10;
-      if (pct > cap && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'DISCOUNT_ABOVE_CAP_NEEDS_OWNER', { capPct: cap, pct });
-    }
-    const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: req.ctx.name }).returning();
-    await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
-    await emit(tx, req.ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings });
-    return standing(tx, t, row);
+    const b = z.object({ recommendationId: z.string().uuid(), packageId: z.string().min(1).max(40).optional() }).strict().parse(req.body);
+    if (await tx.select({ id: course.id }).from(course).where(and(eq(course.tenantId, req.ctx.tenantId), eq(course.recommendationId, b.recommendationId))).then((r) => r.length)) throw new HttpError(409, 'ALREADY_AGREED');
+    return standing(tx, req.ctx.tenantId, await ensureCourse(tx, req.ctx, b.recommendationId, b.packageId));
   });
 
   route(app, 'get', '/courses', 'worklist.read', async (req, tx) => {
@@ -155,7 +166,7 @@ export function courseRoutes(app: FastifyInstance) {
     const c = await tx.select().from(course).where(and(eq(course.id, (req.params as any).id), eq(course.tenantId, t))).then((r) => r[0]);
     if (!c) throw new HttpError(404, 'NOT_FOUND');
     const st = await standing(tx, t, c);
-    if (b.amountPaise > st.unusedPaise) throw new HttpError(400, 'MORE_THAN_UNUSED', { unusedPaise: st.unusedPaise });
+    if (b.amountPaise > st.refundablePaise) throw new HttpError(400, 'MORE_THAN_UNUSED', { unusedPaise: st.refundablePaise });
     const [row] = await tx.insert(payment).values({ tenantId: t, patientId: c.patientId, courseId: c.id, amountPaise: -b.amountPaise, method: b.method, reference: `Refund: ${b.reason}`, receivedBy: req.ctx.userId }).returning();
     await emit(tx, req.ctx, 'course.refunded', 'payment', row.id, { courseId: c.id, amountPaise: b.amountPaise, reason: b.reason });
     return standing(tx, t, c);

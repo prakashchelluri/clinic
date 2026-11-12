@@ -20,7 +20,7 @@ export function PackagesCard({ cfg, onSaved }: { cfg: any; onSaved: () => void }
   return (
     <div className="card-flat p-5 mt-4">
       <h3 className="text-lg font-medium">Packages</h3>
-      <p className="text-sm text-muted mb-3">Set up once. When the patient agrees to a course, the desk taps the package and the price is filled in.</p>
+      <p className="text-sm text-muted mb-3">Set up once. A package is a fixed price for a number of sittings: the desk picks it on the quote or when the patient pays ahead. Anything lower is a discount on the bill.</p>
       {list.length === 0 ? <div className="text-sm text-muted mb-3">No packages yet.</div> : <div className="mb-3 divide-y divide-line/60">{list.map((p) => (
         <div key={p.id} className="flex items-center gap-2 py-2 text-sm"><div className="min-w-0 flex-1"><b>{p.name}</b><div className="text-xs text-muted">{procs.find((x) => x.id === p.procedureId)?.name ?? 'Procedure'} · {p.sittings} sittings{p.intervalDays ? ` every ${p.intervalDays} days` : ''}</div></div><b>{money(p.pricePaise)}</b>
           <button className="btn btn-ghost btn-sm" aria-label={`Remove ${p.name}`} disabled={save.isPending} onClick={() => save.mutate(list.filter((x) => x.id !== p.id))}><Icon name="x" className="h-3.5 w-3.5" /></button></div>))}</div>}

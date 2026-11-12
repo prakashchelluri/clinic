@@ -1,6 +1,7 @@
 import { post, get, qc, errText } from './api';
 import { useState } from 'react';
-import { Chip, Modal, MoreMenu, Section, ask, fmtDate, money, toPaise, toast } from './ui';
+import { useQuery } from '@tanstack/react-query';
+import { Chip, Modal, MoneyInput, MoreMenu, Section, Stat, ask, fmtDate, money, toast } from './ui';
 
 /** Why money is given back: picked, not typed, so the owner can count the reasons. "Other" asks for a few words. */
 export const REFUND_REASONS = ['Left without consultation', 'Patient changed mind', 'Charged twice', 'Wrong amount', 'Service not given'] as const;
@@ -40,8 +41,50 @@ export async function printReceipt(no: string) {
   } catch (e) { toast(errText(e), 'err'); }
 }
 
-/** Each invoice with what was paid on it and a menu for the rare things: discount, cancel, refund, leave out of tax reports. Every one asks why. */
-export function Invoices({ charges, payments, canRefund, canDiscount }: { charges: any[]; payments: any[]; canRefund: boolean; canDiscount: boolean }) {
+/** The patient's money at a glance, above the invoices: billed, paid, due, paid ahead on courses, and discounts waiting for approval. */
+export function BillTotals({ patientId, charges, payments, duePaise, canRefund }: { patientId: string; charges: any[]; payments: any[]; duePaise: number; canRefund: boolean }) {
+  const adv = useQuery({ queryKey: ['advance', patientId], queryFn: () => get(`/patients/${patientId}/advance`) }); const advT: number = adv.data?.balancePaise ?? 0;
+  const [giving, setGiving] = useState(false);
+  const cs = useQuery({ queryKey: ['courses', patientId], queryFn: () => get(`/courses?patientId=${patientId}`) });
+  const asks = useQuery({ queryKey: ['discount-asks', patientId], queryFn: () => get(`/discount-asks?patientId=${patientId}`) });
+  const live = charges.filter((c) => !['cancelled', 'waived'].includes(c.status));
+  const billed = live.reduce((s, c) => s + c.amountPaise, 0); const off = live.reduce((s, c) => s + c.discountPaise, 0);
+  const money_ = payments.filter((p) => p.method !== 'advance'); // paid from the advance moves no money: it was counted when the advance came in
+  const paid = money_.filter((p) => p.amountPaise > 0).reduce((s, p) => s + p.amountPaise, 0); const back = -money_.filter((p) => p.amountPaise < 0).reduce((s, p) => s + p.amountPaise, 0);
+  const ahead = (cs.data ?? []).reduce((s: number, c: any) => s + c.unusedPaise, 0); const aheadN = (cs.data ?? []).reduce((s: number, c: any) => s + c.unusedSittings, 0);
+  const wait = (asks.data ?? []).filter((a: any) => a.status === 'pending'); const waitT = wait.reduce((s: number, a: any) => s + a.offPaise, 0);
+  return (
+    <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+      <Stat label="Billed" value={money(billed)} sub={`${live.length} invoice${live.length === 1 ? '' : 's'}${off ? ` · ${money(off)} discount` : ''}`} />
+      <Stat label="Paid" value={money(paid)} tone="sage" sub={back ? `${money(back)} given back` : 'every mode'} />
+      <Stat label="Due" value={money(duePaise)} tone={duePaise ? 'clay' : ''} sub={duePaise ? 'Add bill / payment to collect' : 'nothing owed'} />
+      <Stat label="Advance" value={money(advT + ahead)} sub={<>{advT ? `${money(advT)} to use` : 'nothing to use'}{ahead ? ` · ${money(ahead)} on ${aheadN} sitting${aheadN === 1 ? '' : 's'}` : ''}{canRefund && advT > 0 && <> · <button className="underline" onClick={() => setGiving(true)}>Give back</button></>}</>} />
+      <Stat label="Discount waiting" value={money(waitT)} sub={wait.length ? wait.map((a: any) => a.reason).join(', ') : 'nothing with the owner'} />
+      {giving && <GiveBackAdvance patientId={patientId} balancePaise={advT} onClose={() => setGiving(false)} />}
+    </div>
+  );
+}
+
+/** The rest of the advance goes back to the patient: how much, how, and why. Money out today. */
+function GiveBackAdvance({ patientId, balancePaise, onClose }: { patientId: string; balancePaise: number; onClose: () => void }) {
+  const [amount, setAmount] = useState(String(balancePaise / 100)); const [mode, setMode] = useState<'cash' | 'upi' | 'card' | 'bank'>('cash'); const [why, setWhy] = useState(''); const [busy, setBusy] = useState(false);
+  const paise = Math.round(Number(amount || 0) * 100);
+  const bad = paise <= 0 ? 'Type the amount' : paise > balancePaise ? `Only ${money(balancePaise)} is in the advance` : why.trim().length < 3 ? 'Say why' : '';
+  const go = async () => { setBusy(true); try { await post(`/patients/${patientId}/advance/refund`, { amountPaise: paise, method: mode, reason: why.trim() }); ['advance', 'timeline', 'daily'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`Gave back ${money(paise)}`); onClose(); } catch (e: any) { toast(e?.body?.code === 'DAY_CLOSED' ? 'Today has been closed: no money can be given back today.' : errText(e), 'err'); } finally { setBusy(false); } };
+  return (
+    <Modal title="Give back the advance" subtitle={`${money(balancePaise)} in the advance`} onClose={onClose} width="max-w-md">
+      <div className="space-y-3">
+        <div><label className="label" htmlFor="adv-amt">Amount</label><MoneyInput id="adv-amt" value={amount} onChange={setAmount} /></div>
+        <div><span className="label">Given back by</span><div className="flex flex-wrap gap-1.5">{(['cash', 'upi', 'card', 'bank'] as const).map((m) => <button key={m} type="button" aria-pressed={mode === m} className={`toggle-opt !py-1 ${mode === m ? 'on' : ''}`} onClick={() => setMode(m)}>{m === 'upi' ? 'UPI' : m[0].toUpperCase() + m.slice(1)}</button>)}</div></div>
+        <div><label className="label" htmlFor="adv-why">Why</label><input id="adv-why" className="input" maxLength={200} value={why} onChange={(e) => setWhy(e.target.value)} /></div>
+        <div className="modal-foot"><span className="mr-auto text-xs text-muted">{bad}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!bad || busy} onClick={go}>Give back {money(paise)}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Each invoice with what was paid on it and a menu for the rare things: cancel, refund, leave out of tax reports. Every one asks why. Discounts are given on the bill. */
+export function Invoices({ charges, payments, canRefund }: { charges: any[]; payments: any[]; canRefund: boolean }) {
   const [refunding, setRefunding] = useState<null | { c: any; paid: number }>(null);
   if (!charges.length) return null;
   const run = async (path: string, body: object, done: string) => { try { await post(path, body); refresh(); toast(done); } catch (e: any) { toast(e?.body?.code === 'DAY_CLOSED' ? 'Today has been closed: no money can be given back today.' : errText(e), 'err'); } };
@@ -50,11 +93,6 @@ export function Invoices({ charges, payments, canRefund, canDiscount }: { charge
   const cancel = async (c: any) => { const a = await why('Cancel this invoice?', 'It stays in the list, marked cancelled.', 'Cancel invoice'); if (a?.value) run(`/charges/${c.id}/cancel`, { reason: a.value }, 'Invoice cancelled'); };
   const refund = (c: any) => setRefunding({ c, paid: payments.filter((p) => p.chargeId === c.id).reduce((s, p) => s + p.amountPaise, 0) });
   const exclude = async (c: any) => { const a = await why('Leave this out of the tax reports?', 'It is kept and marked. This cannot be undone.'); if (a?.value) run(`/charges/${c.id}/exclude`, { reason: a.value }, 'Left out of the tax reports'); };
-  const discount = async (c: any) => {
-    const amt = await ask({ title: 'Discount', body: `${c.description} · ${money(c.amountPaise)}`, confirmLabel: 'Next', field: { label: 'Rupees off', required: true, maxLength: 9 } });
-    const paise = toPaise((amt?.value ?? '').replace(/[^\d.]/g, '')); if (!amt?.value || paise <= 0) return;
-    const a = await why(`Take ${money(paise)} off?`); if (a?.value) run(`/charges/${c.id}/discount`, { amountPaise: paise, reason: a.value }, 'Discount given');
-  };
   return (
     <Section title="Invoices" delay={200}>
       <table className="table"><tbody>{charges.map((c) => {
@@ -67,7 +105,6 @@ export function Invoices({ charges, payments, canRefund, canDiscount }: { charge
           <td className="text-right">{money(c.amountPaise)}</td>
           <td className="pr-3 text-right"><MoreMenu items={[
             { label: 'Print receipt', hidden: !rno, onClick: () => printReceipt(rno) },
-            { label: 'Give a discount', hidden: !(canDiscount && c.status === 'due' && paid === 0), onClick: () => discount(c) },
             { label: 'Cancel invoice', hidden: !(canRefund && c.status === 'due' && paid === 0), danger: true, onClick: () => cancel(c) },
             { label: 'Refund', hidden: !(canRefund && c.status === 'paid'), danger: true, onClick: () => refund(c) },
             { label: 'Leave out of tax reports', hidden: !(canRefund && !c.excludedAt), onClick: () => exclude(c) },

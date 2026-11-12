@@ -115,16 +115,15 @@ test('invoice menu: cancel only unpaid, exclude from tax reports, discount cap (
   const rc = (await reception('GET', `/receipts/${take.body.receiptNo}`)).body;
   assert.equal(rc.totalPaise, 100000); assert.equal(rc.lines[0].description, 'Peel 2'); assert.equal(rc.patient.fullName, 'Menu Wave4');
 
-  // discount: not without the permission; within the cap with it; above the cap only the owner
-  assert.equal((await reception('POST', `/charges/${c.id}/discount`, { amountPaise: 5000, reason: 'known person' })).status, 403);
+  // discount on the bill: within the cap with the permission it applies; the owner's own discount needs nobody
+  const bill = (who: Call, disc: number, key: string, reason = 'known person') => who('POST', '/bills', { patientId: p.id, lines: [{ chargeId: c.id, discountPaise: disc }], reason, idempotencyKey: key });
   assert.equal((await owner('PATCH', '/admin/roles/receptionist', { perms: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'appointment.write', 'visit.read', 'visit.write', 'visit.queue', 'payment.record', 'payment.waive', 'discount.give', 'worklist.read', 'worklist.write', 'document.read', 'document.write'] })).status, 200);
   const r2 = await as('reception@demo.clinic');
-  assert.equal((await r2('POST', `/charges/${c.id}/discount`, { amountPaise: 8000, reason: 'known person' })).status, 200, '8% is within the 10% cap');
-  const over = await r2('POST', `/charges/${c.id}/discount`, { amountPaise: 8000, reason: 'asked again' });
-  assert.equal(over.status, 403); assert.equal(over.body.capPct, 10);
-  assert.equal((await owner('POST', `/charges/${c.id}/discount`, { amountPaise: 8000, reason: 'owner agreed' })).status, 200);
+  const ok = await bill(r2, 8000, 'wave4-disc-0001');
+  assert.equal(ok.status, 200, JSON.stringify(ok.body)); assert.equal(ok.body.waitingForApproval, false, '8% is within the 10% cap');
+  assert.equal((await bill(owner, 8000, 'wave4-disc-0002', 'owner agreed')).body.waitingForApproval, false);
   assert.equal((await owner('PATCH', '/admin/clinic', { settings: { discountCapPct: 200 } })).status, 400);
   const cur = (await owner('GET', `/patients/${p.id}/timeline`)).body.charges.find((x: any) => x.id === c.id);
   assert.equal(cur.amountPaise, 84000); assert.equal(cur.discountPaise, 16000);
-  assert.equal((await r2('POST', `/charges/${c.id}/discount`, { amountPaise: 84000, reason: 'whole thing' })).status, 400, 'a whole-amount discount is a waiver');
+  assert.equal((await bill(r2, 84000, 'wave4-disc-0003', 'whole thing')).status, 400, 'a whole-amount discount is a waiver');
 });

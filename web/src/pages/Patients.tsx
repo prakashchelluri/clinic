@@ -11,7 +11,7 @@ import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
 import { SkinMapPanel } from '../skinmap';
 import { TakePayment } from '../takePayment';
-import { Invoices } from '../invoices';
+import { Invoices, BillTotals } from '../invoices';
 import { CoursesCard } from '../courses';
 import { FlagChips, CarefulBanner, FlagEditor, GuardianPick, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { DataTable, filterValue, pageOf, type FilterDef } from '../table';
@@ -105,7 +105,7 @@ function Timeline({ id }: { id: string }) {
             <div className="mt-1 text-sm text-muted">{[p.patientNo, p.phone ?? 'no phone', p.locality, visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}` : 'no visit yet'].filter(Boolean).join(' · ')}</div>
             {(guardian || p.contactLabel || sharingPhone > 0) && <div className="mt-1 text-sm text-ink-2">{guardian && <>Guardian: <button className="underline font-medium" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button> · </>}{p.contactLabel ? `contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? `${p.contactLabel ? ' · ' : ''}this phone is shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}</div>}
           </div>
-          {outstandingPaise > 0 && <div className="flex items-center gap-2"><span className="text-sm font-bold text-rose">Due {money(outstandingPaise)}</span>{can(perms, 'payment.record') && <button className="btn btn-sm btn-primary" onClick={() => setPaying(true)}>Take payment</button>}</div>}
+          {(outstandingPaise > 0 || can(perms, 'payment.record')) && <div className="flex items-center gap-2">{outstandingPaise > 0 && <span className="text-sm font-bold text-rose">Due {money(outstandingPaise)}</span>}{can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}</div>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp })}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
           {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}
@@ -185,14 +185,14 @@ function Timeline({ id }: { id: string }) {
             <CoursesCard patientId={id} patientName={p.fullName} />
           </>}
 
-          {tab === 'bills' && <Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} canDiscount={can(perms, 'discount.give')} />}
+          {tab === 'bills' && <><BillTotals patientId={id} charges={charges} payments={t.data.payments} duePaise={outstandingPaise} canRefund={can(perms, 'payment.refund')} /><Invoices charges={charges} payments={t.data.payments} canRefund={can(perms, 'payment.refund')} /></>}
           {tab === 'messages' && <PatientMessages id={id} />}
           {tab === 'missed' && <Section title={<>Missed <span className="text-muted font-normal">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
         </div>
       </div>
 
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
-      {paying && <TakePayment patientId={id} patientName={p.fullName} charges={charges} payments={t.data.payments} onClose={() => setPaying(false)} />}
+      {paying && <TakePayment patientId={id} patientName={p.fullName} onClose={() => setPaying(false)} />}
       {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}
     </div>

@@ -357,7 +357,7 @@ export const recommendation = pgTable('recommendation', {
   informedBy: text('informed_by'),
 }, (t) => [index('rec_status').on(t.tenantId, t.kind, t.status)]);
 
-// A procedure plan the patient agreed to: price locked once an advance is taken; sittings are paid from the advance, then on the day.
+// A procedure course: list price × sittings, or a clinic package price. Sittings are paid from the advance, then on the day.
 export const course = pgTable('course', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
@@ -368,7 +368,24 @@ export const course = pgTable('course', {
   totalPaise: integer('total_paise').notNull(),
   lockedAt: ts('locked_at'),
   agreedBy: text('agreed_by'),
+  creditPaise: integer('credit_paise').notNull().default(0), // an approved discount on sittings paid ahead: pays for sittings like the advance, but is not money in
 }, (t) => [uniqueIndex('course_rec').on(t.tenantId, t.recommendationId), index('course_patient').on(t.tenantId, t.patientId)]);
+
+// A discount above the clinic limit, or from someone without the discount permission, waiting for an approver.
+// Each line is what it comes off: an invoice (chargeId) or sittings paid ahead on a course (courseId).
+export const discountAsk = pgTable('discount_ask', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  lines: jsonb('lines').$type<{ chargeId?: string; courseId?: string; what: string; listPaise: number; offPaise: number }[]>().notNull(),
+  listPaise: integer('list_paise').notNull(),
+  offPaise: integer('off_paise').notNull(),
+  reason: text('reason').notNull(),
+  askedBy: text('asked_by').notNull(),
+  paidPaise: integer('paid_paise').notNull().default(0), // taken on the same bill while it waits
+  status: text('status').notNull().default('pending'),   // pending | approved | rejected
+  decidedBy: text('decided_by'),
+  decidedAt: ts('decided_at'),
+}, (t) => [index('discount_ask_status').on(t.tenantId, t.status)]);
 
 // A call or message to bring a patient back: one row per attempt, for every kind of follow-up.
 export const callback = pgTable('callback', {
@@ -441,6 +458,7 @@ export const payment = pgTable('payment', {
   courseId: uuid('course_id'),           // an advance for a procedure course (negative = refund of unused sittings)         // one number for everything taken in one go
   settledAt: ts('settled_at'),           // EMI: when the lender's money reached the bank; null = awaiting settlement
   feePaise: integer('fee_paise'),        // EMI: what the lender kept
+  advance: boolean('advance').notNull().default(false), // the patient's advance: + money in, − used on a bill (method 'advance') or given back
 
   receivedBy: uuid('received_by').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
@@ -684,7 +702,7 @@ export const domainEvent = pgTable('domain_event', {
 
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
-  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'callback', 'quote', 'day_close', 'charge', 'payment',
+  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'callback', 'quote', 'day_close', 'charge', 'payment',
   'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'body_pin', 'lab_result',
 ];
 

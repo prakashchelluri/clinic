@@ -8,10 +8,10 @@ import { FlagChips } from './flags';
 
 // prepaidPaise: a partly used advance covers that much; amountPaise is then the balance due
 type Money = { kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number; prepaidPaise?: number } | null | undefined;
-/** "Prepaid", "₹2,500 due", "Paid" or "No price agreed", for a sitting row or the drawer. Nothing when the user cannot see fees. */
+/** "Prepaid", "₹2,500 due", "Paid" or "No price on the list", for a sitting row or the drawer. Nothing when the user cannot see fees. */
 export function MoneyChip({ m }: { m: Money }) {
   if (!m) return null;
-  return m.kind === 'prepaid' ? <Chip tone="sage">Prepaid</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due{m.prepaidPaise ? ` · ${money(m.prepaidPaise)} from advance` : ''}</Chip> : <Chip tone="rose">No price agreed</Chip>;
+  return m.kind === 'prepaid' ? <Chip tone="sage">Prepaid</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due{m.prepaidPaise ? ` · ${money(m.prepaidPaise)} from advance` : ''}</Chip> : <Chip tone="rose">No price on the list</Chip>;
 }
 /** Consent kept on the patient per procedure: "Consent on file" or "Consent needed". */
 type Consent = { consentNeeded?: boolean; consent?: { grantedAt: string; by: string; how?: string; documentId?: string } | null };

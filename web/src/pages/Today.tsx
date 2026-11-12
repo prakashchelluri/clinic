@@ -10,6 +10,7 @@ import { ChangeMyDay, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 import { ageText } from '../rxLine';
 import { ProcReview, useApprovals } from '../procReview';
+import { DiscountAsks, useDiscountAsks } from '../takePayment';
 import '../frontdesk.css';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -52,6 +53,7 @@ export function Today() {
   // sittings the coordinator sent for this doctor's approval
   const approvals = useApprovals(!!doc); const [reviewing, setReviewing] = useState(false);
   const toApprove: number = approvals.data?.pending ?? 0;
+  const discountAsks = useDiscountAsks(can(perms, 'discount.approve')); const asksN: number = discountAsks.data?.length ?? 0; // discounts above the limit wait for whoever approves them
   const [picked, setPicked] = useState<Item | null>(null);
 
   const d = fd.data; const c = cal.data;
@@ -128,7 +130,7 @@ export function Today() {
   const overdue = (fus.data?.rows ?? []).filter((r: any) => r.dueOn && r.dueOn < today() && !r.waiting);
   const noDoc = (allProcs.data ?? []).filter((p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId);
   const stopped: any[] = secq.data?.security?.ipLock?.enabled ? secq.data.stopped : [];
-  const otherCount = stopped.length + drafts.length + noDoc.length + (overdue.length ? 1 : 0) + (toApprove ? 1 : 0);
+  const otherCount = stopped.length + drafts.length + noDoc.length + (overdue.length ? 1 : 0) + (toApprove ? 1 : 0) + asksN;
 
   const tw: any[] = tom.data?.windows ?? [];
   const tBooked = tw.reduce((n, w) => n + (w.appointments ?? []).length, 0);
@@ -206,6 +208,7 @@ export function Today() {
           {otherCount > 0 && <section className="fd-sheet p-4 sm:p-5 anim-fade-up">
             <b className="text-[15px]">Needs your attention</b>
             <div className="mt-1">
+              {asksN > 0 && <DiscountAsks />}
               {toApprove > 0 && <Attn title={`${toApprove} procedure sitting${toApprove === 1 ? '' : 's'} to approve`} sub={`from the coordinator${approvals.data?.weeks?.length ? ` · week of ${new Date(approvals.data.weeks[0] + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : ''}`} action="Review" onClick={() => setReviewing(true)} />}
               {drafts.map((v: any) => <Attn key={v.id} title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=today&day=${today()}`)} />)}

@@ -5,6 +5,7 @@ import { useNavigate, useOutletContext } from 'react-router';
 import { get, today, errText } from '../api';
 import { can } from '../App';
 import { Icon, Skeleton, money } from '../ui';
+import { DiscountAsks, useDiscountAsks } from '../takePayment';
 import '../frontdesk.css';
 
 const dayLabel = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
@@ -25,6 +26,7 @@ export function Clinic() {
   const procs = useQuery({ queryKey: ['psessions', 'day', t, 'owner'], queryFn: () => get(`/procedure-sessions?day=${t}&active=1`), refetchInterval: 60000, enabled: can(perms, 'worklist.read') });
   const stock = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 60000, enabled: can(perms, 'stock.read') });
   const dash = useQuery({ queryKey: ['analytics', t, t, ''], queryFn: () => get(`/reports/analytics?from=${t}&to=${t}`), refetchInterval: 60000 });
+  const asks = useDiscountAsks(can(perms, 'discount.approve')); const askN: number = asks.data?.length ?? 0;
   const [open, setOpen] = useState<Need | null>(null);
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
 
@@ -49,6 +51,7 @@ export function Clinic() {
 
   // only what needs the owner, each with the one place to deal with it
   const needs: Need[] = [
+    ...(askN ? [{ key: 'disc', red: true, title: `${askN} discount${askN === 1 ? '' : 's'} above the limit to approve`, where: 'Today', act: 'Open Today', to: '/', body: <div className="-mx-1"><DiscountAsks /></div> }] : []),
     // one day: its money table; several: one row, each day listed in the drawer
     ...(s.unclosed.length === 1 ? s.unclosed.map((u: any): Need => ({ key: `day${u.day}`, red: true, title: `${dayLabel(u.day)} was never closed`, where: 'End of day', act: 'Open End of day', to: `/reports?day=${u.day}&view=eod`,
       body: <>{table(u.money)}<p className="text-[13px] text-muted">Payments for this day stay open until it is closed. Counting the cash and the diary is on the End of day screen.</p></> }))

@@ -294,7 +294,7 @@ export function FrontDesk() {
             {canDesk && tab !== 'history' && !onSchedule && <Filmstrip visits={visitsAll} selectedId={selV?.id ?? null} onSelect={setPickV}
               onEnter={(v) => { const s = canSend(v); if (['waiting', 'screened'].includes(v.status) && s.ok) upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') }); else if (['waiting', 'screened'].includes(v.status)) toast(s.why, 'info'); }} />}
           </div>
-          {collecting && <TakePayment patientId={collecting.patientId} patientName={collecting.patient.fullName} charges={collecting.due} payments={collecting.due.map((c: any) => ({ chargeId: c.id, amountPaise: c.paidPaise ?? 0 }))} onClose={() => { setCollecting(null); refresh(); }} />}
+          {collecting && <TakePayment patientId={collecting.patientId} patientName={collecting.patient.fullName} onClose={() => { setCollecting(null); refresh(); }} />}
           {moving && <Modal title="Change doctor" subtitle={`${moving.patient.fullName} · token ${moving.opNumber}`} onClose={() => setMoving(null)} width="max-w-sm">
             <div role="radiogroup" aria-label="Doctor" className="flex flex-col gap-1.5">
               {(d?.doctors ?? []).map((x: any) => { const n = visitsAll.filter((w) => w.practitionerId === x.id && ['waiting', 'intake', 'screened'].includes(w.status)).length; const on = moving.practitionerId === x.id; return (
