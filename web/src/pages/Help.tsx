@@ -51,7 +51,7 @@ function Overview() {
     <Flow label="From the first call to the follow-up. Reception does steps 1, 2, 3 and 6.">
       <Step n={1} who="reception" title="Booking or walk-in">The patient is booked on the Calendar, or just walks in. A walk-in needs no booking.</Step>
       <Step n={2} who="reception" title="Check-in">Pick the visit type, note the complaints, take the consultation fee. The patient gets a token.</Step>
-      <Step n={3} who="reception" title="Waiting">The patient waits. You see them under Waiting on the Front desk.</Step>
+      <Step n={3} who="reception" title="Waiting">The patient waits. You see them under Waiting on the Dashboard.</Step>
       <Step n={4} who="junior" title="Screening">Yes / No questions for the complaint, and the medical history.</Step>
       <Step n={5} who="doctor" title="Consultation">The doctor sees what was found, confirms, prescribes and plans.</Step>
       <Step n={6} who="reception" title="Checkout">Hand over the lab slip, send the procedure quote, book the next visit, close the visit.</Step>
@@ -91,7 +91,7 @@ function Overview() {
 
 function Reception() {
   return (<>
-    <H2 id="frontdesk">The Front desk</H2>
+    <H2 id="frontdesk">The Dashboard</H2>
     <P>This is your home page. The cards across the top are your lists for the day. Tap a card to see that list.</P>
     <Table head={['Card', 'What is in it']} rows={[
       ['Waiting', 'Checked in, waiting to be called. The longest wait is shown.'],
@@ -168,7 +168,7 @@ function Reception() {
     <P>To put a second doctor on a sitting as supervisor, open Schedule, choose the sitting, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
 
     <H2 id="payments">Add bill / payment</H2>
-    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sittings paid ahead. It opens from the patient&rsquo;s record, from Collect on the Front desk, and from a procedure course.</P>
+    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sittings paid ahead. It opens from the patient&rsquo;s record, from Collect on the Dashboard, and from a procedure course.</P>
     <Steps>{[
       <>Open <b>Patients</b>, find the patient, and tap <Btn>Add bill / payment</Btn>. Everything due is listed and ticked.</>,
       <>To bill something new, pick it from <b>+ Add an item from the price list</b>.</>,
@@ -224,7 +224,7 @@ function Doctor() {
     <H2 id="doctor-day">The doctor&rsquo;s day: about six minutes a patient</H2>
     <P>Typing is done at the desk and by the junior doctor. You confirm.</P>
     <Steps>{[
-      <>Open <b>Today</b>. Patients waiting are listed. Open the next one.</>,
+      <>Open the <b>Dashboard</b>. Patients waiting are listed. Open the next one.</>,
       <>The <b>screening card</b> (top left) lists only what was found: the Yes answers and the history. Everything answered No is one grey line.</>,
       <>Under <b>Suggested</b>, tap the sets for the complaint, one tap each: medicines, advice, findings, tests. Nothing is added twice. A set marked &ldquo;auto&rdquo; is added for you.</>,
       <>Choose the <b>diagnosis</b>. Each section has its own <b>Templates</b> and <b>Load previous</b>; a template adds only what is missing and leaves your choices alone.</>,
@@ -233,7 +233,7 @@ function Doctor() {
     ]}</Steps>
     <Tip>Saved your own set? Use &ldquo;Save only the medicines / advice / tests&rdquo; at the bottom. It waits as a draft until the owner approves it.</Tip>
     <H3>Reviewing test results</H3>
-    <P>On <b>Today</b>, <b>Review</b> beside a result opens that consultation at Lab investigations, where the values and reports are. Change what the results call for, then <b>Keep open for the rest</b> (more reports to come) or <b>Complete</b>: that is the review. Complete with a result not added means you saw it another way, such as the paper report; the desk can add it later.</P>
+    <P>On the <b>Dashboard</b>, <b>Review</b> beside a result opens that consultation at Lab investigations, where the values and reports are. Change what the results call for, then <b>Keep open for the rest</b> (more reports to come) or <b>Complete</b>: that is the review. Complete with a result not added means you saw it another way, such as the paper report; the desk can add it later.</P>
   </>);
 }
 
@@ -241,7 +241,7 @@ function Junior() {
   return (<>
     <H2 id="junior-day">The junior doctor: screening</H2>
     <Steps>{[
-      <>Open <b>Front desk</b>. Open the patient who is waiting.</>,
+      <>Open the <b>Dashboard</b>. Open the patient who is waiting.</>,
       <>For each complaint the patient gave at check-in, tap <b>Yes</b> or <b>No</b> on each question. A Yes may ask for one detail, such as how long.</>,
       <>Ask the <b>medical history</b> (diabetes, thyroid, blood pressure, allergy). This is asked once and kept on the patient; at later visits you only confirm it.</>,
       <>Your answers appear for the doctor as the screening card. You do not see prices anywhere.</>,
@@ -280,7 +280,7 @@ function Owner() {
 }
 
 const TOC: Record<Guide, [string, string][]> = {
-  reception: [['frontdesk', 'Front desk'], ['checkin', 'Check in'], ['checkout', 'Checkout'], ['tests', 'Test reports'], ['procedures', 'Procedures'], ['payments', 'Payments'], ['followups', 'Follow-ups'], ['patients', 'Patients'], ['booking', 'Calendar'], ['endofday', 'End of day']],
+  reception: [['frontdesk', 'Dashboard'], ['checkin', 'Check in'], ['checkout', 'Checkout'], ['tests', 'Test reports'], ['procedures', 'Procedures'], ['payments', 'Payments'], ['followups', 'Follow-ups'], ['patients', 'Patients'], ['booking', 'Calendar'], ['endofday', 'End of day']],
   doctor: [['doctor-day', 'The consultation']], junior: [['junior-day', 'Screening']], pharmacy: [['pharmacy-day', 'Pharmacy counter']], owner: [['owner-settings', 'Settings'], ['owner-reports', 'Reports']],
 };
 

@@ -9,7 +9,12 @@ import { DataTable, type Col, type FilterDef } from '../table';
 import { ScheduleModal } from './Worklist';
 
 type Tab = 'all' | 'confirm' | 'reviews' | 'missed' | 'procedures';
-const TABS: [Tab, string, string][] = [['all', 'All', 'Everyone to call today'], ['confirm', 'Confirm sittings', 'Booked sittings to confirm: a week before, then the day before'], ['reviews', 'Reviews due', 'Patients the doctor asked to see again'], ['missed', 'Missed', 'Booked and did not come, visits and sittings'], ['procedures', 'Procedures', 'Courses with the next sitting not booked yet']];
+/** One list, four reasons to call. Each tab says who is in it and what ends the call. */
+const TABS: [Tab, string, string][] = [['all', 'All calls', 'Everyone to call today, whatever the reason.'],
+  ['reviews', 'Review visits', 'The doctor asked to see them again. They come up on the review date; book the visit and they leave the list.'],
+  ['procedures', 'Procedures to book', 'A procedure was advised (the patient is still deciding) or a course is running and its next sitting is not booked. Book the sitting, or close it if the patient says no.'],
+  ['confirm', 'Confirm sittings', 'A sitting is booked. Ring a week before and again the day before: Confirmed, or move it.'],
+  ['missed', 'Missed', 'Booked a visit or a sitting and did not come. Book again, or close it.']];
 type Out = 'booked' | 'call_later' | 'no_answer' | 'not_interested' | 'confirmed';
 const OUT: Record<Out, string> = { booked: 'Booked', call_later: 'Call later', no_answer: 'No answer', not_interested: 'Not interested', confirmed: 'Confirmed' };
 /** The outcomes the procedure plans always used, each saved as one of the four call results. "Will come" books. */
@@ -22,7 +27,7 @@ const OUTCOMES: { label: string; out: Out | 'book'; note?: string }[] = [
 const CONFIRM_OUTCOMES: { label: string; out: Out | 'move'; note?: string }[] = [
   { label: 'Confirmed', out: 'confirmed' }, { label: 'No answer', out: 'no_answer' }, { label: 'Call later', out: 'call_later' }, { label: 'Wants another day', out: 'move' }, { label: 'Not coming', out: 'not_interested' },
 ];
-const KIND: Record<string, string> = { review: 'Review', missed_visit: 'Missed visit', missed_sitting: 'Missed sitting', schedule: 'Paid, to book', advised: 'Advised, not started', report: 'Reports to tell', confirm_week: 'Week-before call', confirm_day: 'Day-before call' };
+const KIND: Record<string, string> = { review: 'Review visit due', missed_visit: 'Missed a booked visit', missed_sitting: 'Missed a sitting', schedule: 'Course agreed · next sitting to book', advised: 'Procedure advised · patient deciding', confirm_week: 'Confirm · a week before', confirm_day: 'Confirm · the day before' };
 const isConfirm = (r: any) => r.kind === 'confirm_week' || r.kind === 'confirm_day';
 const refresh = () => ['followups', 'worklist', 'bookings', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
@@ -85,8 +90,8 @@ export function Calls() {
         </div>
       </div>) },
     { key: 'phone', label: 'Phone', csv: (r) => r.patient.phone, cell: (r) => r.patient.phone ? <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold tabular-nums text-ink-2"><Icon name="phone" className="h-3.5 w-3.5 text-muted" />{r.patient.phone}</span> : <span className="text-muted">no phone</span> },
-    { key: 'what', label: 'Reason', csv: (r) => r.what, cell: (r) => (
-      <div className="max-w-[300px]"><div className="truncate text-ink-2" title={r.what}>{r.what}</div>{KIND[r.kind] && r.what !== KIND[r.kind] && <div className="text-[12px] text-muted">{KIND[r.kind]}</div>}</div>) },
+    { key: 'what', label: 'Why call', sort: (r) => KIND[r.kind] ?? '', csv: (r) => `${KIND[r.kind] ?? ''}: ${r.what}`, cell: (r) => (
+      <div className="max-w-[320px]"><div className="font-semibold text-ink-2">{KIND[r.kind] ?? r.kind}</div><div className="truncate text-[12px] text-muted" title={r.what}>{r.what}</div></div>) },
     { key: 'due', label: 'Due', sort: (r) => callOn(r) ?? '', csv: (r) => r.dueOn, cell: (r) => {
       if (!r.dueOn) return <span className="text-muted">No date set</span>;
       const n = days(r.dueOn);
@@ -102,22 +107,24 @@ export function Calls() {
       </div>;
     } },
     { key: 'act', label: '', fixed: true, align: 'right', className: 'dt-act', cell: (r) => (
-      // one dropdown per row: what the patient said first, then closing with a reason, then the patient
-      <MoreMenu text="Outcome" label={`Outcome of the call to ${r.patient.fullName}`} items={[
-        { label: 'Confirmed', hidden: !canWrite || !isConfirm(r), onClick: () => confirmed.mutate(r) },
+      // the usual good outcome is a button (Confirmed for a booked sitting, Book for everything else); the other outcomes are in the menu
+      <span className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
+      {canWrite && isConfirm(r) ? <button type="button" className="btn btn-sm btn-primary" disabled={confirmed.isPending} onClick={() => confirmed.mutate(r)}>Confirmed</button>
+        : bookable(r) ? <button type="button" className="btn btn-sm btn-primary" onClick={() => book(r)}>Book</button> : null}
+      <MoreMenu text="Other" label={`Other outcomes of the call to ${r.patient.fullName}`} items={[
         { label: 'Wants another day…', hidden: !canWrite || !isConfirm(r), onClick: () => setMoving(r) },
-        { label: 'Will come · book…', hidden: !bookable(r), onClick: () => book(r) },
         { label: 'No answer', hidden: !canWrite, onClick: () => many.mutate({ list: [r], send: false }) },
         { label: 'Call later…', hidden: !canWrite, onClick: () => setCalling({ row: r, out: 'call_later' }) },
         { label: isConfirm(r) ? 'Not coming…' : 'Close with a reason…', hidden: !canWrite, onClick: () => setCalling({ row: r, out: 'not_interested' }) },
         { label: 'Open patient', onClick: () => nav(`/patients/${r.patient.id}`) },
         { label: 'Copy phone number', hidden: !r.patient.phone, onClick: () => navigator.clipboard?.writeText(r.patient.phone).then(() => toast('Number copied'), () => toast('Could not copy', 'err')) },
-      ]} />) },
+      ]} /></span>) },
   ];
 
   return (
     <div>
-      <PageHeader title="Calls" subtitle="Everyone to call, and what happened the last time" />
+      <PageHeader title="Calls" subtitle="Who to ring today and why. After the call, press the button or pick what happened; a booked or closed row leaves the list." />
+      <div className="mb-3 text-[13px] text-muted">{TABS.find((t) => t[0] === tab)![2]}</div>
       <DataTable
         id="calls" exportName={`calls-${tab}-${today()}`} rows={rows} rowKey={(r) => r.key} columns={columns}
         loading={q.isLoading} error={q.error} onRetry={() => q.refetch()} empty={{ title: 'Nobody to call here', hint: TABS.find((t) => t[0] === tab)![2] }}

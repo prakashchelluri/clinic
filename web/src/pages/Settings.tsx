@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, errText } from '../api';
+import { can } from '../App';
 import { Drawer, Chip, Icon, Modal, PageHeader, PageSearchBox, Section, Skeleton, Tabs, money, toast, NumInput, MoneyInput, toPaise, ask, useAddFromNew, usePageSearch } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
 import { RolesTab, DiscountCap, useRoles } from './Roles';
@@ -75,12 +76,14 @@ const FIELD_TYPES: [string, string][] = [['text', 'Short text'], ['textarea', 'L
 /** Owner's control panel. Everything here is data: no deploy needed to change it.
  *  The home is six groups; opening one shows its first topic, with the group's other topics as tabs. Prices is one screen. */
 export function Settings() {
-  const { cfg, me } = useOutletContext<any>();
+  const { cfg, me, perms } = useOutletContext<any>();
   const owner = (me?.roles ?? []).includes('owner');
-  const visible = (k: Tab) => (owner || groupOf(k)[0] !== OWNER_ONLY_GROUP) && (k !== 'testdata' || !!cfg?.testData);
+  // the desk (it books and moves appointments) may set the doctors' hours and nothing else; the rest needs the settings permission
+  const admin = can(perms, 'config.write');
+  const visible = (k: Tab) => (admin || k === 'availability') && (owner || groupOf(k)[0] !== OWNER_ONLY_GROUP) && (k !== 'testdata' || !!cfg?.testData);
   const [params, setParams] = useSearchParams();
   const asked = params.get('tab') ?? ''; const alias = ALIAS[asked];
-  const tab = TABS.find((t) => t[0] === (alias?.[0] ?? asked) && visible(t[0]))?.[0] ?? null;
+  const tab = TABS.find((t) => t[0] === (alias?.[0] ?? asked) && visible(t[0]))?.[0] ?? (admin ? null : 'availability');
   // an old link to fees, medicines… opens Prices at that part
   useEffect(() => { if (alias && tab) setTimeout(() => document.getElementById(alias[1])?.scrollIntoView({ block: 'start' }), 80); }, [asked, !!tab]);
   // from the groups to a topic is a step of its own (Back returns to the groups); topic to topic replaces it

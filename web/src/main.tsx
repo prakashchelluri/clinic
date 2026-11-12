@@ -7,10 +7,9 @@ import './glass.css';
 import './oat.css'; // trial theme (cream/slate/teal): delete this line to revert
 import { qc } from './api';
 import { App, Home } from './App';
-import { Today } from './pages/Today';
-import { MyWeek } from './pages/MyWeek';
+import { Dashboard } from './pages/Dashboard';
 import { Login } from './pages/Login';
-import { FrontDesk } from './pages/FrontDesk';
+
 import { Navigate } from 'react-router';
 import { Patients } from './pages/Patients';
 import { Encounter } from './pages/Encounter';
@@ -28,7 +27,7 @@ import { AuditLog } from './pages/Privacy';
 import { Expenses } from './pages/Expenses';
 import { Accounts } from './pages/Accounts';
 import { Billing } from './billing';
-import { Appointments } from './pages/Bookings';
+
 import { PatientLink } from './pages/PatientLink';
 import { Display } from './pages/Display';
 import { NotFound } from './ui';
@@ -36,7 +35,7 @@ import { useLocation, useParams } from 'react-router';
 
 /** A fresh pad per patient: keyed on the id, nothing from patient A's pad can carry over (or autosave) into patient B's. */
 function EncounterById() { return <Encounter key={useParams().id} />; }
-/** An old address (Calendar, Bookings, Follow-ups) goes to the page that replaced it, keeping its query (?day=, ?book=1…). */
+/** An old address (Today, Front desk, Appointments, Follow-ups) goes to the page that replaced it, keeping its query (?book=1, ?arrive=1…). */
 function Moved({ to, add = '' }: { to: string; add?: string }) {
   const q = new URLSearchParams(useLocation().search); new URLSearchParams(add).forEach((v, k) => q.set(k, v));
   const s = q.toString();
@@ -56,10 +55,9 @@ createRoot(document.getElementById('root')!).render(
             <Route index element={<Home />} />
             {/* ponytail: the old Overview (pages/Overview.tsx) is parked; its address, and the Dashboard's, go to Reports */}
             <Route path="/overview" element={<Navigate to="/reports" replace />} />
-            <Route path="/today" element={<Today />} />
-            <Route path="/today/week" element={<MyWeek />} />
-            <Route path="/queue" element={<FrontDesk />} />
-            <Route path="/booking" element={<Moved to="/appointments" add="book=1" />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            {['/today', '/today/week', '/queue', '/appointments', '/calendar', '/bookings'].map((p) => <Route key={p} path={p} element={<Moved to="/dashboard" />} />)}
+            <Route path="/booking" element={<Moved to="/dashboard" add="book=1" />} />
             <Route path="/patients" element={<Patients />} />
             <Route path="/patients/:id" element={<Patients />} />
             <Route path="/encounter/:id" element={<EncounterById />} />
@@ -70,14 +68,12 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/calls" element={<Calls />} />
             <Route path="/followups" element={<Moved to="/calls" />} />
             <Route path="/help" element={<Help />} />
-            <Route path="/dashboard" element={<Navigate to="/reports" replace />} />
+
             <Route path="/clinic" element={<Clinic />} />
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/appointments" element={<Appointments />} />
-            <Route path="/calendar" element={<Moved to="/appointments" />} />
-            <Route path="/bookings" element={<Moved to="/appointments" add="view=list" />} />
+
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/platform" element={<Platform />} />

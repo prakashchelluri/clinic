@@ -21,15 +21,7 @@ import { TakePayment, moneyErr } from '../takePayment';
 import { printReceipt, RefundDialog } from '../invoices';
 import { ReportDialog, type Order } from './TestReports';
 
-/** Table or Schedule as two small icons, and History beside them where it is easy to find. */
-function ViewSwitch({ view, onView, onHistory }: { view: 'table' | 'schedule'; onView: (v: 'table' | 'schedule') => void; onHistory: () => void }) {
-  const opt = (v: 'table' | 'schedule', icon: string, label: string) => <button type="button" role="radio" aria-checked={view === v} aria-label={label} title={label} onClick={() => onView(v)}
-    className={`grid h-7 w-8 place-items-center rounded-[7px] transition-colors ${view === v ? 'bg-ink text-paper' : 'text-muted hover:text-ink'}`}><Icon name={icon} className="h-4 w-4" /></button>;
-  return <span className="inline-flex shrink-0 items-center gap-1.5">
-    <span role="radiogroup" aria-label="View" className="inline-flex gap-0.5 rounded-[9px] bg-surface-2 p-[3px] ring-1 ring-line">{opt('table', 'list', 'Table')}{opt('schedule', 'calendar', 'Schedule')}</span>
-    <button type="button" className="btn btn-sm" onClick={onHistory}><Icon name="clock" className="h-3.5 w-3.5" />History</button>
-  </span>;
-}
+
 
 type Ctx = { me: any; perms: string[]; cfg: any };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
@@ -47,8 +39,9 @@ function downloadCsv(filename: string, rows: (string | number | null | undefined
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
 }
 
-/** The receptionist's home as one board: every patient is a row, the stage is a tab, Waiting is the default. */
-export function FrontDesk() {
+/** The desk's dashboard: the same day as a Calendar (by the hour, with who is waiting beside it) or as a List (by stage).
+ *  One toolbar on top, the same in both views: the view, the search, History. */
+export function FrontDesk({ lead }: { lead?: React.ReactNode }) {
   const { perms, cfg, me } = useOutletContext<Ctx>();
   const nav = useNavigate();
   const day = today(); const isToday = true;
@@ -231,7 +224,7 @@ export function FrontDesk() {
       <Row key={a.id} token={a.window.startTime} cls="opacity-70"
         top={<>{who(a.patient)}<Chip tone="rose">no-show</Chip><Chip>{docName(a.window.practitionerId)}</Chip></>}
         sub={meta([a.patient.phone, 'did not arrive'])}
-        actions={canDesk && <button className="btn btn-sm" onClick={() => nav(`/appointments?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>} />); }
+        actions={canDesk && <button className="btn btn-sm" onClick={() => nav(`/dashboard?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>} />); }
     const v = r.v; const due = dueOf(v); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
     return (
       <Row key={v.id} token={v.opNumber} cls={due ? 'bg-rose-soft/30' : handled || left ? 'opacity-70' : ''}
@@ -252,7 +245,14 @@ export function FrontDesk() {
 
   return (
     <div className="fd flex min-h-0 flex-1 flex-col">
-      <h1 className="sr-only">Front desk</h1>
+      <h1 className="sr-only">Dashboard</h1>
+      {tab !== 'history' && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
+        {lead}
+        {canDesk && <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} />}
+        <span className="ml-auto" />
+        <PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[280px] max-w-full" />
+        {canDesk && <button type="button" className="btn btn-sm" title="Past days: who came, who left, who did not come" onClick={() => setTab('history')}><Icon name="clock" className="h-3.5 w-3.5" />History</button>}
+      </div>}
       {tab === 'history' && <div className="anim-fade-up mb-4 flex flex-wrap items-center gap-2 no-print"><button className="btn" onClick={() => setTab(canDesk ? 'now' : 'waiting')}><Icon name="chevL" className="h-4 w-4" />Back to today</button><div ref={setSlot} className="flex flex-wrap items-center gap-2" /></div>}
       {canDesk && arrive && <ArrivalSheet key={`${arriveKey}:${arrive.patientId ?? ''}:${arrive.appointmentId ?? ''}:${arrive.reports?.encounterId ?? ''}`} init={arrive} cfg={cfg} perms={perms} todayAppts={scheduled} waitingByDoctor={Object.fromEntries((d?.doctors ?? []).map((x: any) => [x.id, visitsAll.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))} onClose={() => { setArrive(null); setArriveKey((k) => k + 1); refresh(); }} />}
 
@@ -266,8 +266,7 @@ export function FrontDesk() {
                 ? [['now', 'To do', nowCount, nowCount > 0], ['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest {waitText(longest)}</span>], ['scheduled', 'Not here yet', scheduled.length, false]]
                 : [['waiting', 'Waiting', waiting.length, false, d && waiting.length > 0 && <span className={longest >= 30 ? 'text-amber' : ''} title="The patient who has waited longest since arriving">longest {waitText(longest)}</span>], ...(screening !== 'off' || intake.length ? [['intake', 'Initial screening', intake.length, false]] : []), ['doctor', 'With doctor', inConsult.length, false], ['checkout', 'Pending tests', checkout.length, false], ['reports', 'Reports awaited', reportsOpen.length, false], ['completed', 'Done', completed.length + noShows.length, false], ['all', 'All', visits.length + scheduled.length + noShows.length, false]]) as [Tab, string, number, boolean, React.ReactNode?][]}
               extra={<>{docFilter && tab !== 'now' && view !== 'schedule' && <span className="fd-chip">{docOptions.find((o) => o.value === docFilter)?.label}<button type="button" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button></span>}
-              <span className="ml-auto flex shrink-0 items-center gap-2 self-center"><PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[260px]" />{canDesk && <ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} />}</span>
-              <span className={`fd-day ${canDesk ? '!ml-0' : ''}`}>{dayLabel}</span>
+              <span className="fd-day">{dayLabel}</span>
               {canDesk && (tab === 'waiting' || tab === 'scheduled') && (tab === 'waiting' ? waiting : scheduled).length > 0 && <button type="button" className="shrink-0 self-center whitespace-nowrap px-3 py-1.5 text-[13px] font-semibold text-muted hover:text-ink" aria-pressed={!!sel} title={tab === 'scheduled' ? 'Tick several bookings and mark them no-show together; the late ones come pre-ticked' : 'Tick several waiting patients and mark them as left together'} onClick={() => setSel(sel ? null : new Set(tab === 'scheduled' ? late.map((a) => a.id) : []))}>{sel ? 'Done' : 'Select'}</button>}</>} />}
             {sel && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[12px] bg-ink px-3 py-2 text-[13px] text-paper anim-fade-up" role="toolbar" aria-label="Selected rows">
               <b>{sel.size} selected</b>
@@ -280,13 +279,13 @@ export function FrontDesk() {
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} tools={<><PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[260px]" /><ViewSwitch view={view} onView={setView} onHistory={() => setTab('history')} /></>} />
+                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} />
               {waitingPanel}</div>
             : tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
                 onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
                 onReportsArrive={(o) => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })} freeDays={freeDays}
                 onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => setCollecting(v)} doctorHead={docOptions.length > 2 && <span className="fd-thf"><Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={docOptions} />{docFilter && <button type="button" className="fd-x" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button>}</span>} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
-            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/appointments?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/appointments?book=1')} /> : (
+            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/dashboard?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/dashboard?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
@@ -720,7 +719,17 @@ function CheckoutList({ visits, canDesk, canForce, bare = false }: { visits: any
   const upd = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/worklist/${id}`, b), onSuccess: plansRefresh, onError: (e) => toast(errText(e), 'err') });
   const act = (ids: string[], status: string, outcome: string, note?: string) => Promise.all(ids.map((id) => upd.mutateAsync({ id, status, contact: { outcome, note } })));
   const decline = async (ids: string[], what: string) => { const a = await ask({ title: `Patient declined ${what}?`, body: 'It leaves the pending list and stays in the patient record.', confirmLabel: 'Declined', cancelLabel: 'Keep', field: { label: 'Reason', maxLength: 200 } }); if (a) await act(ids, 'cancelled', 'Declined', a.value || undefined); };
-  const later = (ids: string[]) => act(ids, 'contacted', 'Do later');
+  // "Not today": the patient wants to think about it. It leaves the desk's pending list and comes up on Calls on the day picked,
+  // so "later" always has a date and somebody rings. (Tests are not called about: they are just set aside.)
+  const later = async (rs: any[], patientId: string, days: number) => {
+    const on = new Date(Date.now() + days * 864e5); if (on.getDay() === 0) on.setDate(on.getDate() + 1); // not a Sunday
+    const day = `${on.getFullYear()}-${String(on.getMonth() + 1).padStart(2, '0')}-${String(on.getDate()).padStart(2, '0')}`;
+    await act(rs.map((r) => r.id), 'contacted', 'Not today', `call on ${day}`);
+    const call = rs.filter((r) => r.kind !== 'investigation');
+    await Promise.all(call.map((r) => post('/followups/log', { kind: r.kind === 'followup' ? 'review' : 'advised', refId: r.id, patientId, outcome: 'call_later', callbackOn: day }))).catch((e) => toast(errText(e), 'err'));
+    qc.invalidateQueries({ queryKey: ['followups'] });
+    toast(call.length ? `Set aside. On the Calls list from ${fmtDate(day)}.` : 'Set aside for now.', 'info');
+  };
   const close = useMutation({ mutationFn: ({ id, reason }: { id: string; reason?: string }) => patch(`/visits/${id}`, { details: { checkoutClosedAt: new Date().toISOString(), ...(reason ? { checkoutCloseReason: reason } : {}) } }), onSuccess: () => { plansRefresh(); toast('Visit closed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
   const closeWithReason = async (id: string) => { const a = await ask({ title: 'Close this visit with things still open?', body: 'The reason is written to the audit log.', confirmLabel: 'Close visit', cancelLabel: 'Keep open', field: { label: 'Reason (patient left, declined…)', required: true, maxLength: 200 } }); if (a?.value) close.mutate({ id, reason: a.value }); };
   if (visits.length === 0) return <div className="card"><Empty icon="check" title="Nothing pending after the doctor" hint="When the doctor advises a procedure, tests or a review, the patient shows here until each is done or marked not needed." /></div>;
@@ -731,12 +740,13 @@ function CheckoutList({ visits, canDesk, canForce, bare = false }: { visits: any
         const procs = recs.filter((r) => r.kind === 'procedure'); const fus = recs.filter((r) => r.kind === 'followup'); const tests = recs.filter((r) => r.kind === 'investigation');
         const doneLabel = (r: any) => r.status === 'scheduled' ? (r.kind === 'procedure' ? 'Scheduled' : 'Booked') : r.status === 'cancelled' ? 'Declined' : r.status === 'done' ? 'Done' : (r.contactLog?.[r.contactLog.length - 1]?.outcome ?? 'Handled');
         const Item = ({ tag, tone, title, sub, rs, action, onAction, extra }: { tag: string; tone: 'sky' | 'clay' | 'amber'; title: string; sub?: string; rs: any[]; action: string; onAction: () => void; extra?: React.ReactNode }) => {
-          const pending = rs.filter((r) => r.status === 'open'); const ids = pending.map((r) => r.id);
+          const pending = rs.filter((r) => r.status === 'open'); const ids = pending.map((r) => r.id); const call = tag !== 'tests';
           return pending.length === 0
             ? <div className="flex items-center gap-2 rounded-2xl px-3 py-2 text-sm opacity-60"><Chip>done</Chip><span className="flex-1">{title} · {doneLabel(rs[0])}</span><Icon name="check" className="h-4 w-4" /></div>
             : <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-surface/70 px-3 py-2.5 text-sm"><Chip tone={tone}>{tag}</Chip><span className="min-w-0 flex-1"><b>{title}</b>{sub && <span className="text-muted"> · {sub}</span>}</span>
               {canDesk && <>{extra}<button className="btn btn-sm btn-primary" disabled={upd.isPending} onClick={onAction}>{action}</button>
-                <MoreMenu items={[{ label: 'Patient declined', danger: true, onClick: () => decline(ids, tag) }, { label: 'Do later', onClick: () => later(ids) }]} /></>}</div>;
+                <MoreMenu items={[...(call ? [{ label: 'Not today · call in 3 days', onClick: () => later(pending, v.patient.id, 3) }, { label: 'Not today · call in a week', onClick: () => later(pending, v.patient.id, 7) }, { label: 'Not today · call in a month', onClick: () => later(pending, v.patient.id, 30) }] : [{ label: 'Explain later', onClick: () => later(pending, v.patient.id, 0) }]),
+                  { label: 'Patient declined', danger: true, onClick: () => decline(ids, tag) }]} /></>}</div>;
         };
         return (
           <div key={v.id} className={bare ? '' : 'card !p-4'}>

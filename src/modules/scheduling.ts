@@ -139,11 +139,11 @@ export function schedulingRoutes(app: FastifyInstance) {
     return tx.insert(session).values(src.map(({ id, createdAt, ...s }) => ({ ...s, day: toDay }))).returning();
   });
 
-  // --- weekly routine: set once by the doctor (own) or the owner ---
+  // --- weekly routine: set once by the doctor (own), the owner, or the desk that books into it ---
   const RoutineIn = z.object({ days: z.record(z.string().regex(/^[0-6]$/), z.array(z.tuple([HHMM, HHMM]))), capacity: z.number().int().min(1).max(50), windowMinutes: z.number().int().min(15).max(240) });
   route(app, 'put', '/calendar/routine/:practitionerId', null, async (req, tx) => {
     const pid = (req.params as any).practitionerId; const t = req.ctx.tenantId;
-    if (!(can(req.perms, 'config.write') || req.ctx.practitionerId === pid)) throw new HttpError(403, 'FORBIDDEN:routine');
+    if (!(can(req.perms, 'config.write') || can(req.perms, 'appointment.write') || req.ctx.practitionerId === pid)) throw new HttpError(403, 'FORBIDDEN:routine');
     const routine = RoutineIn.parse(req.body);
     for (const ranges of Object.values(routine.days)) for (const r of ranges) {
       if (r[1] === '00:00') r[1] = '23:59'; // till midnight

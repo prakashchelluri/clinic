@@ -8,10 +8,10 @@ export type Action = { key: string; label: string; icon: string; hint: string; t
 
 /** The things you start from anywhere. One list for the + menu and for ⌘K. */
 export const createActions = (can: (p: string) => boolean, path = ''): Action[] => {
-  const first = path.startsWith('/patients') ? 'R' : path.startsWith('/appointments') ? 'B' : path.startsWith('/pharmacy') ? 'SOD' : path.startsWith('/inventory') ? 'OD' : path.startsWith('/worklist') ? 'P' : path.startsWith('/expenses') || path.startsWith('/accounts') ? 'E' : path.startsWith('/queue') ? 'A' : '';
+  const first = path.startsWith('/patients') ? 'R' :  path.startsWith('/pharmacy') ? 'SOD' : path.startsWith('/inventory') ? 'OD' : path.startsWith('/worklist') ? 'P' : path.startsWith('/expenses') || path.startsWith('/accounts') ? 'E' : path.startsWith('/dashboard') ? 'A' : '';
   const list = [
-  can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/queue?arrive=1' },
-  can('appointment.write') && { key: 'B', label: 'New booking', icon: 'calendar', hint: 'Pick a window', to: '/appointments?add=book' },
+  can('visit.write') && { key: 'A', label: 'Check in a patient', icon: 'plus', hint: 'Arrival, vitals and fee', to: '/dashboard?arrive=1' },
+  can('appointment.write') && { key: 'B', label: 'New booking', icon: 'calendar', hint: 'Pick a window', to: '/dashboard?book=1' },
   can('patient.write') && { key: 'R', label: 'Register a patient', icon: 'user', hint: 'New record', to: '/patients?new=1' },
   can('worklist.write') && { key: 'P', label: 'Schedule a procedure', icon: 'stetho', hint: 'Pending schedules', to: '/worklist?tab=week' },
   can('expense.write') && { key: 'E', label: 'Add an expense', icon: 'rupee', hint: can('finance.read') ? 'Accounts' : 'Expenses', to: can('finance.read') ? '/accounts?tab=spend&add=expense' : '/expenses?add=expense' },

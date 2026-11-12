@@ -21,9 +21,8 @@ export type NavItem = { to: string; label: string; icon: string; show: (c: (p: s
 type Badge = { n: number; warn?: boolean; hint: string };
 type Badges = Record<string, Badge | undefined>;
 export const NAV: NavItem[] = [
-  { to: '/today', label: 'Today', icon: 'stetho', show: (c) => c('encounter.complete') },
-  { to: '/queue', label: 'Front desk', icon: 'door', show: (c) => c('visit.write') || (c('encounter.intake') && !c('encounter.complete')) },
-  { to: '/appointments', label: 'Appointments', icon: 'booked', show: (c) => c('appointment.read') },
+  // one home for doctors, the junior doctor and the desk: the calendar and what needs you (it replaced Today, Front desk and Appointments)
+  { to: '/dashboard', label: 'Dashboard', icon: 'calendar', show: (c) => c('encounter.complete') || c('visit.write') || c('encounter.intake') },
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', icon: 'syringe', show: (c) => c('worklist.read') },
   { to: '/calls', label: 'Calls', icon: 'phone', show: (c) => c('worklist.read') },
@@ -35,7 +34,7 @@ export const NAV: NavItem[] = [
   { to: '/accounts', label: 'Accounts', icon: 'wallet', show: (c) => c('finance.read') },
   { to: '/reports', label: 'Reports', icon: 'chart', show: (c) => c('report.read') || c('report.daily') || c('finance.read') },
   { to: '/expenses', label: 'Expenses', icon: 'wallet', show: (c) => c('expense.read') && !c('finance.read') }, // the owner has them in Accounts › Spending
-  { to: '/settings', label: 'Settings', icon: 'gear', show: (c) => c('config.write') },
+  { to: '/settings', label: 'Settings', icon: 'gear', show: (c) => c('config.write') || c('appointment.write') }, // the desk gets Doctors' hours only
   { to: '/audit', label: 'Audit log', icon: 'lock', show: (c) => c('user.write') },
   { to: '/platform', label: 'Clinics', icon: 'home', show: (c) => c('platform.read') },
 ];
@@ -43,9 +42,7 @@ export const NAV: NavItem[] = [
 /** Where each role lands: the page that answers their first question of the day. An owner who sees patients lands on Today. */
 export function homeFor(c: (p: string) => boolean, platform = false) {
   if (platform) return '/platform';
-  if (c('encounter.complete')) return '/today';
-  if (c('visit.write')) return '/queue';
-  if (c('encounter.intake')) return '/queue';
+  if (c('encounter.complete') || c('visit.write') || c('encounter.intake')) return '/dashboard';
   if (c('worklist.write')) return '/worklist';
   if (c('expense.read')) return '/expenses';
   if (c('pharmacy.read')) return '/pharmacy';
@@ -207,7 +204,7 @@ export function App() {
   const topic = loc.pathname === '/settings' ? settingsTopic(new URLSearchParams(loc.search).get('tab')) : null;
   // Back: the screen you came from; opened from a link or a fresh tab, the page above this one
   const seg = loc.pathname.split('/').filter(Boolean);
-  const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? (perms.includes('encounter.complete') || perms.includes('*') ? '/today' : '/queue') : seg[0] === 'help' ? '/' : null;
+  const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? '/dashboard' : seg[0] === 'help' ? '/' : null;
   const goBack = () => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(parent ?? '/', { viewTransition: true }));
   const roles: string[] = me.data.roles ?? [me.data.role];
   const mc = counts.data;
@@ -257,7 +254,7 @@ export function App() {
       <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
         {offlineAt !== null && <div role="status" className="no-print sticky top-[60px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
 
-        <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
+        <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/dashboard' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}><PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>
         </div>
       </div>

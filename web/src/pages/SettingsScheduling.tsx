@@ -4,6 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, errText } from '../api';
 import { Chip, Empty, Icon, Section, Skeleton, money, toast, NumInput, MoneyInput, toPaise, useAddFromNew } from '../ui';
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from '../routine';
+import { ChangeMyDay } from '../dayChange';
 
 /* Scheduling settings: availability, visit types, booking rules, reminders. All data, no deploy. */
 
@@ -32,15 +33,15 @@ const intIn = (v: any, min: number, max: number) => { const n = Number(v); retur
 
 /* ---------------- Availability: each doctor's weekly routine ---------------- */
 export function AvailabilityTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
-  const [edit, setEdit] = useState<any>(null);
+  const [edit, setEdit] = useState<any>(null); const [change, setChange] = useState<any>(null); // the doctor whose one day is being changed
   const saveR = useMutation({ mutationFn: ({ id, routine }: any) => api('PUT', `/calendar/routine/${id}`, routine), onSuccess: () => { toast('Availability saved · future days follow it'); setEdit(null); onSaved(); }, onError: (e) => toast(errText(e), 'err') });
   return (
     <div className="space-y-4">
-      <div className="text-sm text-muted">Set each doctor's week once. Every day's OP windows come from it. One-off changes (late, away, a break) are made on the Calendar.</div>
+      <div className="text-sm text-muted">Set each doctor's week once. Every day's OP windows come from it. For one day only (late, away, a break) use Change a day.</div>
       {cfg.practitioners.map((p: any) => (
         <div key={p.id} className="card">
           <div className="flex items-center gap-3"><div className="flex-1"><div className="font-semibold">{p.name}</div><div className="text-sm text-muted">{routineSummary(p.routine)}{p.routine ? ` · ${p.routine.capacity} places per ${p.routine.windowMinutes} min` : ''}</div></div>
-            {edit?.id !== p.id && <button className="btn btn-sm" onClick={() => setEdit({ id: p.id, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}</div>
+            {edit?.id !== p.id && <><button className="btn btn-sm" onClick={() => setChange(p)}><Icon name="calendar" className="h-3.5 w-3.5" />Change a day</button><button className="btn btn-sm" onClick={() => setEdit({ id: p.id, routine: p.routine ?? DEFAULT_ROUTINE })}><Icon name="edit" className="h-3.5 w-3.5" />Edit weekly hours</button></>}</div>
           {edit?.id === p.id && (
             <div className="mt-4 space-y-3 anim-fade-up">
               <RoutineEditor value={edit.routine} onChange={(routine) => setEdit({ ...edit, routine })} />
@@ -49,6 +50,7 @@ export function AvailabilityTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
           )}
         </div>
       ))}
+      {change && <ChangeMyDay practitionerId={change.id} name={change.name} initialKind="away" onClose={() => { setChange(null); onSaved(); }} />}
     </div>
   );
 }
