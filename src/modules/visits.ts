@@ -121,6 +121,8 @@ export function visitRoutes(app: FastifyInstance) {
       feeCategoryId: cat.id, day, opNumber, details: body.details, queuePosition: String(Number(maxPos) + 1), priority: cat.priority, idempotencyKey: body.idempotencyKey,
     }).returning();
     if (body.appointmentId) await tx.update(appointment).set({ status: 'arrived' }).where(eq(appointment.id, body.appointmentId));
+    // the patient is back: every review advised earlier is now met, on Calls and on the doctor's home
+    await tx.update(recommendation).set({ status: 'done' }).where(and(eq(recommendation.tenantId, t), eq(recommendation.patientId, body.patientId), eq(recommendation.kind, 'followup'), inArray(recommendation.status, ['open', 'contacted', 'scheduled'])));
 
     // Fee: a charge row even when ₹0, so reports reconcile by category
     const amount = cat.amountPaise;

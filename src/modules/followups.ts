@@ -23,7 +23,7 @@ type Row = { key: string; kind: Kind; refId: string; patient: any; what: string;
   sitting?: { id: string; day: string; startTime: string; endTime: string; practitionerId: string | null; sittingNo: number; of: number | null; weekConfirmedAt: string | null } };
 
 /** The visit's diagnoses as one line, so a review says what it is for. */
-const dxOf = (d: any): string => ((d?.assessment?.diagnosis ?? []) as any[]).map((x) => typeof x === 'string' ? x : x?.name).filter(Boolean).join(', ');
+const dxOf = (d: any): string => ([] as any[]).concat(d?.assessment?.diagnosis ?? []).map((x) => typeof x === 'string' ? x : x?.name).filter(Boolean).join(', ');
 
 const dayLabel = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
@@ -157,7 +157,7 @@ export function followupRoutes(app: FastifyInstance) {
     const [row] = await tx.insert(callback).values({ tenantId: t, patientId: b.patientId, kind: b.kind, refId: b.refId, outcome: b.outcome, note: b.note ?? null, callbackOn: b.outcome === 'call_later' ? b.callbackOn! : null, byName: req.ctx.name }).returning();
     if (['review', 'schedule', 'advised'].includes(b.kind)) {
       const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, b.refId), eq(recommendation.tenantId, t))).then((r) => r[0]);
-      if (rec) await tx.update(recommendation).set({ status: b.outcome === 'not_interested' ? 'cancelled' : rec.status === 'open' ? 'contacted' : rec.status, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: b.outcome, note: b.note }] }).where(eq(recommendation.id, rec.id));
+      if (rec) await tx.update(recommendation).set({ status: b.outcome === 'not_interested' ? 'cancelled' : b.outcome === 'booked' && b.kind === 'review' ? 'scheduled' : rec.status === 'open' ? 'contacted' : rec.status, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: b.outcome, note: b.note }] }).where(eq(recommendation.id, rec.id));
     }
     let messaged = false;
     if (b.outcome === 'no_answer' && b.sendMessage && p.phone && /^\d{10}$/.test(p.phone) && !p.noWhatsapp) {

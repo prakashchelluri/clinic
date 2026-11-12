@@ -409,6 +409,8 @@ export function schedulingRoutes(app: FastifyInstance) {
     await emit(tx, req.ctx, 'appointment.booked', 'appointment', row.id, { patientId, sessionId: s.id, day: s.day, window: [s.startTime, s.endTime], overbooked: full, serviceId: svc?.id ?? null });
     // Booking a patient who was on the waiting list takes them off it.
     await tx.update(waitlist).set({ status: 'booked' }).where(and(eq(waitlist.tenantId, t), eq(waitlist.patientId, patientId!), inArray(waitlist.status, ['waiting', 'offered'])));
+    // a visit booked: an open review of this patient is on its way, so nobody needs to call about it
+    await tx.update(recommendation).set({ status: 'scheduled' }).where(and(eq(recommendation.tenantId, t), eq(recommendation.patientId, patientId!), eq(recommendation.kind, 'followup'), inArray(recommendation.status, ['open', 'contacted'])));
 
     // Repeat: same doctor, same window time, every N weeks. Dates without that window or with no room are reported, not forced.
     const series = { created: [] as string[], skipped: [] as { day: string; reason: string }[] };

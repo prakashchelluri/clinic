@@ -80,3 +80,36 @@ test('check-in: only to a doctor who still has hours today', async () => {
   const off = await checkIn('Away Rules', b.id);
   assert.equal(off.status, 409); assert.equal(off.body.code, 'DOCTOR_NOT_WORKING');
 });
+
+test('a review leaves the lists once a visit is booked, a call says booked, or the patient is back', async () => {
+  const owner = await as('owner@demo.clinic'); const desk = await as('reception@demo.clinic');
+  const cfg = (await owner('GET', '/config')).body; const cat = cfg.feeCategories[0]; const doc = cfg.practitioners[0].id; const branchId = cfg.branches[0].id;
+  const pay = cat.amountPaise > 0 ? { method: 'cash', amountPaise: cat.amountPaise } : undefined;
+  // a consultation that ends with "review in 14 days"
+  const seen = async (name: string) => {
+    const id = (await desk('POST', '/patients?force=1', { fullName: name })).body.id as string;
+    const v = await desk('POST', '/visits', { patientId: id, feeCategoryCode: cat.code, details: {}, idempotencyKey: `${name}-${Date.now()}`, payment: pay });
+    const enc = (await owner('POST', `/visits/${v.body.id}/encounter`)).body;
+    const done = await owner('PATCH', `/encounters/${enc.id}`, { data: { complaint: { chief_complaint: 'acne', site: ['Face'] }, assessment: { diagnosis: 'Acne', severity: 'Mild' } }, recommendations: [{ kind: 'followup', intervalDays: 14 }], complete: true });
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    return id;
+  };
+  const review = async (id: string) => (await desk('GET', '/worklist?kind=followup')).body.find((r: any) => r.patient.id === id);
+  // as the doctor, who also sees what the review is for (a diagnosis typed as one line, not a list)
+  const onCalls = async (id: string) => (await owner('GET', '/followups?tab=reviews')).body.rows.some((r: any) => r.patient.id === id);
+
+  // a call that ends in "booked"
+  const a = await seen('Review Called');
+  assert.equal((await review(a)).status, 'open'); assert.ok(await onCalls(a));
+  assert.equal((await desk('POST', '/followups/log', { kind: 'review', refId: (await review(a)).id, patientId: a, outcome: 'booked' })).status, 200);
+  assert.equal((await review(a)).status, 'scheduled'); assert.ok(!(await onCalls(a)));
+
+  // a visit booked from the calendar, then the patient comes back
+  const b = await seen('Review Returns');
+  const later = (await owner('POST', '/sessions', { branchId, practitionerId: doc, day: addDays(today(), 14), startTime: '06:00', endTime: '07:00', capacity: 5 })).body;
+  assert.equal((await desk('POST', '/appointments', { sessionId: later.id, patientId: b })).status, 200);
+  assert.equal((await review(b)).status, 'scheduled'); assert.ok(!(await onCalls(b)));
+  const back = await desk('POST', '/visits', { patientId: b, feeCategoryCode: cat.code, details: {}, idempotencyKey: `back-${Date.now()}`, payment: pay });
+  assert.equal(back.status, 200, JSON.stringify(back.body));
+  assert.equal(await review(b), undefined, 'met: off the follow-up list');
+});

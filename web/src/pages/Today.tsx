@@ -40,7 +40,8 @@ export function Today() {
   const fd = useQuery({ queryKey: ['frontdesk', 'today-doc'], queryFn: () => get('/frontdesk'), refetchInterval: 5000 });
   const cal = useQuery({ queryKey: ['calendar', today(), doc ?? 'all'], queryFn: () => get(`/calendar?day=${today()}${doc ? `&practitionerId=${doc}` : ''}`), refetchInterval: 30000 });
   const tom = useQuery({ queryKey: ['calendar', tmr, doc ?? 'all'], queryFn: () => get(`/calendar?day=${tmr}${doc ? `&practitionerId=${doc}` : ''}`) });
-  const fus = useQuery({ queryKey: ['worklist', 'followup'], queryFn: () => get('/worklist?kind=followup'), enabled: can(perms, 'worklist.read') });
+  // the owner's check on the desk: the same review rows the Calls page lists, so both numbers agree; other doctors don't see it
+  const fus = useQuery({ queryKey: ['followups', 'reviews'], queryFn: () => get('/followups?tab=reviews'), enabled: can(perms, 'finance.read') && can(perms, 'worklist.read') });
   const allProcs = useQuery({ queryKey: ['psessions', 'day', today()], queryFn: () => get(`/procedure-sessions?day=${today()}&active=1`), refetchInterval: 30000, enabled: can(perms, 'worklist.read') });
   const ordq = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
   const secq = useQuery({ queryKey: ['security'], queryFn: () => get('/security'), enabled: (me.roles ?? []).includes('owner'), refetchInterval: 60000 });
@@ -118,7 +119,7 @@ export function Today() {
   const abnormalCount = readyOrders.reduce((n, o) => n + outTests(o).length, 0);
   // --- also waiting on the doctor ---
   const drafts = visits.filter((v) => v.encounterStatus === 'draft' && v.status !== 'in_consult');
-  const overdue = (fus.data ?? []).filter((r: any) => r.dueOn && r.dueOn < today() && ['open', 'contacted'].includes(r.status));
+  const overdue = (fus.data?.rows ?? []).filter((r: any) => r.dueOn && r.dueOn < today() && !r.waiting);
   const noDoc = (allProcs.data ?? []).filter((p: any) => ['confirmed', 'in_progress'].includes(p.state) && !p.practitionerId);
   const stopped: any[] = secq.data?.security?.ipLock?.enabled ? secq.data.stopped : [];
   const otherCount = stopped.length + drafts.length + noDoc.length + (overdue.length ? 1 : 0);
@@ -201,7 +202,7 @@ export function Today() {
             <div className="mt-1">
               {drafts.map((v: any) => <Attn key={v.id} title={v.patient.fullName} sub={`arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=schedule&day=${today()}`)} />)}
-              {overdue.length > 0 && <Attn title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Reception or the coordinator can call them" action="See" onClick={() => nav('/calls?tab=reviews')} />}
+              {overdue.length > 0 && <Attn title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="Still on the desk's Calls list" action="See" onClick={() => nav('/calls?tab=reviews')} />}
               {stopped.map((x: any) => <Attn key={x.id} title={`${x.name} was stopped`} sub={`new internet address ${x.ip}: at the clinic? allow it`} action="Open" onClick={() => nav('/settings?tab=privacy')} />)}
             </div>
           </section>}
