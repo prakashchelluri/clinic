@@ -139,16 +139,13 @@ test('test orders: reviewed once when every report is in; a slow test in its own
   assert.equal((await doc2('POST', '/orders/called', { id: idOf(o2, 'Skin biopsy') })).status, 403);
   assert.equal((await up([idOf(o2, 'Skin biopsy')], 'biopsy.pdf')).status, 200);
   assert.equal((await owner('POST', '/orders/review', { encounterId: e.id, orderNo: 2, outcome: 'needs_visit' })).status, 200);
-  // the reviewed report is a call on the one Calls list until the patient is told
-  const reportCall = async () => (await reception('GET', '/followups?tab=reports')).body.rows.find((r: any) => r.patient.id === p.id);
-  const rc = await reportCall();
-  assert.ok(rc && rc.kind === 'report' && rc.order.orderNo === 2 && rc.order.needsVisit, 'a reviewed report shows on Calls');
-  assert.ok((await reception('GET', '/followups')).body.rows.some((r: any) => r.key === rc.key), 'and on the All tab, the default');
-  assert.equal((await reception('POST', '/followups/log', { kind: 'report', refId: rc.refId, patientId: p.id, outcome: 'no_answer' })).status, 200);
-  assert.equal((await reportCall()).lastCall.outcome, 'no_answer');
-  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).status, 200, 'the desk explains after "needs a visit"');
+  // telling the patient happens on Test reports only, not on Calls; "needs a visit" closes once that visit is booked
+  assert.ok(!(await reception('GET', '/followups')).body.rows.some((r: any) => r.patient.id === p.id && r.kind === 'report'), 'no report rows on Calls');
+  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).body.code, 'BOOK_FIRST');
+  const slot = (await reception('GET', '/calendar/free?days=7')).body[0];
+  assert.equal((await reception('POST', '/appointments', { sessionId: slot.sessionId, patientId: p.id })).status, 200);
+  assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).status, 200, 'the desk explains once the visit is booked');
   assert.equal((await reception('POST', '/orders/inform', { encounterId: e.id, orderNo: 2, how: 'in_person' })).body.code, 'ALREADY_INFORMED');
-  assert.equal(await reportCall(), undefined, 'told: off the Calls list');
   assert.equal((await mine('')).filter((o: any) => o.state === 'closed').length, 2);
 });
 

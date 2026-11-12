@@ -8,8 +8,8 @@ import { FlagChips } from '../flags';
 import { DataTable, type Col, type FilterDef } from '../table';
 import { ScheduleModal } from './Worklist';
 
-type Tab = 'all' | 'confirm' | 'reviews' | 'missed' | 'procedures' | 'reports';
-const TABS: [Tab, string, string][] = [['all', 'All', 'Everyone to call today'], ['confirm', 'Confirm sittings', 'Booked sittings to confirm: a week before, then the day before'], ['reviews', 'Reviews due', 'Patients the doctor asked to see again'], ['missed', 'Missed', 'Booked and did not come, visits and sittings'], ['procedures', 'Procedures', 'Courses with the next sitting not booked yet'], ['reports', 'Reports', 'The doctor has seen the reports; tell the patient']];
+type Tab = 'all' | 'confirm' | 'reviews' | 'missed' | 'procedures';
+const TABS: [Tab, string, string][] = [['all', 'All', 'Everyone to call today'], ['confirm', 'Confirm sittings', 'Booked sittings to confirm: a week before, then the day before'], ['reviews', 'Reviews due', 'Patients the doctor asked to see again'], ['missed', 'Missed', 'Booked and did not come, visits and sittings'], ['procedures', 'Procedures', 'Courses with the next sitting not booked yet']];
 type Out = 'booked' | 'call_later' | 'no_answer' | 'not_interested' | 'confirmed';
 const OUT: Record<Out, string> = { booked: 'Booked', call_later: 'Call later', no_answer: 'No answer', not_interested: 'Not interested', confirmed: 'Confirmed' };
 /** The outcomes the procedure plans always used, each saved as one of the four call results. "Will come" books. */
@@ -43,7 +43,7 @@ const LAST: FilterDef<any> = {
 const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 const PROC = ['schedule', 'advised', 'missed_sitting'];
 
-/** One Calls list: reviews due, missed visits and sittings, procedure plans and reports to tell. Each row: No answer · Call later · Book. */
+/** One Calls list: reviews due, missed visits and sittings, procedure plans. Each row: No answer · Call later · Book. */
 export function Calls() {
   const { perms } = useOutletContext<any>(); const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -64,11 +64,9 @@ export function Calls() {
     onError: (e) => { refresh(); toast(errText(e), 'err'); },
   });
   const confirmed = useMutation({ mutationFn: (r: any) => log(r, 'confirmed'), onSuccess: () => { refresh(); toast('Confirmed'); }, onError: (e) => { refresh(); toast(errText(e), 'err'); } });
-  const told = useMutation({ mutationFn: (r: any) => post('/orders/inform', { encounterId: r.order.encounterId, orderNo: r.order.orderNo, how: 'phone' }),
-    onSuccess: () => { refresh(); toast('Patient told · report closed'); }, onError: (e) => toast(errText(e), 'err') });
 
   /** Book: a sitting for a procedure plan, a visit (pre-filled) for everything else. Booking takes the row off the list. */
-  const bookable = (r: any) => isConfirm(r) ? false : (PROC.includes(r.kind) ? canWrite && !!r.recId && !!r.procedureId : canBook && (r.kind !== 'report' || r.order?.needsVisit));
+  const bookable = (r: any) => isConfirm(r) ? false : (PROC.includes(r.kind) ? canWrite && !!r.recId && !!r.procedureId : canBook);
   const book = (r: any) => {
     if (PROC.includes(r.kind)) { setSitting({ id: r.recId, procedureId: r.procedureId, sittings: r.sittings, dueOn: r.dueOn, patient: r.patient }); return; }
     const p = new URLSearchParams(sp); p.set('book', '1'); p.set('patient', r.patient.id); p.set('pname', r.patient.fullName);
@@ -88,7 +86,7 @@ export function Calls() {
       </div>) },
     { key: 'phone', label: 'Phone', csv: (r) => r.patient.phone, cell: (r) => r.patient.phone ? <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold tabular-nums text-ink-2"><Icon name="phone" className="h-3.5 w-3.5 text-muted" />{r.patient.phone}</span> : <span className="text-muted">no phone</span> },
     { key: 'what', label: 'Reason', csv: (r) => r.what, cell: (r) => (
-      <div className="max-w-[300px]"><div className="truncate text-ink-2" title={r.what}>{r.what}</div>{KIND[r.kind] && r.what !== KIND[r.kind] && <div className="text-[12px] text-muted">{KIND[r.kind]}{r.order?.needsVisit ? ' · doctor wants a visit' : ''}</div>}</div>) },
+      <div className="max-w-[300px]"><div className="truncate text-ink-2" title={r.what}>{r.what}</div>{KIND[r.kind] && r.what !== KIND[r.kind] && <div className="text-[12px] text-muted">{KIND[r.kind]}</div>}</div>) },
     { key: 'due', label: 'Due', sort: (r) => callOn(r) ?? '', csv: (r) => r.dueOn, cell: (r) => {
       if (!r.dueOn) return <span className="text-muted">No date set</span>;
       const n = days(r.dueOn);
@@ -108,7 +106,6 @@ export function Calls() {
       <MoreMenu text="Outcome" label={`Outcome of the call to ${r.patient.fullName}`} items={[
         { label: 'Confirmed', hidden: !canWrite || !isConfirm(r), onClick: () => confirmed.mutate(r) },
         { label: 'Wants another day…', hidden: !canWrite || !isConfirm(r), onClick: () => setMoving(r) },
-        { label: 'Told the result', hidden: !canWrite || r.kind !== 'report', onClick: () => told.mutate(r) },
         { label: 'Will come · book…', hidden: !bookable(r), onClick: () => book(r) },
         { label: 'No answer', hidden: !canWrite, onClick: () => many.mutate({ list: [r], send: false }) },
         { label: 'Call later…', hidden: !canWrite, onClick: () => setCalling({ row: r, out: 'call_later' }) },

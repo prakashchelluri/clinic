@@ -19,6 +19,7 @@ import { AppointmentDrawer } from '../apptDrawer';
 import { enabledVitals, vitalProblem } from '../vitals';
 import { TakePayment, moneyErr } from '../takePayment';
 import { printReceipt, RefundDialog } from '../invoices';
+import { ReportDialog, type Order } from './TestReports';
 
 /** Table or Schedule as two small icons, and History beside them where it is easy to find. */
 function ViewSwitch({ view, onView, onHistory }: { view: 'table' | 'schedule'; onView: (v: 'table' | 'schedule') => void; onHistory: () => void }) {
@@ -470,7 +471,15 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const setPay = (i: number, x: Partial<{ method: string; amount: string; ref: string }>) => setPays(pays.map((p, j) => (j === i ? { ...p, ...x } : p)));
   const [partOk, setPartOk] = useState(false); // ticked: taking less than the fee on purpose, the rest stays due
   const [visitKey] = useState(uuid); // one check-in, one key: a retry after a timeout cannot check in twice
-  const waive = !!init.reports?.free; // back with reports within the free days: the server waives it by the clinic's rule
+  // A consultation still open for this patient's tests: ask "back with reports?" so the doctor reopens it instead of starting afresh
+  const ordersQ = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), enabled: !!patientId && !init.reports && can(perms, 'document.read') });
+  const heldOrders: Order[] = ((ordersQ.data?.orders ?? []) as Order[]).filter((o) => o.patient.id === patientId && o.held);
+  const heldEnc = heldOrders[0]?.encounterId; const heldTests = heldOrders.filter((o) => o.encounterId === heldEnc);
+  const [back, setBack] = useState<boolean | null>(null);
+  const [addRep, setAddRep] = useState<{ o: Order; testId: string } | null>(null);
+  const sinceOrder = heldTests[0] ? Math.floor((Date.now() - new Date((heldTests[0] as any).orderedAt).getTime()) / 86400000) : 0;
+  const reports = init.reports ?? (back && heldEnc ? { encounterId: heldEnc, tests: heldTests.flatMap((o) => o.tests.map((t) => t.name)).join(', '), free: sinceOrder <= Number(cfg?.tenant?.settings?.reports?.freeDays ?? 30), since: (heldTests[0] as any).orderedAt } : undefined);
+  const waive = !!reports?.free; // back with reports within the free days: the server waives it by the clinic's rule
   const [pickedDoc, setPractitionerId] = useState('');
   const search = useQuery({ queryKey: ['patients', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: !patientId && q.length >= 2 });
   const sug = useQuery({ queryKey: ['suggest', patientId], queryFn: () => get(`/patients/${patientId}/suggest-category`), enabled: !!patientId });
@@ -489,7 +498,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
   const catRow = cfg?.feeCategories.find((c: any) => c.code === chosen);
   const fee = catRow?.amountPaise ?? 0;
   const p = sug.data?.patient;
-  const isFirst = !!newP || (!!patientId && !init.reports && tl.data?.visits.length === 0); // new, or registered at booking and never seen
+  const isFirst = !!newP || (!!patientId && !reports && tl.data?.visits.length === 0); // new, or registered at booking and never seen
   useEffect(() => { if (p) setFirst(firstOf(p)); }, [p?.id]);
   const hadHistory = !!(p?.history?.conditions?.length || p?.history?.drugAllergies?.length);
   const firstBody = () => ({ ageYears: first.ageYears ? Number(first.ageYears) : null, sex: first.sex || null, dob: first.dob || null,
@@ -509,7 +518,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
       const vitals: Record<string, any> = {};
       for (const f of vitalList) if (vit[f.key]) vitals[f.key] = f.type === 'number' ? Number(vit[f.key]) : vit[f.key];
       return post('/visits', { patientId: pid, appointmentId: appt?.id ?? init.appointmentId, feeCategoryCode: chosen, practitionerId: practitionerId || null,
-        details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: init.reports ? `Back with reports: ${init.reports.tests}` : complaints.map((c) => c.text).join(', '), ...(init.reports ? { reportsEncounterId: init.reports.encounterId } : {}) },
+        details: { ...vitals, ...(bmi ? { bmi } : {}), locality: locality || p?.locality, complaints, complaint: reports ? `Back with reports: ${reports.tests}` : complaints.map((c) => c.text).join(', '), ...(reports ? { reportsEncounterId: reports.encounterId } : {}) },
         payments: taking ? pays.map((x, i) => ({ method: x.method, amountPaise: amtOf(i), reference: x.method !== 'cash' && x.ref.trim() ? x.ref.trim() : undefined })).filter((x) => x.amountPaise > 0) : undefined, allowReview: allowReview.current ? { reason: allowReview.current } : undefined, idempotencyKey: visitKey });
     },
     onSuccess: (v: any) => { toast(`Checked in · token ${v.opNumber}${v.receiptNo ? ` · receipt ${v.receiptNo}` : ''}`, 'ok', v.receiptNo ? { label: 'Print receipt', run: () => printReceipt(v.receiptNo) } : undefined); onClose(); },
@@ -581,8 +590,19 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
                   <div className="mt-0.5 text-[13px] text-muted">{p ? [p.patientNo, p.phone ?? 'no phone', !isFirst && p.ageYears ? `${p.ageYears} ${p.sex ?? ''}` : null, p.locality].filter(Boolean).join(' · ') : 'loading…'}</div>
                   {openPlans.length > 0 && <div className="mt-1 text-[12.5px] text-ink-2">Open plan: {openPlans.map((r: any) => r.kind === 'procedure' ? 'procedure' : r.kind === 'followup' ? `review ${r.dueOn ? fmtDate(r.dueOn) : ''}` : `test ${r.notes}`).join(', ')}</div>}
                 </div>
-                {!init.patientId && <button className="btn btn-ghost shrink-0" onClick={() => setPatientId(undefined)}>Change</button>}
+                {!init.patientId && <button className="btn btn-ghost shrink-0" onClick={() => { setPatientId(undefined); setBack(null); }}>Change</button>}
                </div>
+               {heldEnc && !init.reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px]" role="status">
+                 {back === null ? <div className="flex flex-wrap items-center gap-2"><span className="min-w-0 flex-1"><b>Back with reports?</b> Tests ordered {fmtDate((heldTests[0] as any).orderedAt)}: {heldTests.flatMap((o) => o.tests.map((t) => t.name)).join(', ')}.</span>
+                   <button type="button" className="btn btn-sm btn-primary" onClick={() => setBack(true)}>Yes, back with reports</button><button type="button" className="btn btn-sm" onClick={() => setBack(false)}>No, something new</button></div>
+                 : back ? <div className="flex flex-col gap-1.5">
+                   <div className="flex flex-wrap items-center gap-2"><b className="flex-1">Back with reports: the doctor opens the same consultation.</b><button type="button" className="btn btn-ghost btn-sm" onClick={() => setBack(null)}>Undo</button></div>
+                   {heldTests.flatMap((o) => o.tests.map((t) => (
+                     <div key={t.id} className="flex flex-wrap items-center gap-2">{t.receivedAt ? <Chip tone="sage">in</Chip> : <Chip tone="amber">not added</Chip>}<span className="flex-1">{t.name}</span>
+                       {!t.receivedAt && can(perms, 'document.write') && <button type="button" className="btn btn-sm" onClick={() => setAddRep({ o, testId: t.id })}><Icon name="plus" className="h-3.5 w-3.5" />Add report</button>}</div>)))}
+                 </div> : <div className="flex items-center gap-2"><span className="flex-1 text-muted">A new consultation: the reports stay with the doctor's list.</span><button type="button" className="btn btn-ghost btn-sm" onClick={() => setBack(null)}>Undo</button></div>}
+               </div>}
+               {addRep && <ReportDialog order={addRep.o} testId={addRep.testId} inVisit onClose={() => { setAddRep(null); qc.invalidateQueries({ queryKey: ['orders'] }); }} />}
               </section>
             )}
             {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>This looks like a patient already registered: {dup.fullName ?? ''} ({dup.patientNo}){dup.phone ? ` · ${dup.phone}` : ''}{dup.ageYears ? ` · ${dup.ageYears} yrs` : ''}.</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
@@ -623,7 +643,7 @@ function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }
 
             {/* complaints */}
             <Sec n={n++} title="Complaints">
-              {init.reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px] text-amber"><b>Back with reports:</b> {init.reports.tests}. No new complaint is needed; the doctor opens the same consultation.{init.reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
+              {reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px] text-amber"><b>Back with reports:</b> {reports.tests}. No new complaint is needed; the doctor opens the same consultation.{reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
               <div className="flex flex-col gap-2">
                 {list.map((c, i) => (
                   <div key={i} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5 anim-scale-in">

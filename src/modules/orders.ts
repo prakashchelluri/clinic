@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, inArray, ne, sql, desc } from 'drizzle-orm';
-import { recommendation, document, patient, encounter, practitioner, labResult } from '../db/schema.js';
+import { and, eq, gte, inArray, ne, sql, desc } from 'drizzle-orm';
+import { recommendation, document, patient, encounter, practitioner, labResult, appointment, session, visit, OPEN_STATUSES } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -24,7 +24,7 @@ export function orderRoutes(app: FastifyInstance) {
   route(app, 'get', '/orders', 'document.read', async (req, tx) => {
     const t = req.ctx.tenantId; const tab = String((req.query as any).tab ?? '');
     const today = todayIn(req.ctx.timezone);
-    const rows = await tx.select({ r: recommendation, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }, doctor: practitioner.name })
+    const rows = await tx.select({ r: recommendation, p: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }, doctor: practitioner.name, encStatus: encounter.status })
       .from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).innerJoin(encounter, eq(encounter.id, recommendation.encounterId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
       .where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'investigation'), ne(recommendation.status, 'cancelled'),
         sql`(${recommendation.informedAt} is null or (${recommendation.informedAt} at time zone ${req.ctx.timezone})::date = ${today}::date)`));
@@ -43,7 +43,8 @@ export function orderRoutes(app: FastifyInstance) {
       const state = stateOf(tests);
       const abnormal = tests.reduce((n, x) => n + x.values.filter((v) => OUT.includes(v.flag ?? '')).length, 0);
       const o = tests.find((x) => x.reviewOutcome);
-      return { key, encounterId: first.r.encounterId, orderNo: first.r.orderNo, patient: first.p, doctor: first.doctor, orderedAt: first.r.createdAt, tests, state, abnormal, got: tests.filter((x) => x.receivedAt).length,
+      // held: the consultation is still open for these reports, so a visit with them reopens it
+      return { key, encounterId: first.r.encounterId, orderNo: first.r.orderNo, patient: first.p, doctor: first.doctor, orderedAt: first.r.createdAt, held: first.encStatus === 'awaiting_reports', tests, state, abnormal, got: tests.filter((x) => x.receivedAt).length,
         outcome: o?.reviewOutcome ?? null, note: xs.find((x) => x.r.reviewNote)?.r.reviewNote ?? null, reviewedBy: xs.find((x) => x.r.reviewedBy)?.r.reviewedBy ?? null,
         informedHow: xs.find((x) => x.r.informedHow)?.r.informedHow ?? null, receivedLast: tests.map((x) => x.receivedAt).filter(Boolean).sort().pop() ?? null,
         late: tests.filter((x) => x.late).map((x) => x.name), nextDue: tests.filter((x) => !x.receivedAt && x.expectedOn).map((x) => x.expectedOn as string).sort()[0] ?? null };
@@ -72,7 +73,18 @@ export function orderRoutes(app: FastifyInstance) {
     await tx.update(recommendation).set({ reviewedAt: now, reviewOutcome: b.outcome, reviewNote: b.note || null, reviewedBy: req.ctx.name }).where(inArray(recommendation.id, recs.map((r) => r.id)));
     await tx.update(document).set({ reviewedAt: now }).where(and(eq(document.tenantId, t), sql`${document.recommendationIds} && ${sql.raw(`ARRAY['${recs.map((r) => r.id).join("','")}']::uuid[]`)}`, sql`${document.reviewedAt} is null`));
     await emit(tx, req.ctx, 'order.reviewed', 'encounter', b.encounterId, { orderNo: b.orderNo, outcome: b.outcome, patientId: recs[0].patientId });
-    return { ok: true, patientId: recs[0].patientId };
+    // Nothing more to do in the consultation: it closes once every test in it is reviewed. Changing medicines keeps it open
+    // for the doctor to edit; "needs a visit" keeps it open so the visit reopens the same consultation.
+    let closed = false;
+    if (b.outcome === 'normal' || b.outcome === 'will_call') {
+      const enc = await tx.select({ status: encounter.status, provenance: encounter.provenance }).from(encounter).where(and(eq(encounter.id, b.encounterId), eq(encounter.tenantId, t))).then((r: any[]) => r[0]);
+      const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(recommendation).where(and(eq(recommendation.encounterId, b.encounterId), eq(recommendation.kind, 'investigation'), ne(recommendation.status, 'cancelled'), sql`${recommendation.reviewedAt} is null`));
+      if (enc?.status === 'awaiting_reports' && n === 0) {
+        await tx.update(encounter).set({ status: 'completed', provenance: { ...(enc.provenance ?? {}), reportsClosedAt: now } }).where(eq(encounter.id, b.encounterId));
+        closed = true;
+      }
+    }
+    return { ok: true, patientId: recs[0].patientId, closed };
   });
 
   /** Front desk (or the doctor, if she phoned) tells the patient. Not before the doctor has reviewed. */
@@ -83,6 +95,16 @@ export function orderRoutes(app: FastifyInstance) {
     if (recs.some((r) => !r.reviewedAt)) throw new HttpError(409, 'NOT_REVIEWED');
     if (recs.some((r) => r.reviewOutcome === 'will_call') && !can(req.perms, 'encounter.complete')) throw new HttpError(409, 'DOCTOR_WILL_CALL');
     if (recs.every((r) => r.informedAt)) throw new HttpError(409, 'ALREADY_INFORMED');
+    // The doctor wants to see them: the order closes only once that visit is booked (or they are here today), so nobody is lost.
+    if (recs.some((r) => r.reviewOutcome === 'needs_visit')) {
+      const today = todayIn(req.ctx.timezone); const pid = recs[0].patientId;
+      const booked = await tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+        .where(and(eq(appointment.tenantId, t), eq(appointment.patientId, pid), inArray(appointment.status, [...OPEN_STATUSES]), gte(session.day, today))).limit(1);
+      // or they came in after the review (not the visit the tests were ordered at)
+      const reviewed = recs.map((r) => r.reviewedAt).filter(Boolean).sort()[0]!;
+      const here = booked.length ? booked : await tx.select({ id: visit.id }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, pid), eq(visit.day, today), gte(visit.arrivedAt, reviewed))).limit(1);
+      if (!here.length) throw new HttpError(409, 'BOOK_FIRST');
+    }
     await tx.update(recommendation).set({ informedAt: new Date().toISOString(), informedHow: b.how, informedBy: req.ctx.name }).where(inArray(recommendation.id, recs.map((r) => r.id)));
     await emit(tx, req.ctx, 'order.informed', 'encounter', b.encounterId, { orderNo: b.orderNo, how: b.how, patientId: recs[0].patientId });
     return { ok: true, patientId: recs[0].patientId };

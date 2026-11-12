@@ -10,10 +10,10 @@ import { MSG, patientLang } from '../lib/patientText.js';
 import { clinical } from './patients.js';
 import { dayBounds } from './billing.js';
 
-const KINDS = ['review', 'missed_visit', 'missed_sitting', 'schedule', 'advised', 'report', 'confirm_week', 'confirm_day'] as const;
+const KINDS = ['review', 'missed_visit', 'missed_sitting', 'schedule', 'advised', 'confirm_week', 'confirm_day'] as const;
 type Kind = (typeof KINDS)[number];
 const CONFIRM = ['confirm_week', 'confirm_day'];
-const TABS = { all: KINDS, confirm: CONFIRM, reviews: ['review'], missed: ['missed_visit', 'missed_sitting'], procedures: ['schedule', 'advised'], schedule: ['schedule'], advised: ['advised'], reports: ['report'] } as const;
+const TABS = { all: KINDS, confirm: CONFIRM, reviews: ['review'], missed: ['missed_visit', 'missed_sitting'], procedures: ['schedule', 'advised'], schedule: ['schedule'], advised: ['advised'] } as const;
 /** A booked sitting is called a week before (from 7 days out until 2 days out) and again the day before (or on the day, if still not confirmed). */
 export const WEEK_CALL = { from: 2, to: 7 }; export const DAY_CALL = 1;
 type Tab = keyof typeof TABS;
@@ -28,7 +28,7 @@ const dxOf = (d: any): string => ([] as any[]).concat(d?.assessment?.diagnosis ?
 
 const dayLabel = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-/** Every patient the desk should call, in one list: reviews, missed visits and sittings, procedure plans, reports to tell.
+/** Every patient the desk should call, in one list: reviews, missed visits and sittings, procedure plans (reports are told from Test reports).
  *  A call outcome of Booked or Not interested takes a row off; so does a real booking (a sitting for the plan, a visit after a missed one) or telling the patient the report. */
 async function build(tx: Tx, t: string, tz: string, dx = true) {
   const today = todayIn(tz);
@@ -72,17 +72,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   const rebooked = (x: { p: { id: string }; day: string }) => nextBookings.some((b) => b.id === x.p.id && new Date(b.at).getTime() >= Date.parse(dayBounds(x.day, tz).start));
   for (const x of noShows) if (!rebooked(x)) rows.push({ key: x.a.id, kind: 'missed_visit', refId: x.a.id, patient: x.p, what: `Visit on ${dayLabel(x.day)}, ${x.start}`, dueOn: x.day });
   for (const x of missed) if (!x.ps.recommendationId || !booked.has(x.ps.recommendationId)) rows.push({ key: x.ps.id, kind: 'missed_sitting', refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'}, sitting ${x.ps.sittingNo} on ${dayLabel(x.ps.day)}`, dueOn: x.ps.day, recId: x.ps.recommendationId, procedureId: x.ps.procedureId });
-  // reports the doctor has reviewed and the patient has not been told yet; not the ones the doctor said she will call about herself
-  const reps = await tx.select({ r: recommendation, p: P }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId))
-    .where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'investigation'), sql`${recommendation.status} <> 'cancelled'`, sql`${recommendation.informedAt} is null`));
-  const orders = new Map<string, typeof reps>();
-  for (const x of reps) { const k = `${x.r.encounterId}:${x.r.orderNo}`; orders.set(k, [...(orders.get(k) ?? []), x]); }
-  for (const [k, xs] of orders) {
-    if (!xs.every((x) => x.r.reviewedAt) || xs.some((x) => x.r.reviewOutcome === 'will_call')) continue;
-    const r0 = xs[0].r;
-    rows.push({ key: `rep:${k}`, kind: 'report', refId: r0.id, patient: xs[0].p, what: `Reports ready: ${xs.map((x) => x.r.notes ?? 'Test').join(', ')}`, dueOn: new Date(r0.reviewedAt!).toLocaleDateString('en-CA', { timeZone: tz }),
-      order: { encounterId: r0.encounterId, orderNo: r0.orderNo, needsVisit: xs.some((x) => x.r.reviewOutcome === 'needs_visit') } });
-  }
+  // reports to tell are not here: the desk tells the patient from Test reports, where the doctor's words and Book are
   // booked sittings to confirm: a week before, and the day before
   const ahead = await tx.select({ ps: procedureSession, p: P, proc: procedureCatalog.name, of: recommendation.sittings }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
     .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId))

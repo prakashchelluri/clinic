@@ -174,6 +174,16 @@ export function clinicalRoutes(app: FastifyInstance) {
       // The return visit for the reports is over for today whether the pad was closed or kept open for the rest.
       const back = await tx.select({ id: visit.id, details: visit.details }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.status, 'in_consult'), sql`${visit.details}->>'reportsEncounterId' = ${id}`));
       for (const b of back) await tx.update(visit).set({ status: 'done', details: { ...(b.details ?? {}), returnDoneAt: new Date().toISOString() } }).where(eq(visit.id, b.id));
+      // The patient sat with the doctor and the reports: those reports are reviewed and the patient told, in person.
+      // Reports that come in later still go to the doctor's To review as usual.
+      if (back.length) {
+        const now = new Date().toISOString();
+        await tx.update(recommendation).set({ reviewedAt: now, reviewOutcome: 'seen', reviewedBy: req.ctx.name, informedAt: now, informedHow: 'in_person', informedBy: req.ctx.name })
+          .where(and(eq(recommendation.tenantId, t), eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.receivedAt} is not null`, sql`${recommendation.reviewedAt} is null`));
+        // already reviewed from the list and not told yet: the doctor has now told them
+        await tx.update(recommendation).set({ informedAt: now, informedHow: 'in_person', informedBy: req.ctx.name })
+          .where(and(eq(recommendation.tenantId, t), eq(recommendation.encounterId, id), eq(recommendation.kind, 'investigation'), sql`${recommendation.reviewedAt} is not null`, sql`${recommendation.informedAt} is null`));
+      }
       if (body.complete) await emit(tx, req.ctx, 'encounter.completed', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, afterReports: true, newRx });
       else await emit(tx, req.ctx, 'encounter.kept_open', 'encounter', id, { visitId: enc.visitId, patientId: enc.patientId, newRx });
       if (newRx > 0) await queueRxMessage(tx, req.ctx, id); // medicines added after the reports go out the same way
