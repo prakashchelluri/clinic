@@ -177,3 +177,15 @@ test('hours till 11:59 pm save over an hour with a cancelled booking, and keep t
   assert.ok(late.some((w: any) => w.startTime === '23:00' && w.endTime === '23:59'), 'the last, short hour is there');
   assert.ok(late.every((w: any) => w.effectiveCapacity > 0), 'every hour inside the new hours takes patients again');
 });
+
+test('hours ending 00:00 mean till midnight; an end before the start is refused', async () => {
+  const owner = await login('owner@demo.clinic'); const R = as(await login('reception@demo.clinic'));
+  const second = (await R('GET', '/config')).json().practitioners.find((p: any) => p.name.includes('Second'));
+  const put = (days: any) => app.inject({ method: 'PUT', url: `/api/calendar/routine/${second.id}`, cookies: { cc_session: owner }, payload: { ...second.routine, days: { ...second.routine.days, ...days } } });
+  const day = addDays(new Date().toISOString().slice(0, 10), 50); const wd = String(new Date(day + 'T00:00:00Z').getUTCDay());
+  const bad = await put({ [wd]: [['16:00', '10:00']] }); assert.equal(bad.statusCode, 400); assert.equal(bad.json().code, 'END_BEFORE_START');
+  const ok = await put({ [wd]: [['16:00', '00:00']] }); assert.equal(ok.statusCode, 200, ok.body);
+  assert.deepEqual(ok.json().routine.days[wd], [['16:00', '23:59']]);
+  const ws = (await R('GET', `/sessions?day=${day}&practitionerId=${second.id}`)).json();
+  assert.equal(ws.length, 8); assert.equal(ws[ws.length - 1].endTime, '23:59');
+});

@@ -27,6 +27,8 @@ export const msgOutcome = (m: { status: string; error?: string | null } | null |
 const sameName = sql`lower(regexp_replace(trim(${patient.fullName}), '\\s+', ' ', 'g'))`;
 
 export const toMin = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
+/** An end time of 00:00 means midnight, the end of the day (a time box offers 12:00 AM for "till midnight"). */
+export const endMin = (hhmm: string) => (hhmm === '00:00' ? 24 * 60 - 1 : toMin(hhmm));
 export const toHHMM = (min: number) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 const overlapMin = (aS: number, aE: number, bS: number, bE: number) => Math.max(0, Math.min(aE, bE) - Math.max(aS, bS));
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -50,8 +52,8 @@ export async function ensureDaySessions(tx: Tx, t: string, day: string) {
     // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
     const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
     const r = d.routine as Routine; const len = r.windowMinutes || 60;
-    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < toMin(end); m += len) {
-      const e = Math.min(m + len, toMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
+    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < endMin(end); m += len) {
+      const e = Math.min(m + len, endMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
       if (!mine.some(([s, x]) => s < e && x > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(e), capacity: r.capacity || 7, source: 'routine' });
     }
   }
@@ -143,6 +145,10 @@ export function schedulingRoutes(app: FastifyInstance) {
     const pid = (req.params as any).practitionerId; const t = req.ctx.tenantId;
     if (!(can(req.perms, 'config.write') || req.ctx.practitionerId === pid)) throw new HttpError(403, 'FORBIDDEN:routine');
     const routine = RoutineIn.parse(req.body);
+    for (const ranges of Object.values(routine.days)) for (const r of ranges) {
+      if (r[1] === '00:00') r[1] = '23:59'; // till midnight
+      if (endMin(r[1]) <= toMin(r[0])) throw new HttpError(400, 'END_BEFORE_START', { start: r[0], end: r[1] });
+    }
     const [row] = await tx.update(practitioner).set({ routine }).where(and(eq(practitioner.id, pid), eq(practitioner.tenantId, t))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     // From today on, every unbooked hour except one-off extra hours is dropped, so the days rebuild from the new routine.
@@ -155,7 +161,7 @@ export function schedulingRoutes(app: FastifyInstance) {
       .where(and(eq(session.tenantId, t), eq(session.practitionerId, pid), sql`${session.source} <> 'extra'`, gte(session.day, today),
         sql`not exists (select 1 from appointment a where a.session_id = ${session.id} and a.status in ('booked','confirmed','arrived'))`));
     for (const k of kept) {
-      const inside = (routine.days[String(weekday(k.day))] ?? []).some(([a, b]) => toMin(a) <= toMin(k.s) && toMin(k.e) <= toMin(b));
+      const inside = (routine.days[String(weekday(k.day))] ?? []).some(([a, b]) => toMin(a) <= toMin(k.s) && toMin(k.e) <= endMin(b));
       await tx.update(session).set({ capacity: inside ? routine.capacity : 0 }).where(eq(session.id, k.id));
     }
     await emit(tx, req.ctx, 'routine.updated', 'practitioner', pid, routine);
