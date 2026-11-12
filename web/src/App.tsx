@@ -172,6 +172,7 @@ export function App() {
   const idleMin: number = me.data?.privacy?.idleMinutes ?? 0;
   const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
   const onPad = loc.pathname.startsWith('/encounter'); // the pad: the patient sits in the top bar; clock, search, help and + step aside
+  const onRecord = /^\/patients\/[^/]+$/.test(loc.pathname); // one patient's record takes the whole screen; its own left column has Back
   const wide = onPad ? padNav : navOpen;
   const toggleWide = onPad ? () => setPadNav((o) => !o) : toggleNav;
   useEffect(() => {
@@ -221,7 +222,7 @@ export function App() {
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
-      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar md:block ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
+      <aside className={`no-print fixed inset-y-0 left-0 z-20 hidden bg-sidebar ${onRecord ? '' : 'md:block'} ${wide ? 'w-[232px]' : 'w-[76px]'}`} style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)', transition: 'width 0.2s var(--ease)' }} aria-label="Main">
         {wide ? <Sidebar {...side} onCollapse={toggleWide} /> : <Rail items={items} active={active} clinic={clinic} me={me.data} badges={badges} onSignOut={signOut} onExpand={toggleWide} />}
       </aside>
       {drawer && (
@@ -230,8 +231,8 @@ export function App() {
         </div>
       )}
 
-      <div className={`${wide ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
-        <header className="app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
+      <div className={`${onRecord ? '' : wide ? 'md:pl-[232px]' : 'md:pl-[76px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`} style={{ transition: 'padding-left 0.2s var(--ease)' }}>
+        {!onRecord && <header className="app-top no-print sticky top-0 z-30 flex h-[68px] shrink-0 items-center gap-2 bg-paper/90 px-3 backdrop-blur-xl md:px-7">
           <button className="btn btn-ghost btn-icon md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
           {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 -ml-2 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
           {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[22px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-5 w-5 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
@@ -251,10 +252,10 @@ export function App() {
               <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-8 w-8 text-xs" /></button>
               {userMenu && <div className="menu anim-menu" onMouseLeave={() => setUserMenu(false)}><div className="px-3 py-2"><div className="text-sm font-semibold">{me.data.name}</div><div className="text-xs text-muted">{roles.map(roleLabel).join(' · ')}</div></div><button onClick={signOut}><Icon name="logout" className="h-4 w-4" />Sign out</button></div>}
             </div>
-        </header>
+        </header>}
         {offlineAt !== null && <div role="status" className="no-print sticky top-[68px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
 
-        <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
+        <div className={`mx-auto w-full ${onRecord ? '' : 'px-4 py-4 md:px-7 md:py-5'} ${onRecord || loc.pathname.startsWith('/encounter') || loc.pathname === '/queue' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}>{pageSearch && <PageSearchBox placeholder={pageSearch} className="mb-3 flex w-full md:hidden" />}<PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>
         </div>
       </div>
