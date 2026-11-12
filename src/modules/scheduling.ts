@@ -50,8 +50,10 @@ export async function ensureDaySessions(tx: Tx, t: string, day: string) {
     // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
     const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
     const r = d.routine as Routine; const len = r.windowMinutes || 60;
-    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m + len <= toMin(end); m += len)
-      if (!mine.some(([s, e]) => s < m + len && e > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(m + len), capacity: r.capacity || 7, source: 'routine' });
+    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < toMin(end); m += len) {
+      const e = Math.min(m + len, toMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
+      if (!mine.some(([s, x]) => s < e && x > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(e), capacity: r.capacity || 7, source: 'routine' });
+    }
   }
   if (!values.length) return;
   const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
@@ -146,7 +148,16 @@ export function schedulingRoutes(app: FastifyInstance) {
     // From today on, every unbooked hour except one-off extra hours is dropped, so the days rebuild from the new routine.
     const today = todayIn(req.ctx.timezone);
     await tx.execute(sql`delete from session s where s.tenant_id = ${t} and s.practitioner_id = ${pid} and s.source <> 'extra' and s.day >= ${today}
-      and not exists (select 1 from appointment a where a.session_id = s.id and a.status in ('booked','confirmed','arrived'))`);
+      and not exists (select 1 from appointment a where a.session_id = s.id)`);
+    // An hour that only holds past bookings (cancelled, no-show) cannot be deleted: it keeps its history and takes the new
+    // routine's places, or none when the new hours no longer cover it. Hours with open bookings are left as they are.
+    const kept = await tx.select({ id: session.id, day: session.day, s: session.startTime, e: session.endTime }).from(session)
+      .where(and(eq(session.tenantId, t), eq(session.practitionerId, pid), sql`${session.source} <> 'extra'`, gte(session.day, today),
+        sql`not exists (select 1 from appointment a where a.session_id = ${session.id} and a.status in ('booked','confirmed','arrived'))`));
+    for (const k of kept) {
+      const inside = (routine.days[String(weekday(k.day))] ?? []).some(([a, b]) => toMin(a) <= toMin(k.s) && toMin(k.e) <= toMin(b));
+      await tx.update(session).set({ capacity: inside ? routine.capacity : 0 }).where(eq(session.id, k.id));
+    }
     await emit(tx, req.ctx, 'routine.updated', 'practitioner', pid, routine);
     return row;
   });

@@ -156,3 +156,24 @@ test('changed weekly hours show on a day that already has a booking, and extra h
   assert.ok(after.includes(ws[0].startTime) && after.includes('21:00'), 'the booked hour and the extra hour stay');
   assert.equal(new Set(after).size, after.length, 'no hour twice');
 });
+
+test('hours till 11:59 pm save over an hour with a cancelled booking, and keep the short last hour', async () => {
+  const owner = await login('owner@demo.clinic'); const R = as(await login('reception@demo.clinic'));
+  const main = (await R('GET', '/config')).json().practitioners.find((p: any) => p.name.includes('Main'));
+  let day = ''; let ws: any[] = [];
+  for (let i = 31; i < 45 && !day; i++) { const d = addDays(new Date().toISOString().slice(0, 10), i); const c = (await R('GET', `/sessions?day=${d}&practitionerId=${main.id}`)).json(); if (c.length >= 2) { day = d; ws = c; } }
+  assert.ok(day);
+  const p = (await R('POST', '/patients', { fullName: 'Cancelled Hour Patient', phone: '9876500078' })).json();
+  const a = (await R('POST', '/appointments', { sessionId: ws[ws.length - 1].id, patientId: p.id })).json();
+  assert.equal((await R('PATCH', `/appointments/${a.id}`, { status: 'cancelled' })).statusCode, 200);
+  const wd = String(new Date(day + 'T00:00:00Z').getUTCDay());
+  const routine = { ...main.routine, days: { ...main.routine.days, [wd]: [['10:00', '12:00']] } };
+  const put = (r: any) => app.inject({ method: 'PUT', url: `/api/calendar/routine/${main.id}`, cookies: { cc_session: owner }, payload: r });
+  let res = await put(routine); assert.equal(res.statusCode, 200, res.body); // the cancelled hour is outside the new hours: no error
+  const cut = (await R('GET', `/sessions?day=${day}&practitionerId=${main.id}`)).json();
+  assert.equal(cut.find((w: any) => w.id === ws[ws.length - 1].id)?.effectiveCapacity, 0, 'the cancelled hour stays for its history but takes no one');
+  res = await put({ ...routine, days: { ...routine.days, [wd]: [['10:00', '23:59']] } }); assert.equal(res.statusCode, 200, res.body);
+  const late = (await R('GET', `/sessions?day=${day}&practitionerId=${main.id}`)).json();
+  assert.ok(late.some((w: any) => w.startTime === '23:00' && w.endTime === '23:59'), 'the last, short hour is there');
+  assert.ok(late.every((w: any) => w.effectiveCapacity > 0), 'every hour inside the new hours takes patients again');
+});
