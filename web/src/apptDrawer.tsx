@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, errText, ApiError, today, dialable } from './api';
+import { PatientActions } from './pages/frontDeskJourney';
 import { Chip, Icon, Skeleton, toast } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
@@ -99,6 +100,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
             ))}
           </div>
 
+          <PatientActions patientId={a.patient.id} name={a.patient.fullName} />
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
             <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${a.patient.id}`); }}><Icon name="user" />Open record</button>
           </div>

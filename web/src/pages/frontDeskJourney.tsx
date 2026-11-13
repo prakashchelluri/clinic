@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useOutletContext } from 'react-router';
-import { dialable } from '../api';
+import { useQuery } from '@tanstack/react-query';
+import { dialable, get } from '../api';
+import { can } from '../App';
+import { TakePayment } from '../takePayment';
 import { openPrint } from '../printPreview';
 import { FlagChips } from '../flags';
 import { Chip, Icon, Num, money } from '../ui';
 import { vitalFields, vitalsText } from '../vitals';
-import { ReportDialog } from './TestReports';
+import { ReportDialog, type Order } from './TestReports';
 import '../frontdesk.css';
 
 /** The front desk as each patient's journey: Check-in → Initial screening → Doctor → Tests & procedures → Reports → Done. */
@@ -123,12 +126,37 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
         <Step i={5} last state={finished ? 'done' : 'next'} title={left ? 'Left' : 'Done'} meta={finished ? (left ? 'did not see the doctor' : 'nothing left open') : held ? 'when the doctor has seen the reports' : ''} />
       </ol>
 
+      <PatientActions patientId={v.patient.id} name={v.patient.fullName} />
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3.5">
         <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>
         {v.encounterId && !left && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
         {v.due?.length > 0 && <Chip tone="rose">{money(v.due.reduce((x: number, c: any) => x + c.amountPaise - (c.paidPaise ?? 0), 0))} due</Chip>}
       </div>
     </Drawer>);
+}
+
+/** The two things the desk does for any patient on the calendar without leaving the Dashboard: bill them, and type in a lab result that came in. */
+export function PatientActions({ patientId, name }: { patientId: string; name: string }) {
+  const { perms } = useOutletContext<any>() ?? {};
+  const canBill = can(perms ?? [], 'payment.record'); const canLab = can(perms ?? [], 'document.write');
+  const orders = useQuery<{ orders: Order[] }>({ queryKey: ['orders'], queryFn: () => get('/orders'), enabled: canLab });
+  const [billing, setBilling] = useState(false); const [picking, setPicking] = useState(false); const [lab, setLab] = useState<{ o: Order; t: string } | null>(null);
+  // the patient's tests still waiting for a result
+  const waiting = (orders.data?.orders ?? []).filter((o) => o.patient.id === patientId).flatMap((o) => o.tests.filter((t) => !t.receivedAt && !t.reviewedAt).map((t) => ({ o, t })));
+  if (!canBill && !canLab) return null;
+  const addLab = () => waiting.length === 1 ? setLab({ o: waiting[0].o, t: waiting[0].t.id }) : setPicking(!picking);
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        {canBill && <button type="button" className="btn justify-center" onClick={() => setBilling(true)}><Icon name="plus" className="h-3.5 w-3.5" />Create bill</button>}
+        {canLab && <button type="button" className="btn justify-center" disabled={!waiting.length} title={waiting.length ? '' : 'No tests waiting for a result'} aria-expanded={waiting.length > 1 ? picking : undefined} onClick={addLab}><Icon name="plus" className="h-3.5 w-3.5" />Add lab results</button>}
+      </div>
+      {picking && waiting.length > 1 && <div className="rounded-[10px] border border-line p-1">{waiting.map(({ o, t }) =>
+        <button key={t.id} type="button" className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-left text-[13.5px] hover:bg-surface-2" onClick={() => { setPicking(false); setLab({ o, t: t.id }); }}>
+          <b className="font-semibold">{t.name}</b><span className="text-[12px] text-muted">{t.expectedOn ? `expected ${new Date(t.expectedOn).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'pending'}</span></button>)}</div>}
+      {billing && <TakePayment patientId={patientId} patientName={name} onClose={() => setBilling(false)} />}
+      {lab && <ReportDialog order={lab.o} testId={lab.t} onClose={() => setLab(null)} />}
+    </div>);
 }
 
 /** A side drawer on the right edge: the page stays as it is and stays usable; tapping another patient switches the drawer. ✕ or Escape closes it. */
