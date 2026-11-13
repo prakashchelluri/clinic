@@ -1,11 +1,10 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon, CalendarDays, HeartPulse, ClipboardList, Activity, Stethoscope, ScanSearch, Pill, MessageSquareText, FlaskConical, TestTubes, CalendarClock, Syringe, NotebookPen, ArrowRightLeft, Camera, FolderOpen, PenLine, FileText, type LucideIcon } from 'lucide-react';
-import { Avatar, Chip, Drawer, Floating, Icon, Modal, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
+import { BackButton, Chip, Drawer, Floating, Icon, Modal, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
 import { EncounterModal, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
@@ -301,8 +300,6 @@ export function Encounter() {
   useEffect(() => { if (sp.get('review')) { const n = new URLSearchParams(sp); n.delete('review'); setSp(n, { replace: true }); } }, []);
   const keys = useRef<(ev: KeyboardEvent) => void>(() => {}); // the pad's keys; the handler is set each render below
   useEffect(() => { const f = (ev: KeyboardEvent) => keys.current(ev); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f); }, []);
-  const [slot, setSlot] = useState<HTMLElement | null>(null); // the app's top bar keeps a place for the patient on the pad
-  useEffect(() => { setSlot(document.getElementById('topbar-slot')); }, []);
   const goTo = (k: string) => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   // the cards draw a moment after the consultation loads: wait for Lab investigations, then bring it (and Lab results below it) up
   useEffect(() => {
@@ -803,9 +800,11 @@ export function Encounter() {
   return (
     <div className="space-y-3 pb-4">
       {/* who: the patient in the app's top bar (more room for the pad), with the layout, the whole-pad templates and the pad's settings; History, Photos and Reports as tabs under it */}
+      {/* the record's header: the patient, then the pad's tabs with Save and Finish, stuck to the top (the app's top bar steps aside on a record) */}
+      <div className="sticky top-14 z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0">
       {(() => { const who = (
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          <Avatar name={p.fullName} size="h-9 w-9 text-xs" />
+          <BackButton to="/dashboard" />
           <div className="min-w-0"><div className="flex items-center gap-1.5 truncate text-[16px] font-semibold leading-tight">{p.fullName}<FlagChips flags={p.flags} /></div>
             <div className="truncate text-xs text-muted" title={patientLine}>{patientLine}</div></div>
           {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
@@ -832,10 +831,9 @@ export function Encounter() {
             {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm btn-icon" aria-label="Configure pad: sections, required, printing" title="Configure pad: sections, required, printing" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" /></button>}
           </span>
         </div>);
-        return slot ? createPortal(who, slot) : <div className="card !px-5 !py-3 anim-fade-up">{who}</div>; })()}
-      <CarefulBanner flags={p.flags} />
+        return <div className="card !px-4 !py-2.5">{who}</div>; })()}
       {/* tabs (an underline, not pills): the Rxpad, and the patient's past visits, photos and reports beside it */}
-      {<div className="sticky top-14 z-20 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-1 bg-paper/95 px-1 backdrop-blur-xl">
+      {<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {isDoctor ? <Tabs<'pad' | 'visits' | 'photos' | 'docs'> className="tabs-lg min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'pad', label: 'Rxpad' }, { value: 'visits', label: 'Past visits', count: previous.length || undefined }, { value: 'photos', label: 'Photos', count: ph.length || undefined }]} /> : <span className="flex-1" />}
         {/* Stacked: save, preview and finish at the top, always in reach (Tatva's End visit) */}
         {<div className="flex flex-wrap items-center gap-2 py-1.5">
@@ -854,6 +852,8 @@ export function Encounter() {
         {missingList.length > 0 && <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 pb-2 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet:</span>
           {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>}
       </div>}
+      </div>
+      <CarefulBanner flags={p.flags} />
 
       {tab === 'pad' && <>
         {held && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-[12px] bg-amber-soft px-4 py-2.5 text-[12.5px] text-amber anim-fade-in" role="status"><b>Held for reports.</b><span>Prescription issued {fmtDate(e.completedAt)}. {testsIn} of {testRecs.length} reports in{testsOpen ? `; pending: ${testRecs.filter((r: any) => r.status !== 'done').map((r: any) => `${r.notes}${r.expectedOn ? ` (expected ${fmtDate(r.expectedOn)})` : ''}`).join(', ')}` : ''}.</span>{canFinish && <span className="text-muted">Add or change what the results call for, then Complete. Issued medicines stay as written.</span>}</div>}

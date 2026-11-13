@@ -72,26 +72,26 @@ const GROUP: Record<string, string> = { '/worklist': 'Care', '/pharmacy': 'Stock
 
 /** The side menu (v61 · Pro): dark, every allowed page by name, counts as small badges, quiet group headings.
  *  The same menu on desktop (fixed) and on phones (the drawer). */
-function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void}) {
+function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, slim = false }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; slim?: boolean }) {
   const link = (n: NavItem) => (
-    <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
+    <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} title={slim ? n.label : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
       {badges[n.to] && <span className={`nav-badge ${badges[n.to]!.warn ? 'warn' : ''}`} title={badges[n.to]!.hint}><span className="sr-only">{badges[n.to]!.hint}: </span>{badges[n.to]!.n > 99 ? '99+' : badges[n.to]!.n}</span>}
     </Link>
   );
   return (
-    <div className="side-dark flex h-full flex-col px-3 pb-3">
+    <div className={`side-dark flex h-full flex-col px-3 pb-3 ${slim ? 'side-slim' : ''}`}>
       <Link to="/" onClick={onNavigate} className="flex h-14 shrink-0 items-center gap-2.5 px-1.5" title={clinic}>
         <img src="/cubott.png" alt="" className="h-7 w-7 shrink-0 object-contain" />
-        <span className="min-w-0 leading-tight"><span className="block truncate text-[14px] font-semibold text-ink">Cubott OPD</span><span className="block truncate text-[11.5px] text-muted">{clinic}</span></span>
+        <span className="side-text min-w-0 leading-tight"><span className="block truncate text-[14px] font-semibold text-ink">Cubott OPD</span><span className="block truncate text-[11.5px] text-muted">{clinic}</span></span>
       </Link>
       <nav className="-mx-1 flex flex-1 flex-col gap-px overflow-y-auto px-1 no-scrollbar" aria-label="Sections">
         {items.map((n, i) => <span key={n.to} className="contents">{i > 0 && GROUP[n.to] && <span className="side-group" aria-hidden="true">{GROUP[n.to]}</span>}{link(n)}</span>)}
       </nav>
-      <Link to="/help" onClick={onNavigate} className={`nav-item mt-2 ${active === null && location.pathname.startsWith('/help') ? 'active' : ''}`}><Icon name="help" className="h-4 w-4" /><span>Help</span></Link>
-      <div className="mt-2 flex items-center gap-2.5 border-t border-line px-1 pt-3">
+      <Link to="/help" onClick={onNavigate} title={slim ? 'Help' : undefined} className={`nav-item mt-2 ${active === null && location.pathname.startsWith('/help') ? 'active' : ''}`}><Icon name="help" className="h-4 w-4" /><span className="flex-1">Help</span></Link>
+      <div className="side-foot mt-2 flex items-center gap-2.5 border-t border-line px-1 pt-3">
         <span className="relative shrink-0"><Avatar name={me.name} size="h-8 w-8 text-[11px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-sidebar)' }} /></span>
-        <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{me.name}</div><div className="truncate text-[11.5px] text-muted">{roles.map(roleLabel).join(' · ')}</div></div>
+        <div className="side-text min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{me.name}</div><div className="truncate text-[11.5px] text-muted">{roles.map(roleLabel).join(' · ')}</div></div>
         <button onClick={onSignOut} aria-label="Sign out" title="Sign out" className="btn btn-ghost btn-icon text-muted hover:!bg-paper-2 hover:text-ink"><Icon name="logout" className="h-4 w-4" /></button>
       </div>
     </div>
@@ -142,7 +142,9 @@ export function App() {
   // Sign out when idle (owner's setting) on shared computers. A doctor in a consultation is left alone; anything unsaved is saved first.
   const idleMin: number = me.data?.privacy?.idleMinutes ?? 0;
   const inConsult = loc.pathname.startsWith('/encounter') && c('encounter.complete');
-  const onPad = loc.pathname.startsWith('/encounter'); // the pad: the patient sits in the top bar; clock, search, help and + step aside
+  const onPad = loc.pathname.startsWith('/encounter');
+  // an open record (a patient, a consultation): its own bar is the header, so the top bar steps aside and the menu slims to icons
+  const record = /^\/(patients|encounter)\/[^/]+/.test(loc.pathname);
   useEffect(() => {
     if (!idleMin || inConsult) return;
     let last = Date.now();
@@ -192,8 +194,8 @@ export function App() {
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
       {/* one top row across the whole screen: the Cubott logo over the menu, the clinic, where you are, and the few app actions.
           A page's search lives with its own table, not up here. */}
-      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-[232px] md:block" aria-label="Main">
-        <Sidebar {...side} />
+      <aside className={`no-print fixed inset-y-0 left-0 z-30 hidden transition-[width] duration-200 md:block ${record ? 'w-[64px]' : 'w-[232px]'}`} aria-label="Main">
+        <Sidebar {...side} slim={record} />
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
@@ -201,13 +203,13 @@ export function App() {
         </div>
       )}
 
-      <div className={`md:pl-[232px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-      <header className="app-top no-print sticky top-0 z-30 flex h-14 items-center" style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
+      <div className={`transition-[padding] duration-200 ${record ? 'md:pl-[64px]' : 'md:pl-[232px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+      <header className={`app-top no-print sticky top-0 z-30 flex h-14 items-center ${record ? 'md:hidden' : ''}`} style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
         <button className="btn btn-ghost btn-icon ml-2 md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
         <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:hidden"><img src="/cubott.png" alt="Cubott" className="h-8 w-8 object-contain" /></Link>
         <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 md:px-7">
-          {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
-          {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
+          {parent && !record && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
+          {<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
           <span className="ml-auto" />
           {/* theme and help as one grouped control */}
           <span className="hidden overflow-hidden rounded-[6px] border border-line-2 bg-field sm:flex">

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { LayoutList, Calendar, Users, List, BarChart3, LogOut, Plus, Printer, Phone, Check, CircleHelp, X, Undo2, ChevronUp, Search, Pill, Sparkles, User, Clock, DoorOpen, IndianRupee, Pencil, ChevronLeft, ChevronRight, MoreHorizontal, Filter as FilterIcon, FileDown, Moon, Home, Lock, Wallet, Bell, Settings, Menu, Repeat, Link as LinkIcon, Download, Copy, MessageCircle, Inbox, Globe, Stethoscope, ConciergeBell, Syringe, TestTubes, CalendarCheck, Package, type LucideIcon } from 'lucide-react';
 
 /** The icon set: Lucide, one stroke weight everywhere. The names stay the app's own so pages did not change. */
@@ -59,6 +59,12 @@ export function Icon({ name, className = '' }: { name: keyof typeof PATHS | stri
 }
 
 /* ---------- Primitives ---------- */
+/** Back on a record's own header bar (a patient, a consultation): the screen you came from, else the list above it. */
+export function BackButton({ to }: { to: string }) {
+  const nav = useNavigate();
+  return <button type="button" className="btn btn-icon shrink-0" aria-label="Back" title="Back" onClick={() => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(to, { viewTransition: true }))}><Icon name="chevL" className="h-5 w-5" /></button>;
+}
+
 export const Chip = ({ tone = '', children, className = '' }: { tone?: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky'; children: ReactNode; className?: string }) => (
   <span className={`chip ${tone ? `chip-${tone}` : ''} ${className}`}>{children}</span>
 );

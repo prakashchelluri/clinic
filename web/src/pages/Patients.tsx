@@ -4,7 +4,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
-import { Drawer, Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
+import { BackButton, Drawer, Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
 import { EncounterDetail, UploadButton, joinList } from '../encounterDetail';
 import { enabledVitals } from '../vitals';
@@ -107,9 +107,10 @@ function Timeline({ id }: { id: string }) {
   return (
     <div className="space-y-3">
       {/* one compact card: back, who, how to reach them and the few actions; the record's tabs in their own row below */}
-      <div className="card !p-0 anim-fade-up">
+      {/* the record's header: on a record the app's top bar steps aside, so this bar sticks to the top in its place */}
+      <div className="card z-20 !p-0 anim-fade-up md:sticky md:top-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 sm:px-4">
-          <Avatar name={p.fullName} size="h-10 w-10 text-[13px]" />
+          <BackButton to="/patients" />
           <div className="min-w-[240px] flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <h2 className="text-[19px] font-extrabold leading-tight [overflow-wrap:anywhere]">{p.fullName}</h2>
