@@ -12,6 +12,7 @@ import { refreshBookings } from './apptDrawer';
 import { PrintHost } from './printPreview';
 import { FirstPassword } from './firstPassword';
 import { ViewerHost } from './viewer';
+import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 export function can(perms: string[] | undefined, needed: string) {
   return !!perms?.some((p) => p === '*' || p === needed || (p.endsWith('.*') && needed.startsWith(p.slice(0, -1))));
@@ -73,7 +74,7 @@ const GROUP: Record<string, string> = { '/worklist': 'Care', '/pharmacy': 'Stock
 
 /** The side menu (v61 · Pro): dark, every allowed page by name, counts as small badges, quiet group headings.
  *  The same menu on desktop (fixed) and on phones (the drawer). */
-function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, slim = false, theme, onTheme }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; slim?: boolean; theme?: string; onTheme?: (e: React.MouseEvent) => void }) {
+function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, slim = false, theme, onTheme, onCollapse }: { /** shrink the menu to icons, or open it again (at its foot, not by the back button) */ onCollapse?: () => void; items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; slim?: boolean; theme?: string; onTheme?: (e: React.MouseEvent) => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} title={slim ? n.label : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
@@ -90,6 +91,7 @@ function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onN
         {items.map((n, i) => <span key={n.to} className="contents">{i > 0 && GROUP[n.to] && <span className="side-group" aria-hidden="true">{GROUP[n.to]}</span>}{link(n)}</span>)}
       </nav>
       <Link to="/help" onClick={onNavigate} title={slim ? 'Help' : undefined} className={`nav-item mt-2 ${active === null && location.pathname.startsWith('/help') ? 'active' : ''}`}><Icon name="help" className="h-4 w-4" /><span className="flex-1">Help</span></Link>
+      {onCollapse && <button type="button" onClick={onCollapse} className="nav-item" aria-label={slim ? 'Expand menu' : 'Collapse menu'} title={slim ? 'Expand menu' : undefined}>{slim ? <PanelLeftOpen className="h-4 w-4 shrink-0" /> : <PanelLeftClose className="h-4 w-4 shrink-0" />}<span className="flex-1">Collapse menu</span></button>}
       {/* on a record the top bar steps aside, so its light / dark switch comes here */}
       {slim && onTheme && <button type="button" onClick={onTheme} className="nav-item" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>}
       <div className="side-foot mt-2 flex items-center gap-2.5 border-t border-line px-1 pt-3">
@@ -133,6 +135,9 @@ export function App() {
   const active = items.find((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + '/')) ?? null;
   const [, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
   const [theme, toggleTheme] = useTheme();
+  // the menu as icons only, kept on this computer; an open record slims it anyway
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('side.collapsed') === '1'; } catch { return false; } });
+  const toggleSide = () => { const n = !collapsed; setCollapsed(n); try { localStorage.setItem('side.collapsed', n ? '1' : '0'); } catch { /* storage blocked */ } };
   const online = useOnline(); const offlineAt = useOffline();
   // menu badges (a hook: above the early returns), under the Calls list's own key so logging a call refreshes them too
   const counts = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: c('worklist.read') && !platform, refetchInterval: 30000 });
@@ -191,14 +196,15 @@ export function App() {
     '/worklist': mc.sittings ? { n: mc.sittings, warn: mc.unconfirmed > 0, hint: mc.unconfirmed ? `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today, ${mc.unconfirmed} not confirmed` : `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today` } : undefined,
   } : {};
   const side = { items, active, clinic, me: me.data, roles, badges, onSignOut: signOut };
+  const slimSide = record || collapsed;
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
       {/* one top row across the whole screen: the Cubott logo over the menu, the clinic, where you are, and the few app actions.
           A page's search lives with its own table, not up here. */}
-      <aside className={`no-print fixed inset-y-0 left-0 z-30 hidden transition-[width] duration-200 md:block ${record ? 'w-[64px]' : 'w-[232px]'}`} aria-label="Main">
-        <Sidebar {...side} slim={record} theme={theme} onTheme={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} />
+      <aside className={`no-print fixed inset-y-0 left-0 z-30 hidden transition-[width] duration-200 md:block ${slimSide ? 'w-[64px]' : 'w-[232px]'}`} aria-label="Main">
+        <Sidebar {...side} slim={slimSide} onCollapse={record ? undefined : toggleSide} theme={theme} onTheme={record ? (e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme) : undefined} />
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
@@ -206,7 +212,7 @@ export function App() {
         </div>
       )}
 
-      <div className={`transition-[padding] duration-200 ${record ? 'md:pl-[64px]' : 'md:pl-[232px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+      <div className={`transition-[padding] duration-200 ${slimSide ? 'md:pl-[64px]' : 'md:pl-[232px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
       <header className={`app-top no-print sticky top-0 z-30 flex h-[64px] items-center ${record ? 'md:hidden' : ''}`} style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
         <button className="btn btn-ghost btn-icon ml-2 md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
         <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:hidden"><img src="/cubott.png" alt="Cubott" className="h-8 w-8 object-contain" /></Link>
