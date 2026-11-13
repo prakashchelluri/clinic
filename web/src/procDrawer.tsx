@@ -158,6 +158,8 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
             <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-primary" onClick={() => setMoving(true)}><Icon name="calendar" />Reschedule</button>
               {overdue && <button className="btn" disabled={markMissed.isPending} onClick={() => markMissed.mutate()}>Mark as missed</button>}</div>
           </div>}
+          {/* any booked sitting can move, the same as a consultation; a missed one gets the red box above */}
+          {canAct && s.state === 'confirmed' && !overdue && <button className="btn justify-center" onClick={() => setMoving(true)}><Icon name="calendar" />Reschedule</button>}
           {signing && <ConsentDialog s={s} onClose={() => setSigning(false)} onStart={(b) => setState.mutate(b)} />}
           {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
 
