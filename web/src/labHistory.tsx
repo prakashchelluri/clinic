@@ -90,7 +90,7 @@ function Trend({ rows, docOf }: { rows: LabRow[]; docOf: (r: LabRow) => any }) {
           <span className="w-24 shrink-0 text-muted">{fmtDate(r.takenOn)}</span>
           <span className={`flex-1 ${isOut(r.flag) ? 'font-semibold text-rose' : ''}`}>{r.value}{r.unit ? ` ${r.unit}` : ''} <Arrow flag={r.flag} />{r.note && <span className="ml-2 text-xs font-normal text-muted">{r.note}</span>}</span>
           {r.flag && <Chip tone={isOut(r.flag) ? 'rose' : 'sage'}>{r.flag === 'normal' ? 'ok' : r.flag}</Chip>}
-          {d ? <button className="btn btn-ghost btn-sm" onClick={() => openViewer({ docs: [d] })}><FileText className="h-3.5 w-3.5" />Report</button> : <span className="w-[74px] text-xs text-muted">typed</span>}
+          {d ? <button className="btn btn-ghost btn-sm" onClick={() => openViewer({ docs: [d] })}><FileText className="h-3.5 w-3.5" />Report</button> : <span className="w-[74px] text-xs text-muted">Typed</span>}
         </div>); })}</div>
     </div>
   );
@@ -127,7 +127,7 @@ export function ReportValues({ doc, patientId, encounterId }: { doc: any; patien
         <label key={v.id} className="flex items-start gap-2 py-2 text-[13px]">
           {encounterId && <input type="checkbox" className="mt-0.5 accent-ink" checked={ticked.includes(v.id)} onChange={() => setTicked(ticked.includes(v.id) ? ticked.filter((x) => x !== v.id) : [...ticked, v.id])} />}
           <span className="min-w-0 flex-1"><span className="block truncate font-medium">{v.test}</span><span className="text-xs text-muted">{[rangeText(v), v.unit].filter(Boolean).join(' ')}</span></span>
-          <span className={`text-right ${isOut(v.flag) ? 'font-semibold text-rose' : ''}`}>{v.value}<span className="block text-xs font-normal">{v.flag && v.flag !== 'normal' ? <><Arrow flag={v.flag} /> {v.flag}</> : v.flag ? <span className="text-muted">ok</span> : ''}</span></span>
+          <span className={`text-right ${isOut(v.flag) ? 'font-semibold text-rose' : ''}`}>{v.value}<span className="block text-xs font-normal">{v.flag && v.flag !== 'normal' ? <><Arrow flag={v.flag} /> {v.flag}</> : v.flag ? <span className="text-muted">OK</span> : ''}</span></span>
         </label>))}</div>
       {encounterId && <div className="flex gap-1.5 border-t border-line p-2">
         <button className="btn btn-sm flex-1" disabled={busy} onClick={() => copy(vals)}>Copy all to Rx</button>

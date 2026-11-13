@@ -180,7 +180,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
       <div className="space-y-3 p-4">
         {q.isLoading ? <Skeleton rows={2} /> : (<>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the record. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>withdraw</button>}</>
+            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the record. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>Withdraw</button>}</>
               : <><Chip tone="amber">no photo consent yet</Chip><span>Asked when you first take photos.</span></>}
             {photos.length > 1 && <span className="ml-auto">Pick two photos to compare</span>}
           </div>

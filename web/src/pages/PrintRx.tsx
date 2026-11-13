@@ -63,7 +63,7 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
         {(p.allergies || (on('history') && histLine)) && <div className="col-span-2">{p.allergies && <><b>Allergies:</b> {p.allergies}</>}{on('history') && histLine && <> · <b>History:</b> {histLine}</>}</div>}
       </div>
       {on('medicines') && (!results || rxLines.length > 0) && <>
-        <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞{results && <span className="ml-2 align-middle text-[11px] font-sans text-gray-600">added after the reports</span>}</div>
+        <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞{results && <span className="ml-2 align-middle text-[11px] font-sans text-gray-600">Added after the reports</span>}</div>
         <table className="w-full mt-1"><tbody>
           {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : i.durationNote ?? null; const parts = [i.frequency, i.timing, days]; const teLine = localLine([...parts, i.instructions]); return (
             <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>

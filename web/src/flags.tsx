@@ -67,7 +67,7 @@ export function FlagPick({ value, onChange }: { value: FlagDraft; onChange: (f: 
 export function GuardianPick({ value, onChange, selfId }: { value: { id: string; fullName: string } | null; onChange: (g: { id: string; fullName: string } | null) => void; selfId: string }) {
   const [q, setQ] = useState('');
   const res = useQuery({ queryKey: ['guardian-pick', q], queryFn: () => get(`/patients?q=${encodeURIComponent(q)}`), enabled: q.trim().length >= 2 });
-  if (value) return <div className="flex items-center gap-2 text-sm"><b>{value.fullName}</b><button type="button" className="underline text-muted" onClick={() => onChange(null)}>change</button></div>;
+  if (value) return <div className="flex items-center gap-2 text-sm"><b>{value.fullName}</b><button type="button" className="underline text-muted" onClick={() => onChange(null)}>Change</button></div>;
   return <div><input className="input" placeholder="Search the parent by name, phone or ID" value={q} onChange={(e) => setQ(e.target.value)} />
     {q.trim().length >= 2 && <div className="mt-1 max-h-40 overflow-auto rounded-xl border border-line bg-surface">{(res.data ?? []).filter((p: any) => p.id !== selfId).slice(0, 6).map((p: any) => <button key={p.id} type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-clay-soft/50" onClick={() => onChange({ id: p.id, fullName: p.fullName })}>{p.fullName} <span className="text-xs text-muted">{p.patientNo} · {p.ageYears ? `${p.ageYears}y` : ''} {p.sex ?? ''}</span></button>)}</div>}</div>;
 }

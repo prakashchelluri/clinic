@@ -209,7 +209,7 @@ function Totals({ t, advance, onAdvance, onCourses, line }: { t: any; advance?: 
   return (
     <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
       <Stat label={`Billed (${t.n})`} value={money(t.billedPaise)} sub={`${money(t.paidPaise)} paid`} />
-      <Stat label="Collected" value={money(t.paidPaise - t.refundedPaise)} tone="sage" sub={`after refunds · ${t.paidFully} paid fully`} />
+      <Stat label="Collected" value={money(t.paidPaise - t.refundedPaise)} tone="sage" sub={`After refunds · ${t.paidFully} paid fully`} />
       <Stat label={`Due (${t.withDue})`} value={money(t.duePaise)} tone={t.duePaise ? 'clay' : ''} sub={t.duePaise ? 'Collect from the ⋯ menu' : 'nothing owed'} />
       <Stat label={`Refunded (${t.withRefund})`} value={money(t.refundedPaise)} sub={t.refundedPaise ? 'given back' : 'none'} />
       {advance !== undefined && <Stat label="Advance balance" value={money(advance)} sub={<>{onCourses ? `${money(onCourses)} more paid ahead on courses · ` : ''}{onAdvance ? <button className="underline" onClick={onAdvance}>Add or give back</button> : 'to use on bills'}</>} />}

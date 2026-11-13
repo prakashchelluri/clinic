@@ -37,7 +37,7 @@ export function PadTab({ onSaved }: { onSaved: () => void }) {
           {secs.map((s, i) => { const k = known(s.key); return (
             <div key={s.key} className={`grid grid-cols-[24px_minmax(0,1fr)_64px_80px_64px_64px] items-center gap-2 border-t border-line px-4 py-2 text-[13px] ${s.show ? '' : 'text-muted'}`}>
               <span className="text-muted">⋮⋮</span>
-              <span className="font-medium">{k?.label ?? s.key}{s.key === 'notes' && <span className="ml-2 text-xs text-muted">never printed</span>}</span>
+              <span className="font-medium">{k?.label ?? s.key}{s.key === 'notes' && <span className="ml-2 text-xs text-muted">Never printed</span>}</span>
               <Tick label={`Show ${k?.label}`} on={s.show} disabled={s.key === 'diagnosis'} onChange={(v) => upd(i, { show: v })} />
               <Tick label={`Require ${k?.label}`} on={s.required} disabled={!k?.canRequire} onChange={(v) => upd(i, { required: v })} />
               <Tick label={`Print ${k?.label}`} on={s.print} disabled={!k?.canPrint} onChange={(v) => upd(i, { print: v })} />
@@ -93,7 +93,7 @@ function TeluguTable({ value, defaults, onChange }: { value: Record<string, stri
       <div className="max-h-[420px] overflow-y-auto">
         {keys.map((k) => { const def = defaults[k]; const isNew = def === undefined; const edited = !isNew && def !== value[k]; return (
           <div key={k} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_32px] items-center gap-2 border-t border-line px-4 py-1.5 text-[13px]">
-            <span className="truncate" title={k}>{k}{isNew && <span className="ml-1.5 text-[11px] text-muted">added</span>}</span>
+            <span className="truncate" title={k}>{k}{isNew && <span className="ml-1.5 text-[11px] text-muted">Added</span>}</span>
             <input aria-label={`Telugu for ${k}`} className={`input !min-h-8 !py-1 ${edited ? '!border-amber' : ''}`} lang="te" placeholder="English only" maxLength={160} value={value[k] ?? ''} onChange={(e) => onChange({ ...value, [k]: e.target.value })} />
             {isNew ? <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove ${k}`} onClick={() => { const n = { ...value }; delete n[k]; onChange(n); }}><Icon name="x" className="h-3.5 w-3.5" /></button>
               : edited ? <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Reset ${k}`} title="Back to built-in" onClick={() => onChange({ ...value, [k]: def })}><Icon name="undo" className="h-3.5 w-3.5" /></button> : <span />}

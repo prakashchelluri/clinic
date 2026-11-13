@@ -89,7 +89,7 @@ export function Calls() {
           <div className="text-[12px] text-muted">{[r.patient.patientNo, [r.patient.ageYears, r.patient.sex].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}</div>
         </div>
       </div>) },
-    { key: 'phone', label: 'Phone', csv: (r) => r.patient.phone, cell: (r) => r.patient.phone ? <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold tabular-nums text-ink-2"><Icon name="phone" className="h-3.5 w-3.5 text-muted" />{r.patient.phone}</span> : <span className="text-muted">no phone</span> },
+    { key: 'phone', label: 'Phone', csv: (r) => r.patient.phone, cell: (r) => r.patient.phone ? <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold tabular-nums text-ink-2"><Icon name="phone" className="h-3.5 w-3.5 text-muted" />{r.patient.phone}</span> : <span className="text-muted">No phone</span> },
     { key: 'what', label: 'Why call', sort: (r) => KIND[r.kind] ?? '', csv: (r) => `${KIND[r.kind] ?? ''}: ${r.what}`, cell: (r) => (
       <div className="max-w-[320px]"><div className="font-semibold text-ink-2">{KIND[r.kind] ?? r.kind}</div><div className="truncate text-[12px] text-muted" title={r.what}>{r.what}</div></div>) },
     { key: 'due', label: 'Due', sort: (r) => callOn(r) ?? '', csv: (r) => r.dueOn, cell: (r) => {

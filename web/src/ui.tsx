@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
+import { Fragment, createContext, createElement, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router';
 import { LayoutList, Calendar, Users, List, BarChart3, LogOut, Plus, Printer, Phone, Check, CircleHelp, X, Undo2, ChevronUp, Search, Pill, Sparkles, User, Clock, DoorOpen, IndianRupee, Pencil, ChevronLeft, ChevronRight, MoreHorizontal, Filter as FilterIcon, FileDown, Moon, Home, Lock, Wallet, Bell, Settings, Menu, Repeat, Link as LinkIcon, Download, Copy, MessageCircle, Inbox, Globe, Stethoscope, ConciergeBell, Syringe, TestTubes, CalendarCheck, Package, type LucideIcon } from 'lucide-react';
@@ -65,8 +65,12 @@ export function BackButton({ to }: { to: string }) {
   return <button type="button" className="btn btn-icon shrink-0" aria-label="Back" title="Back" onClick={() => (((window.history.state as any)?.idx ?? 0) > 0 ? nav(-1) : nav(to, { viewTransition: true }))}><Icon name="chevL" className="h-5 w-5" /></button>;
 }
 
+/** Every label we show starts with a capital ("free" reads "Free"): the first word only, the rest as written. */
+export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const capFirst = (c: ReactNode): ReactNode => typeof c === 'string' ? cap(c) : Array.isArray(c) && typeof c[0] === 'string' ? createElement(Fragment, null, cap(c[0]), ...c.slice(1)) : c;
+
 export const Chip = ({ tone = '', children, className = '' }: { tone?: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky'; children: ReactNode; className?: string }) => (
-  <span className={`chip ${tone ? `chip-${tone}` : ''} ${className}`}>{children}</span>
+  <span className={`chip ${tone ? `chip-${tone}` : ''} ${className}`}>{capFirst(children)}</span>
 );
 
 export function Avatar({ name, size = 'h-9 w-9 text-xs' }: { name: string; size?: string }) {

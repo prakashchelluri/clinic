@@ -52,7 +52,7 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
         <div className="grid grid-cols-3 gap-3">
           <div><label className="label">Day</label><input type="date" className="input" value={day} onChange={(e) => { setDay(e.target.value); setPick(null); }} /></div>
           <div><label className="label">Duration (min)</label><div className="flex gap-1 flex-wrap">{[15, 30, 45, 60, 90, 120].map((m) => <button key={m} className={`toggle-opt ${minutes === m ? 'on' : ''}`} onClick={() => { setMinutes(m); setPick(null); }}>{m}</button>)}</div></div>
-          <div><label className="label">Doctor {proc?.requiresMainDoctor && <span className="text-clay">required</span>}</label><select className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setPick(null); }}><option value="">Other staff / none</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <div><label className="label">Doctor {proc?.requiresMainDoctor && <span className="text-clay">Required</span>}</label><select className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setPick(null); }}><option value="">Other staff / none</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
             {doc && <div className="text-[11px] text-amber mt-1">{cfg.practitioners.find((p: any) => p.id === doc)?.name ?? 'This doctor'} gets no OPD bookings {(pick?.startTime ?? manual.startTime) ? `${pick?.startTime ?? manual.startTime}–${endOf(pick?.startTime ?? manual.startTime)}` : 'for the sitting'}.</div>}</div>
         </div>
         <div>

@@ -50,7 +50,7 @@ export function PrivacyTab() {
               className={`relative ml-auto h-6 w-11 rounded-full transition-colors ${s.ipLock.enabled ? 'bg-sage' : 'bg-ink/20'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${s.ipLock.enabled ? 'left-[22px]' : 'left-0.5'}`} /></button></div>
           <div className="mt-1 text-sm text-muted">Staff can sign in and use the app only from the clinic's internet. The owner and admins can work from anywhere.</div>
           <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2.5 text-sm ${d.myIpAllowed ? 'bg-sage-soft text-sage' : 'bg-paper'}`}>
-            This computer: <b className="font-mono">{d.myIp}</b>{d.myIpAllowed ? <Chip tone="sage">allowed</Chip> : <span className="text-xs text-muted">not in the list</span>}
+            This computer: <b className="font-mono">{d.myIp}</b>{d.myIpAllowed ? <Chip tone="sage">allowed</Chip> : <span className="text-xs text-muted">Not in the list</span>}
           </div>
 
           <div className="mt-4 text-[11px] font-bold uppercase tracking-wider text-muted">Allowed internet addresses</div>

@@ -7,8 +7,8 @@ import { PatientActions } from './pages/frontDeskJourney';
 import { Chip, Icon, Skeleton, toast } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
-  booked: { label: 'booked', tone: '' }, confirmed: { label: 'confirmed', tone: 'sage' },
-  arrived: { label: 'arrived', tone: 'sky' }, cancelled: { label: 'cancelled', tone: 'rose' }, no_show: { label: 'did not come', tone: 'rose' },
+  booked: { label: 'Booked', tone: '' }, confirmed: { label: 'Confirmed', tone: 'sage' },
+  arrived: { label: 'Arrived', tone: 'sky' }, cancelled: { label: 'Cancelled', tone: 'rose' }, no_show: { label: 'Did not come', tone: 'rose' },
 };
 export const StatusChip = ({ s }: { s: string }) => <Chip tone={STATUS[s]?.tone ?? ''}>{STATUS[s]?.label ?? s}</Chip>;
 const MSG: Record<string, string> = { confirmation: 'Confirmation', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', late: 'Doctor running late', reschedule: 'Asked to pick a new time' };

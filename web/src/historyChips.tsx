@@ -33,7 +33,7 @@ export function HistoryChips({ patientId, history, categories, readOnly }: { pat
         {categories.map((c) => { const xs = items(history, c.key); const none = (history.none ?? []).includes(c.key); return (
           <button key={c.key} type="button" aria-expanded={open === c.key} disabled={readOnly && !xs.length} onClick={() => begin(c.key)}
             className={xs.length ? `pick-chip ${open === c.key ? '!shadow-[inset_0_0_0_1.5px_currentColor]' : ''}` : `toggle-opt !border-dashed ${open === c.key ? '!border-ink !border-solid' : ''} ${none ? 'opacity-70' : ''}`} title={xs.length ? xs.map((x) => x.name + (x.note ? ` · ${x.note}` : '')).join(', ') : none ? 'None of these' : 'Tap to ask or add'}>
-            {c.short}{xs.length > 0 && <b className="ml-1.5">{xs.slice(0, 2).map((x) => x.name).join(', ')}{xs.length > 2 ? ` +${xs.length - 2}` : ''}</b>}{!xs.length && none && <span className="ml-1.5 text-muted">none</span>}
+            {c.short}{xs.length > 0 && <b className="ml-1.5">{xs.slice(0, 2).map((x) => x.name).join(', ')}{xs.length > 2 ? ` +${xs.length - 2}` : ''}</b>}{!xs.length && none && <span className="ml-1.5 text-muted">None</span>}
           </button>); })}
         <span className="text-xs text-muted">· asked once, kept for every visit{history.confirmedAt ? ` · confirmed ${new Date(history.confirmedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${history.confirmedBy ? ` by ${history.confirmedBy}` : ''}` : ''}</span>
       </div>

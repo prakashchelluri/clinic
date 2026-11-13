@@ -27,8 +27,8 @@ function spanOf(r: Range, sp: URLSearchParams) {
 
 /** Change against the period before, in words: green when it went the good way. */
 function Change({ now, before, lowerIsBetter = false }: { now: number | null; before: number | null; lowerIsBetter?: boolean }) {
-  if (now === null || before === null) return <span className="text-muted">no earlier figure</span>;
-  if (now === before) return <span className="text-muted">same as the period before</span>;
+  if (now === null || before === null) return <span className="text-muted">No earlier figure</span>;
+  if (now === before) return <span className="text-muted">Same as the period before</span>;
   const good = lowerIsBetter ? now < before : now > before;
   const pct = before ? `${Math.round((Math.abs(now - before) / before) * 100)}%` : 'up from 0';
   return <span className={good ? 'text-sage' : 'text-rose'}>{now > before ? '↑' : '↓'} {before ? pct : ''}{before ? ' vs the period before' : pct}</span>;
@@ -159,8 +159,8 @@ function Patients({ d }: { d: any }) {
   return (<>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <Stat label="Patients" value={d.now.patients} sub={<span className="text-xs"><Change now={d.now.patients} before={d.before.patients} /></span>} />
-      <Stat label="New" value={d.now.newPatients} sub={<span className="text-xs text-muted">first visit in these dates</span>} />
-      <Stat label="Returning" value={d.now.returning} sub={<span className="text-xs text-muted">came before</span>} />
+      <Stat label="New" value={d.now.newPatients} sub={<span className="text-xs text-muted">First visit in these dates</span>} />
+      <Stat label="Returning" value={d.now.returning} sub={<span className="text-xs text-muted">Came before</span>} />
       <Stat label="Referral card" value={p.referralCard} sub={<span className="text-xs text-muted">RMP/PMP card holders</span>} />
     </div>
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -213,7 +213,7 @@ function DailyReport() {
       {view === 'eod' ? <EndOfDay day={day} /> : !d ? <Skeleton rows={3} /> : (<>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Stat label="Visits" value={d.totals.visits} delay={0} />
-          <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.pharmacyPaise ? `includes pharmacy ${money(d.pharmacyPaise)} · less refunds` : 'less refunds · same as End of day'} delay={40} />
+          <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.pharmacyPaise ? `Includes pharmacy ${money(d.pharmacyPaise)} · less refunds` : 'Less refunds · same as End of day'} delay={40} />
           <Stat label="Expenses" value={money(d.totals.expensesPaise)} sub={`${d.expenses.length} entries`} delay={80} />
           <Stat label="Net for the day" value={money(d.totals.netPaise)} tone="clay" sub={`Outstanding overall ${money(d.outstanding.total)} across ${d.outstanding.n}`} delay={120} />
         </div>

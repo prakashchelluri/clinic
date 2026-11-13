@@ -48,7 +48,7 @@ export function ProcReview({ onClose }: { onClose: () => void }) {
           <div className="overflow-hidden rounded-[10px] border border-line">
             {days.map((d) => (
               <div key={d}>
-                <div className="border-b border-line bg-paper-2 px-4 py-2 text-[13px] font-semibold text-ink-2">{fmt(d, { weekday: 'long', day: 'numeric', month: 'short' })}{awayOn(d) && <span className="ml-2 font-normal text-rose">you are away</span>}</div>
+                <div className="border-b border-line bg-paper-2 px-4 py-2 text-[13px] font-semibold text-ink-2">{fmt(d, { weekday: 'long', day: 'numeric', month: 'short' })}{awayOn(d) && <span className="ml-2 font-normal text-rose">You are away</span>}</div>
                 {all.filter((s) => s.day === d).map((s) => { const f = s.approval === 'sent' ? flag(s) : ''; return (
                   <div key={s.id} className="border-b border-line px-4 py-2.5 last:border-b-0">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">

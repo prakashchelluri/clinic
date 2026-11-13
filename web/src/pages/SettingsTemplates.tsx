@@ -132,7 +132,7 @@ export function TemplatesTab({ cfg }: { cfg: any }) {
   const rows = (all.data ?? []).filter((t) => t.kind === kind && (!q || t.name.toLowerCase().includes(q.toLowerCase())));
   const count = (k: string) => (k === 'protocol' ? protos.data?.length : (all.data ?? []).filter((t) => t.kind === k && t.active && !t.draft).length);
   const waiting = (all.data ?? []).filter((t) => t.draft);
-  const linkChips = (l: Linked) => <>{(l.complaints ?? []).map((c) => <Chip key={'c' + c}>{c}</Chip>)}{(l.diagnoses ?? []).map((d) => <Chip key={'d' + d} tone="clay">{d}</Chip>)}{!(l.complaints?.length || l.diagnoses?.length) && <span className="text-xs text-muted">not linked yet</span>}</>;
+  const linkChips = (l: Linked) => <>{(l.complaints ?? []).map((c) => <Chip key={'c' + c}>{c}</Chip>)}{(l.diagnoses ?? []).map((d) => <Chip key={'d' + d} tone="clay">{d}</Chip>)}{!(l.complaints?.length || l.diagnoses?.length) && <span className="text-xs text-muted">Not linked yet</span>}</>;
   const editProto = async (t: any) => {
     const r = await ask({ title: `Suggest “${t.name}” for…`, body: 'Type the diagnoses this template belongs to, separated by commas. Complaints can be added the same way after a semicolon: “Acne vulgaris, Rosacea; Acne”.', confirmLabel: 'Save', field: { label: 'Diagnoses; complaints', initial: `${(t.linked?.diagnoses ?? []).join(', ')}${t.linked?.complaints?.length ? `; ${t.linked.complaints.join(', ')}` : ''}`, maxLength: 400 } });
     if (!r) return; const [d, c] = r.value.split(';'); const split = (x?: string) => (x ?? '').split(',').map((y) => y.trim()).filter(Boolean).slice(0, 20);

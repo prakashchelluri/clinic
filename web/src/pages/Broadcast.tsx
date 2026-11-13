@@ -112,7 +112,7 @@ export function SentMessages() {
           <button key={b.id} className="row w-full text-left" onClick={() => setOpen(b.id)}>
             <span className="w-28 shrink-0 text-xs text-muted">{when(b.createdAt)}</span>
             <span className="min-w-0 flex-1"><span className="block truncate font-medium">{b.title}</span><span className="block truncate text-xs text-muted">{b.body}</span><span className="block text-xs text-muted">{b.audienceLabel} · by {b.by ?? 'staff'}</span></span>
-            <span className="shrink-0 text-right"><b>{b.recipients}</b><span className="block text-xs text-muted">recipients</span></span>
+            <span className="shrink-0 text-right"><b>{b.recipients}</b><span className="block text-xs text-muted">Recipients</span></span>
             <Chip tone="amber">{b.mode}</Chip>
           </button>))}
       </Section>

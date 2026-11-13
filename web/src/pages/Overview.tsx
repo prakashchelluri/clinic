@@ -59,7 +59,7 @@ export function Overview() {
       </Section>
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Section title="Waiting now" aside={<span className="text-xs text-muted">by arrival</span>} delay={200}>
+        <Section title="Waiting now" aside={<span className="text-xs text-muted">By arrival</span>} delay={200}>
           {d.waiting.length === 0 ? <Empty icon="clock" title="Nobody waiting" /> : d.waiting.map((w: any, i: number) => (
             <div key={w.id} className="flex h-10 items-center gap-3 border-t border-line px-4 text-[13px] first:border-t-0">
               <Avatar name={w.name} size="h-7 w-7 text-[10px]" />

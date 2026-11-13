@@ -239,7 +239,7 @@ function NotIn({ d, perms }: { d: any; perms: string[] }) {
   return (
     <div className="grid items-start gap-4 xl:grid-cols-2">
       <section className="card overflow-hidden !p-0">
-        <div className="flex items-baseline gap-2 px-5 py-4"><b className="text-[15px]">Patients who still owe</b><span className="text-[12.5px] text-muted">oldest first</span><span className="flex-1" /><b className="tabular-nums">{money(d.owed.totalPaise)}</b></div>
+        <div className="flex items-baseline gap-2 px-5 py-4"><b className="text-[15px]">Patients who still owe</b><span className="text-[12.5px] text-muted">Oldest first</span><span className="flex-1" /><b className="tabular-nums">{money(d.owed.totalPaise)}</b></div>
         {d.owed.patients.length === 0 ? <div className="px-5 pb-5 text-[14px] text-muted">Nobody owes the clinic anything.</div> :
           <div className="overflow-x-auto"><table className="table min-w-[520px]">
             <thead><tr><th className="pl-5">Patient</th><th>For</th><th>Since</th><th className="pr-5 text-right">Owes</th></tr></thead>

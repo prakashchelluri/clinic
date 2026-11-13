@@ -94,8 +94,8 @@ export async function confirmDone(s: { procedure?: string | null; sittingNo: num
 }
 
 const STATE: Record<string, { label: string; tone: '' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
-  confirmed: { label: 'Booked', tone: 'sky' }, in_progress: { label: 'in progress', tone: 'amber' }, completed: { label: 'done', tone: 'sage' },
-  missed: { label: 'missed', tone: 'rose' }, cancelled: { label: 'cancelled', tone: 'rose' }, postponed: { label: 'postponed', tone: 'amber' },
+  confirmed: { label: 'Booked', tone: 'sky' }, in_progress: { label: 'In progress', tone: 'amber' }, completed: { label: 'Done', tone: 'sage' },
+  missed: { label: 'Missed', tone: 'rose' }, cancelled: { label: 'Cancelled', tone: 'rose' }, postponed: { label: 'Postponed', tone: 'amber' },
 };
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 const Head = ({ children }: { children: string }) => <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">{children}</div>;

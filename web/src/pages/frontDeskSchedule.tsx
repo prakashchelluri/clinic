@@ -4,7 +4,7 @@ import { useNavigate, useOutletContext } from 'react-router';
 import { can } from '../App';
 import { ProcedureDrawer } from '../procDrawer';
 import { get, patch, qc, errText, ApiError } from '../api';
-import { Floating, Icon, Segmented, Skeleton, Tabs, ask, toast } from '../ui';
+import { Floating, cap, Icon, Segmented, Skeleton, Tabs, ask, toast } from '../ui';
 import { told } from '../apptDrawer';
 
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow' | 'cancelled';
@@ -127,7 +127,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   } else {
     const D = days[0]; const procs: any[] = D.procedures ?? []; const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
     const roomCols: Col[] = [...onRooms, ...(onRooms.length && procs.some((p) => !p.roomId) ? [{ id: '__none', name: 'No room' }] : [])]
-      .map((r) => ({ key: r.id, room: true, day, head: <><b>{r.name}</b> <span>procedures</span></>, ws: [], visits: [], sits: procs.filter((p) => (p.roomId ?? '__none') === r.id) }));
+      .map((r) => ({ key: r.id, room: true, day, head: <><b>{r.name}</b> <span>Procedures</span></>, ws: [], visits: [], sits: procs.filter((p) => (p.roomId ?? '__none') === r.id) }));
     const inRoomCol = new Set(roomCols.map((c) => c.key));
     cols = [...onDocs.map((d): Col => ({ key: d.id, day, head: <b>{d.name}</b>, ws: D.windows.filter((w: any) => w.practitionerId === d.id), visits: visits.filter((v) => v.practitionerId === d.id),
       sits: procsInDoc ? procs.filter((p) => p.practitionerId === d.id && !inRoomCol.has(p.roomId ?? '__none')) : [] })), ...roomCols];
@@ -209,8 +209,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
             ...cols.map((c) => {
               const { wsAt, chips } = cell(c, r); const nowC = i === nowRow && c.day === today ? 'now' : ''; const key = c.key + r.start;
               const names = chips.length > 0 && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}</div>;
-              if (c.room) return <div key={key} className={`fd-hc ${nowC}`}>{!chips.length && <span className="fd-hcap">free</span>}{names}</div>;
-              if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'not in')}</div>;
+              if (c.room) return <div key={key} className={`fd-hc ${nowC}`}>{!chips.length && <span className="fd-hcap">Free</span>}{names}</div>;
+              if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'Not in')}</div>;
               const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
               const canDrop = !!onBook && !!one && !past && !shut;
@@ -237,5 +237,5 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
 
 function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info }: ChipP) {
   return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${sel ? 'sel' : ''}`} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
-    {tok && <span className="tk">{tok}</span>}{proc && <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5 shrink-0" />}<span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{tag}</span>}</button>;
+    {tok && <span className="tk">{tok}</span>}{proc && <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5 shrink-0" />}<span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{cap(tag)}</span>}</button>;
 }
