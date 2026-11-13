@@ -442,6 +442,9 @@ html[data-theme="dark"] .side-dark { --color-paper: #09090B; --color-surface: #1
 @media (min-width: 768px) { .pad-calm .pad-head-calm { margin: -1.25rem -1.75rem 0; padding: 6px 1.75rem 0; } }
 .pad-calm .pad-head-calm > .card { background: transparent; box-shadow: none; padding: 6px 0 !important; border-radius: 0; border-bottom: 1px solid var(--color-line); animation: none; }
 .pad-calm .pad-head-calm .tabs { border-bottom: 0; }
+/* a record's header (patient profile): a full-width bar, edge to edge, like the pad's, not a card */
+.rec-head { background: var(--color-surface); box-shadow: inset 0 -1px 0 var(--color-line); margin: -1rem -1rem 0; }
+@media (min-width: 768px) { .rec-head { margin: -1.25rem -1.75rem 0; padding: 0 0.75rem; } }
 /* v67: each section is its own card with a grey header band, so one section never runs into the next */
 .pad-calm .pad-sheet > section { overflow: hidden; box-shadow: inset 0 0 0 1px var(--color-line-2), 0 1px 2px rgba(9, 9, 11, .05); }
 .pad-calm .pad-sheet > * + * { margin-top: 16px !important; }

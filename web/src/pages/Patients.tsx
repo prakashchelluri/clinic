@@ -115,7 +115,7 @@ function Timeline({ id }: { id: string }) {
     <div className="space-y-3">
       {/* one compact card: back, who, how to reach them and the few actions; the record's tabs in their own row below */}
       {/* the record's header: on a record the app's top bar steps aside, so this bar sticks to the top in its place */}
-      <div className="card z-20 !p-0 anim-fade-up md:sticky md:top-0">
+      <div className="rec-head z-20 md:sticky md:top-0">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 sm:px-4">
           <BackButton to="/patients" />
           <div className="min-w-[240px] flex-1">
