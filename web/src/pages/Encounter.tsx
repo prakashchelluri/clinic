@@ -39,7 +39,7 @@ const asExam = (v: any): ExamRow[] => (Array.isArray(v?.items) ? v.items : []);
 const TESTS = ['CBC', 'FBS / PPBS', 'HbA1c', 'LFT', 'RFT', 'Lipid profile', 'TSH', 'Vitamin D', 'Vitamin B12', 'Serum ferritin', 'KOH mount', 'Skin biopsy', 'Patch test', 'VDRL', 'HIV', 'HBsAg', 'ANA', 'Urine routine', 'Culture & sensitivity', 'Woods lamp'];
 const ADVICE = ['Keep the area dry', "Don't share towels", 'Wash clothes in hot water', 'No steroid creams', 'Loose cotton clothes', 'Sunscreen every 3 hours', 'Moisturise twice daily', 'Avoid scrubbing', 'Avoid oily food', 'Mild soap only'];
 const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
-const DX_STATUS = ['Provisional', 'Confirmed'];
+const DX_STATUS = ['Ruled Out', 'Suspected', 'Confirmed'];
 const DX_OPTIONS = ['Acne vulgaris', 'Melasma', 'Tinea corporis', 'Tinea cruris', 'Psoriasis vulgaris', 'Alopecia areata', 'Androgenetic alopecia', 'Verruca vulgaris', 'Atopic dermatitis', 'Seborrheic dermatitis', 'Contact dermatitis', 'Acute urticaria', 'Chronic urticaria', 'Vitiligo', 'Post-inflammatory hyperpigmentation', 'Scabies', 'Pityriasis versicolor', 'Lichen planus', 'Rosacea', 'Molluscum contagiosum', 'Impetigo', 'Herpes zoster'];
 // ponytail: the allergy, pregnancy and interaction word lists live in src/lib/rxSafety.ts (tested in rxSafety2.test.ts); a proper drug database is the upgrade path.
 const strip = ({ id, encounterId, tenantId, sortOrder, dispensed, issuedQty, notIssuedReason, createdAt, _qtyTouched, _issued, ...i }: any): RxItem => i;
@@ -638,7 +638,7 @@ export function Encounter() {
         {dxs.map((d, i) => <Row key={d.name} label={d.name} onRemove={readOnly ? null : () => setDxs(dxs.filter((_, j) => j !== i))}>
           <b className="rx-name">{d.name}</b>
           <input aria-label={`${d.name}: since`} className={`cell-in !w-28 ${PH}`} placeholder="Since" maxLength={30} value={d.since ?? ''} disabled={readOnly} onChange={(ev) => setDxs(dxs.map((x, j) => (j === i ? { ...x, since: ev.target.value || undefined } : x)))} />
-          <select aria-label={`${d.name}: status`} className="cell-in !w-36" value={d.status ?? ''} disabled={readOnly} onChange={(ev) => setDxs(dxs.map((x, j) => (j === i ? { ...x, status: ev.target.value || undefined } : x)))}><option value="">Status</option>{DX_STATUS.map((st) => <option key={st}>{st}</option>)}</select>
+          <select aria-label={`${d.name}: status`} className="cell-in !w-36" value={d.status ?? ''} disabled={readOnly} onChange={(ev) => setDxs(dxs.map((x, j) => (j === i ? { ...x, status: ev.target.value || undefined } : x)))}><option value="">Status</option>{[...DX_STATUS, ...(d.status && !DX_STATUS.includes(d.status) ? [d.status] : [])].map((st) => <option key={st}>{st}</option>)}</select>
           <input aria-label={`${d.name}: notes`} className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Notes" maxLength={120} value={d.note ?? ''} disabled={readOnly} onChange={(ev) => setDxs(dxs.map((x, j) => (j === i ? { ...x, note: ev.target.value || undefined } : x)))} />
         </Row>)}
         {!readOnly && <SearchLine placeholder="Search diagnosis" options={uniq([...(dxField?.options ?? []), ...DX_OPTIONS])} invalid={!!err('assessment', 'diagnosis')} onAdd={(t) => smartAdd(t, 'diagnosis')} />}
