@@ -47,8 +47,8 @@ aside.bg-sidebar { background: var(--g-glass-2); -webkit-backdrop-filter: var(--
 .toggle-opt.on { background: var(--color-clay); box-shadow: none; }
 .filter-btn.on { background: var(--color-clay-soft); box-shadow: none; }
 .cnt.on { background: var(--color-ink); box-shadow: none; }
-.btn:not(.btn-primary):not(.btn-accent):not(.btn-ghost):not(.btn-ink) { background: var(--g-glass-strong); box-shadow: inset 0 0 0 1px var(--g-edge), var(--ring); }
-.btn:not(.btn-primary):not(.btn-accent):not(.btn-ghost):not(.btn-ink):hover { background: var(--color-surface); }
+.btn:not(.btn-primary):not(.btn-accent):not(.btn-ghost):not(.btn-ink) { background: var(--color-field); box-shadow: inset 0 0 0 1px var(--color-line-2); }
+.btn:not(.btn-primary):not(.btn-accent):not(.btn-ghost):not(.btn-ink):hover { background: var(--color-surface-2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 30%, transparent); }
 
 /* menus, popovers and dialogs stay solid: what you read there must not swim */
 .menu, .pop { background: var(--color-surface); }

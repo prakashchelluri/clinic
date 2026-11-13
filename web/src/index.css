@@ -143,17 +143,17 @@ h1 { letter-spacing: -0.025em; }
   .dark-card { @apply rounded-[24px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
 
   /* Buttons: secondary is white with a hairline ring, primary is solid black, ghost is bare. */
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-full px-4 text-[13.5px] font-semibold border-0 bg-surface text-ink select-none; min-height: 38px; box-shadow: var(--ring);
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-[8px] px-4 text-[13.5px] font-semibold border-0 bg-field text-ink select-none; min-height: 38px; box-shadow: var(--ring);
     transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
   .btn:hover { @apply bg-surface-2; }
   .btn:disabled { @apply opacity-45 cursor-not-allowed; }
-  .btn-primary, .btn-accent { @apply bg-clay; color: var(--color-paper); box-shadow: 0 8px 18px -10px var(--color-clay); }
-  .btn-primary:hover, .btn-accent:hover { @apply bg-clay-2; }
+  .btn-primary, .btn-accent { @apply bg-ink; color: var(--color-paper); box-shadow: none; }
+  .btn-primary:hover, .btn-accent:hover { @apply bg-ink-2; }
   .btn:active { transform: scale(0.985); }
   .btn-ghost { @apply bg-transparent text-ink-2; box-shadow: none; }
   .btn-ghost:hover { @apply bg-ink/6 text-ink; }
-  .btn-sm { @apply px-3.5 text-[12.5px] rounded-full; min-height: 32px; }
-  .btn-icon { @apply h-9 w-9 p-0 rounded-full; min-height: 0; }
+  .btn-sm { @apply px-3.5 text-[12.5px] rounded-[8px]; min-height: 32px; }
+  .btn-icon { @apply h-9 w-9 p-0 rounded-[8px]; min-height: 0; }
   .btn-ink { @apply bg-nav-active; color: var(--color-paper); box-shadow: none; } .btn-ink:hover { @apply bg-ink-2; }
 
   /* Inputs: white, a hairline ring, a black ring on focus */
