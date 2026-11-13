@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, qc, ApiError, errText } from '../api';
@@ -806,6 +806,10 @@ export function Encounter() {
   // the clinic's pad settings still say which show; records and canvas are the doctor's, always there
   const vitalCells: [string, string, string][] = vitalFields(cfg?.tenant?.settings).filter((x) => vd[x.key] !== undefined && vd[x.key] !== null && vd[x.key] !== '').map((x) => [x.label, `${vd[x.key]}${x.unit && x.key !== 'bp' ? ` ${x.unit}` : ''}`, vitalFlag(x.key, vd[x.key])]);
   { const b = bmiOf(Number(vd.weight_kg) || null, Number(vd.height_cm ?? p.history?.heightCm) || null); if (b) vitalCells.push(['BMI', String(b), vitalFlag('bmi', b)]); }
+  // medical history on the row itself: only the categories with something recorded, allergies first and in red, then the note
+  const histRows = (cfg?.historyCategories ?? []).map((c: any) => ({ label: c.short ?? c.label, allergy: /allerg/i.test(c.key), names: (Array.isArray(p.history?.[c.key]) ? p.history[c.key] : []).map((x: any) => x.name).filter(Boolean) as string[] }))
+    .filter((r: any) => r.names.length).sort((a: any, b: any) => Number(b.allergy) - Number(a.allergy));
+  const histNote = typeof p.history?.notes === 'string' ? p.history.notes.trim() : '';
   const leftKeys = ['vitals', 'history', 'notes', 'reports', 'canvas'].filter((k) => (['reports', 'canvas', 'notes'].includes(k) ? isDoctor : true) && (['reports', 'canvas'].includes(k) || order.includes(k)));
   const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">{saveFailed === 'kept' ? 'Not saved — kept on this computer, will send when the internet is back' : 'Not saved — your notes are still here. Try Save again.'}</span>;
   const restoreAt = restore ? new Date(restore.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -886,15 +890,17 @@ export function Encounter() {
         <div className="pad-grid grid items-start gap-3 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
           {/* Tatva's left column: the patient's basic info, each opening its own drawer */}
           <aside className="card !p-0 overflow-hidden lg:sticky lg:top-[124px]" aria-label="Basic info">
-            {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = k === 'vitals' && vitalCells.length > 0; return (
+            {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = (k === 'vitals' && vitalCells.length > 0) || (k === 'history' && (histRows.length > 0 || !!histNote)); return (
               <button key={k} type="button" className="block w-full border-t border-line !px-3.5 !py-3 text-left transition-colors first:border-t-0 hover:bg-surface-2" onClick={() => setSide(k)} aria-haspopup="dialog">
                 <span className="flex items-center gap-2.5">
                   <SecIcon id={k} />
                   <span className="min-w-0 flex-1"><span className="block text-[15.5px] font-bold">{LEFT[k].title}</span>{!tiles && v && <span className="block truncate text-xs text-muted" title={v}>{v}</span>}</span>
-                  <span className="shrink-0 text-[12.5px] font-semibold text-clay">{v ? 'Edit' : readOnly ? 'View' : '+ Add'}</span>
+                  <span className="shrink-0 text-[12.5px] font-semibold text-clay">{v || tiles ? 'Edit' : readOnly ? 'View' : '+ Add'}</span>
                 </span>
                 {/* vitals: only the ones taken, each in its own small tile */}
-                {tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val, fl]) => { const red = !!fl; return <span key={l} className={`min-w-0 rounded-[8px] px-2 py-1.5 ring-1 ${red ? 'bg-rose-soft ring-rose/30' : 'bg-field ring-line'}`} title={red ? `${l} ${fl}` : undefined}><span className={`block truncate text-[10.5px] font-medium uppercase tracking-wide ${red ? 'text-rose' : 'text-muted'}`}>{l}{red ? ` · ${fl}` : ''}</span><span className={`block truncate text-[13.5px] font-bold ${red ? 'text-rose' : ''}`}>{val}</span></span>; })}</span>}
+                {k === 'history' && histRows.length > 0 && <span className="mt-2.5 grid grid-cols-[76px_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 text-[12.5px]">{histRows.map((r: any) => <Fragment key={r.label}><span className={`pt-[3px] ${r.allergy ? 'font-semibold text-rose' : 'text-muted'}`}>{r.label}</span><span className="flex flex-wrap gap-1">{r.names.map((n: string) => <span key={n} className={`rounded-[6px] px-2 py-0.5 font-medium ring-1 ${r.allergy ? 'bg-rose-soft text-rose ring-rose/30' : 'bg-field ring-line'}`}>{n}</span>)}</span></Fragment>)}</span>}
+                {k === 'history' && histNote && <span className="mt-2 block border-t border-line pt-1.5 text-[12.5px] text-muted">{histNote}</span>}
+                {k === 'vitals' && tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val, fl]) => { const red = !!fl; return <span key={l} className={`min-w-0 rounded-[8px] px-2 py-1.5 ring-1 ${red ? 'bg-rose-soft ring-rose/30' : 'bg-field ring-line'}`} title={red ? `${l} ${fl}` : undefined}><span className={`block truncate text-[10.5px] font-medium uppercase tracking-wide ${red ? 'text-rose' : 'text-muted'}`}>{l}{red ? ` · ${fl}` : ''}</span><span className={`block truncate text-[13.5px] font-bold ${red ? 'text-rose' : ''}`}>{val}</span></span>; })}</span>}
               </button>); })}
           </aside>
           {(() => {
