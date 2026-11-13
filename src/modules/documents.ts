@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, desc, gte, inArray, isNotNull, isNull } from 'drizzle-orm';
 import path from 'node:path';
-import { document, recommendation, patient, procedureSession, procedureCatalog, practitioner, tenant, bodyPin } from '../db/schema.js';
+import { document, recommendation, patient, procedureSession, procedureCatalog, practitioner, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -15,9 +15,9 @@ const Area = z.string().trim().min(1).max(40);
 
 const Upload = z.object({
   patientId: z.string().uuid(), encounterId: z.string().uuid().optional(), recommendationId: z.string().uuid().optional(), recommendationIds: z.array(z.string().uuid()).max(20).optional(),
-  kind: z.enum(['report', 'photo', 'prescription', 'consent', 'other']).default('report'),
+  kind: z.enum(['report', 'photo', 'prescription', 'consent', 'canvas', 'other']).default('report'), // canvas: a drawing from the pad
   title: z.string().min(1).max(200), note: z.string().max(500).optional(),
-  area: Area.optional(), view: z.enum(PHOTO_VIEWS).optional(), procedureSessionId: z.string().uuid().optional(), pinId: z.string().uuid().optional(),
+  area: Area.optional(), view: z.enum(PHOTO_VIEWS).optional(), procedureSessionId: z.string().uuid().optional(),
   mime: z.string(), dataBase64: z.string().min(1),
 });
 
@@ -71,8 +71,6 @@ export function documentRoutes(app: FastifyInstance) {
       if (!ps || ps.patientId !== body.patientId) throw new HttpError(400, 'SITTING_NOT_FOR_PATIENT');
     }
     // a photo pinned on the skin map takes the pin's area unless one was given
-    let pinArea: string | null = null;
-    if (body.pinId) { const pin = await tx.select().from(bodyPin).where(and(eq(bodyPin.id, body.pinId), eq(bodyPin.tenantId, t))).then((r) => r[0]); if (!pin || pin.patientId !== body.patientId) throw new HttpError(400, 'PIN_NOT_FOR_PATIENT'); pinArea = pin.area; }
     // a result can belong to several tests at once (one report for CBC, TSH and LFT)
     const recIds = [...new Set([...(body.recommendationIds ?? []), ...(body.recommendationId ? [body.recommendationId] : [])])];
     const recs = recIds.length ? await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), inArray(recommendation.id, recIds), eq(recommendation.patientId, body.patientId), eq(recommendation.kind, 'investigation'))) : [];
@@ -82,7 +80,7 @@ export function documentRoutes(app: FastifyInstance) {
     const ext = body.mime === 'application/pdf' ? 'pdf' : body.mime.split('/')[1];
     const [row] = await tx.insert(document).values({ tenantId: t, patientId: body.patientId, encounterId: body.encounterId, recommendationId: recIds[0], recommendationIds: recIds, kind: body.kind,
       title: body.title, mime: body.mime, sizeBytes: bytes.length, storageKey: 'pending', note: body.note, uploadedBy: req.ctx.userId,
-      area: body.kind === 'photo' ? body.area ?? pinArea : null, view: body.kind === 'photo' ? body.view ?? null : null, procedureSessionId: body.procedureSessionId ?? null, pinId: body.pinId ?? null }).returning();
+      area: body.kind === 'photo' ? body.area ?? null : null, view: body.kind === 'photo' ? body.view ?? null : null, procedureSessionId: body.procedureSessionId ?? null }).returning();
     const key = path.posix.join(t, body.patientId, `${row.id}.${ext}`);
     await putFile(key, bytes, body.mime); // inside the transaction: if storage fails, no record is left pointing at nothing
     await tx.update(document).set({ storageKey: key }).where(eq(document.id, row.id));

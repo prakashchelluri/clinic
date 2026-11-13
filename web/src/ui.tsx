@@ -328,7 +328,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const p = panel.current; if (!p) return;
-      const backs = document.querySelectorAll('.modal-back'); if (backs[backs.length - 1] !== p.parentElement) return; // only the top one answers keys
+      const backs = document.querySelectorAll('.modal-back'); if (backs[backs.length - 1] !== p.parentElement || document.querySelector('[data-over-modal]')) return; // only the top one answers keys (a full-screen layer such as the canvas board sits above every modal)
       if (e.key === 'Escape') { if (!pending) tryClose(); }
       else if (e.key === 'Tab' && !side) trapTab(p, e); // a drawer leaves the page behind usable
       else if (e.key === 'Enter' && submitOnEnter && e.target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'submit'].includes(e.target.type)) {

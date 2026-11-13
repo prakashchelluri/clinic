@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { get } from './api';
 
 /** Small reusable sets for one section of the note. They are suggested by the complaint or diagnosis they are linked to, and they stack. */
-export type TmplKind = 'medicine' | 'complaint' | 'finding' | 'advice' | 'tests' | 'procedure' | 'symptom' | 'diagnosis';
+export type TmplKind = 'medicine' | 'complaint' | 'finding' | 'advice' | 'tests' | 'procedure' | 'symptom' | 'diagnosis' | 'notes' | 'canvas';
 export type Tmpl = { id: string; kind: TmplKind; name: string; linked: { complaints?: string[]; diagnoses?: string[] }; mode: 'chip' | 'auto'; payload: any; uses: number; active: boolean; draft: boolean };
 export type Linked = { complaints?: string[]; diagnoses?: string[] };
 

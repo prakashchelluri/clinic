@@ -7,21 +7,25 @@ import { emit } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 
 const RxItem = z.object({ medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1).max(120), dose: z.string().nullish(), route: z.string().nullish(),
-  frequency: z.string().nullish(), durationDays: z.number().int().min(1).max(365).nullish(), instructions: z.string().max(200).nullish() });
+  frequency: z.string().nullish(), durationDays: z.number().int().min(1).max(365).nullish(), durationNote: z.string().max(40).nullish(), timing: z.string().max(40).nullish(), instructions: z.string().max(200).nullish() });
 const Str = z.string().trim().min(1).max(120);
 /** What each kind of set holds. Anything else is refused, so a set can never carry stray data into a note. */
 const Payload = {
   medicine: z.object({ items: z.array(RxItem).min(1).max(20) }),
   complaint: z.object({ questions: z.array(z.object({ q: Str, detail: z.string().trim().max(80).optional() })).max(30) }),
-  finding: z.object({ chips: z.array(Str).min(1).max(30) }),
+  // examination rows (name · note); older sets hold chips
+  finding: z.object({ chips: z.array(Str).max(30).optional(), items: z.array(z.object({ name: Str, note: z.string().trim().max(120).optional() })).max(30).optional() }).refine((p) => (p.chips?.length ?? 0) + (p.items?.length ?? 0) > 0),
   advice: z.object({ lines: z.array(Str).min(1).max(20) }),
-  tests: z.object({ tests: z.array(z.object({ name: Str, days: z.number().int().min(0).max(60).optional() })).min(1).max(20) }),
+  tests: z.object({ tests: z.array(z.object({ name: Str, days: z.number().int().min(0).max(60).optional(), note: z.string().trim().max(120).optional() })).min(1).max(20) }),
   procedure: z.object({ procedureId: z.string().uuid(), sittings: z.number().int().min(1).max(60).optional(), intervalDays: z.number().int().min(1).max(365).optional(), pricePaise: z.number().int().min(0).optional() }),
   // per-section templates on the pad (the spec's Tsx / TDx), saved from the card header
   symptom: z.object({ items: z.array(z.object({ name: Str, since: z.string().trim().max(40).optional(), severity: z.string().trim().max(20).optional(), note: z.string().trim().max(120).optional() })).min(1).max(20) }),
-  diagnosis: z.object({ items: z.array(z.object({ name: Str, severity: z.string().trim().max(20).optional(), status: z.string().trim().max(20).optional() })).min(1).max(10) }),
+  diagnosis: z.object({ items: z.array(z.object({ name: Str, since: z.string().trim().max(40).optional(), severity: z.string().trim().max(20).optional(), status: z.string().trim().max(20).optional(), note: z.string().trim().max(120).optional() })).min(1).max(10) }),
+  notes: z.object({ text: z.string().trim().min(1).max(2000) }),
+  // a drawing to start from (body outline, face …): the drawing tool's own elements and image files
+  canvas: z.object({ elements: z.array(z.any()).max(2000), files: z.record(z.string(), z.any()).optional() }),
 } as const;
-const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure', 'symptom', 'diagnosis']);
+const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure', 'symptom', 'diagnosis', 'notes', 'canvas']);
 const Linked = z.object({ complaints: z.array(Str).max(20).optional(), diagnoses: z.array(Str).max(20).optional() }).default({});
 const Body = z.object({ kind: Kind, name: z.string().trim().min(2).max(80), linked: Linked, mode: z.enum(['chip', 'auto']).default('chip'), payload: z.record(z.string(), z.any()) });
 const checkPayload = (kind: keyof typeof Payload, payload: unknown) => { const r = Payload[kind].safeParse(payload); if (!r.success) throw new HttpError(400, 'BAD_TEMPLATE', { errors: r.error.issues }); return r.data as Record<string, any>; };

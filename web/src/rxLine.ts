@@ -47,3 +47,14 @@ export function ageText(p: { ageYears?: number | null; dob?: string | null }, no
   if (p.dob) { const b = new Date(p.dob); const m = (now.getFullYear() - b.getFullYear()) * 12 + now.getMonth() - b.getMonth() - (now.getDate() < b.getDate() ? 1 : 0); if (m >= 0) return m < 24 ? `${m} m` : `${Math.floor(m / 12)} y`; }
   return p.ageYears === null || p.ageYears === undefined ? null : `${p.ageYears} y`;
 }
+
+/** "5", "5 days", "2 weeks", "1 month" → days; a word (Stat, Till required …) stays a word. */
+export const parseDuration = (t: string): { durationDays?: number; durationNote: string | null } => {
+  const v = t.trim(); if (!v) return { durationDays: undefined, durationNote: null };
+  const m = v.match(/^(\d{1,3})\s*(d|days?|w|wks?|weeks?|m|mons?|months?)?$/i);
+  if (m) { const n = Number(m[1]) * (/^w/i.test(m[2] ?? '') ? 7 : /^m/i.test(m[2] ?? '') ? 30 : 1); return { durationDays: Math.min(365, n) || undefined, durationNote: null }; }
+  return { durationDays: undefined, durationNote: v.slice(0, 40) };
+};
+/** "3 days", "2 weeks", "1 month" → days, for the follow-up box. */
+export const parseAfter = (t: string): number | null => { const m = t.trim().match(/^(\d{1,3})\s*(d|days?|w|wks?|weeks?|m|mons?|months?)?$/i); return m ? Number(m[1]) * (/^w/i.test(m[2] ?? '') ? 7 : /^m/i.test(m[2] ?? '') ? 30 : 1) || null : null; };
+export const afterText = (d: number) => (d % 30 === 0 ? `${d / 30} ${d === 30 ? 'month' : 'months'}` : d % 7 === 0 ? `${d / 7} ${d === 7 ? 'week' : 'weeks'}` : `${d} ${d === 1 ? 'day' : 'days'}`);

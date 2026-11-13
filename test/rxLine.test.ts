@@ -33,3 +33,14 @@ test('quantity is worked out from dose, frequency and days', async () => {
   assert.equal(qtyFor({ frequency: 'at night', durationDays: 56, route: 'topical' }), 1, 'a tube is one');
   assert.equal(qtyFor({ frequency: 'SOS', durationDays: 7 }), null);
 });
+
+test('duration and follow-up words: numbers become days, words stay words', async () => {
+  const { parseDuration, parseAfter, afterText } = await import('../web/src/rxLine.js');
+  assert.deepEqual(parseDuration('5'), { durationDays: 5, durationNote: null });
+  assert.deepEqual(parseDuration('2 weeks'), { durationDays: 14, durationNote: null });
+  assert.deepEqual(parseDuration('1 month'), { durationDays: 30, durationNote: null });
+  assert.deepEqual(parseDuration('Till required'), { durationDays: undefined, durationNote: 'Till required' });
+  assert.deepEqual(parseDuration(''), { durationDays: undefined, durationNote: null });
+  assert.equal(parseAfter('3 days'), 3); assert.equal(parseAfter('2 Weeks'), 14); assert.equal(parseAfter('soon'), null);
+  assert.equal(afterText(14), '2 weeks'); assert.equal(afterText(60), '2 months'); assert.equal(afterText(1), '1 day');
+});

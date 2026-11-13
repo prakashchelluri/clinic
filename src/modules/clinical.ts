@@ -14,7 +14,7 @@ import { HttpError } from '../lib/auth.js';
 import { expectedDays } from '../lib/tests.js';
 
 const RxItem = z.object({ id: z.string().uuid().optional(), medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
-  frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
+  frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), durationNote: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
   intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), gapDays: z.number().int().min(1).max(365).nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false), reviewed: z.boolean().default(false) });
@@ -262,7 +262,7 @@ export function clinicalRoutes(app: FastifyInstance) {
     // results typed for this consultation's tests (or linked to it), the clinic's print choices, and the Telugu for every standard phrase on the page
     const recIds = e.recommendations.map((r: any) => r.id);
     const labs = await tx.select().from(labResult).where(and(eq(labResult.tenantId, t), eq(labResult.patientId, e.patientId), recIds.length ? sql`(${labResult.encounterId} = ${e.id} or ${labResult.recommendationId} in ${recIds})` : eq(labResult.encounterId, e.id))).orderBy(labResult.test);
-    const phrases = [...e.prescription.flatMap((i: any) => [i.frequency, i.timing, i.instructions, i.durationDays ? `${i.durationDays} days` : null]), ...String(e.data?.plan?.advice ?? '').split('\n')].filter(Boolean) as string[];
+    const phrases = [...e.prescription.flatMap((i: any) => [i.frequency, i.timing, i.instructions, i.durationDays ? `${i.durationDays} days` : i.durationNote]), ...String(e.data?.plan?.advice ?? '').split('\n')].filter(Boolean) as string[];
     const pr = printSettings(ten.settings);
     const local = Object.fromEntries(phrases.map((p) => [p, localPhrase(pr.lang, p, ten.settings)]).filter(([, v]) => v));
     // the private note and the safety overrides are never on paper; the diagnosis prints only for clinical roles (the desk reprints without it)

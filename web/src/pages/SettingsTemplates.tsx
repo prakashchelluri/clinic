@@ -116,7 +116,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
 }
 
 const n = (x: number, one: string) => `${x} ${one}${x === 1 ? '' : 's'}`;
-const summary = (t: Tmpl) => t.kind === 'medicine' ? n(t.payload.items?.length ?? 0, 'medicine') : t.kind === 'complaint' ? n(t.payload.questions?.length ?? 0, 'question') : t.kind === 'finding' ? n(t.payload.chips?.length ?? 0, 'finding') : t.kind === 'advice' ? n(t.payload.lines?.length ?? 0, 'line') : t.kind === 'tests' ? (t.payload.tests ?? []).map((x: any) => x.name).join(', ') : t.kind === 'symptom' || t.kind === 'diagnosis' ? (t.payload.items ?? []).map((x: any) => x.name).join(', ') : `${t.payload.sittings ?? '?'} sittings${t.payload.pricePaise ? ` · ${money(t.payload.pricePaise)}` : ''}`;
+const summary = (t: Tmpl) => t.kind === 'medicine' ? n(t.payload.items?.length ?? 0, 'medicine') : t.kind === 'complaint' ? n(t.payload.questions?.length ?? 0, 'question') : t.kind === 'finding' ? n((t.payload.chips?.length ?? 0) + (t.payload.items?.length ?? 0), 'finding') : t.kind === 'notes' ? String(t.payload.text ?? '').slice(0, 60) : t.kind === 'canvas' ? 'drawing' : t.kind === 'advice' ? n(t.payload.lines?.length ?? 0, 'line') : t.kind === 'tests' ? (t.payload.tests ?? []).map((x: any) => x.name).join(', ') : t.kind === 'symptom' || t.kind === 'diagnosis' ? (t.payload.items ?? []).map((x: any) => x.name).join(', ') : `${t.payload.sittings ?? '?'} sittings${t.payload.pricePaise ? ` · ${money(t.payload.pricePaise)}` : ''}`;
 
 /** Settings → Templates: every kind of set the doctors use, linked to complaints and diagnoses. */
 export function TemplatesTab({ cfg }: { cfg: any }) {

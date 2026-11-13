@@ -225,6 +225,20 @@
       "when": 1795200000000,
       "tag": "0031_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795300000000,
+      "tag": "0032_drop_skinmap",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795400000000,
+      "tag": "0033_rx_duration_note",
+      "breakpoints": true
     }
   ]
 }

@@ -33,6 +33,8 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
     ...Object.fromEntries((e.vitalFields ?? []).map((v: any) => [v.key, [v.label, v.unit ? ` ${v.unit}` : '']])) }; // the clinic's own vitals (Settings) print by their name
   const outOnly = results ? false : d.labs?.printOutOfRangeOnly ?? pr.outOfRangeOnly;
   const labs: any[] = (e.labs ?? []).filter((r: any) => !outOnly || ['low', 'high', 'abnormal'].includes(r.flag));
+  const exam: any[] = Array.isArray(d.exam?.items) ? d.exam.items : [];
+  const canvases: any[] = results ? [] : (Array.isArray(d.canvases) ? d.canvases : []).filter((c: any) => c.showInRx && c.docId);
   const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
   const hist = p.history ?? {}; const histLine = ['conditions', 'drugAllergies', 'otherAllergies'].flatMap((k) => (hist[k] ?? []).map((x: any) => x.name)).join(', ');
   // English always prints. The second line is in the patient's language, and a part with no translation stays in English there,
@@ -56,24 +58,26 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
       </div>
       <div className="grid grid-cols-2 gap-x-4 py-2">
         {on('symptoms') && syms.length > 0 && <div><b>C/o:</b> {syms.map((s) => line([s.name, s.since ? `since ${s.since}` : null, s.severity?.toLowerCase()])).join('; ')}{d.complaint?.site?.length ? ` · ${d.complaint.site.join(', ')}` : ''}</div>}
-        {on('diagnosis') && dxs.length > 0 && <div><b>Dx:</b> {dxs.map((x) => line([x.name, x.severity?.toLowerCase(), x.status?.toLowerCase()])).join('; ')}</div>}
-        {on('exam') && (d.exam?.findings || d.exam?.morphology?.length) && <div className="col-span-2"><b>O/e:</b> {line([(d.exam.morphology ?? []).join(', '), d.exam.distribution, d.exam.findings])}</div>}
+        {on('diagnosis') && dxs.length > 0 && <div><b>Dx:</b> {dxs.map((x) => line([x.name, x.since ? `since ${x.since}` : null, x.severity?.toLowerCase(), x.status?.toLowerCase(), x.note])).join('; ')}</div>}
+        {on('exam') && (exam.length > 0 || d.exam?.findings || d.exam?.morphology?.length) && <div className="col-span-2"><b>O/e:</b> {line([exam.map((x: any) => line([x.name, x.note])).join('; '), (d.exam?.morphology ?? []).join(', '), d.exam?.distribution, d.exam?.findings])}</div>}
         {(p.allergies || (on('history') && histLine)) && <div className="col-span-2">{p.allergies && <><b>Allergies:</b> {p.allergies}</>}{on('history') && histLine && <> · <b>History:</b> {histLine}</>}</div>}
       </div>
       {on('medicines') && (!results || rxLines.length > 0) && <>
         <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞{results && <span className="ml-2 align-middle text-[11px] font-sans text-gray-600">added after the reports</span>}</div>
         <table className="w-full mt-1"><tbody>
-          {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : null; const parts = [i.frequency, i.timing, days]; const teLine = localLine([...parts, i.instructions]); return (
+          {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : i.durationNote ?? null; const parts = [i.frequency, i.timing, days]; const teLine = localLine([...parts, i.instructions]); return (
             <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>
               <td className="py-1"><b>{i.name}</b>{i.dose ? ` ${i.dose}` : ''}{i.qty ? <span className="float-right text-[11px] text-gray-600">× {i.qty}</span> : null}
                 {<div className="text-[11px]">{line([...parts, i.route && i.route !== 'oral' ? i.route : null])}{i.instructions ? ` — ${i.instructions}` : ''}</div>}
                 {teLine && <div className="text-[11px] text-gray-800">{teLine}</div>}</td></tr>); })}
         </tbody></table>
       </>}
-      {on('tests') && investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => r.notes).join(', ')}</div>}
+      {on('tests') && investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => line([r.notes, d.plan?.testNotes?.[r.notes]])).join(', ')}</div>}
       {on('results') && labs.length > 0 && <div className="mt-2"><b>Results{outOnly ? ' (out of range)' : ''}:</b> {labs.map((r: any) => `${r.test} ${r.value}${r.unit ? ` ${r.unit}` : ''}${r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''}`).join(' · ')}</div>}
       {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {advice.join(' · ')}{localLine(advice) && <div className="text-gray-800">{localLine(advice)}</div>}</div>}
-      {plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).length > 0 && <div className="mt-2">{plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `Procedure advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
+      {plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).length > 0 && <div className="mt-2">{plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `${r.procedure?.name ?? r.procedureName ?? 'Procedure'} advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
+      {d.plan?.notes && <div className="mt-2 whitespace-pre-line"><b>Notes:</b> {d.plan.notes}</div>}
+      {canvases.map((c: any) => <img key={c.id} src={`/api/documents/${c.docId}/file`} alt={c.name} className="mt-2 max-h-[70mm] max-w-full border border-gray-300" />)}
       {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
       {(e.amendments ?? []).length > 0 && <div className="mt-3 border-t border-black pt-1 text-[11px]">{e.amendments.map((a: any, k: number) => <div key={k}><b>Amended on {new Date(a.at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}:</b> {a.reason}</div>)}</div>}
       <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div>{draft ? <div className="text-[11px] font-semibold text-red-700">Draft — not signed</div> : <div className="border-t border-black pt-1 w-48 text-center">Signature</div>}</div>

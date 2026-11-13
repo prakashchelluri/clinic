@@ -10,7 +10,6 @@ import { EncounterDetail, UploadButton, joinList } from '../encounterDetail';
 import { enabledVitals } from '../vitals';
 import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
-import { SkinMapPanel } from '../skinmap';
 import { TakePayment } from '../takePayment';
 import { BillingHistory } from '../billing';
 import { CoursesCard } from '../courses';
@@ -193,7 +192,6 @@ function Timeline({ id }: { id: string }) {
 
           {sec === 'photos' && <>
             <PhotoTimeline patient={{ id, fullName: p.fullName }} canWrite={can(perms, 'document.write')} />
-            <Section title="Skin map"><div className="p-4"><SkinMapPanel patientId={id} patientName={p.fullName} readOnly={!can(perms, 'encounter.intake')} /></div></Section>
           </>}
 
           {sec === 'reports' && <section className="card-flat overflow-hidden anim-fade-up">

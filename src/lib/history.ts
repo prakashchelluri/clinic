@@ -2,7 +2,7 @@
 export const HISTORY_KEYS = ['conditions', 'family', 'lifestyle', 'drugAllergies', 'surgeries', 'otherAllergies'] as const;
 export type HistoryKey = (typeof HISTORY_KEYS)[number];
 export type HistoryItem = { name: string; note?: string };
-export type History = Partial<Record<HistoryKey, HistoryItem[]>> & { none?: HistoryKey[]; heightCm?: number; confirmedAt?: string; confirmedBy?: string };
+export type History = Partial<Record<HistoryKey, HistoryItem[]>> & { none?: HistoryKey[]; denied?: Partial<Record<HistoryKey, string[]>>; notes?: string; heightCm?: number; confirmedAt?: string; confirmedBy?: string };
 
 export const HISTORY_CATEGORIES: { key: HistoryKey; label: string; short: string; options: string[]; notePlaceholder: string }[] = [
   { key: 'conditions', label: 'Existing conditions', short: 'Existing', notePlaceholder: 'Which medicine, since when', options: ['BP', 'Diabetes', 'Thyroid', 'PCOS', 'Asthma', 'Epilepsy', 'Heart disease', 'Kidney disease', 'Liver disease', 'Pregnant', 'Breastfeeding', 'Depression or anxiety', 'Tuberculosis'] },
@@ -24,7 +24,7 @@ export function historyCategories(settings: any) {
 const OLD: Record<string, [HistoryKey, string]> = { diabetes: ['conditions', 'Diabetes'], thyroid: ['conditions', 'Thyroid'], bp: ['conditions', 'BP'] };
 export function normHistory(raw: any): History {
   if (!raw || typeof raw !== 'object') return {};
-  if (HISTORY_KEYS.some((k) => Array.isArray(raw[k])) || Array.isArray(raw.none)) return raw as History;
+  if (HISTORY_KEYS.some((k) => Array.isArray(raw[k])) || Array.isArray(raw.none) || raw.denied || raw.notes) return raw as History;
   const h: History = {};
   const add = (k: HistoryKey, item: HistoryItem) => { (h[k] ??= []).push(item); };
   for (const [k, v] of Object.entries(raw as Record<string, { yes?: boolean; note?: string }>)) {
@@ -50,6 +50,11 @@ export function cleanHistory(input: any): History {
   }
   const none = Array.isArray(input?.none) ? input.none.filter((k: any) => HISTORY_KEYS.includes(k) && !h[k as HistoryKey]) : [];
   if (none.length) h.none = none;
+  // asked and answered No (the – / Y / N chip), kept apart from the items so nothing reads a No as a Yes
+  const denied: Partial<Record<HistoryKey, string[]>> = {};
+  for (const k of HISTORY_KEYS) { const xs = Array.isArray(input?.denied?.[k]) ? input.denied[k].filter((x: any) => typeof x === 'string' && x.trim()).slice(0, 30).map((x: string) => x.trim().slice(0, 80)) : []; const yes = new Set((h[k] ?? []).map((i) => i.name)); const no = xs.filter((x: string) => !yes.has(x)); if (no.length) denied[k] = no; }
+  if (Object.keys(denied).length) h.denied = denied;
+  if (typeof input?.notes === 'string' && input.notes.trim()) h.notes = input.notes.trim().slice(0, 5000);
   if (typeof input?.heightCm === 'number' && input.heightCm > 30 && input.heightCm < 250) h.heightCm = input.heightCm;
   return h;
 }

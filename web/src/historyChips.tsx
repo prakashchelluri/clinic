@@ -51,3 +51,49 @@ export function HistoryChips({ patientId, history, categories, readOnly }: { pat
     </div>
   );
 }
+
+type Answer = 'yes' | 'no' | undefined;
+/** Medical history as one sheet (Tatva's drawer): every category at once, each choice a – / Y / N chip, "No known history" per category,
+ *  a box for anything else, and Additional history. Y is an item on the patient; N is kept apart (history.denied) so no check reads it as a Yes. */
+export function HistorySheet({ patientId, history, categories, readOnly, onDone }: { patientId: string; history: History; categories: Category[]; readOnly: boolean; onDone: () => void }) {
+  const denied0 = (history.denied ?? {}) as Record<string, string[]>;
+  const [yes, setYes] = useState<Record<string, HistoryItem[]>>(() => Object.fromEntries(categories.map((c) => [c.key, items(history, c.key).map((x) => ({ ...x }))])));
+  const [no, setNo] = useState<Record<string, string[]>>(() => Object.fromEntries(categories.map((c) => [c.key, [...(denied0[c.key] ?? [])]])));
+  const [none, setNone] = useState<string[]>(() => [...((history.none as string[] | undefined) ?? [])]);
+  const [notes, setNotes] = useState<string>(typeof history.notes === 'string' ? history.notes : '');
+  const [other, setOther] = useState<Record<string, string>>({});
+  const save = useMutation({
+    mutationFn: () => api('PUT', `/patients/${patientId}/history`, { ...history, ...yes, denied: no, none: none.filter((k) => !(yes[k] ?? []).length), notes }),
+    onSuccess: () => { ['encounter', 'timeline', 'patients'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Medical history saved'); onDone(); },
+    onError: (e) => toast(errText(e), 'err'),
+  });
+  const answer = (k: string, o: string): Answer => ((yes[k] ?? []).some((x) => x.name === o) ? 'yes' : (no[k] ?? []).includes(o) ? 'no' : undefined);
+  const cycle = (k: string, o: string) => { // – → Y → N → –
+    const a = answer(k, o);
+    setYes((y) => ({ ...y, [k]: a === undefined ? [...(y[k] ?? []), { name: o }] : (y[k] ?? []).filter((x) => x.name !== o) }));
+    setNo((n) => ({ ...n, [k]: a === 'yes' ? [...(n[k] ?? []), o] : (n[k] ?? []).filter((x) => x !== o) }));
+    if (a === undefined) setNone((xs) => xs.filter((x) => x !== k));
+  };
+  return (
+    <div className="space-y-3">
+      {categories.map((c) => { const opts = [...new Set([...c.options, ...(yes[c.key] ?? []).map((x) => x.name), ...(no[c.key] ?? [])])]; const nk = none.includes(c.key); return (
+        <section key={c.key} className="rounded-[10px] border border-line p-3" aria-label={c.label}>
+          <div className="mb-2 flex items-center gap-2"><b className="text-[14px]">{c.label}</b>
+            <label className="ml-auto inline-flex items-center gap-1.5 text-[12.5px] text-muted"><input type="checkbox" className="accent-ink" disabled={readOnly} checked={nk} onChange={(e) => { setNone((xs) => (e.target.checked ? [...xs, c.key] : xs.filter((x) => x !== c.key))); if (e.target.checked) { setYes((y) => ({ ...y, [c.key]: [] })); } }} />No known history</label></div>
+          <div className={`flex flex-wrap gap-1.5 ${nk ? 'opacity-50' : ''}`}>
+            {opts.map((o) => { const a = answer(c.key, o); return (
+              <button key={o} type="button" disabled={readOnly || nk} title="Tap: – not asked, Y yes, N no" aria-label={`${o}: ${a === 'yes' ? 'yes' : a === 'no' ? 'no' : 'not asked'}`} onClick={() => cycle(c.key, o)}
+                className={`inline-flex items-center gap-2 rounded-[8px] border px-2.5 py-1 text-[12.5px] font-medium ${a === 'yes' ? 'border-ink bg-surface-2' : a === 'no' ? 'border-line text-muted line-through' : 'border-line'}`}>
+                {o}<span className={`grid h-5 min-w-5 place-items-center rounded-[5px] px-1 text-[11px] font-bold ${a === 'yes' ? 'bg-ink text-paper' : a === 'no' ? 'bg-rose-soft text-rose' : 'bg-paper-2 text-muted'}`}>{a === 'yes' ? 'Y' : a === 'no' ? 'N' : '–'}</span></button>); })}
+            {!readOnly && !nk && <input aria-label={`Add to ${c.label}`} className="input !w-40 !py-1 text-[12.5px]" placeholder="Add other, Enter" value={other[c.key] ?? ''} onChange={(e) => setOther({ ...other, [c.key]: e.target.value })}
+              onKeyDown={(e) => { const v = (other[c.key] ?? '').trim(); if (e.key === 'Enter' && v) { e.preventDefault(); if (!answer(c.key, v)) cycle(c.key, v); setOther({ ...other, [c.key]: '' }); } }} />}
+          </div>
+          {(yes[c.key] ?? []).length > 0 && <div className="mt-2 space-y-1">{(yes[c.key] ?? []).map((x, i) => <div key={x.name} className="flex items-center gap-2 text-[12.5px]"><span className="w-40 shrink-0 truncate font-medium">{x.name}</span>
+            <input aria-label={`${x.name}: ${c.notePlaceholder}`} className="input !py-1 text-[12.5px]" maxLength={160} disabled={readOnly} placeholder={c.notePlaceholder} value={x.note ?? ''} onChange={(e) => setYes((y) => ({ ...y, [c.key]: (y[c.key] ?? []).map((z, j) => (j === i ? { ...z, note: e.target.value || undefined } : z)) }))} /></div>)}</div>}
+        </section>); })}
+      <section className="rounded-[10px] border border-line p-3"><div className="mb-2 flex items-center"><b className="text-[14px]">Additional history</b><span className="ml-auto text-[11.5px] text-muted">{notes.length}/5000</span></div>
+        <textarea aria-label="Additional history" className="input min-h-20" maxLength={5000} disabled={readOnly} value={notes} onChange={(e) => setNotes(e.target.value)} /></section>
+      {!readOnly && <div className="flex justify-end gap-2"><button type="button" className="btn btn-ghost" onClick={onDone}>Cancel</button><button type="button" className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>Save</button></div>}
+    </div>
+  );
+}
