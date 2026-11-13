@@ -94,7 +94,7 @@ export async function confirmDone(s: { procedure?: string | null; sittingNo: num
 }
 
 const STATE: Record<string, { label: string; tone: '' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
-  confirmed: { label: 'Booked', tone: 'sky' }, in_progress: { label: 'In progress', tone: 'amber' }, completed: { label: 'Done', tone: 'sage' },
+  confirmed: { label: 'Booked', tone: 'sky' }, in_progress: { label: 'In progress', tone: 'amber' }, completed: { label: 'Completed', tone: 'sage' },
   missed: { label: 'Missed', tone: 'rose' }, cancelled: { label: 'Cancelled', tone: 'rose' }, postponed: { label: 'Postponed', tone: 'amber' },
 };
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -107,7 +107,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
   const [signing, setSigning] = useState(false);
-  const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false);
+  const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false); const [moving, setMoving] = useState(false);
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
     onSuccess: (_r, b) => { setSigning(false); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Sitting marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Sitting started'); },
     onError: (e) => toast(errText(e), 'err') });
@@ -123,13 +123,18 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const label = s ? `${s.procedure ?? 'Procedure'} · sitting ${s.sittingNo}${s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}` : '';
   // more sittings to come and none booked yet: reception books the next tentative date right here
   const nextBooked = (s?.sittings ?? []).some((x: any) => x.state === 'confirmed' && x.id !== id);
+  // booked, and its time went by without it starting: the patient didn't come (the calendar shows it red); reception reschedules or marks it missed
+  const nowT = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+  const overdue = !!s && s.state === 'confirmed' && (s.day < today() || (s.day === today() && s.endTime <= nowT));
+  const refresh = () => ['procedure-session', 'psessions', 'worklist', 'calendar', 'pcounts'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const markMissed = useMutation({ mutationFn: () => patch(`/procedure-sessions/${id}`, { state: 'missed' }), onSuccess: () => { refresh(); toast('Marked as missed'); }, onError: (e) => toast(errText(e), 'err') });
   const more = !!s && s.state === 'completed' && !nextBooked && (!s.plan?.sittings || s.sittingNo < s.plan.sittings);
 
   return createPortal(
       <aside role="dialog" aria-label="Procedure sitting" className="side-drawer">
         {q.isError ? <div className="text-sm text-rose">Couldn't load. {errText(q.error)} <button className="btn btn-sm ml-1" onClick={() => q.refetch()}>Retry</button></div> :!s ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
-            <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>
+            {overdue ? <Chip tone="rose">Didn't come</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
             <span className="truncate text-xs text-muted">Procedure sitting{s.patientConfirmedAt ? ' · patient said yes' : ''}</span>
             <MoneyChip m={s.money} />
             <button className="btn btn-ghost btn-icon ml-auto" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
@@ -147,6 +152,12 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
             {s.stateReason && <div className="mt-2 text-sm text-amber">Reason: {s.stateReason}</div>}
           </div>
           {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => s.consentNeeded ? setSigning(true) : setState.mutate({ state: 'in_progress' })}><Icon name="check" />Start sitting</button>}
+          {canAct && (overdue || ['missed', 'postponed'].includes(s.state)) && <div className="rounded-[10px] border border-rose/25 bg-rose-soft/50 p-4">
+            <div className="font-semibold">{overdue ? 'The patient did not come for this sitting' : s.state === 'missed' ? 'This sitting was missed' : 'This sitting was postponed'}</div>
+            <div className="mt-0.5 text-sm text-muted">Pick a new date and time with the patient. The course and its sitting number stay the same.</div>
+            <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-primary" onClick={() => setMoving(true)}><Icon name="calendar" />Reschedule</button>
+              {overdue && <button className="btn" disabled={markMissed.isPending} onClick={() => markMissed.mutate()}>Mark as missed</button>}</div>
+          </div>}
           {signing && <ConsentDialog s={s} onClose={() => setSigning(false)} onStart={(b) => setState.mutate(b)} />}
           {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
 
@@ -200,6 +211,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           </div>
         </>)}
         {shoot && s && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} sitting={{ id, label: `${label} · ${shoot}` }} phase={shoot} onClose={() => { setShoot(null); qc.invalidateQueries({ queryKey: ['photos', p.id] }); }} />}
+        {moving && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} sitting={s} onClose={() => { setMoving(false); refresh(); }} />}
         {booking && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} onClose={() => { setBooking(false); ['procedure-session', 'psessions', 'worklist', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />}
       </aside>
   , document.body);

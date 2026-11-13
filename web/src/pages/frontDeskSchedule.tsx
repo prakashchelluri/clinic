@@ -235,7 +235,11 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               const canDrop = !!onBook && !!one && !past && !shut;
               // the doctor's own procedure in this hour sits in the grid like any booking
               const red = shut ? wsAt[0].reductions[0] : null;
-              const all: ChipP[] = red?.kind === 'procedure' && kindF !== 'consult' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => { const sit = (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r); if (sit) setProcId(sit.id); else nav(`/worklist?day=${c.day}`); } } as ChipP].filter(keyOk).concat(chips) : chips;
+              // the doctor's procedure hour: the sitting booked in it, with its patient and its own status (done, didn't come …); only a bare block when no sitting is found
+              const sit = red?.kind === 'procedure' ? (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r) : null;
+              const block: ChipP | null = red?.kind !== 'procedure' || kindF === 'consult' || (sit && chips.some((x) => x.id === sit.id)) ? null
+                : sit ? sitChip(sit, c) : { id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => nav(`/worklist?day=${c.day}`) };
+              const all: ChipP[] = block && keyOk(block) ? [block, ...chips] : chips;
               const free = showFree && kindF !== 'proc' && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
               return (
                 <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''} ${past && !all.length ? 'off' : ''}`}
