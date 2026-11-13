@@ -305,9 +305,11 @@ export function FrontDesk() {
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
                 list={view === 'table'} onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
                 tools={<>{/* Calendar | List swaps only this section; the Action panel beside it stays */}
-                  <PageSearchBox placeholder="Find a patient" className="!h-8 w-[200px] max-w-full" />
-                  <button type="button" className="btn btn-sm" title="Past days: who came, who left, who did not come" onClick={() => setTab('history')}><Icon name="clock" className="h-3.5 w-3.5" />History</button>
-                  <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} /></>} />
+                  <PageSearchBox placeholder="Find a patient" className="!h-8 w-[180px] max-w-full" />
+                  <button type="button" className="btn btn-sm btn-icon !h-8 !w-8" aria-label="History: past days" title="History: past days, who came, who left, who did not come" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" /></button>
+                  <span className="inline-flex overflow-hidden rounded-[6px] border border-line-2" role="group" aria-label="Show as">
+                    {([['schedule', 'calendar', 'Calendar'], ['table', 'list', 'List']] as const).map(([v, ic, l], i) => <button key={v} type="button" aria-pressed={view === v} aria-label={l} title={l} onClick={() => setView(v)} className={`grid h-8 w-8 place-items-center ${i ? 'border-l border-line-2' : ''} ${view === v ? 'bg-paper-2 text-ink' : 'text-muted hover:text-ink'}`}><Icon name={ic} className="h-4 w-4" /></button>)}
+                  </span></>} />
               {waitingPanel}</div>
             : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/dashboard?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/dashboard?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>

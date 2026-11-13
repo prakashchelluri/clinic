@@ -84,15 +84,19 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <Segmented<'day' | 'week'> size="sm" value={mode} onChange={(m) => { setMode(m); if (m === 'day') setDay(today); }} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }]} />
       {!week && !isToday && <button type="button" className="btn btn-sm" onClick={() => setDay(today)}>Back to today</button>}
       <span className="ml-auto" />
-      <select aria-label="Show consultations, procedures or both" className="input !h-8 !min-h-8 !w-auto !py-0 !text-[13px]" value={kindF} onChange={(e) => setShown('kind', e.target.value)}>
-        <option value="all">All visits</option><option value="consult">Consults</option><option value="proc">Procedures</option></select>
-      {docList.length + roomList.length > 1 && <><button ref={pickBtn} type="button" className="fd-cal on max-w-[300px]" aria-haspopup="true" aria-expanded={pickOpen} onClick={() => setPickOpen(!pickOpen)}><Icon name="filter" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="text-muted">Show</span><span className="min-w-0 truncate">{summary}</span></button>
-        <Floating anchor={pickBtn} open={pickOpen} onClose={() => setPickOpen(false)} width={260}>
-          <div className="max-h-[60vh] overflow-y-auto p-1.5">
-            <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Doctors</div>{docList.map(tick)}
-            {roomList.length > 0 && <><div className="mt-1 border-t border-line/60 px-2.5 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Rooms · procedures</div>{roomList.map(tick)}</>}
-          </div>
-        </Floating></>}
+      {/* one Filter (v63): which visits, whose calendars, free slots; the button says what is narrowed */}
+      <button ref={pickBtn} type="button" className="btn btn-sm max-w-[280px]" aria-haspopup="true" aria-expanded={pickOpen} onClick={() => setPickOpen(!pickOpen)}>
+        <Icon name="filter" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="min-w-0 truncate">{[kindF === 'consult' ? 'Consults' : kindF === 'proc' ? 'Procedures' : null, docList.length + roomList.length > 1 ? summary : null].filter(Boolean).join(' · ') || 'Filter'}</span>
+        <Icon name="chevR" className="h-3.5 w-3.5 shrink-0 rotate-90 text-muted" /></button>
+      <Floating anchor={pickBtn} open={pickOpen} onClose={() => setPickOpen(false)} width={260}>
+        <div className="max-h-[60vh] overflow-y-auto p-1.5">
+          <div className="px-2.5 pb-1 pt-1.5 text-[12px] font-medium text-muted">Visits</div>
+          {([['all', 'All visits'], ['consult', 'Consults only'], ['proc', 'Procedures only']] as const).map(([v, l]) => <label key={v} className="flex cursor-pointer items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-[13.5px] hover:bg-paper-2"><input type="radio" name="fd-kind" className="accent-ink h-4 w-4" checked={kindF === v} onChange={() => setShown('kind', v)} />{l}</label>)}
+          {docList.length > 1 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Doctors</div>{docList.map(tick)}</>}
+          {roomList.length > 0 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Rooms · procedures</div>{roomList.map(tick)}</>}
+          {onBook && <><div className="mt-1 border-t border-line" />{tick({ key: 'free', label: 'Show free slots', on: showFree })}</>}
+        </div>
+      </Floating>
       {tools}
     </div>);
   const keyRow = (
@@ -101,7 +105,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <span><i className="fd-k-booked fd-k-procsw" /><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
-  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{keyRow}{inner}
+  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{inner}{!list && keyRow}
     {procId && <ProcedureDrawer key={procId} id={procId} canAct={can(perms ?? [], 'worklist.write')} onClose={() => setProcId(null)} />}</div>;
   const days: any[] | undefined = week ? range.data : cal.data && [cal.data];
   if (!days || (!week && !isToday && other.isLoading)) return sheet(<div className="p-4"><Skeleton rows={4} /></div>);
@@ -228,7 +232,6 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
           ])}
         </div>
       </div>
-      {onBook && <label className="fd-hfoot"><input type="checkbox" className="accent-ink h-3.5 w-3.5" checked={showFree} onChange={(e) => setShown('free', e.target.checked)} />Show free slots</label>}
     </>);
 }
 
