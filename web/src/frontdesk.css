@@ -125,7 +125,7 @@
 .fd-pc { display: flex; align-items: center; gap: 6px; height: 26px; width: 100%; min-width: 0; padding: 0 8px 0 4px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap; text-align: left; }
 .fd-pc .truncate { flex: 1; }
 /* the calendar sheet is a plain white table, not glass */
-.fd-sch { background: var(--color-surface); -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--color-line); }
+.fd-sch { background: var(--color-surface); -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 12px; box-shadow: none; border: 1px solid color-mix(in srgb, var(--color-ink) 28%, transparent); }
 .fd-pc:hover { filter: brightness(.96); }
 .fd-pc .tk { display: inline-grid; place-items: center; min-width: 18px; height: 18px; font-size: 11px; font-weight: 700; }
 .fd-pc .tg { font-size: 11px; font-weight: 500; opacity: .8; }
@@ -133,11 +133,14 @@
 .fd-pc.sel { box-shadow: 0 0 0 2px var(--color-ink); }
 .fd-k-booked { background: var(--color-sky-soft); color: var(--color-sky); padding-left: 8px; }
 .fd-k-late, .fd-k-noshow { background: var(--color-rose-soft); color: var(--color-rose); padding-left: 8px; }
-.fd-k-waiting, .fd-k-intake, .fd-k-tests { background: var(--color-paper-2); color: var(--color-ink); }
+.fd-k-waiting, .fd-k-intake { background: var(--color-paper-2); color: var(--color-ink); }
 .fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-ink); }
 .fd-k-doctor { background: var(--color-sky); color: var(--color-surface); }
 
-.fd-k-done { background: color-mix(in srgb, var(--color-sage-soft) 70%, var(--color-surface)); color: var(--color-sage); }
+/* seen by the doctor: done, with or without tests still to arrange (the ! says so) */
+.fd-k-done, .fd-k-tests { background: color-mix(in srgb, var(--color-sage-soft) 70%, var(--color-surface)); color: var(--color-sage); }
+/* space after the last slot of an hour is shaded, not left as a hole */
+.fd-hchips { background: repeating-linear-gradient(45deg, rgba(0,0,0,.03) 0 6px, transparent 6px 12px); }
 /* an empty place in the hour: a dashed box that books it */
 .fd-free { justify-content: center; color: var(--color-muted); font-weight: 500; background: var(--color-surface); }
 .fd-free:hover { color: var(--color-clay); background: var(--color-clay-soft); filter: none; }

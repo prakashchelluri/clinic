@@ -6,7 +6,7 @@ import { Floating, Icon, Segmented, Skeleton, ask, toast } from '../ui';
 import { told } from '../apptDrawer';
 
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow';
-const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Tests & procedures pending', done: 'Done', noshow: "Didn't come" };
+const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Done · tests & procedures pending', done: 'Done', noshow: "Didn't come" };
 const SITTING: Record<string, Kind> = { confirmed: 'booked', in_progress: 'doctor', completed: 'done', missed: 'noshow' };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -89,7 +89,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const keyRow = (
     <div className="fd-hkey">
       <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
-      <span><i className="fd-k-done" />Done</span><span><i className="fd-k-noshow" />Didn't come</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
+      <span><i className="fd-k-done" />Done</span><span><i className="fd-k-proc" />Procedure</span><span><i className="fd-k-noshow" />Didn't come</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
   const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{keyRow}{inner}</div>;
   const days: any[] | undefined = week ? range.data : cal.data && [cal.data];
@@ -178,17 +178,18 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
               const canDrop = !!onBook && !!one && !past && !shut;
+              // the doctor's own procedure in this hour sits in the grid like any booking
+              const red = shut ? wsAt[0].reductions[0] : null;
+              const all: ChipP[] = red?.kind === 'procedure' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: 'Procedure', who: docNameOf(wsAt[0].practitionerId), onClick: () => nav(`/worklist?day=${c.day}`) }, ...chips] : chips;
+              const free = showFree && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
               return (
                 <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''}`}
                   onDragOver={canDrop ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(one!.id); } } : undefined}
                   onDragLeave={() => setOver(null)} onDrop={canDrop ? (e) => drop(e, one) : undefined}>
-                  {shut && (wsAt[0].reductions[0].kind === 'procedure'
-                    ? <button type="button" className="fd-hcap text-left hover:underline" title="Open the day's procedures" onClick={() => nav(`/worklist?day=${c.day}`)}>Doctor in a procedure · no new bookings · {wsAt[0].reductions[0].note}</button>
-                    : <span className="fd-hcap">{wsAt[0].reductions[0].note ?? 'Closed'}</span>)}
-                  {(chips.length > 0 || (showFree && !shut && !past && one && one.free > 0 && onBook)) && <div className="fd-hchips">
-                    {chips.map((p) => <Chip key={p.id} {...p} />)}
-                    {showFree && !shut && !past && one && onBook && Array.from({ length: Math.max(0, one.free) }, (_, j) =>
-                      <button key={j} type="button" className="fd-pc fd-free" onClick={() => onBook({ ...one, day: c.day })}>+ Book</button>)}
+                  {red && red.kind !== 'procedure' && <span className="fd-hcap">{red.note ?? 'Closed'}</span>}
+                  {all.length + free > 0 && <div className="fd-hchips">
+                    {all.map((p) => <Chip key={p.id} {...p} />)}
+                    {Array.from({ length: free }, (_, j) => <button key={j} type="button" className="fd-pc fd-free" onClick={() => onBook!({ ...one, day: c.day })}>+ Book</button>)}
                   </div>}
                 </div>);
             }),
