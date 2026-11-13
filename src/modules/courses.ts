@@ -149,7 +149,7 @@ export function courseRoutes(app: FastifyInstance) {
     const rows = await tx.select().from(course).where(pid ? and(eq(course.tenantId, t), eq(course.patientId, pid)) : eq(course.tenantId, t)).orderBy(course.createdAt).limit(50);
     // each course with its next booked sitting, so the course popup and the patient's Procedures tab say the same thing
     return Promise.all(rows.map(async (c) => ({ ...(await standing(tx, t, c)),
-      nextSitting: (await tx.select({ day: procedureSession.day, startTime: procedureSession.startTime, sittingNo: procedureSession.sittingNo }).from(procedureSession)
+      nextSitting: (await tx.select().from(procedureSession)
         .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'confirmed'))).orderBy(procedureSession.day, procedureSession.startTime).limit(1))[0] ?? null })));
   });
 

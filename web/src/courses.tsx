@@ -51,7 +51,7 @@ export async function printQuote(id: string) {
 /** A procedure plan's money in one place for the desk: the fixed price (list or a clinic package), the quote, booking, and paying sittings ahead.
  *  Nobody types a price here: a reduction is a discount on the bill, where above the clinic limit it waits for approval. */
 export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { id: string; procedureId: string; procedure?: string; sittings?: number; amountPaise?: number | null; patient?: any }; patientId: string; patientName: string; onClose: () => void }) {
-  const [booking, setBooking] = useState(false); const [paying, setPaying] = useState(false);
+  const [booking, setBooking] = useState(false); const [moving, setMoving] = useState<any>(null); const [paying, setPaying] = useState(false); // book a new sitting, or move the one booked
   const { cfg, perms } = useOutletContext<any>();
   const cs = useCourses(patientId); const c = (cs.data ?? []).find((x: any) => x.recommendationId === rec.id);
   const proc = cfg?.procedures?.find((p: any) => p.id === rec.procedureId);
@@ -73,7 +73,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
     onSuccess: () => { refresh(); toast(`Refund of ${money(rfPaise)} recorded · ${REFUND_MODES.find(([m]) => m === rf!.mode)?.[1]}`); setRf(null); }, onError: (e) => toast(errText(e), 'err') });
   const ledger: any[] = c?.ledger ?? []; const booked = c?.nextSitting ?? ledger.find((l: any) => l.state && !['done', 'planned'].includes(l.state)); // the next sitting already booked
   const canPay = can(perms, 'payment.record'); const leftToPay = c ? c.stillToPayPaise > 0 && c.sittings - c.doneSittings - c.unusedSittings > 0 : true;
-  if (booking) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} onClose={() => { setBooking(false); refresh(); }} />;
+  if (booking || moving) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} sitting={moving ?? undefined} onClose={() => { setBooking(false); setMoving(null); refresh(); ['psessions', 'timeline', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />;
   if (paying) return <TakePayment patientId={patientId} patientName={patientName} ahead={{ recommendationId: rec.id }} onClose={() => { setPaying(false); refresh(); }} />;
   return (
     <Drawer title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${c?.sittings ?? sittings} sittings planned`} onClose={onClose} width="max-w-lg">
@@ -94,7 +94,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
         </div>
       ) : (
         <div className="space-y-4">
-          <Standing c={c} booked={booked} action={c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book sitting {c.doneSittings + 1}</button>} />
+          <Standing c={c} booked={booked} action={booked?.id ? <button className="btn btn-sm" onClick={() => setMoving(booked)}>Reschedule</button> : c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book sitting {c.doneSittings + 1}</button>} />
           {rf && <div className="rounded-xl border border-line p-3 space-y-3 anim-fade-up">
             <div className="label !mb-0">Refund unused sittings · up to {money(c.refundablePaise)}</div>
             <div><label className="label" htmlFor="rf-amt">Amount</label><MoneyInput id="rf-amt" value={rf.amount} onChange={(v) => setRf({ ...rf, amount: v })} /></div>

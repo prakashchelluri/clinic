@@ -56,9 +56,9 @@ test("the doctor's amount is the course price; a sitting done before a course is
   assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 600000); assert.match(ch[0].description, /doctor's price/);
 
   // the course carries its next booked sitting (the popup and the Procedures tab agree)
-  await reception('POST', '/procedure-sessions', { recommendationId: a.rec.id, day: plusDays(3), startTime: '10:00', minutes: 30, force: true });
+  const booked1 = (await reception('POST', '/procedure-sessions', { recommendationId: a.rec.id, day: plusDays(3), startTime: '10:00', minutes: 30, force: true })).json();
   const listed = (await owner('GET', `/courses?patientId=${a.p.id}`)).json().find((x: any) => x.id === c.id);
-  assert.equal(listed.nextSitting?.day, plusDays(3)); assert.equal(listed.nextSitting?.sittingNo, 1);
+  assert.equal(listed.nextSitting?.day, plusDays(3)); assert.equal(listed.nextSitting?.sittingNo, 1); assert.equal(listed.nextSitting?.id, booked1.id, 'the id, so the popup can reschedule it');
 
   // the printed Rx names the procedure
   const enc = (await owner('GET', `/patients/${a.p.id}/timeline`)).json().encounters[0];
