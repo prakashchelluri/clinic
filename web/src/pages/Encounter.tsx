@@ -942,9 +942,9 @@ export function Encounter() {
               {secs.map((k) => cards[k] ?? null)}
               {customSections.map(custom)}
               {modIds.map(moduleCard)}
-              {waiting.length > 0 &&<div className="card !px-4 !py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
-              {/* Tatva's custom modules: pick one the clinic has or create a new one */}
-              {!readOnly && isDoctor && <button type="button" className="card flex w-full items-center gap-2 !px-4 !py-3 text-left text-[15px] font-semibold text-clay hover:bg-surface-2" onClick={() => setModDrawer({})}><Icon name="plus" className="h-4 w-4" />Add custom module<span className="ml-auto text-[13px] font-normal text-muted">{myMods.length ? `${myMods.length} on your pad` : 'Your own table on the pad'}</span></button>}
+              {/* one line for everything that can be added: the optional sections, then a custom module (pick one the clinic has or make a new one) */}
+              {(waiting.length > 0 || (!readOnly && isDoctor)) && <div className="card !px-4 !py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}
+                {!readOnly && isDoctor && <span>{waiting.length > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" title={myMods.length ? `${myMods.length} on your pad` : 'Your own table on the pad'} onClick={() => setModDrawer({})}>+ Custom module</button></span>}</div>}
               {modDrawer && <AddModuleDrawer editing={modDrawer.edit} onClose={() => setModDrawer(null)} />}
             </div>; })()}
         </div>
