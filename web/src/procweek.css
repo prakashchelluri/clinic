@@ -1,8 +1,8 @@
 /* Procedures for the coordinator (Today, Week) and the doctor's review: blocks by the hour, the week grid, the lifted box. */
 
 /* a sitting block: time and status, patient, procedure, doctor and room */
-.pw-blk { display: flex; flex-direction: column; gap: 2px; width: 236px; max-width: 100%; padding: 9px 11px; border-radius: 12px; text-align: left; box-sizing: border-box;
-  background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-line-2); font-size: 12.5px; color: var(--color-ink-2); cursor: grab; touch-action: none; user-select: none;
+.pw-blk { display: flex; flex-direction: column; gap: 2px; width: 236px; max-width: 100%; padding: 9px 11px; border-radius: 4px; text-align: left; box-sizing: border-box;
+  background: var(--color-sky-soft); font-size: 12.5px; color: var(--color-ink-2); cursor: grab; touch-action: none; user-select: none;
   transition: opacity .15s ease, transform .15s ease, box-shadow .15s ease; }
 .pw-blk:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px var(--color-line-2), 0 10px 20px -14px rgb(0 0 0 / .45); }
 .pw-blk:focus-visible { outline: 2px solid var(--color-clay); outline-offset: 2px; }
@@ -12,8 +12,8 @@
 .pw-blk .st { font-weight: 700; flex-shrink: 0; }
 .pw-blk.warn .st { color: var(--color-rose); }
 .pw-blk.amber .st { color: var(--color-amber); }
-.pw-blk.room { background: var(--color-nav-active, var(--color-ink)); color: color-mix(in srgb, var(--color-paper) 85%, transparent); box-shadow: none; cursor: pointer; }
-.pw-blk.room b, .pw-blk.room .top { color: var(--color-paper); }
+.pw-blk.room { background: var(--color-sky); color: color-mix(in srgb, var(--color-surface) 85%, transparent); box-shadow: none; cursor: pointer; }
+.pw-blk.room b, .pw-blk.room .top { color: var(--color-surface); }
 .pw-blk.done { background: transparent; color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line); cursor: pointer; }
 .pw-blk.done b { color: var(--color-muted); }
 .pw-blk.fixed { cursor: pointer; }
@@ -29,20 +29,20 @@
 
 /* Today: one row per hour */
 .pw-row { display: grid; grid-template-columns: 84px minmax(0, 1fr); border-top: 1px solid var(--color-line); }
-.pw-row.now { box-shadow: inset 3px 0 0 var(--color-clay); background: color-mix(in srgb, var(--color-clay) 4%, transparent); }
-.pw-row .t { padding: 14px 12px; font-size: 13.5px; font-weight: 700; color: var(--color-ink-2); }
+.pw-row.now { border-top: 2px solid var(--color-rose); }
+.pw-row .t { padding: 12px 10px; font-size: 12px; font-weight: 500; color: var(--color-muted); text-align: right; }
 .pw-row.past .t { color: var(--color-muted); }
-.pw-row .t small { display: block; font-size: 11.5px; font-weight: 700; color: var(--color-clay); margin-top: 2px; }
+.pw-row .t small { display: block; font-size: 11.5px; font-weight: 700; color: var(--color-rose); margin-top: 2px; }
 .pw-slots { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; min-height: 44px; padding: 10px 12px; border-left: 1px solid var(--color-line); transition: background-color .15s, box-shadow .15s, opacity .15s; }
 .pw-free { align-self: center; font-size: 13px; color: var(--color-muted); opacity: .7; }
 
 /* Week: hours down, days across */
 .pw-week { display: grid; grid-template-columns: 76px repeat(6, minmax(0, 1fr)); min-width: 900px; }
-.pw-week .hd { position: sticky; top: 0; z-index: 1; padding: 9px 8px; font-size: 13px; font-weight: 700; background: var(--color-surface-2); border-left: 1px solid var(--color-line); }
+.pw-week .hd { position: sticky; top: 0; z-index: 1; padding: 9px 8px; font-size: 13px; font-weight: 700; background: var(--color-surface); border-left: 1px solid var(--color-line); }
 .pw-week .hd small { display: block; font-size: 11.5px; font-weight: 600; color: var(--color-muted); }
 .pw-week .hd small.red { color: var(--color-rose); }
 .pw-week .hd.today { color: var(--color-clay); }
-.pw-week .t { white-space: nowrap; padding: 11px 8px; font-size: 12.5px; font-weight: 700; color: var(--color-ink-2); border-top: 1px solid var(--color-line); }
+.pw-week .t { white-space: nowrap; padding: 8px; font-size: 12px; font-weight: 500; color: var(--color-muted); text-align: right; border-top: 1px solid var(--color-line); }
 .pw-week .c { min-height: 64px; padding: 5px; display: flex; flex-direction: column; gap: 5px; min-width: 0; border-left: 1px solid var(--color-line); border-top: 1px solid var(--color-line); transition: background-color .15s, box-shadow .15s, opacity .15s; }
 .pw-week .c.past { background: var(--color-surface-2); }
 .pw-week .c.away { background: repeating-linear-gradient(135deg, var(--color-surface-2) 0 6px, var(--color-paper-2) 6px 12px); }

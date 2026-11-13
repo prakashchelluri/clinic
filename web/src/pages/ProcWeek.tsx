@@ -158,7 +158,7 @@ export function ProcWeek() {
             })}
         </section>
 
-        <section className="fd-sheet overflow-hidden">
+        <section className="fd-sheet fd-sch overflow-hidden">
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">
               <div className="pw-week">

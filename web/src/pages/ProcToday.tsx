@@ -61,7 +61,7 @@ export function ProcToday() {
   </> : canWrite && s.state === 'missed' ? act('Reschedule', () => { setOpenId(null); setMoving(s); }, true) : null;
 
   return (
-    <div className="fd-sheet overflow-hidden anim-fade-up">
+    <div className="fd-sheet fd-sch overflow-hidden anim-fade-up">
       <div className="flex flex-wrap items-center gap-2 px-4 py-3">
         <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous day" onClick={() => setDay(addDay(day, -1))}><Icon name="chevL" className="h-4 w-4" /></button>
         <label className="fd-sch-date"><span>{day === t ? `Today · ${longDay(day)}` : day === addDay(t, 1) ? `Tomorrow · ${longDay(day)}` : longDay(day)}</span><input type="date" aria-label="Pick a day" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></label>

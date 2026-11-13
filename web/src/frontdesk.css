@@ -94,43 +94,45 @@
 .fd-cal.on { color: var(--color-ink); box-shadow: inset 0 0 0 1.5px var(--color-nav-active, var(--color-ink)); }
 .fd-cal.on .tick { background: var(--color-nav-active, var(--color-ink)); box-shadow: none; }
 .fd-hgrid { display: grid; }
-.fd-hh { padding: 7px 12px; font-size: 13px; background: var(--color-surface-2); border-left: 1px solid var(--color-line); }
+.fd-hh { padding: 9px 12px; font-size: 13px; border-left: 1px solid var(--color-line); }
 .fd-hh:first-child { border-left: 0; }
 .fd-hh b { font-weight: 700; }
 .fd-hh span { font-size: 12px; color: var(--color-muted); }
-.fd-ht { display: flex; flex-direction: column; gap: 2px; padding: 12px 10px; font-size: 13.5px; font-weight: 700; color: var(--color-ink-2); border-top: 1px solid var(--color-line); white-space: nowrap; }
+.fd-ht { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 10px; font-size: 12px; font-weight: 500; color: var(--color-muted); border-top: 1px solid var(--color-line); white-space: nowrap; }
 .fd-ht.past { color: var(--color-muted); }
-.fd-ht small { font-size: 11.5px; font-weight: 700; color: var(--color-clay); }
-.fd-ht.now, .fd-hc.now { background: color-mix(in srgb, var(--color-clay) 6%, transparent); }
-.fd-ht.now { box-shadow: inset 3px 0 0 var(--color-clay); }
+.fd-ht small { font-size: 11.5px; font-weight: 700; color: var(--color-rose); }
+/* the hour it is now: a red line across the grid, as on any calendar */
+.fd-ht.now, .fd-hc.now { border-top: 2px solid var(--color-rose); }
+
 .fd-hc { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px 10px; border-top: 1px solid var(--color-line); border-left: 1px solid var(--color-line); }
 .fd-hc.off { color: var(--color-muted); font-size: 12px; background: repeating-linear-gradient(45deg, rgba(0,0,0,.03) 0 6px, transparent 6px 12px); }
-.fd-hcap { font-size: 12px; font-weight: 600; color: var(--color-muted); }
-.fd-hchips { display: flex; flex-wrap: wrap; gap: 5px; }
-.fd-sch-free { align-self: flex-start; display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--color-clay); box-shadow: inset 0 0 0 1.5px var(--color-clay-line, var(--color-line-2)); white-space: nowrap; }
+.fd-hcap { font-size: 11.5px; font-weight: 500; color: var(--color-muted); }
+.fd-hchips { display: flex; flex-direction: column; gap: 3px; }
+.fd-sch-free { align-self: flex-start; display: inline-flex; align-items: center; height: 24px; padding: 0 6px; border-radius: 4px; font-size: 12px; font-weight: 600; color: var(--color-clay); white-space: nowrap; }
 .fd-sch-free:hover { background: var(--color-clay-soft); }
 .fd-hkey { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-top: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); }
 .fd-hkey span { display: inline-flex; align-items: center; gap: 6px; }
-.fd-hkey i { display: inline-block; width: 12px; height: 12px; border-radius: 4px; }
+.fd-hkey i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; padding: 0; }
 
-/* a patient chip: one calm colour per state; text says the rest */
-.fd-pc { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 100%; padding: 0 9px 0 4px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; transition: opacity .2s, transform .15s; }
-.fd-pc:hover { transform: translateY(-1px); }
-.fd-pc .tk { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 4px; box-sizing: border-box; border-radius: 6px; background: color-mix(in srgb, var(--color-surface) 70%, transparent); font-size: 11px; font-weight: 700; }
+/* a patient on the calendar: a solid block the width of its column, one colour per state */
+.fd-pc { display: flex; align-items: center; gap: 6px; height: 26px; width: 100%; min-width: 0; padding: 0 8px 0 4px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap; text-align: left; }
+.fd-pc .truncate { flex: 1; }
+/* the calendar sheet is a plain white table, not glass */
+.fd-sch { background: var(--color-surface); -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 12px; box-shadow: inset 0 0 0 1px var(--color-line); }
+.fd-pc:hover { filter: brightness(.96); }
+.fd-pc .tk { display: inline-grid; place-items: center; min-width: 18px; height: 18px; font-size: 11px; font-weight: 700; }
 .fd-pc .tg { font-size: 11px; font-weight: 500; opacity: .8; }
 .fd-pc.dim { opacity: .22; }
 .fd-pc.sel { box-shadow: 0 0 0 2px var(--color-ink); }
-.fd-k-booked { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-line-2); color: var(--color-ink-2); font-weight: 500; padding-left: 9px; }
-.fd-k-late, .fd-k-noshow { background: transparent; color: var(--color-rose); font-weight: 500; padding-left: 4px; }
+.fd-k-booked { background: var(--color-sky-soft); color: var(--color-sky); padding-left: 8px; }
+.fd-k-late, .fd-k-noshow { background: var(--color-rose-soft); color: var(--color-rose); padding-left: 8px; }
 .fd-k-waiting, .fd-k-intake, .fd-k-tests { background: var(--color-paper-2); color: var(--color-ink); }
-.fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-2, var(--color-clay)); box-shadow: inset 0 0 0 1.5px var(--color-clay); }
-.fd-k-doctor { background: var(--color-nav-active, var(--color-ink)); color: var(--color-paper); }
-.fd-k-doctor .tk { background: color-mix(in srgb, var(--color-paper) 18%, transparent); }
-.fd-k-done { background: transparent; color: var(--color-muted); font-weight: 500; }
-.fd-pc.fd-k-done .tk { background: transparent; }
-/* the doctor's own day: booked is the least of their worries, procedures matter */
-.fd-doc .fd-k-booked { background: transparent; color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line); }
-.fd-k-proc { background: var(--color-surface); color: var(--color-ink); box-shadow: inset 0 0 0 1.5px var(--color-muted); padding-left: 9px; }
+.fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-ink); }
+.fd-k-doctor { background: var(--color-sky); color: var(--color-surface); }
+
+.fd-k-done { background: transparent; color: var(--color-muted); }
+
+.fd-k-proc { background: var(--color-surface); color: var(--color-sky); box-shadow: inset 0 0 0 1px var(--color-sky); padding-left: 8px; }
 /* a procedure sitting on the schedule: patient on top, procedure and time under it, never cut off */
 .fd-sit { flex-direction: column; align-items: flex-start; gap: 1px; height: auto; min-height: 40px; padding: 5px 10px; white-space: normal; text-align: left; }
 .fd-sit b { font-size: 13px; font-weight: 600; }
@@ -140,6 +142,6 @@
 .fd-sch-free.quiet:hover { color: var(--color-clay); background: transparent; text-decoration: underline; }
 /* something is pending for the desk (tests or procedures advised): a small "!" beside the name */
 .fd-warn, .fd-pc .warn { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 999px; background: var(--color-amber); color: #fff; font-size: 11px; font-weight: 800; flex-shrink: 0; }
-.fd-pc:not(:has(.tk)) { padding-left: 9px; }
+.fd-pc:not(:has(.tk)) { padding-left: 8px; }
 .fd-pc[draggable="true"] { cursor: grab; }
 .fd-hc.drop { box-shadow: inset 0 0 0 2px var(--color-clay); background: color-mix(in srgb, var(--color-clay) 8%, transparent); }
