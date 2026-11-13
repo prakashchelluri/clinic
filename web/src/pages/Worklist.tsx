@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
-import { get, post, today, errText } from '../api';
+import { get, post, qc, today, errText } from '../api';
 import { ProcToday } from './ProcToday';
 import { ProcWeek } from './ProcWeek';
 import { CourseList, clashLabel } from '../procBoard';
@@ -24,8 +24,8 @@ export function Worklist() {
   );
 }
 /** Pick a day; the server lists rooms with the right capability and the free slots; conflicts are explained, override is explicit. */
-export function ScheduleModal({ rec, sitting, at, onClose }: { rec: any; sitting?: any; at?: { day: string; roomId: string; startTime: string }; onClose: () => void }) {
-  const { cfg } = useOutletContext<any>();
+export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: any; sitting?: any; at?: { day: string; roomId: string; startTime: string }; onClose: () => void; /** when opened outside a page (the + menu) */ cfg?: any }) {
+  const ctx = useOutletContext<any>(); const cfg = cfgP ?? ctx?.cfg;
   const proc = cfg.procedures.find((p: any) => p.id === rec.procedureId);
   const [day, setDay] = useState(at ? at.day : sitting ? (sitting.day >= today() ? sitting.day : today()) : rec.dueOn && rec.dueOn >= today() ? rec.dueOn : today());
   const [reason, setReason] = useState('');
@@ -68,6 +68,35 @@ export function ScheduleModal({ rec, sitting, at, onClose }: { rec: any; sitting
           <div className="flex gap-2 mt-2 items-center"><input type="time" className="input !w-auto" value={manual.startTime} onChange={(e) => { setManual({ ...manual, startTime: e.target.value }); setPick(null); }} /><select className="input !w-auto" value={manual.roomId} onChange={(e) => setManual({ ...manual, roomId: e.target.value })}><option value="">No room</option>{cfg.rooms.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div></details>
         {conf && <div className="rounded-xl bg-amber-soft text-amber text-sm p-3 anim-fade-up"><div className="font-medium mb-1">This slot clashes:</div>{conf.map((c, i) => <div key={i}>• {clashLabel(c.kind)}: {c.who} ({c.startTime}–{c.endTime})</div>)}<button className="btn btn-sm mt-2" onClick={() => save.mutate(true)}>Schedule anyway</button></div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || (!pick && !manual.startTime)} onClick={() => save.mutate(false)}><Icon name="check" />Book {new Date(day + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}{(pick?.startTime ?? manual.startTime) ? `, ${pick?.startTime ?? manual.startTime}` : ''}</button></div>
+      </div>
+    </Drawer>
+  );
+}
+
+/** + New › Schedule a procedure, from any page: find the patient, pick one of their prescribed procedures, then book the sitting
+ *  in the usual drawer. Lists every procedure still to finish, the ones with no sitting booked first. */
+export function ScheduleProcedure({ cfg, onClose }: { cfg: any; onClose: () => void }) {
+  const [q, setQ] = useState(''); const [pick, setPick] = useState<any>(null);
+  const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure') });
+  const f = q.trim().toLowerCase(); const digits = f.replace(/\s/g, '');
+  const open: any[] = (plans.data ?? []).filter((r: any) => !['done', 'cancelled'].includes(r.status) && (!r.sittings || (r.done ?? 0) < r.sittings))
+    .filter((r: any) => !f || r.patient.fullName.toLowerCase().includes(f) || (r.patient.phone ?? '').includes(digits) || (r.patient.patientNo ?? '').toLowerCase().includes(f) || (r.procedure ?? '').toLowerCase().includes(f))
+    .sort((a: any, b: any) => Number(!!a.next) - Number(!!b.next) || String(a.dueOn ?? '').localeCompare(String(b.dueOn ?? '')));
+  const day = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  if (pick) return <ScheduleModal cfg={cfg} rec={pick} onClose={() => { setPick(null); ['psessions', 'worklist', 'calendar', 'pcounts'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); onClose(); }} />;
+  return (
+    <Drawer title="Schedule a procedure" subtitle="Find the patient, then pick the procedure the doctor prescribed" onClose={onClose} width="max-w-lg">
+      <div className="space-y-3">
+        <input autoFocus aria-label="Find the patient" className="input" placeholder="Patient name, phone or P-number" value={q} onChange={(e) => setQ(e.target.value)} />
+        {plans.isLoading ? <Skeleton rows={3} /> : open.length === 0 ? <div className="py-6 text-center text-[14px] text-muted">{f ? 'No prescribed procedure for this patient.' : 'No prescribed procedures are waiting.'}<div className="mt-1 text-[13px]">The doctor prescribes procedures on the consultation pad.</div></div>
+          : <div className="overflow-hidden rounded-[10px] border border-line">{open.slice(0, 40).map((r: any) => (
+            <button key={r.id} type="button" className="flex w-full items-center gap-3 border-t border-line px-3.5 py-3 text-left first:border-t-0 hover:bg-surface-2" onClick={() => setPick(r)}>
+              <span className="min-w-0 flex-1"><b className="block truncate text-[14.5px] font-semibold">{r.patient.fullName}</b>
+                <span className="block truncate text-[12.5px] text-muted">{[r.patient.patientNo, r.patient.phone].filter(Boolean).join(' · ')}</span>
+                <span className="block truncate text-[13px]">{r.procedure ?? 'Procedure'} · sitting {(r.done ?? 0) + 1}{r.sittings ? ` of ${r.sittings}` : ''}<span className="text-muted"> · {r.next ? `next booked ${day(r.next.day)}` : 'not booked'}</span></span></span>
+              <span className="btn btn-sm shrink-0">{r.next ? 'Book another' : 'Book'}</span>
+            </button>))}</div>}
+        {open.length > 40 && <div className="text-[12.5px] text-muted">Showing 40 of {open.length}. Type a name to narrow it.</div>}
       </div>
     </Drawer>
   );

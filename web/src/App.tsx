@@ -5,6 +5,7 @@ import { useMe, useConfig, post, get, patch, qc, ApiError, clearOfflineCache } f
 import { useOffline } from './offline';
 import { Avatar, Icon, NoAccess, ToastHost, useScrollLock, useOnline, PageSearchCtx, revealTheme } from './ui';
 import { CommandPalette, createActions } from './palette';
+import { ScheduleProcedure } from './pages/Worklist';
 import { NewBooking } from './pages/Booking';
 import { settingsTopic } from './pages/Settings';
 import { refreshBookings } from './apptDrawer';
@@ -239,6 +240,7 @@ export function App() {
       </div>
       <PrintHost />
       <ViewerHost />
+      {params.get('sched') === '1' && c('worklist.write') && cfg.data && <ScheduleProcedure cfg={cfg.data} onClose={() => { const p = new URLSearchParams(params); p.delete('sched'); setParams(p, { replace: true }); }} />}
       {params.get('book') === '1' && c('appointment.write') && cfg.data && <NewBooking cfg={cfg.data} me={me.data} initialPatient={params.get('patient') ? { id: params.get('patient')!, name: params.get('pname') ?? 'this patient' } : undefined} initialDay={params.get('day') ?? undefined} initialDoc={params.get('doc') ?? undefined} onClose={closeBook} onDone={() => { refreshBookings(); const rec = params.get('rec'); if (rec) patch(`/worklist/${rec}`, { status: 'scheduled' }).then(() => qc.invalidateQueries({ queryKey: ['worklist'] }), () => {}); closeBook(); }} />}
       <CommandPalette open={palette} onClose={() => setPalette(false)} can={c} />
       <ToastHost />
