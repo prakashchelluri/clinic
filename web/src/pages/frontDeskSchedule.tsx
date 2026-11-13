@@ -34,7 +34,7 @@ function useShown(): [Record<string, any>, (k: string, on: boolean | string) => 
   return [s, (k, on) => { const n = { ...s, [k]: on }; setS(n); try { localStorage.setItem('fd.cals', JSON.stringify(n)); } catch { /* storage blocked */ } }];
 }
 
-type ChipP = { id: string; k: Kind; next?: boolean; tok?: string; name: string; tag: string; who: string; warn?: boolean; sel?: boolean; proc?: boolean; /** the procedure's name, after the patient */ sub?: string; /** more for the tooltip: the service, the time and room */ info?: string; onClick: () => void; drag?: (e: DragEvent) => void };
+type ChipP = { id: string; k: Kind; next?: boolean; tok?: string; name: string; tag: string; who: string; warn?: boolean; sel?: boolean; proc?: boolean; /** the procedure's name, after the patient */ sub?: string; /** more for the tooltip: the service, the time and room */ info?: string; /** a procedure's part of the hour: where it starts and how much it takes, 0–1 */ at?: [number, number]; onClick: () => void; drag?: (e: DragEvent) => void };
 type Col = { key: string; head: React.ReactNode; day: string; ws: any[]; /** null: that day's check-ins are not loaded, the bookings carry the status */ visits: any[] | null; sits: any[]; room?: boolean };
 
 /** The one calendar on the Dashboard, for the desk and for doctors. Today is a column per doctor (and per room when asked for), Week is a column
@@ -171,15 +171,19 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       drag: canDrag ? (e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: a.id, sessionId: w.id, name: a.name })); e.dataTransfer.effectAllowed = 'move'; } : undefined };
   };
   // a sitting whose hour has gone by without starting counts as didn't come
-  const sitChip = (p: any, c: Col): ChipP => { const base = SITTING[p.state] ?? 'booked'; const k: Kind = base === 'booked' && gone(c.day, rowOf(p.startTime)?.end ?? p.startTime) ? 'late' : base; return { id: p.id, k, proc: true, name: p.patient, sub: p.procedure ?? 'Procedure', tag: '', info: [p.startTime, p.room].filter(Boolean).join(' · '), who: p.doctor ?? '', onClick: () => setProcId(p.id) }; };
+  // a sitting is drawn in every hour it runs into, as long as its share of that hour (45 min = three quarters, 2 hours = two full hours)
+  const inRow = (p: any, r: { start: string; end: string }) => (list ? rowOf(p.startTime) === r : p.startTime < r.end && p.endTime > r.start);
+  const share = (p: any, r: { start: string; end: string }): [number, number] => { const a = toMin(r.start), len = toMin(r.end) - a || 60; const s = Math.max(toMin(p.startTime), a), e = Math.min(toMin(p.endTime), toMin(r.end));
+    return [(s - a) / len, Math.max(0.15, (e - s) / len)]; };
+  const sitChip = (p: any, c: Col, r?: { start: string; end: string }): ChipP => { const base = SITTING[p.state] ?? 'booked'; const k: Kind = base === 'booked' && gone(c.day, rowOf(p.startTime)?.end ?? p.startTime) ? 'late' : base; return { id: p.id, k, proc: true, name: p.patient, sub: p.procedure ?? 'Procedure', tag: '', info: [`${p.startTime}–${p.endTime}`, p.room].filter(Boolean).join(' · '), who: p.doctor ?? '', at: r && !list ? share(p, r) : undefined, onClick: () => setProcId(p.id) }; };
   // the key as a filter: Procedure narrows to procedures; the statuses add up (Completed + Didn't come shows both)
   const keyOk = (x: ChipP) => { if (!keyF.size) return true; const st = KEY.filter((y) => y.id !== 'proc' && keyF.has(y.id)); return (!keyF.has('proc') || !!x.proc) && (!st.length || st.some((y) => y.match(x))); };
   /** who is in a column's hour: here first, then sittings, then booked */
-  const cell = (c: Col, r: { start: string }) => {
+  const cell = (c: Col, r: { start: string; end: string }) => {
     const wsAt = c.ws.filter((w) => w.startTime === r.start);
     const here = (c.visits ?? []).filter((v) => { const h = homeOf(v, c.ws.filter((w) => w.practitionerId === v.practitionerId)); return !!h && wsAt.includes(h); });
     const booked: ChipP[] = wsAt.flatMap((w) => (w.appointments ?? []).filter((a: any) => !c.visits || (a.status !== 'arrived' && !c.visits.some((v) => v.appointmentId === a.id))).map((a: any) => apptChip(a, w, c.day))).sort((x, y) => Number(x.k === 'cancelled') - Number(y.k === 'cancelled'));
-    const chips = [...here.map((v) => visitChip(v, c.day)), ...c.sits.filter((p) => rowOf(p.startTime) === r).map((p) => sitChip(p, c)), ...booked];
+    const chips = [...c.sits.filter((p) => inRow(p, r)).map((p) => sitChip(p, c, r)), ...here.map((v) => visitChip(v, c.day)), ...booked];
     const keyed = chips.filter(keyOk);
     return { wsAt, chips: kindF === 'all' ? keyed : keyed.filter((x) => (kindF === 'proc') === !!x.proc) };
   };
@@ -205,14 +209,14 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   // Today only: an hour that is over and has nobody still here folds into one line; from two hours after now, an hour is one line until opened
   const calm = !week && isToday;
   const ACTIVE: Kind[] = ['waiting', 'intake', 'doctor', 'tests'];
-  const chipsAt = (r: { start: string }) => cols.flatMap((c) => cell(c, r).chips);
+  const chipsAt = (r: { start: string; end: string }) => cols.flatMap((c) => cell(c, r).chips);
   const folded = new Set(calm && !showPast ? rows.filter((r) => gone(day, r.end) && !chipsAt(r).some((x) => ACTIVE.includes(x.k))) : []);
   const pastSum = (() => { if (!calm) return ''; const all = rows.filter((r) => gone(day, r.end)).flatMap(chipsAt); const k = (...ks: Kind[]) => all.filter((x) => ks.includes(x.k)).length;
     return [k('done', 'tests') && `${k('done', 'tests')} completed`, k('late', 'noshow') && `${k('late', 'noshow')} didn't come`, k('cancelled') && `${k('cancelled')} cancelled`].filter(Boolean).join(' · ') || 'nobody'; })();
   const anchor = nowRow >= 0 ? nowRow : rows.findIndex((r) => toMin(r.start) > nowM);
   const compact = (i: number, r: { start: string }) => calm && anchor >= 0 && i > anchor + 2 && !opened.has(r.start);
   const freeAt = (r: { start: string }) => cols.reduce((n, c) => { const ws = c.ws.filter((w) => w.startTime === r.start); return n + (ws.length === 1 && !(ws[0].effectiveCapacity === 0 && ws[0].reductions?.length) ? Math.max(0, ws[0].free) : 0); }, 0);
-  const lineOf = (r: { start: string }) => { const x = chipsAt(r).filter((y) => y.k !== 'cancelled'); const pr = x.filter((y) => y.proc).length; const b = x.length - pr; const f = kindF === 'proc' ? 0 : freeAt(r);
+  const lineOf = (r: { start: string; end: string }) => { const x = chipsAt(r).filter((y) => y.k !== 'cancelled'); const pr = x.filter((y) => y.proc).length; const b = x.length - pr; const f = kindF === 'proc' ? 0 : freeAt(r);
     return [b && `${b} booked`, pr && `${pr} procedure${pr === 1 ? '' : 's'}`, f && `${f} free`].filter(Boolean).join(' · ') || 'nothing booked'; };
   return sheet(<>
       <div>
@@ -236,9 +240,9 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               // the doctor's own procedure in this hour sits in the grid like any booking
               const red = shut ? wsAt[0].reductions[0] : null;
               // the doctor's procedure hour: the sitting booked in it, with its patient and its own status (done, didn't come …); only a bare block when no sitting is found
-              const sit = red?.kind === 'procedure' ? (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r) : null;
+              const sit = red?.kind === 'procedure' ? (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && inRow(p, r)) : null;
               const block: ChipP | null = red?.kind !== 'procedure' || kindF === 'consult' || (sit && chips.some((x) => x.id === sit.id)) ? null
-                : sit ? sitChip(sit, c) : { id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => nav(`/worklist?day=${c.day}`) };
+                : sit ? sitChip(sit, c, r) : { id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => nav(`/worklist?day=${c.day}`) };
               const all: ChipP[] = block && keyOk(block) ? [block, ...chips] : chips;
               const free = showFree && kindF !== 'proc' && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
               return (
@@ -258,7 +262,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </>);
 }
 
-function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info }: ChipP) {
-  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${sel ? 'sel' : ''}`} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
+function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info, at }: ChipP) {
+  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${sel ? 'sel' : ''}`} style={at ? { gridColumn: '1 / -1', marginLeft: `${at[0] * 100}%`, width: `${at[1] * 100}%` } : undefined} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
     {tok && <span className="tk">{tok}</span>}{proc && <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5 shrink-0" />}<span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{cap(tag)}</span>}</button>;
 }
