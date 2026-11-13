@@ -205,26 +205,25 @@ function DurationCell({ item, disabled, onChange }: { item: RxItem; disabled?: b
   return <Combo label="Duration" className={`cell-in ${PH}`} placeholder="e.g. 5 days" value={v} options={DURATION_WORDS} disabled={disabled} onChange={(t) => { setV(t); const d = parseDuration(t); last.current = d.durationDays ? afterText(d.durationDays) : d.durationNote ?? ''; onChange(d); }} />;
 }
 
-/** Advices as Tatva picks them: the search opens a list to tick, Done adds what was ticked; a line not in the list is added as typed. */
-function AdvicePicker({ options, have, onDone }: { options: string[]; have: string[]; onDone: (xs: string[]) => void }) {
-  const [q, setQ] = useState(''); const [open, setOpen] = useState(false); const [picked, setPicked] = useState<string[]>([]); const box = useRef<HTMLDivElement>(null);
-  const list = options.filter((o) => !have.includes(o) && (!q.trim() || o.toLowerCase().includes(q.trim().toLowerCase())));
-  const done = (extra: string[] = []) => { const xs = uniq([...picked, ...extra]); if (xs.length) onDone(xs); setPicked([]); setQ(''); setOpen(false); };
-  const custom = q.trim() && !options.some((o) => o.toLowerCase() === q.trim().toLowerCase()) ? q.trim() : null;
+/** Advices as Tatva picks them: the search opens a list where a tick adds the line to the advices and an untick takes it off; a line not in the list is added as typed. */
+function AdvicePicker({ options, have, onToggle }: { options: string[]; have: string[]; onToggle: (x: string) => void }) {
+  const [q, setQ] = useState(''); const [open, setOpen] = useState(false); const box = useRef<HTMLDivElement>(null);
+  const list = options.filter((o) => !q.trim() || o.toLowerCase().includes(q.trim().toLowerCase()));
+  const add = (x: string) => { if (!have.includes(x)) onToggle(x); setQ(''); };
+  const custom = q.trim() && !options.some((o) => o.toLowerCase() === q.trim().toLowerCase()) && !have.includes(q.trim()) ? q.trim() : null;
   return (
     <div ref={box} className="relative mt-2">
       <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
       <input aria-label="Search advices" data-search className={`input w-full !rounded-[8px] !py-2 !pl-9 ${PH}`} placeholder="Search advices" value={q} role="combobox" aria-expanded={open}
         onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-        onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; if (e.key === 'Enter') { e.preventDefault(); done(custom ? [custom] : picked.length ? [] : list[0] ? [list[0]] : []); } else if (e.key === 'Escape') { setOpen(false); } }} />
-      <Floating anchor={box} open={open && (list.length > 0 || !!custom)} onClose={() => done()} width={box.current?.offsetWidth ?? 360} align="left">
+        onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; if (e.key === 'Enter') { e.preventDefault(); const x = custom ?? list.find((o) => !have.includes(o)); if (x) add(x); } else if (e.key === 'Escape') { setOpen(false); } }} />
+      <Floating anchor={box} open={open && (list.length > 0 || !!custom)} onClose={() => { setOpen(false); setQ(''); }} width={box.current?.offsetWidth ?? 360} align="left">
         <div className="p-1.5">
-          <div className="flex items-center px-2 pb-1 pt-0.5"><span className="text-[11px] font-semibold uppercase tracking-wider text-muted">{q ? 'Search results' : 'Advices'}</span>
-            <button type="button" className="btn btn-sm btn-primary ml-auto" onMouseDown={(e) => e.preventDefault()} onClick={() => done()}>Done ({picked.length})</button></div>
+          <div className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted">{q ? 'Search results' : 'Advices'}</div>
           <div className="max-h-64 overflow-y-auto">
             {list.slice(0, 40).map((o) => <label key={o} className="flex cursor-pointer items-center gap-2 rounded-[4px] px-2.5 py-1.5 text-[13px] hover:bg-paper-2" onMouseDown={(e) => e.preventDefault()}>
-              <input type="checkbox" className="accent-ink" checked={picked.includes(o)} onChange={() => setPicked((p) => (p.includes(o) ? p.filter((x) => x !== o) : [...p, o]))} />{o}</label>)}
-            {custom && <button type="button" className="flex w-full items-center gap-2 rounded-[4px] px-2.5 py-1.5 text-left text-[13px] hover:bg-paper-2" onMouseDown={(e) => e.preventDefault()} onClick={() => done([custom])}>{custom}<span className="font-semibold text-clay">+ Add custom</span></button>}
+              <input type="checkbox" className="accent-ink" checked={have.includes(o)} onChange={() => onToggle(o)} />{o}</label>)}
+            {custom && <button type="button" className="flex w-full items-center gap-2 rounded-[4px] px-2.5 py-1.5 text-left text-[13px] hover:bg-paper-2" onMouseDown={(e) => e.preventDefault()} onClick={() => add(custom)}>{custom}<span className="font-semibold text-clay">+ Add custom</span></button>}
           </div>
         </div>
       </Floating>
@@ -689,7 +688,7 @@ export function Encounter() {
     </Card> : null,
     advice: isDoctor ? <Card key="advice" id="advice" title="Advices" meta="standard lines print in Telugu too" actions={cardActs('advice')}>
       {adviceLines.map((a) => <div key={a} className="rx-row"><label className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-[13px] font-semibold"><input type="checkbox" className="accent-ink" checked disabled={readOnly} aria-label={`Remove ${a}`} onChange={() => toggleAdvice(a)} />{a}</label></div>)}
-      {!readOnly && <AdvicePicker options={ADVICE} have={adviceLines} onDone={(xs) => set('plan', 'advice', uniq([...adviceLines, ...xs]).join('\n'))} />}
+      {!readOnly && <AdvicePicker options={ADVICE} have={adviceLines} onToggle={toggleAdvice} />}
     </Card> : null,
     tests: isDoctor ? <Card key="tests" id="tests" title="Investigation" actions={cardActs('tests')}>
       {tests.map((r) => <Row key={r.notes} label={r.notes ?? 'test'} onRemove={readOnly || r.status === 'done' ? null : () => setRecs(recs.filter((x) => x !== r))}>
