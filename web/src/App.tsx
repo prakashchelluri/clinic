@@ -56,7 +56,6 @@ export function Home() {
   return <Navigate to={homeFor(c, me.data?.tenantKind === 'platform')} replace />;
 }
 
-/** Left navigation: a quiet rail with counts; the active item is one filled row. */
 /** Light or dark for this person, kept on this device. The print sheet and the waiting-room TV ignore it. */
 export function useTheme() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => { try { return (localStorage.getItem('theme') as 'light' | 'dark') || 'light'; } catch { return 'light'; } });
@@ -68,58 +67,32 @@ export function useTheme() {
 const ROLE_LABEL: Record<string, string> = { owner: 'Owner', admin: 'Admin', doctor: 'Doctor', assistant: 'Junior doctor', receptionist: 'Reception', coordinator: 'Coordinator', pharmacist: 'Pharmacy' };
 const roleLabel = (r: string) => ROLE_LABEL[r] ?? r.replace(/_/g, ' ');
 
-/** Where a thin line goes in the rail: before the first page of each group (care, stock, money, the clinic). */
-const GROUP_START = new Set(['/worklist', '/pharmacy', '/clinic', '/billing', '/settings']);
+/** Group headings in the side menu, before the first page of each group. */
+const GROUP: Record<string, string> = { '/worklist': 'Care', '/pharmacy': 'Stock', '/clinic': 'Business', '/settings': 'Admin' };
 
-/** The menu (S-C): one size, always. Every page an icon with its name under it, counts as small badges, thin lines
- *  between the groups. Nothing to open or collapse, so the only arrow on screen is the page's own Back. */
-function LabelRail({ items, active, clinic, me, roles, badges = {}, onSignOut }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void }) {
-  let first = true;
-  const item = (to: string, label: string, icon: string, b?: Badge) => {
-    const on = active?.to === to;
-    return (
-      <Link key={to} to={to} viewTransition aria-current={on ? 'page' : undefined} aria-label={b ? `${label}, ${b.hint}` : label} title={b ? `${label} · ${b.hint}` : label} className={`lrail-item ${on ? 'active' : ''}`}>
-        <span className="lrail-ic"><Icon name={icon} className="h-5 w-5" /></span>
-        <span className="lrail-label">{label}</span>
-        {b && <span className={`lrail-badge ${b.warn ? 'warn' : ''}`} aria-hidden="true">{b.n > 99 ? '99+' : b.n}</span>}
-      </Link>
-    );
-  };
-  return (
-    <div className="flex h-full flex-col items-center px-1.5 pb-3 pt-3">
-      <nav className="flex w-full flex-1 flex-col items-center gap-0.5 overflow-y-auto no-scrollbar" aria-label="Sections">
-        {items.map((n) => { const line = !first && GROUP_START.has(n.to); first = false; return <span key={n.to} className="contents">{line && <span className="lrail-sep" aria-hidden="true" />}{item(n.to, n.label, n.icon, badges[n.to])}</span>; })}
-        <span className="lrail-sep" aria-hidden="true" />
-        {item('/help', 'Help', 'help')}
-      </nav>
-      <div className="mt-2 flex shrink-0 flex-col items-center gap-1.5 border-t border-line pt-2.5">
-        <span className="relative" title={`${me.name} · ${roles.map(roleLabel).join(', ')}`}><Avatar name={me.name} size="h-9 w-9 text-[12px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-paper)' }} /></span>
-        <button onClick={onSignOut} aria-label="Sign out" title="Sign out" className="lrail-item !min-h-0 !flex-none !py-1.5"><span className="lrail-ic !h-7"><Icon name="logout" className="h-4 w-4" /></span><span className="lrail-label">Sign out</span></button>
-      </div>
-    </div>
-  );
-}
-
+/** The side menu (v61 · Pro): dark, every allowed page by name, counts as small badges, quiet group headings.
+ *  The same menu on desktop (fixed) and on phones (the drawer). */
 function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void}) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
-      {badges[n.to] && <span className={`nav-badge ${badges[n.to]!.warn ? 'warn' : ''}`} title={badges[n.to]!.hint}><span className="sr-only">{badges[n.to]!.hint}: </span>{badges[n.to]!.n}</span>}
+      {badges[n.to] && <span className={`nav-badge ${badges[n.to]!.warn ? 'warn' : ''}`} title={badges[n.to]!.hint}><span className="sr-only">{badges[n.to]!.hint}: </span>{badges[n.to]!.n > 99 ? '99+' : badges[n.to]!.n}</span>}
     </Link>
   );
   return (
-    <div className="flex h-full flex-col px-2.5 py-3">
-      <div className="flex items-center gap-1 pb-3 pt-1">
-        <Link to="/" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5 px-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white">{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
-      </div>
-      <nav className="flex flex-col gap-px overflow-y-auto no-scrollbar" aria-label="Sections">
-        {items.map(link)}
+    <div className="side-dark flex h-full flex-col px-3 pb-3">
+      <Link to="/" onClick={onNavigate} className="flex h-14 shrink-0 items-center gap-2.5 px-1.5" title={clinic}>
+        <img src="/cubott.png" alt="" className="h-7 w-7 shrink-0 object-contain" />
+        <span className="min-w-0 leading-tight"><span className="block truncate text-[14px] font-semibold text-ink">Cubott OPD</span><span className="block truncate text-[11.5px] text-muted">{clinic}</span></span>
+      </Link>
+      <nav className="-mx-1 flex flex-1 flex-col gap-px overflow-y-auto px-1 no-scrollbar" aria-label="Sections">
+        {items.map((n, i) => <span key={n.to} className="contents">{i > 0 && GROUP[n.to] && <span className="side-group" aria-hidden="true">{GROUP[n.to]}</span>}{link(n)}</span>)}
       </nav>
-      <Link to="/help" onClick={onNavigate} className="nav-item mt-auto"><Icon name="help" className="h-4 w-4" /><span>Help</span></Link>
-      <div className="mt-1.5 flex items-center gap-2.5 border-t border-line px-2 pt-3">
-        <Avatar name={me.name} size="h-7 w-7 text-[11px]" />
-        <div className="min-w-0 flex-1"><div className="truncate text-[12.5px] font-semibold">{me.name}</div><div className="truncate text-[11px] text-muted">{roles.map(roleLabel).join(' · ')}</div></div>
-        <button onClick={onSignOut} aria-label="Sign out" data-tip="Sign out" className="tip btn btn-ghost btn-icon !h-8 !w-8"><Icon name="logout" /></button>
+      <Link to="/help" onClick={onNavigate} className={`nav-item mt-2 ${active === null && location.pathname.startsWith('/help') ? 'active' : ''}`}><Icon name="help" className="h-4 w-4" /><span>Help</span></Link>
+      <div className="mt-2 flex items-center gap-2.5 border-t border-line px-1 pt-3">
+        <span className="relative shrink-0"><Avatar name={me.name} size="h-8 w-8 text-[11px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-sidebar)' }} /></span>
+        <div className="min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{me.name}</div><div className="truncate text-[11.5px] text-muted">{roles.map(roleLabel).join(' · ')}</div></div>
+        <button onClick={onSignOut} aria-label="Sign out" title="Sign out" className="btn btn-ghost btn-icon text-muted hover:!bg-paper-2 hover:text-ink"><Icon name="logout" className="h-4 w-4" /></button>
       </div>
     </div>
   );
@@ -219,25 +192,31 @@ export function App() {
       <div className="app-orbs no-print" aria-hidden="true"><i /><i /><i /></div>
       {/* one top row across the whole screen: the Cubott logo over the menu, the clinic, where you are, and the few app actions.
           A page's search lives with its own table, not up here. */}
-      <header className="app-top no-print sticky top-0 z-30 flex h-[60px] items-center bg-paper/90 backdrop-blur-xl" style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
+      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-[232px] md:block" aria-label="Main">
+        <Sidebar {...side} />
+      </aside>
+      {drawer && (
+        <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
+          <aside className="h-full w-[264px] max-w-[85vw] anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
+        </div>
+      )}
+
+      <div className={`md:pl-[232px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
+      <header className="app-top no-print sticky top-0 z-30 flex h-14 items-center" style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
         <button className="btn btn-ghost btn-icon ml-2 md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
-        <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:w-[84px]"><img src="/cubott.png" alt="Cubott" className="h-9 w-9 object-contain" /></Link>
-        <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 md:pr-7">
+        <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:hidden"><img src="/cubott.png" alt="Cubott" className="h-8 w-8 object-contain" /></Link>
+        <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 md:px-7">
           {parent && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
-          {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[18px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
+          {onPad ? <div id="topbar-slot" className="flex min-w-0 flex-1 items-center" /> : <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
           <span className="ml-auto" />
-          {/* the clinic you are working in, as a quiet badge: its initials, its name, your role under it */}
-          <span className="hidden min-w-0 max-w-[360px] items-center gap-2.5 sm:flex" title={clinic}><span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[9px] bg-clay text-[13px] font-bold" style={{ color: 'var(--color-paper)' }}>{clinic.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()}</span>
-            <span className="min-w-0 leading-tight"><span className="block truncate text-[16px] font-bold">{clinic}</span><span className="block truncate text-[12.5px] font-medium text-muted">{roles.map(roleLabel).join(' · ')}</span></span></span>
-          <span className="mx-2.5 hidden h-[30px] w-px bg-line-2 sm:block" />
           {/* theme and help as one grouped control */}
-          <span className="hidden overflow-hidden rounded-[10px] border border-line-2 bg-surface sm:flex">
-          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="grid h-9 w-9 place-items-center text-muted hover:bg-paper-2 hover:text-ink" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
-          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="grid h-9 w-9 place-items-center border-l border-line-2 text-muted hover:bg-paper-2 hover:text-ink"><Icon name="help" className="h-4 w-4" /></Link>}
+          <span className="hidden overflow-hidden rounded-[6px] border border-line-2 bg-field sm:flex">
+          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="grid h-8 w-8 place-items-center text-muted hover:bg-paper-2 hover:text-ink" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
+          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="grid h-8 w-8 place-items-center border-l border-line-2 text-muted hover:bg-paper-2 hover:text-ink"><Icon name="help" className="h-4 w-4" /></Link>}
           </span>
           {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
             <div className="relative shrink-0">
-              <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-10 !min-h-10 !w-10 !rounded-[11px] !p-0 justify-center"><Icon name="plus" className="h-5 w-5" /></button>
+              <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-8 !min-h-8 !rounded-[6px] !px-2.5 justify-center"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
               {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
                 <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
             </div>); })()}
@@ -247,17 +226,8 @@ export function App() {
           </div>
         </div>
       </header>
-      <aside className="no-print fixed bottom-0 left-0 top-[60px] z-20 hidden w-[84px] bg-sidebar md:block" style={{ boxShadow: 'inset -1px 0 0 rgba(0,0,0,.15)' }} aria-label="Main">
-        <LabelRail items={items} active={active} clinic={clinic} me={me.data} roles={roles} badges={badges} onSignOut={signOut} />
-      </aside>
-      {drawer && (
-        <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
-          <aside className="h-full w-[264px] max-w-[85vw] bg-sidebar anim-slide-in" style={{ boxShadow: 'var(--shadow-lift)' }} onClick={(e) => e.stopPropagation()} aria-label="Main"><Sidebar {...side} onNavigate={() => setDrawer(false)} /></aside>
-        </div>
-      )}
 
-      <div className={`md:pl-[84px] ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-        {offlineAt !== null && <div role="status" className="no-print sticky top-[60px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
+        {offlineAt !== null && <div role="status" className="no-print sticky top-14 z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
 
         <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/dashboard' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}><PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>

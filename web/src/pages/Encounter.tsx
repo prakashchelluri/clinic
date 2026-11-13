@@ -835,7 +835,7 @@ export function Encounter() {
         return slot ? createPortal(who, slot) : <div className="card !px-5 !py-3 anim-fade-up">{who}</div>; })()}
       <CarefulBanner flags={p.flags} />
       {/* tabs (an underline, not pills): the Rxpad, and the patient's past visits, photos and reports beside it */}
-      {<div className="sticky top-[60px] z-20 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-1 bg-paper/95 px-1 backdrop-blur-xl">
+      {<div className="sticky top-14 z-20 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-1 bg-paper/95 px-1 backdrop-blur-xl">
         {isDoctor ? <Tabs<'pad' | 'visits' | 'photos' | 'docs'> className="tabs-lg min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'pad', label: 'Rxpad' }, { value: 'visits', label: 'Past visits', count: previous.length || undefined }, { value: 'photos', label: 'Photos', count: ph.length || undefined }]} /> : <span className="flex-1" />}
         {/* Stacked: save, preview and finish at the top, always in reach (Tatva's End visit) */}
         {<div className="flex flex-wrap items-center gap-2 py-1.5">

@@ -1,46 +1,46 @@
 @import "tailwindcss";
 
-/* ---------- Design tokens (v60 · Cubott Blue): Inter, a cool-grey canvas, white cards with a hairline border,
-   one blue for the action and the open page, status colours only on small chips. Calm enough for a full OPD day. ---------- */
+/* ---------- Design tokens (v61 · Pro): Inter, zinc neutrals, a dark side menu, white cards with a crisp hairline,
+   indigo for the one action, status as small dot tags. Dense and quiet, like Linear or Vercel. ---------- */
 @theme {
   --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-serif: "Inter", system-ui, sans-serif;
 
-  --radius-lg: 8px; --radius-xl: 10px; --radius-2xl: 12px; --radius-3xl: 16px;
+  --radius-md: 6px; --radius-lg: 7px; --radius-xl: 8px; --radius-2xl: 10px; --radius-3xl: 12px;
 
-  --color-paper: #F5F6F8;      /* the canvas */
-  --color-paper-2: #EBEDF1;    /* a filled tile, a chosen row, a skeleton */
+  --color-paper: #FAFAFA;      /* the canvas */
+  --color-paper-2: #F4F4F5;    /* a filled tile, a chosen row, a skeleton */
   --color-surface: #FFFFFF;    /* cards, menus, dialogs */
-  --color-surface-2: #F7F8FA;  /* hover, table head, the quiet band inside a card */
+  --color-surface-2: #FAFAFA;  /* hover, table head, the quiet band inside a card */
   --color-field: #FFFFFF;      /* every place you type */
-  --color-ink: #101828;
-  --color-ink-2: #344054;
-  --color-muted: #5D6679;      /* 5.6:1 on white */
-  --color-line: #EAECF0;
-  --color-line-2: #D0D5DD;     /* the border on inputs and buttons */
+  --color-ink: #09090B;
+  --color-ink-2: #3F3F46;
+  --color-muted: #71717A;      /* 4.8:1 on white */
+  --color-line: #E4E4E7;
+  --color-line-2: #D4D4D8;     /* the border on inputs and buttons */
 
-  --color-clay: #2563EB;       /* the one action: blue */
-  --color-clay-2: #1D4ED8;
-  --color-clay-soft: #EEF4FF;
-  --color-brand: #2563EB;      /* the mark */
-  --color-sage: #067647;
-  --color-sage-soft: #ECFDF3;
-  --color-amber: #B54708;
-  --color-amber-soft: #FFFAEB;
-  --color-rose: #B42318;
-  --color-rose-soft: #FEF3F2;
-  --color-sky: #6941C6;        /* info / procedures: violet, so it never reads as the action */
-  --color-sky-soft: #F4F3FF;
-  --color-clay-ink: #1D4ED8;   /* text on clay-soft */
-  --color-clay-line: #B2CCFF;  /* border of a chosen option */
-  --color-sidebar: #FFFFFF;
-  --color-nav-active: #101828; /* solid ink for a chosen pill */
-  --color-tile-1: #EEF4FF; --color-tile-2: #FFFAEB; --color-tile-3: #F4F3FF; --color-tile-4: #FEF3F2; --color-tile-5: #F2F4F7;
+  --color-clay: #4F46E5;       /* the one action: indigo */
+  --color-clay-2: #4338CA;
+  --color-clay-soft: #EEF2FF;
+  --color-brand: #4F46E5;      /* the mark */
+  --color-sage: #15803D;
+  --color-sage-soft: #F0FDF4;
+  --color-amber: #B45309;
+  --color-amber-soft: #FFFBEB;
+  --color-rose: #B91C1C;
+  --color-rose-soft: #FEF2F2;
+  --color-sky: #0369A1;        /* info / procedures */
+  --color-sky-soft: #F0F9FF;
+  --color-clay-ink: #4338CA;   /* text on clay-soft */
+  --color-clay-line: #C7D2FE;  /* border of a chosen option */
+  --color-sidebar: #0F0F12;    /* the dark side menu, in both themes */
+  --color-nav-active: #09090B; /* solid ink for a chosen pill */
+  --color-tile-1: #EEF2FF; --color-tile-2: #FFFBEB; --color-tile-3: #F0F9FF; --color-tile-4: #FEF2F2; --color-tile-5: #F4F4F5;
 
-  /* the card: a hairline border and a barely-there drop */
-  --shadow-soft: inset 0 0 0 1px #EAECF0, 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-lift: 0 0 0 1px rgba(16, 24, 40, 0.06), 0 12px 32px -8px rgba(16, 24, 40, 0.18), 0 4px 8px -4px rgba(16, 24, 40, 0.06);
-  --ring: inset 0 0 0 1px #D0D5DD;
+  /* the card: a crisp hairline and the faintest drop */
+  --shadow-soft: inset 0 0 0 1px #E4E4E7, 0 1px 2px rgba(9, 9, 11, 0.04);
+  --shadow-lift: 0 0 0 1px rgba(9, 9, 11, 0.08), 0 16px 36px -12px rgba(9, 9, 11, 0.22), 0 4px 8px -4px rgba(9, 9, 11, 0.06);
+  --ring: inset 0 0 0 1px #E4E4E7;
 
   /* the one easing curve: quick start, long soft landing; and a spring that overshoots a little */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -50,15 +50,16 @@
 html { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); -webkit-font-smoothing: antialiased; font-size: 14px; font-weight: 400; font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1; color-scheme: light; }
 /* Dark: the same tokens with other values. Each user picks it in the top bar; the print sheet stays white. */
 html[data-theme="dark"] { color-scheme: dark;
-  --color-paper: #0B0D12; --color-paper-2: #1D2129; --color-surface: #13161C; --color-surface-2: #1A1E26; --color-field: #171B22;
-  --color-ink: #F2F4F7; --color-ink-2: #CDD2DB; --color-muted: #98A2B3; --color-line: #232833; --color-line-2: #343A46;
-  --color-clay: #5B8DFF; --color-clay-2: #84A9FF; --color-clay-soft: #18244A; --color-clay-ink: #A4C0FF; --color-clay-line: #2D4A8F; --color-brand: #5B8DFF;
-  --color-sage: #47CD89; --color-sage-soft: #0F2A1E; --color-amber: #FDB022; --color-amber-soft: #2E2210; --color-rose: #F97066; --color-rose-soft: #37170F; --color-sky: #B692F6; --color-sky-soft: #241B3D;
-  --color-sidebar: #0F1217; --color-nav-active: #F2F4F7;
-  --color-tile-1: #18244A; --color-tile-2: #2E2210; --color-tile-3: #241B3D; --color-tile-4: #35141F; --color-tile-5: #1D2129;
-  --shadow-soft: inset 0 0 0 1px #232833, 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-lift: 0 0 0 1px #2A303B, 0 16px 40px -8px rgba(0, 0, 0, 0.7); --ring: inset 0 0 0 1px #343A46; }
+  --color-paper: #09090B; --color-paper-2: #1C1C20; --color-surface: #111113; --color-surface-2: #18181B; --color-field: #141417;
+  --color-ink: #FAFAFA; --color-ink-2: #D4D4D8; --color-muted: #A1A1AA; --color-line: #232327; --color-line-2: #3F3F46;
+  --color-clay: #6366F1; --color-clay-2: #818CF8; --color-clay-soft: #1E1B4B; --color-clay-ink: #A5B4FC; --color-clay-line: #3730A3; --color-brand: #6366F1;
+  --color-sage: #4ADE80; --color-sage-soft: #052E16; --color-amber: #FBBF24; --color-amber-soft: #2A1F05; --color-rose: #F87171; --color-rose-soft: #2A0F0F; --color-sky: #38BDF8; --color-sky-soft: #082F49;
+  --color-sidebar: #09090B; --color-nav-active: #FAFAFA;
+  --color-tile-1: #1E1B4B; --color-tile-2: #2A1F05; --color-tile-3: #082F49; --color-tile-4: #2A0F0F; --color-tile-5: #1C1C20;
+  --shadow-soft: inset 0 0 0 1px #232327, 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-lift: 0 0 0 1px #2A2A30, 0 16px 40px -8px rgba(0, 0, 0, 0.7); --ring: inset 0 0 0 1px #2E2E33; }
 /* In dark the ink is near-white, so anything solid-ink-with-white-text flips its text */
-html[data-theme="dark"] .bg-ink.text-white, html[data-theme="dark"] .bg-ink.text-paper { color: #0B0D12; }
+html[data-theme="dark"] .bg-ink.text-white, html[data-theme="dark"] .bg-ink.text-paper { color: #09090B; }
+
 body { min-height: 100dvh; margin: 0; background: var(--color-paper); }
 h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-weight: 600; font-variant-numeric: tabular-nums; }
 h1 { letter-spacing: -0.022em; }
@@ -140,14 +141,14 @@ h1 { letter-spacing: -0.022em; }
 /* ---------- Components ---------- */
 @layer components {
   /* Panels: near-white, no border, an inset hairline, 16 px corners. The old glass and dark card map here so every page follows. */
-  .card { @apply rounded-[12px] border-0 bg-surface p-5; box-shadow: var(--shadow-soft); }
+  .card { @apply rounded-[10px] border-0 bg-surface p-5; box-shadow: var(--shadow-soft); }
   .card-title { @apply text-[15px] font-semibold text-ink; letter-spacing: -0.01em; }
-  .card-flat, .glass { @apply rounded-[12px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
+  .card-flat, .glass { @apply rounded-[10px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
   .card-hover:hover { @apply bg-surface-2; }
-  .dark-card { @apply rounded-[12px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
+  .dark-card { @apply rounded-[10px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
 
   /* Buttons: secondary is white with a hairline ring, primary is solid black, ghost is bare. */
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-[8px] px-3.5 text-[13.5px] font-semibold border-0 bg-field text-ink-2 select-none; min-height: 36px; box-shadow: var(--ring), 0 1px 2px rgba(16,24,40,.05);
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-[6px] px-3 text-[13px] font-medium border-0 bg-field text-ink select-none; min-height: 34px; box-shadow: var(--ring), 0 1px 2px rgba(16,24,40,.05);
     transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
   .btn:hover { @apply bg-surface-2; }
   .btn:disabled { @apply opacity-45 cursor-not-allowed; }
@@ -156,22 +157,24 @@ h1 { letter-spacing: -0.022em; }
   .btn:active { transform: scale(0.985); }
   .btn-ghost { @apply bg-transparent text-ink-2; box-shadow: none; }
   .btn-ghost:hover { @apply bg-ink/6 text-ink; }
-  .btn-sm { @apply px-3 text-[12.5px] rounded-[7px]; min-height: 32px; }
-  .btn-icon { @apply h-9 w-9 p-0 rounded-[8px]; min-height: 0; }
+  .btn-sm { @apply px-2.5 text-[12.5px] rounded-[6px]; min-height: 30px; }
+  .btn-icon { @apply h-8 w-8 p-0 rounded-[6px]; min-height: 0; }
   .btn-ink { @apply bg-nav-active; color: var(--color-paper); box-shadow: none; } .btn-ink:hover { @apply bg-ink-2; }
 
   /* Inputs: white, a hairline ring, a black ring on focus */
-  .input { @apply w-full rounded-[8px] border-0 bg-field px-3 py-2 text-[14px] text-ink placeholder:text-muted; min-height: 38px; box-shadow: var(--ring), 0 1px 2px rgba(16,24,40,.05);
+  .input { @apply w-full rounded-[6px] border-0 bg-field px-3 py-2 text-[14px] text-ink placeholder:text-muted; min-height: 36px; box-shadow: inset 0 0 0 1px var(--color-line-2), 0 1px 2px rgba(9,9,11,.04);
     transition: box-shadow 0.15s var(--ease), background-color 0.15s var(--ease); }
   .input:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 30%, transparent); }
   .input:focus { @apply outline-none; box-shadow: inset 0 0 0 1px var(--color-clay), 0 0 0 4px color-mix(in srgb, var(--color-clay) 16%, transparent); }
-  input.input, select.input { border-radius: 8px; padding-left: 0.75rem; }
+  input.input, select.input { border-radius: 6px; padding-left: 0.75rem; }
   .input:disabled { @apply bg-surface-2 text-muted; }
   select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23667085' stroke-width='1.8' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; padding-right: 2.2rem; }
   .label { @apply block text-[13px] font-medium text-ink-2 mb-1.5; }
 
   /* Tags: small, flat, sentence case */
-  .chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[12px] font-medium bg-paper-2 text-ink-2; }
+  .chip { @apply inline-flex items-center gap-1.5 rounded-[5px] px-1.5 py-[1px] text-[12px] font-medium bg-paper-2 text-ink-2; box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent); }
+  /* a status tag leads with a dot in its own colour (Linear); one that already carries an icon keeps just the icon */
+  .chip[class*="chip-"]:not(:has(svg))::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
   .chip-clay { @apply bg-clay-soft text-clay-ink; }
   .chip-sage { @apply bg-sage-soft text-sage; }
   .chip-amber { @apply bg-amber-soft text-amber; }
@@ -179,14 +182,14 @@ h1 { letter-spacing: -0.022em; }
   .chip-sky { @apply bg-sky-soft text-sky; }
 
   /* Option chips (Mendo .chip): white with a ring, 9 px corners; the chosen one is solid black */
-  .toggle-opt { @apply rounded-[8px] border-0 bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink-2; min-height: 32px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease); }
+  .toggle-opt { @apply rounded-[6px] border-0 bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink-2; min-height: 32px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease); }
   .toggle-opt:hover { @apply bg-surface-2; }
   .toggle-opt:active { transform: scale(0.97); }
   .toggle-opt.on { @apply bg-clay-soft text-clay-ink; box-shadow: inset 0 0 0 1px var(--color-clay-line); }
   .toggle-opt.on:hover { @apply bg-clay-soft; }
   .toggle-opt:disabled { @apply opacity-60; }
   /* Counters in the patient strip: what exists for this patient; the lit one is open in the drawer */
-  .cnt { @apply inline-flex items-center gap-1.5 rounded-[8px] bg-surface px-3 text-[12.5px] font-semibold text-ink; height: 30px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .cnt { @apply inline-flex items-center gap-1.5 rounded-[6px] bg-surface px-3 text-[12.5px] font-semibold text-ink; height: 30px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .cnt b { @apply font-semibold text-muted; }
   .cnt:hover { @apply bg-surface-2; }
   .cnt.on { @apply bg-clay-soft text-clay-ink; box-shadow: inset 0 0 0 1px var(--color-clay-line); } .cnt.on b { @apply text-clay-ink/70; }
@@ -201,14 +204,14 @@ h1 { letter-spacing: -0.022em; }
   .tab-count { @apply rounded-full bg-surface-2 px-1.5 text-[11px] font-bold text-muted; box-shadow: var(--ring); }
   .tabs > button.on .tab-count { @apply bg-clay-soft text-clay-ink; box-shadow: none; }
   /* a filter: quiet until it narrows something, then tinted green */
-  .filter-btn { @apply inline-flex min-h-9 items-center gap-1.5 rounded-[8px] bg-surface px-3 text-[13px] font-semibold text-ink-2; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .filter-btn { @apply inline-flex min-h-8 items-center gap-1.5 rounded-[6px] bg-surface px-3 text-[13px] font-semibold text-ink-2; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .filter-btn:hover { @apply text-ink; }
   .filter-btn.on { @apply bg-clay-soft text-clay-ink; box-shadow: inset 0 0 0 1px var(--color-clay-line); }
-  .dtab { @apply rounded-[8px] px-3 py-1.5 text-[13px] font-semibold text-muted; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .dtab { @apply rounded-[6px] px-3 py-1.5 text-[13px] font-semibold text-muted; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .dtab:hover { @apply text-ink; }
   .dtab.on { @apply bg-clay-soft text-clay-ink; }
   /* Options not yet chosen read as quiet text; they lift on hover. Chosen ones are the solid .toggle-opt.on pill. */
-  .opt { @apply rounded-[8px] border-0 bg-transparent px-3 py-1.5 text-[13px] font-semibold text-muted; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
+  .opt { @apply rounded-[6px] border-0 bg-transparent px-3 py-1.5 text-[13px] font-semibold text-muted; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
   .opt:hover { @apply bg-ink/6 text-ink; }
   .opt:active { transform: scale(0.97); }
   .opt:disabled { @apply opacity-50; }
@@ -218,13 +221,13 @@ h1 { letter-spacing: -0.022em; }
   .typebar:focus { @apply outline-none; box-shadow: inset 0 0 0 1.5px var(--color-clay), 0 12px 32px -20px rgba(0,0,0,.3); }
 
   /* Segmented control: a grey track, a white pill that slides */
-  .seg { @apply relative inline-flex rounded-[10px] bg-paper-2 p-[3px] gap-0.5 flex-wrap; }
-  .seg > button { @apply relative z-[1] rounded-[7px] px-3 py-1.5 text-[13px] font-semibold text-muted; transition: color 0.2s var(--ease); }
+  .seg { @apply relative inline-flex rounded-[8px] bg-paper-2 p-[3px] gap-0.5 flex-wrap; }
+  .seg > button { @apply relative z-[1] rounded-[6px] px-3 py-1.5 text-[13px] font-semibold text-muted; transition: color 0.2s var(--ease); }
   .seg > button.on { color: var(--color-ink); }
   .seg > button:not(.on):hover { @apply text-ink; }
   .seg-sm > button { @apply px-2.5 py-1 text-[12px] rounded-[6px]; }
   .seg-sm { @apply rounded-[8px] p-[2px]; }
-  .seg-pill { @apply absolute z-0 rounded-[7px] bg-field; top: 3px; bottom: 3px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12), 0 0 0 1px rgba(16, 24, 40, 0.04); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
+  .seg-pill { @apply absolute z-0 rounded-[6px] bg-field; top: 3px; bottom: 3px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12), 0 0 0 1px rgba(16, 24, 40, 0.04); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
 
   .row { @apply flex items-center gap-3 px-5 py-3 border-t border-line first:border-t-0; min-height: 56px; transition: background-color 0.12s var(--ease); }
   .row:hover { background: var(--color-surface-2); }
@@ -234,20 +237,20 @@ h1 { letter-spacing: -0.022em; }
   /* Tables: 60 px rows, a muted 12 px head, numbers tabular */
   .table { @apply w-full text-[13.5px]; font-variant-numeric: tabular-nums; }
   .table th { @apply text-left text-[12px] font-medium text-muted px-4 py-2.5 border-b border-line whitespace-nowrap bg-transparent; }
-  .table td { @apply px-4 py-[11px] border-b border-line align-middle; }
+  .table td { @apply px-4 py-[9px] border-b border-line align-middle; }
   .table.sticky-head th { position: sticky; top: 0; z-index: 2; background: var(--color-surface); }
   .table tbody tr { transition: background-color 0.12s var(--ease); }
   .table tbody tr:hover { background: var(--color-surface-2); }
   .table tr:last-child td { @apply border-b-0; }
 
-  .menu { @apply absolute right-0 z-30 mt-1.5 min-w-52 rounded-[10px] border-0 bg-surface p-1; box-shadow: var(--shadow-lift); }
+  .menu { @apply absolute right-0 z-30 mt-1.5 min-w-52 rounded-[8px] border-0 bg-surface p-1; box-shadow: var(--shadow-lift); }
   /* .pop is the same panel for popovers that hold their own controls (forms, lists with buttons): nothing inside is restyled */
-  .pop { @apply min-w-52 rounded-[10px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift); }
+  .pop { @apply min-w-52 rounded-[8px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift); }
   .menu button, .menu a, .menu-list button, .menu-list a { @apply flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-left text-[13.5px] font-medium text-ink; transition: background-color 0.12s var(--ease); }
   .menu button:hover, .menu a:hover, .menu-list button:hover, .menu-list a:hover { @apply bg-surface-2; }
   .menu .danger, .menu-list .danger { @apply text-rose; }
 
-  .nav-item { @apply flex items-center gap-2.5 rounded-[8px] px-3 text-[13.5px] font-medium text-ink-2; min-height: 38px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
+  .nav-item { @apply flex items-center gap-2.5 rounded-[6px] px-2.5 text-[13.5px] font-medium text-ink-2; min-height: 34px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
   .nav-item:hover { @apply bg-ink/6 text-ink; }
   .nav-item.active { @apply bg-clay-soft font-semibold text-clay-ink; }
   /* a count beside a menu item (Calls to make, today's sittings); amber while something there still needs doing */
@@ -276,7 +279,7 @@ h1 { letter-spacing: -0.022em; }
   .tip:hover::after, .tip:focus-visible::after { opacity: 1; }
 
   /* Top bar pills (Mendo): the search box, the clock */
-  .toppill { @apply inline-flex items-center gap-2 rounded-[8px] bg-surface px-3 text-[13px] font-medium text-ink-2; height: 36px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease); }
+  .toppill { @apply inline-flex items-center gap-2 rounded-[6px] bg-surface px-3 text-[13px] font-medium text-ink-2; height: 36px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease); }
   .toppill:hover { @apply bg-surface-2; }
 }
 
@@ -326,7 +329,7 @@ h1 { letter-spacing: -0.022em; }
 
 /* ---------- Dialogs: one standard (see Modal in ui.tsx) ---------- */
 .modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(16, 24, 40, 0.45); backdrop-filter: blur(2px); animation: fade-in 0.15s var(--ease) both; overscroll-behavior: contain; }
-.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 16px; border: 0; background: var(--color-surface); box-shadow: var(--shadow-lift); animation: modal-in 0.28s var(--ease) both; outline: none; }
+.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 12px; border: 0; background: var(--color-surface); box-shadow: var(--shadow-lift); animation: modal-in 0.28s var(--ease) both; outline: none; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 .modal-head { flex: none; display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.375rem 1.5rem 0.75rem; }
 .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem 1.5rem 1.5rem; }
@@ -407,3 +410,18 @@ select.cell-in { appearance: none; padding-right: 26px; background-image: url("d
 .cell-in:focus { border-color: var(--color-clay); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-clay) 14%, transparent); }
 .cell-in:disabled { color: var(--color-muted); }
 .cell-in option { background: var(--color-surface); color: var(--color-ink); } /* a select in a cell: its list stays readable in dark */
+
+/* ---------- The dark side menu (v61 · Pro): the same tokens, re-pointed inside it, so every rule above just works ---------- */
+.side-dark { --color-ink: #FAFAFA; --color-ink-2: #D4D4D8; --color-muted: #8B8B94; --color-line: #232328; --color-line-2: #2E2E34;
+  --color-paper: #0F0F12; --color-paper-2: #1C1C21; --color-surface: #16161A; --color-surface-2: #1C1C21; --color-field: #16161A;
+  --color-clay-soft: #26262C; --color-clay-ink: #FFFFFF; --color-clay-line: #33333A;
+  --ring: inset 0 0 0 1px #2E2E34; background: var(--color-sidebar); color: var(--color-ink-2); color-scheme: dark; }
+html[data-theme="dark"] .side-dark { --color-paper: #09090B; --color-surface: #121215; }
+.side-dark .nav-item { color: #A1A1AA; }
+.side-dark .nav-item:hover { background: #1C1C21; color: #FAFAFA; }
+.side-dark .nav-item.active { background: #26262C; color: #FFFFFF; box-shadow: inset 0 0 0 1px #303037; }
+.side-dark .nav-item.active svg { color: #A5B4FC; }
+.side-dark .nav-badge { background: #26262C; color: #D4D4D8; }
+.side-dark .nav-badge.warn { background: #3A2A08; color: #FBBF24; }
+.side-dark .nav-item.active .nav-badge { background: var(--color-clay); color: #fff; }
+.side-group { padding: 14px 10px 4px; font-size: 11.5px; font-weight: 500; color: #6B6B74; letter-spacing: .01em; }
