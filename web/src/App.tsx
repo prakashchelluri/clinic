@@ -110,7 +110,7 @@ function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onN
   return (
     <div className="flex h-full flex-col px-2.5 py-3">
       <div className="flex items-center gap-1 pb-3 pt-1">
-        <Link to="/" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5 px-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white" style={{ fontFamily: 'Urbanist, Inter, sans-serif' }}>{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
+        <Link to="/" onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-2.5 px-2"><span className="grid h-7 w-7 shrink-0 place-items-center rounded-[7px] bg-brand text-[13px] font-bold text-white">{clinic.slice(0, 1)}</span><span className="truncate text-[13px] font-semibold leading-tight">{clinic}</span></Link>
       </div>
       <nav className="flex flex-col gap-px overflow-y-auto no-scrollbar" aria-label="Sections">
         {items.map(link)}

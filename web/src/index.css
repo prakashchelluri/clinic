@@ -1,65 +1,69 @@
 @import "tailwindcss";
 
-/* ---------- Design tokens (v36 · Vialo): Urbanist, a mint canvas, near-white cards with an inset hairline, green for the one action, an ink pill for what is chosen; pastel tiles for categories ---------- */
+/* ---------- Design tokens (v60 · Cubott Blue): Inter, a cool-grey canvas, white cards with a hairline border,
+   one blue for the action and the open page, status colours only on small chips. Calm enough for a full OPD day. ---------- */
 @theme {
-  --font-sans: "Urbanist", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-serif: "Urbanist", system-ui, sans-serif;
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Inter", system-ui, sans-serif;
 
-  --color-paper: #EDF1EE;      /* the canvas, the sidebar and the top bar */
-  --color-paper-2: #E2E8E4;    /* a filled tile, a chosen row, a skeleton */
-  --color-surface: #FBFDFC;    /* cards, inputs, secondary buttons */
-  --color-surface-2: #F0F4F1;  /* hover, table head, the quiet band inside a card, a tile */
-  --color-field: #FFFFFF;      /* every place you type: white on the cards, so it reads apart from them */
-  --color-ink: #121A16;
-  --color-ink-2: #2E3A33;
-  --color-muted: #56605A;
-  --color-line: #E5EAE7;       /* rgba(16,32,24,.08) on the card */
-  --color-line-2: #D3DAD6;     /* rgba(16,32,24,.15): the ring on inputs and buttons */
+  --radius-lg: 8px; --radius-xl: 10px; --radius-2xl: 12px; --radius-3xl: 16px;
 
-  --color-clay: #0E7A52;       /* the one action: green */
-  --color-clay-2: #0A6544;
-  --color-clay-soft: #E0EEE7;
-  --color-brand: #0E7A52;      /* the mark */
-  --color-sage: #12714F;
-  --color-sage-soft: #E1F0E8;
-  --color-amber: #8F4E00;
-  --color-amber-soft: #FBEBD3;
-  --color-rose: #B3301B;
-  --color-rose-soft: #F8E1DC;
-  --color-sky: #285C9C;
-  --color-sky-soft: #E1E9F4;
-  --color-clay-ink: #0B6B47;   /* text on clay-soft */
-  --color-clay-line: #9CCBB7;  /* border of a chosen option */
-  --color-sidebar: #EDF1EE;
-  --color-nav-active: #141C18; /* the open page: an ink pill */
-  --color-tile-1: #D6EEDF; --color-tile-2: #FAE6BD; --color-tile-3: #DCE7F6; --color-tile-4: #F5DCD2; --color-tile-5: #E4E9E5;
+  --color-paper: #F5F6F8;      /* the canvas */
+  --color-paper-2: #EBEDF1;    /* a filled tile, a chosen row, a skeleton */
+  --color-surface: #FFFFFF;    /* cards, menus, dialogs */
+  --color-surface-2: #F7F8FA;  /* hover, table head, the quiet band inside a card */
+  --color-field: #FFFFFF;      /* every place you type */
+  --color-ink: #101828;
+  --color-ink-2: #344054;
+  --color-muted: #5D6679;      /* 5.6:1 on white */
+  --color-line: #EAECF0;
+  --color-line-2: #D0D5DD;     /* the border on inputs and buttons */
 
-  /* the card: no border, an inset hairline and a long soft drop */
-  --shadow-soft: inset 0 0 0 1px rgba(16, 32, 24, 0.08), 0 1px 1px rgba(16, 22, 40, 0.04), 0 16px 32px -24px rgba(16, 22, 40, 0.38);
-  --shadow-lift: 0 2px 6px rgba(16, 22, 40, 0.08), 0 34px 70px -26px rgba(16, 22, 40, 0.42);
-  --ring: inset 0 0 0 1px rgba(16, 32, 24, 0.15);
+  --color-clay: #2563EB;       /* the one action: blue */
+  --color-clay-2: #1D4ED8;
+  --color-clay-soft: #EEF4FF;
+  --color-brand: #2563EB;      /* the mark */
+  --color-sage: #067647;
+  --color-sage-soft: #ECFDF3;
+  --color-amber: #B54708;
+  --color-amber-soft: #FFFAEB;
+  --color-rose: #B42318;
+  --color-rose-soft: #FEF3F2;
+  --color-sky: #6941C6;        /* info / procedures: violet, so it never reads as the action */
+  --color-sky-soft: #F4F3FF;
+  --color-clay-ink: #1D4ED8;   /* text on clay-soft */
+  --color-clay-line: #B2CCFF;  /* border of a chosen option */
+  --color-sidebar: #FFFFFF;
+  --color-nav-active: #101828; /* solid ink for a chosen pill */
+  --color-tile-1: #EEF4FF; --color-tile-2: #FFFAEB; --color-tile-3: #F4F3FF; --color-tile-4: #FEF3F2; --color-tile-5: #F2F4F7;
+
+  /* the card: a hairline border and a barely-there drop */
+  --shadow-soft: inset 0 0 0 1px #EAECF0, 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-lift: 0 0 0 1px rgba(16, 24, 40, 0.06), 0 12px 32px -8px rgba(16, 24, 40, 0.18), 0 4px 8px -4px rgba(16, 24, 40, 0.06);
+  --ring: inset 0 0 0 1px #D0D5DD;
 
   /* the one easing curve: quick start, long soft landing; and a spring that overshoots a little */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-html { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); -webkit-font-smoothing: antialiased; font-size: 14px; font-weight: 500; font-feature-settings: "tnum" 1; color-scheme: light; }
+html { font-family: var(--font-sans); background: var(--color-paper); color: var(--color-ink); -webkit-font-smoothing: antialiased; font-size: 14px; font-weight: 400; font-feature-settings: "tnum" 1, "cv11" 1, "ss01" 1; color-scheme: light; }
 /* Dark: the same tokens with other values. Each user picks it in the top bar; the print sheet stays white. */
 html[data-theme="dark"] { color-scheme: dark;
-  --color-paper: #0C110F; --color-paper-2: #222A26; --color-surface: #151B18; --color-surface-2: #1C231F; --color-field: #1E2622;
-  --color-ink: #EEF3EF; --color-ink-2: #CBD4CF; --color-muted: #A0AAA4; --color-line: #252C28; --color-line-2: #343C38;
-  --color-clay: #4FD39A; --color-clay-2: #7FE4B6; --color-clay-soft: #173D2C; --color-clay-ink: #7FE4B6; --color-clay-line: #2F6B50; --color-brand: #4FD39A;
-  --color-sage: #5EC4A6; --color-sage-soft: #16281F; --color-amber: #E8B04A; --color-amber-soft: #2E2612; --color-rose: #F08A80; --color-rose-soft: #331A18; --color-sky: #8DB4E8; --color-sky-soft: #18263F;
-  --color-sidebar: #0C110F; --color-nav-active: #EEF3EF;
-  --color-tile-1: #133826; --color-tile-2: #3A2C12; --color-tile-3: #18263F; --color-tile-4: #3A2018; --color-tile-5: #1F2622;
-  --shadow-soft: inset 0 0 0 1px rgba(255, 255, 255, 0.07), 0 1px 1px rgba(0, 0, 0, 0.4), 0 10px 26px -18px rgba(0, 0, 0, 0.8); --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.5), 0 34px 70px -26px rgba(0, 0, 0, 0.9); --ring: inset 0 0 0 1px rgba(255, 255, 255, 0.14); }
-/* In dark the accent is white, so anything solid-black-with-white-text flips its text */
-html[data-theme="dark"] .bg-clay.text-white, html[data-theme="dark"] .bg-ink.text-white, html[data-theme="dark"] .bg-ink.text-paper { color: #0C110F; }
+  --color-paper: #0B0D12; --color-paper-2: #1D2129; --color-surface: #13161C; --color-surface-2: #1A1E26; --color-field: #171B22;
+  --color-ink: #F2F4F7; --color-ink-2: #CDD2DB; --color-muted: #98A2B3; --color-line: #232833; --color-line-2: #343A46;
+  --color-clay: #5B8DFF; --color-clay-2: #84A9FF; --color-clay-soft: #18244A; --color-clay-ink: #A4C0FF; --color-clay-line: #2D4A8F; --color-brand: #5B8DFF;
+  --color-sage: #47CD89; --color-sage-soft: #0F2A1E; --color-amber: #FDB022; --color-amber-soft: #2E2210; --color-rose: #F97066; --color-rose-soft: #37170F; --color-sky: #B692F6; --color-sky-soft: #241B3D;
+  --color-sidebar: #0F1217; --color-nav-active: #F2F4F7;
+  --color-tile-1: #18244A; --color-tile-2: #2E2210; --color-tile-3: #241B3D; --color-tile-4: #35141F; --color-tile-5: #1D2129;
+  --shadow-soft: inset 0 0 0 1px #232833, 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-lift: 0 0 0 1px #2A303B, 0 16px 40px -8px rgba(0, 0, 0, 0.7); --ring: inset 0 0 0 1px #343A46; }
+/* In dark the ink is near-white, so anything solid-ink-with-white-text flips its text */
+html[data-theme="dark"] .bg-ink.text-white, html[data-theme="dark"] .bg-ink.text-paper { color: #0B0D12; }
 body { min-height: 100dvh; margin: 0; background: var(--color-paper); }
-h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.025em; font-weight: 600; font-variant-numeric: tabular-nums; }
-h1 { letter-spacing: -0.025em; }
-::selection { background: var(--color-paper-2); }
+h1, h2, .serif { font-family: var(--font-sans); letter-spacing: -0.02em; font-weight: 600; font-variant-numeric: tabular-nums; }
+h1 { letter-spacing: -0.022em; }
+::selection { background: var(--color-clay-soft); }
+:focus-visible { outline: 2px solid var(--color-clay); outline-offset: 2px; }
 
 /* ---------- Motion: short, settles softly ---------- */
 @keyframes tab-line { from { transform: scaleX(0.2); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -136,38 +140,38 @@ h1 { letter-spacing: -0.025em; }
 /* ---------- Components ---------- */
 @layer components {
   /* Panels: near-white, no border, an inset hairline, 16 px corners. The old glass and dark card map here so every page follows. */
-  .card { @apply rounded-[24px] border-0 bg-surface p-5; box-shadow: var(--shadow-soft); }
-  .card-title { @apply text-[15px] font-semibold text-ink; }
-  .card-flat, .glass { @apply rounded-[24px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
+  .card { @apply rounded-[12px] border-0 bg-surface p-5; box-shadow: var(--shadow-soft); }
+  .card-title { @apply text-[15px] font-semibold text-ink; letter-spacing: -0.01em; }
+  .card-flat, .glass { @apply rounded-[12px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
   .card-hover:hover { @apply bg-surface-2; }
-  .dark-card { @apply rounded-[24px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
+  .dark-card { @apply rounded-[12px] border-0 bg-surface; box-shadow: var(--shadow-soft); }
 
   /* Buttons: secondary is white with a hairline ring, primary is solid black, ghost is bare. */
-  .btn { @apply inline-flex items-center justify-center gap-2 rounded-[8px] px-4 text-[13.5px] font-semibold border-0 bg-field text-ink select-none; min-height: 38px; box-shadow: var(--ring);
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-[8px] px-3.5 text-[13.5px] font-semibold border-0 bg-field text-ink-2 select-none; min-height: 36px; box-shadow: var(--ring), 0 1px 2px rgba(16,24,40,.05);
     transition: background-color 0.15s var(--ease), box-shadow 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
   .btn:hover { @apply bg-surface-2; }
   .btn:disabled { @apply opacity-45 cursor-not-allowed; }
-  .btn-primary, .btn-accent { @apply bg-ink; color: var(--color-paper); box-shadow: none; }
-  .btn-primary:hover, .btn-accent:hover { @apply bg-ink-2; }
+  .btn-primary, .btn-accent { @apply bg-clay; color: #fff; box-shadow: 0 1px 2px rgba(16,24,40,.08), inset 0 -1px 0 rgba(0,0,0,.12); }
+  .btn-primary:hover, .btn-accent:hover { @apply bg-clay-2; }
   .btn:active { transform: scale(0.985); }
   .btn-ghost { @apply bg-transparent text-ink-2; box-shadow: none; }
   .btn-ghost:hover { @apply bg-ink/6 text-ink; }
-  .btn-sm { @apply px-3.5 text-[12.5px] rounded-[8px]; min-height: 32px; }
+  .btn-sm { @apply px-3 text-[12.5px] rounded-[7px]; min-height: 32px; }
   .btn-icon { @apply h-9 w-9 p-0 rounded-[8px]; min-height: 0; }
   .btn-ink { @apply bg-nav-active; color: var(--color-paper); box-shadow: none; } .btn-ink:hover { @apply bg-ink-2; }
 
   /* Inputs: white, a hairline ring, a black ring on focus */
-  .input { @apply w-full rounded-[14px] border-0 bg-field px-3.5 py-2.5 text-[14px] text-ink placeholder:text-muted; min-height: 40px; box-shadow: var(--ring);
+  .input { @apply w-full rounded-[8px] border-0 bg-field px-3 py-2 text-[14px] text-ink placeholder:text-muted; min-height: 38px; box-shadow: var(--ring), 0 1px 2px rgba(16,24,40,.05);
     transition: box-shadow 0.15s var(--ease), background-color 0.15s var(--ease); }
   .input:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 30%, transparent); }
-  .input:focus { @apply outline-none; box-shadow: inset 0 0 0 1.5px var(--color-clay), 0 0 0 4px color-mix(in srgb, var(--color-clay) 12%, transparent); }
-  input.input, select.input { border-radius: 999px; padding-left: 1rem; }
+  .input:focus { @apply outline-none; box-shadow: inset 0 0 0 1px var(--color-clay), 0 0 0 4px color-mix(in srgb, var(--color-clay) 16%, transparent); }
+  input.input, select.input { border-radius: 8px; padding-left: 0.75rem; }
   .input:disabled { @apply bg-surface-2 text-muted; }
-  select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%235C5C5C' stroke-width='1.8' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; padding-right: 2.2rem; }
-  .label { @apply block text-[12.5px] font-semibold text-ink-2 mb-1.5; }
+  select.input { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23667085' stroke-width='1.8' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; padding-right: 2.2rem; }
+  .label { @apply block text-[13px] font-medium text-ink-2 mb-1.5; }
 
   /* Tags: small, flat, sentence case */
-  .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[12px] font-bold bg-ink/6 text-ink-2; }
+  .chip { @apply inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[12px] font-medium bg-paper-2 text-ink-2; }
   .chip-clay { @apply bg-clay-soft text-clay-ink; }
   .chip-sage { @apply bg-sage-soft text-sage; }
   .chip-amber { @apply bg-amber-soft text-amber; }
@@ -175,36 +179,36 @@ h1 { letter-spacing: -0.025em; }
   .chip-sky { @apply bg-sky-soft text-sky; }
 
   /* Option chips (Mendo .chip): white with a ring, 9 px corners; the chosen one is solid black */
-  .toggle-opt { @apply rounded-full border-0 bg-surface px-3.5 py-1.5 text-[12.5px] font-semibold text-ink-2; min-height: 32px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease); }
+  .toggle-opt { @apply rounded-[8px] border-0 bg-surface px-3 py-1.5 text-[12.5px] font-semibold text-ink-2; min-height: 32px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease), box-shadow 0.15s var(--ease), transform 0.1s var(--ease); }
   .toggle-opt:hover { @apply bg-surface-2; }
   .toggle-opt:active { transform: scale(0.97); }
-  .toggle-opt.on { @apply bg-clay text-white; box-shadow: none; }
-  .toggle-opt.on:hover { @apply bg-clay-2; }
+  .toggle-opt.on { @apply bg-clay-soft text-clay-ink; box-shadow: inset 0 0 0 1px var(--color-clay-line); }
+  .toggle-opt.on:hover { @apply bg-clay-soft; }
   .toggle-opt:disabled { @apply opacity-60; }
   /* Counters in the patient strip: what exists for this patient; the lit one is open in the drawer */
-  .cnt { @apply inline-flex items-center gap-1.5 rounded-full bg-surface px-3 text-[12.5px] font-semibold text-ink; height: 30px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .cnt { @apply inline-flex items-center gap-1.5 rounded-[8px] bg-surface px-3 text-[12.5px] font-semibold text-ink; height: 30px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .cnt b { @apply font-semibold text-muted; }
   .cnt:hover { @apply bg-surface-2; }
-  .cnt.on { @apply bg-ink text-paper; box-shadow: none; } .cnt.on b { @apply text-paper/70; }
+  .cnt.on { @apply bg-clay-soft text-clay-ink; box-shadow: inset 0 0 0 1px var(--color-clay-line); } .cnt.on b { @apply text-clay-ink/70; }
   /* Drawer tabs: the open section first, then History, Skin map, Photos, Reports */
   /* sub-sections: text, the chosen one underlined in green */
-  .tabs { @apply flex flex-wrap gap-x-6 border-b border-line-2; }
-  .tabs > button { @apply relative -mb-px flex items-center gap-1.5 py-2.5 text-[14px] font-semibold text-muted; transition: color 0.15s var(--ease); }
+  .tabs { @apply flex flex-wrap gap-x-6 border-b border-line; }
+  .tabs > button { @apply relative -mb-px flex items-center gap-1.5 py-2.5 text-[14px] font-medium text-muted; transition: color 0.15s var(--ease); }
   .tabs-lg > button { @apply text-[16.5px] py-3; } /* the consultation pad: tabs read as headings */
   .tabs > button:hover { @apply text-ink; }
-  .tabs > button.on { @apply text-ink; }
+  .tabs > button.on { @apply font-semibold text-clay-ink; }
   .tabs > button.on::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2.5px; border-radius: 2px; background: var(--color-clay); animation: tab-line 0.28s var(--ease) both; }
   .tab-count { @apply rounded-full bg-surface-2 px-1.5 text-[11px] font-bold text-muted; box-shadow: var(--ring); }
   .tabs > button.on .tab-count { @apply bg-clay-soft text-clay-ink; box-shadow: none; }
   /* a filter: quiet until it narrows something, then tinted green */
-  .filter-btn { @apply inline-flex min-h-9 items-center gap-1.5 rounded-full bg-surface px-3.5 text-[13px] font-semibold text-ink-2; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .filter-btn { @apply inline-flex min-h-9 items-center gap-1.5 rounded-[8px] bg-surface px-3 text-[13px] font-semibold text-ink-2; box-shadow: var(--ring); transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .filter-btn:hover { @apply text-ink; }
-  .filter-btn.on { @apply bg-clay-soft text-clay-ink; box-shadow: none; }
-  .dtab { @apply rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-muted; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .filter-btn.on { @apply bg-clay-soft text-clay-ink; box-shadow: inset 0 0 0 1px var(--color-clay-line); }
+  .dtab { @apply rounded-[8px] px-3 py-1.5 text-[13px] font-semibold text-muted; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .dtab:hover { @apply text-ink; }
-  .dtab.on { @apply bg-nav-active; color: var(--color-paper); }
+  .dtab.on { @apply bg-clay-soft text-clay-ink; }
   /* Options not yet chosen read as quiet text; they lift on hover. Chosen ones are the solid .toggle-opt.on pill. */
-  .opt { @apply rounded-full border-0 bg-transparent px-3 py-1.5 text-[13px] font-semibold text-muted; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
+  .opt { @apply rounded-[8px] border-0 bg-transparent px-3 py-1.5 text-[13px] font-semibold text-muted; min-height: 32px; transition: background-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease); }
   .opt:hover { @apply bg-ink/6 text-ink; }
   .opt:active { transform: scale(0.97); }
   .opt:disabled { @apply opacity-50; }
@@ -214,65 +218,65 @@ h1 { letter-spacing: -0.025em; }
   .typebar:focus { @apply outline-none; box-shadow: inset 0 0 0 1.5px var(--color-clay), 0 12px 32px -20px rgba(0,0,0,.3); }
 
   /* Segmented control: a grey track, a white pill that slides */
-  .seg { @apply relative inline-flex rounded-full bg-surface-2 p-[3px] gap-0.5 flex-wrap; box-shadow: var(--ring); }
-  .seg > button { @apply relative z-[1] rounded-full px-3.5 py-1.5 text-[13px] font-semibold text-muted; transition: color 0.2s var(--ease); }
-  .seg > button.on { color: var(--color-paper); }
+  .seg { @apply relative inline-flex rounded-[10px] bg-paper-2 p-[3px] gap-0.5 flex-wrap; }
+  .seg > button { @apply relative z-[1] rounded-[7px] px-3 py-1.5 text-[13px] font-semibold text-muted; transition: color 0.2s var(--ease); }
+  .seg > button.on { color: var(--color-ink); }
   .seg > button:not(.on):hover { @apply text-ink; }
-  .seg-sm > button { @apply px-2.5 py-1 text-[12px] rounded-full; }
-  .seg-sm { @apply rounded-full p-[2px]; }
-  .seg-pill { @apply absolute z-0 rounded-full bg-nav-active; top: 3px; bottom: 3px; box-shadow: 0 6px 14px -8px rgba(16, 22, 40, 0.6); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
+  .seg-sm > button { @apply px-2.5 py-1 text-[12px] rounded-[6px]; }
+  .seg-sm { @apply rounded-[8px] p-[2px]; }
+  .seg-pill { @apply absolute z-0 rounded-[7px] bg-field; top: 3px; bottom: 3px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12), 0 0 0 1px rgba(16, 24, 40, 0.04); transition: left 0.25s var(--ease), width 0.25s var(--ease), top 0.25s var(--ease); }
 
   .row { @apply flex items-center gap-3 px-5 py-3 border-t border-line first:border-t-0; min-height: 56px; transition: background-color 0.12s var(--ease); }
   .row:hover { background: var(--color-surface-2); }
 
-  .kbd { @apply inline-block rounded-full bg-ink/6 px-1.5 py-0.5 font-bold text-muted; font-size: 12.5px; }
+  .kbd { @apply inline-block rounded-[5px] bg-paper-2 px-1.5 py-0.5 font-bold text-muted; font-size: 12.5px; }
 
   /* Tables: 60 px rows, a muted 12 px head, numbers tabular */
   .table { @apply w-full text-[13.5px]; font-variant-numeric: tabular-nums; }
-  .table th { @apply text-left text-[12px] font-semibold text-muted px-4 py-2.5 border-b border-line whitespace-nowrap bg-transparent; }
+  .table th { @apply text-left text-[12px] font-medium text-muted px-4 py-2.5 border-b border-line whitespace-nowrap bg-transparent; }
   .table td { @apply px-4 py-[11px] border-b border-line align-middle; }
   .table.sticky-head th { position: sticky; top: 0; z-index: 2; background: var(--color-surface); }
   .table tbody tr { transition: background-color 0.12s var(--ease); }
   .table tbody tr:hover { background: var(--color-surface-2); }
   .table tr:last-child td { @apply border-b-0; }
 
-  .menu { @apply absolute right-0 z-30 mt-1.5 min-w-52 rounded-[18px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift), inset 0 0 0 1px rgba(0,0,0,.06); }
+  .menu { @apply absolute right-0 z-30 mt-1.5 min-w-52 rounded-[10px] border-0 bg-surface p-1; box-shadow: var(--shadow-lift); }
   /* .pop is the same panel for popovers that hold their own controls (forms, lists with buttons): nothing inside is restyled */
-  .pop { @apply min-w-52 rounded-[18px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift), inset 0 0 0 1px rgba(0,0,0,.06); }
-  .menu button, .menu a, .menu-list button, .menu-list a { @apply flex w-full items-center gap-2.5 rounded-[12px] px-3 py-2.5 text-left text-[13.5px] font-semibold text-ink; transition: background-color 0.12s var(--ease); }
-  .menu button:hover, .menu a:hover, .menu-list button:hover, .menu-list a:hover { @apply bg-ink/6; }
+  .pop { @apply min-w-52 rounded-[10px] border-0 bg-surface p-1.5; box-shadow: var(--shadow-lift); }
+  .menu button, .menu a, .menu-list button, .menu-list a { @apply flex w-full items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-left text-[13.5px] font-medium text-ink; transition: background-color 0.12s var(--ease); }
+  .menu button:hover, .menu a:hover, .menu-list button:hover, .menu-list a:hover { @apply bg-surface-2; }
   .menu .danger, .menu-list .danger { @apply text-rose; }
 
-  .nav-item { @apply flex items-center gap-2.5 rounded-full px-3 text-[13.5px] font-semibold text-ink-2; min-height: 38px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
+  .nav-item { @apply flex items-center gap-2.5 rounded-[8px] px-3 text-[13.5px] font-medium text-ink-2; min-height: 38px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); }
   .nav-item:hover { @apply bg-ink/6 text-ink; }
-  .nav-item.active { @apply bg-nav-active; color: var(--color-paper); }
+  .nav-item.active { @apply bg-clay-soft font-semibold text-clay-ink; }
   /* a count beside a menu item (Calls to make, today's sittings); amber while something there still needs doing */
   .nav-badge { @apply min-w-[22px] shrink-0 rounded-full bg-ink/8 px-1.5 text-center text-[11.5px] font-bold leading-[20px] tabular-nums text-ink-2; }
   .nav-badge.warn { @apply bg-amber-soft text-amber; }
-  .nav-item.active .nav-badge { background: color-mix(in srgb, var(--color-paper) 22%, transparent); color: var(--color-paper); }
+  .nav-item.active .nav-badge { @apply bg-clay text-white; }
   .rail-dot { @apply absolute right-[9px] top-[9px] h-2 w-2 rounded-full bg-ink-2; box-shadow: 0 0 0 2px var(--color-sidebar, var(--color-paper)); }
   .rail-dot.warn { @apply bg-amber; }
   /* the rail (Mendo): one icon per section in a 52 px square, the open one on a grey tile, the name in a tooltip */
-  .rail-item { @apply relative grid h-[44px] w-[44px] place-items-center rounded-full text-ink-2; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
+  .rail-item { @apply relative grid h-[44px] w-[44px] place-items-center rounded-[10px] text-ink-2; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
   .rail-item:hover { @apply bg-ink/6 text-ink; }
   /* the labelled rail (S-C): an icon with its name under it, one size always */
-  .lrail-item { @apply relative flex w-[74px] flex-col items-center justify-center gap-[5px] rounded-[14px] px-0.5 py-1.5 text-center text-[10.5px] font-semibold leading-[1.15] text-ink-2; flex: 1 1 0; min-height: 46px; max-height: 68px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); } /* items share the height: roomy for a short menu, tighter only for a long one */
-  .lrail-item:hover { @apply bg-ink/6 text-ink; }
-  .lrail-ic { @apply grid h-[30px] w-[44px] place-items-center rounded-[10px]; }
-  .lrail-item.active { @apply font-bold text-ink; }
-  .lrail-item.active .lrail-ic { @apply bg-nav-active; color: var(--color-paper); }
+  .lrail-item { @apply relative flex w-[74px] flex-col items-center justify-center gap-[5px] rounded-[10px] px-0.5 py-1.5 text-center text-[10.5px] font-medium leading-[1.15] text-muted; flex: 1 1 0; min-height: 46px; max-height: 68px; transition: background-color 0.12s var(--ease), color 0.12s var(--ease); } /* items share the height: roomy for a short menu, tighter only for a long one */
+  .lrail-item:hover { @apply text-ink; } .lrail-item:hover .lrail-ic { @apply bg-paper-2; }
+  .lrail-ic { @apply grid h-[30px] w-[48px] place-items-center rounded-full; transition: background-color 0.15s var(--ease); }
+  .lrail-item.active { @apply font-semibold text-ink; }
+  .lrail-item.active .lrail-ic { @apply bg-clay-soft text-clay-ink; }
   .lrail-label { max-width: 74px; letter-spacing: -0.01em; overflow-wrap: normal; word-break: keep-all; }
-  .lrail-badge { @apply absolute right-[5px] top-[3px] min-w-[19px] rounded-full bg-clay px-1 text-center text-[10.5px] font-bold leading-[17px] tabular-nums; color: var(--color-paper); }
+  .lrail-badge { @apply absolute right-[5px] top-[3px] min-w-[19px] rounded-full bg-clay px-1 text-center text-[10.5px] font-bold leading-[17px] tabular-nums; color: #fff; box-shadow: 0 0 0 2px var(--color-sidebar); }
   .lrail-badge.warn { @apply bg-amber; }
   .lrail-sep { @apply my-1 block h-px w-9 shrink-0 bg-line; }
-  .rail-item.active { @apply bg-nav-active; color: var(--color-paper); }
+  .rail-item.active { @apply bg-clay-soft text-clay-ink; }
 
   .tip { position: relative; }
-  .tip::after { content: attr(data-tip); @apply pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-[8px] bg-ink px-2.5 py-1.5 text-[12px] font-semibold opacity-0; color: var(--color-paper); transition: opacity 0.15s var(--ease); }
+  .tip::after { content: attr(data-tip); @apply pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-[6px] bg-ink px-2 py-1 text-[12px] font-medium opacity-0; color: var(--color-paper); transition: opacity 0.15s var(--ease); }
   .tip:hover::after, .tip:focus-visible::after { opacity: 1; }
 
   /* Top bar pills (Mendo): the search box, the clock */
-  .toppill { @apply inline-flex items-center gap-2 rounded-full bg-surface px-3.5 text-[13px] font-semibold text-ink; height: 36px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease); }
+  .toppill { @apply inline-flex items-center gap-2 rounded-[8px] bg-surface px-3 text-[13px] font-medium text-ink-2; height: 36px; box-shadow: var(--ring); transition: background-color 0.15s var(--ease); }
   .toppill:hover { @apply bg-surface-2; }
 }
 
@@ -307,7 +311,7 @@ h1 { letter-spacing: -0.025em; }
 }
 
 /* A side drawer on the right (booking, procedure sitting): no dimmed or blurred page, the page beside it stays usable. Same as the front desk's patient drawer. */
-.side-drawer { position: fixed; top: 0; bottom: 0; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 16px; width: min(420px, 100vw); overflow-y: auto; padding: 20px; border-left: 1px solid var(--color-line); background: var(--color-surface); box-shadow: -24px 0 48px -32px rgba(16,32,24,.45); animation: slide-in-right 0.2s var(--ease) both; }
+.side-drawer { position: fixed; top: 0; bottom: 0; right: 0; z-index: 30; display: flex; flex-direction: column; gap: 16px; width: min(420px, 100vw); overflow-y: auto; padding: 20px; border-left: 1px solid var(--color-line); background: var(--color-surface); box-shadow: -16px 0 40px -24px rgba(16,24,40,.25); animation: slide-in-right 0.2s var(--ease) both; }
 @media (min-width: 640px) { .side-drawer { padding: 24px; } }
 
 /* Phones: a wide table becomes a list of cards, so the action button is never off-screen */
@@ -321,9 +325,9 @@ h1 { letter-spacing: -0.025em; }
 }
 
 /* ---------- Dialogs: one standard (see Modal in ui.tsx) ---------- */
-.modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(12, 20, 16, 0.42); backdrop-filter: blur(6px); animation: fade-in 0.15s var(--ease) both; overscroll-behavior: contain; }
-.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 26px; border: 0; background: var(--color-surface); box-shadow: var(--shadow-lift), inset 0 0 0 1px rgba(0,0,0,.06); animation: modal-in 0.42s var(--ease) both; outline: none; }
-@keyframes modal-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
+.modal-back { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: rgba(16, 24, 40, 0.45); backdrop-filter: blur(2px); animation: fade-in 0.15s var(--ease) both; overscroll-behavior: contain; }
+.modal-panel { position: relative; display: flex; flex-direction: column; width: 100%; max-height: calc(100dvh - 48px); overflow: hidden; border-radius: 16px; border: 0; background: var(--color-surface); box-shadow: var(--shadow-lift); animation: modal-in 0.28s var(--ease) both; outline: none; }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
 .modal-head { flex: none; display: flex; align-items: flex-start; gap: 0.75rem; padding: 1.375rem 1.5rem 0.75rem; }
 .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0.5rem 1.5rem 1.5rem; }
 /* Buttons row of a dialog: pinned to the bottom of the scrolling area, so Save never hides below the fold. */
@@ -342,7 +346,7 @@ h1 { letter-spacing: -0.025em; }
 /* The side drawer: the same dialog, docked on the right with the page behind still in view and still usable
    (a click behind goes to the page; a drawer opened from a drawer covers it, × goes back). */
 .modal-back.is-drawer { justify-content: flex-end; align-items: stretch; padding: 0; background: transparent; backdrop-filter: none; pointer-events: none; animation: none; }
-.modal-back.is-drawer .modal-panel { pointer-events: auto; max-width: 100vw; max-height: none; height: 100dvh; border-radius: 0; border-left: 1px solid var(--color-line); box-shadow: -24px 0 48px -32px rgba(16,32,24,.45); animation: slide-in-right 0.2s var(--ease) both; }
+.modal-back.is-drawer .modal-panel { pointer-events: auto; max-width: 100vw; max-height: none; height: 100dvh; border-radius: 0; border-left: 1px solid var(--color-line); box-shadow: -16px 0 40px -24px rgba(16,24,40,.25); animation: slide-in-right 0.2s var(--ease) both; }
 /* a short form keeps its Save row at the bottom of the drawer, where a drawer's buttons belong */
 .modal-back.is-drawer .modal-body { display: flex; flex-direction: column; }
 .modal-back.is-drawer .modal-body > :only-child { flex: 1 0 auto; display: flex; flex-direction: column; }
@@ -398,7 +402,7 @@ h1 { letter-spacing: -0.025em; }
 .cell-in { display: block; width: 100%; min-height: 36px; border: 1px solid var(--color-line-2); border-radius: 6px; background: var(--color-field); padding: 6px 9px; font: inherit; font-size: 14.5px; color: inherit; outline: none; }
 .cell-in:hover:not(:disabled) { border-color: color-mix(in srgb, var(--color-ink) 30%, transparent); }
 .cell-in:disabled { background: transparent; border-color: transparent; }
-select.cell-in { appearance: none; padding-right: 26px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%235C5C5C' stroke-width='1.8' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; }
+select.cell-in { appearance: none; padding-right: 26px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%23667085' stroke-width='1.8' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 7px center; }
 .cell-in::placeholder { color: var(--color-muted); font-weight: 400; } /* placeholders at 4.5:1 or better */
 .cell-in:focus { border-color: var(--color-clay); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-clay) 14%, transparent); }
 .cell-in:disabled { color: var(--color-muted); }
