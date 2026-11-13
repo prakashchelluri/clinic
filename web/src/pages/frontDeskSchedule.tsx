@@ -151,7 +151,16 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   // one row per booking hour (windows that start together share a row); sittings sit in the row their start falls in
   const allWs = cols.flatMap((c) => c.ws);
   const rows = [...new Set(allWs.map((w) => w.startTime))].sort().map((s) => ({ start: s as string, end: allWs.find((w) => w.startTime === s)!.endTime as string }));
-  for (const p of cols.flatMap((c) => c.sits)) if (!rows.some((r) => p.startTime >= r.start && p.startTime < r.end)) rows.push({ start: p.startTime, end: p.endTime });
+  // a sitting outside the booking hours gets clock-hour rows (9–10 holds both 9:00 and 9:30 sittings), trimmed where a booking hour already starts
+  const fmtM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  for (const p of cols.flatMap((c) => c.sits)) {
+    const ps = toMin(p.startTime), pe = toMin(p.endTime);
+    for (let h = Math.floor(ps / 60) * 60; h < pe; h += 60) {
+      let a = h, b = h + 60;
+      for (const r of [...rows].sort((x, y) => x.start.localeCompare(y.start))) { const rs = toMin(r.start), re = toMin(r.end); if (rs <= a && re > a) a = re; else if (rs > a && rs < b) b = rs; }
+      if (a < b && ps < b && pe > a) rows.push({ start: fmtM(a), end: fmtM(b) });
+    }
+  }
   rows.sort((a, b) => a.start.localeCompare(b.start));
   if (!rows.length) return sheet(<div className="py-10 text-center text-muted">Nothing booked {week ? 'this week' : 'on this day'}.</div>);
   const rowOf = (t: string) => rows.find((r) => t >= r.start && t < r.end) ?? [...rows].reverse().find((r) => r.start <= t) ?? rows[0];
