@@ -133,15 +133,18 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   return createPortal(
       <aside role="dialog" aria-label="Procedure sitting" className="side-drawer">
         {q.isError ? <div className="text-sm text-rose">Couldn't load. {errText(q.error)} <button className="btn btn-sm ml-1" onClick={() => q.refetch()}>Retry</button></div> :!s ? <Skeleton rows={6} /> : (<>
-          <div className="flex items-center gap-2">
-            {overdue ? <Chip tone="rose">Didn't come</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
-            <span className="truncate text-xs text-muted">Procedure sitting{s.patientConfirmedAt ? ' · patient said yes' : ''}</span>
-            <MoneyChip m={s.money} />
-            <button className="btn btn-ghost btn-icon ml-auto" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
-          </div>
+          {/* who first, with Close; then the sitting's state and money as one row of tags */}
           <div>
-            <div className="flex flex-wrap items-center gap-2"><span className="text-2xl font-semibold">{p.fullName}</span><FlagChips flags={p.flags} /></div>
-            <div className="text-sm text-muted">{[p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' '), p.phone].filter(Boolean).join(' · ')}</div>
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-[22px] font-semibold leading-tight">{p.fullName}</span><FlagChips flags={p.flags} /></div>
+                <div className="mt-0.5 text-sm text-muted">{[p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' '), p.phone].filter(Boolean).join(' · ')}</div></div>
+              <button className="btn btn-ghost btn-icon -mr-1 -mt-1 shrink-0" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 [&_.chip]:whitespace-nowrap">
+              {overdue ? <Chip tone="rose">Didn't come</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
+              {s.patientConfirmedAt && <Chip tone="sage">Patient confirmed</Chip>}
+              <MoneyChip m={s.money} />
+            </div>
           </div>
 
           <div className="glass !rounded-[10px] p-4">
