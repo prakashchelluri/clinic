@@ -144,6 +144,7 @@
 /* an empty place in the hour: a dashed box that books it */
 .fd-free { justify-content: center; color: var(--color-muted); font-weight: 500; background: var(--color-surface); }
 .fd-free:hover { color: var(--color-clay); background: var(--color-clay-soft); filter: none; }
+.fd-wtabs { padding: 0 14px; border-bottom: 1px solid var(--color-line); }
 .fd-hfoot { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); cursor: pointer; }
 
 .fd-k-proc { background: var(--color-surface); color: var(--color-sky); box-shadow: inset 0 0 0 1px var(--color-sky); padding-left: 8px; }

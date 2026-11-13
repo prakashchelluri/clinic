@@ -2,7 +2,7 @@ import { useRef, useState, type DragEvent } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, qc, errText, ApiError } from '../api';
-import { Floating, Icon, Segmented, Skeleton, ask, toast } from '../ui';
+import { Floating, Icon, Segmented, Skeleton, Tabs, ask, toast } from '../ui';
 import { told } from '../apptDrawer';
 
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow';
@@ -63,6 +63,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
 
   const docList = doctors.map((d) => ({ key: `d:${d.id}`, label: d.name as string, on: docOn(d.id) }));
   const roomList = rooms.map((r) => ({ key: `r:${r.id}`, label: r.name as string, on: roomOn(r.id) }));
+  const [weekDoc, setWeekDoc] = useState<string | null>(null); // Week shows one doctor's week at a time; a tab per shown doctor picks whose
   const [pickOpen, setPickOpen] = useState(false); const pickBtn = useRef<HTMLButtonElement>(null);
   const onD = docList.filter((c) => c.on), onR = roomList.filter((c) => c.on);
   // what the closed button says: up to two names, else counts, so the bar stays one line
@@ -91,7 +92,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
       <span><i className="fd-k-done" />Done</span><span><i className="fd-k-proc" />Procedure</span><span><i className="fd-k-noshow" />Didn't come</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
-  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{keyRow}{inner}</div>;
+  let docTabs: React.ReactNode = null; // set below once the week is loaded
+  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{keyRow}{inner}</div>;
   const days: any[] | undefined = week ? range.data : cal.data && [cal.data];
   if (!days || (!week && !isToday && other.isLoading)) return sheet(<div className="p-4"><Skeleton rows={4} /></div>);
 
@@ -102,10 +104,13 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   let cols: Col[];
   if (week) {
     const roomIds = new Set(onRooms.map((r) => r.id));
+    const wd = onDocs.find((d) => d.id === weekDoc) ?? onDocs[0]; const wIds = new Set(wd ? [wd.id] : []);
+    if (onDocs.length > 1) docTabs = <Tabs className="fd-wtabs" value={wd.id} onChange={setWeekDoc}
+      options={onDocs.map((d) => ({ value: d.id, label: d.name, count: days.reduce((n: number, D: any) => n + D.windows.filter((w: any) => w.practitionerId === d.id).reduce((m: number, w: any) => m + w.allocated, 0), 0) }))} />;
     cols = days.filter((D, i) => i < 6 || D.windows.length).map((D) => ({ key: D.day, day: D.day, // Sunday only when someone works it
       head: <button type="button" className="text-left" title="Open this day" onClick={() => { setDay(D.day); setMode('day'); }}><b className={D.day === today ? 'text-clay' : ''}>{new Date(D.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })}</b>{D.day === today && <span> today</span>}</button>,
-      ws: D.windows.filter((w: any) => docIds.has(w.practitionerId)), visits: D.day === today ? visitsToday.filter((v) => docIds.has(v.practitionerId)) : null,
-      sits: D.procedures.filter((p: any) => (procsInDoc && docIds.has(p.practitionerId)) || roomIds.has(p.roomId)) }));
+      ws: D.windows.filter((w: any) => wIds.has(w.practitionerId)), visits: D.day === today ? visitsToday.filter((v) => wIds.has(v.practitionerId)) : null,
+      sits: D.procedures.filter((p: any) => (procsInDoc && wIds.has(p.practitionerId)) || roomIds.has(p.roomId)) }));
   } else {
     const D = days[0]; const procs: any[] = D.procedures ?? []; const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
     const roomCols: Col[] = [...onRooms, ...(onRooms.length && procs.some((p) => !p.roomId) ? [{ id: '__none', name: 'No room' }] : [])]
