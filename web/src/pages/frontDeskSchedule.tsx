@@ -85,7 +85,12 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
         </Floating></>}
       {tools}
     </div>);
-  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{inner}</div>;
+  const keyRow = (
+    <div className="fd-hkey">
+      <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
+      <span><i className="fd-k-done" />Done</span><span><i className="fd-k-noshow" />Didn't come</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
+    </div>);
+  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{keyRow}{inner}</div>;
   const days: any[] | undefined = week ? range.data : cal.data && [cal.data];
   if (!days || (!week && !isToday && other.isLoading)) return sheet(<div className="p-4"><Skeleton rows={4} /></div>);
 
@@ -147,12 +152,12 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <div className="overflow-x-auto"><table className="fd-table">
         <thead><tr>{week && <th>Day</th>}<th>Time</th><th>Patient</th><th>With</th><th>Status</th></tr></thead>
         <tbody>{items.map((p) => (
-          <tr key={p.day + p.id} className={selectedId === p.id ? 'bg-surface-2' : 'hover:bg-surface-2'}>
+          <tr key={p.day + p.id} className={`cursor-pointer ${selectedId === p.id ? 'bg-surface-2' : 'hover:bg-surface-2'}`} onClick={p.onClick}>
             {week && <td className="whitespace-nowrap">{dayName(p.day)}</td>}
             <td className="whitespace-nowrap text-muted">{hourLabel(p.r.start, p.r.end)}</td>
-            <td><button type="button" className="text-left font-semibold hover:underline" onClick={p.onClick}>{p.name}</button>{p.tag && <span className="ml-2 text-[12px] text-muted">{p.tag}</span>}</td>
+            <td><button type="button" className="text-left font-semibold hover:underline" >{p.name}</button>{p.tag && <span className="ml-2 text-[12px] text-muted">{p.tag}</span>}</td>
             <td>{p.who}</td>
-            <td className={p.k === 'late' || p.k === 'noshow' ? 'text-rose' : p.k === 'done' ? 'text-muted' : ''}>{p.warn && <span className="fd-warn mr-1.5">!</span>}{p.next ? 'Next' : LABEL[p.k]}</td>
+            <td className={p.k === 'late' || p.k === 'noshow' ? 'text-rose' : p.k === 'done' ? 'text-muted' : ''}><i className={`sw fd-k-${p.next ? 'next' : p.k}`} />{p.warn && <span className="fd-warn mr-1.5">!</span>}{p.next ? 'Next' : LABEL[p.k]}</td>
           </tr>))}</tbody>
       </table></div>));
   }
@@ -172,23 +177,20 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'not in')}</div>;
               const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
-              const canDrop = !!onBook && !!one && !past && !shut; const sum = (f: string) => wsAt.reduce((s, w) => s + w[f], 0);
+              const canDrop = !!onBook && !!one && !past && !shut;
               return (
                 <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''}`}
                   onDragOver={canDrop ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(one!.id); } } : undefined}
                   onDragLeave={() => setOver(null)} onDrop={canDrop ? (e) => drop(e, one) : undefined}>
-                  <span className="fd-hcap">{shut ? wsAt[0].reductions[0].note ?? 'Closed' : `${sum('allocated')} of ${sum('effectiveCapacity')} booked`}</span>
+                  {shut && (wsAt[0].reductions[0].kind === 'procedure'
+                    ? <button type="button" className="fd-hcap text-left hover:underline" title="Open the day's procedures" onClick={() => nav(`/worklist?day=${c.day}`)}>Doctor in a procedure · no new bookings · {wsAt[0].reductions[0].note}</button>
+                    : <span className="fd-hcap">{wsAt[0].reductions[0].note ?? 'Closed'}</span>)}
                   {names}
                   {!shut && !past && one && one.free > 0 && onBook && <button type="button" className="fd-sch-free" onClick={() => onBook({ ...one, day: c.day })}>+ Book · {one.free} free</button>}
                 </div>);
             }),
           ])}
         </div>
-      </div>
-      <div className="fd-hkey">
-        <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
-        <span className="text-muted">✓ Done</span><span className="text-rose">Didn't come</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
-        <span className="ml-auto">{onBook ? 'Tap a name for details, “+ Book” to book that hour, drag a booking to move it.' : 'Tap a name for details.'}</span>
       </div>
     </>);
 }

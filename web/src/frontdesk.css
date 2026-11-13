@@ -107,13 +107,14 @@
 .fd-hc { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px 10px; border-top: 1px solid var(--color-line); border-left: 1px solid var(--color-line); }
 .fd-hc.off { color: var(--color-muted); font-size: 12px; background: repeating-linear-gradient(45deg, rgba(0,0,0,.03) 0 6px, transparent 6px 12px); }
 .fd-hcap { font-size: 11.5px; font-weight: 500; color: var(--color-muted); }
-/* up to three patients side by side; a narrow column (week, many doctors) falls back to two or one */
-.fd-hchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(150px, calc((100% - 8px) / 3)), 1fr)); gap: 4px; }
+/* up to four patients side by side; a narrow column (week, many doctors) falls back to fewer */
+.fd-hchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(150px, calc((100% - 12px) / 4)), 1fr)); gap: 4px; }
 .fd-sch-free { align-self: flex-start; display: inline-flex; align-items: center; height: 24px; padding: 0 6px; border-radius: 4px; font-size: 12px; font-weight: 600; color: var(--color-clay); white-space: nowrap; }
 .fd-sch-free:hover { background: var(--color-clay-soft); }
-.fd-hkey { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-top: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); }
+.fd-hkey { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-bottom: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); }
 .fd-hkey span { display: inline-flex; align-items: center; gap: 6px; }
-.fd-hkey i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; padding: 0; }
+.fd-table i.sw { margin-right: 8px; vertical-align: -1px; }
+.fd-hkey i, .fd-table i.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; padding: 0; }
 
 /* a patient on the calendar: a solid block the width of its column, one colour per state */
 .fd-pc { display: flex; align-items: center; gap: 6px; height: 26px; width: 100%; min-width: 0; padding: 0 8px 0 4px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap; text-align: left; }
@@ -131,7 +132,7 @@
 .fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-ink); }
 .fd-k-doctor { background: var(--color-sky); color: var(--color-surface); }
 
-.fd-k-done { background: transparent; color: var(--color-muted); }
+.fd-k-done { background: var(--color-surface); color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line); }
 
 .fd-k-proc { background: var(--color-surface); color: var(--color-sky); box-shadow: inset 0 0 0 1px var(--color-sky); padding-left: 8px; }
 /* a procedure sitting on the schedule: patient on top, procedure and time under it, never cut off */
