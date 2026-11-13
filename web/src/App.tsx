@@ -81,7 +81,7 @@ function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onN
   );
   return (
     <div className={`side-dark flex h-full flex-col px-3 pb-3 ${slim ? 'side-slim' : ''}`}>
-      <Link to="/" onClick={onNavigate} className="flex h-14 shrink-0 items-center gap-2.5 px-1.5" title={clinic}>
+      <Link to="/" onClick={onNavigate} className="flex h-[64px] shrink-0 items-center gap-2.5 px-1.5" title={clinic}>
         <img src="/cubott.png" alt="" className="h-7 w-7 shrink-0 object-contain" />
         <span className="side-text min-w-0 leading-tight"><span className="block truncate text-[14px] font-semibold text-ink">Cubott OPD</span><span className="block truncate text-[11.5px] text-muted">{clinic}</span></span>
       </Link>
@@ -206,21 +206,21 @@ export function App() {
       )}
 
       <div className={`transition-[padding] duration-200 ${record ? 'md:pl-[64px]' : 'md:pl-[232px]'} ${fit ? 'md:flex md:h-full md:flex-col' : ''}`}>
-      <header className={`app-top no-print sticky top-0 z-30 flex h-14 items-center ${record ? 'md:hidden' : ''}`} style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
+      <header className={`app-top no-print sticky top-0 z-30 flex h-[64px] items-center ${record ? 'md:hidden' : ''}`} style={{ boxShadow: 'inset 0 -1px 0 var(--color-line)' }}>
         <button className="btn btn-ghost btn-icon ml-2 md:hidden" aria-label="Open menu" onClick={() => setDrawer(true)}><Icon name="menu" /></button>
         <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:hidden"><img src="/cubott.png" alt="Cubott" className="h-8 w-8 object-contain" /></Link>
         <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 md:px-7">
           {parent && !record && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
-          {<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[15px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
+          {<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[17px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
           <span className="ml-auto" />
           {/* theme and help as one grouped control */}
           <span className="hidden overflow-hidden rounded-[6px] border border-line-2 bg-field sm:flex">
-          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="grid h-8 w-8 place-items-center text-muted hover:bg-paper-2 hover:text-ink" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
-          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="grid h-8 w-8 place-items-center border-l border-line-2 text-muted hover:bg-paper-2 hover:text-ink"><Icon name="help" className="h-4 w-4" /></Link>}
+          <button type="button" onClick={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} className="grid h-[36px] w-[36px] place-items-center text-muted hover:bg-paper-2 hover:text-ink" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>
+          {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="grid h-[36px] w-[36px] place-items-center border-l border-line-2 text-muted hover:bg-paper-2 hover:text-ink"><Icon name="help" className="h-4 w-4" /></Link>}
           </span>
           {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
             <div className="relative shrink-0">
-              <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-8 !min-h-8 !rounded-[6px] !px-2.5 justify-center"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
+              <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-[36px] !min-h-[36px] !rounded-[6px] !px-3 justify-center"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
               {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
                 <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
             </div>); })()}
@@ -231,7 +231,7 @@ export function App() {
         </div>
       </header>
 
-        {offlineAt !== null && <div role="status" className="no-print sticky top-14 z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
+        {offlineAt !== null && <div role="status" className="no-print sticky top-[64px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
 
         <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/dashboard' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}><PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>

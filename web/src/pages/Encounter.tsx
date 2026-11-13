@@ -801,7 +801,7 @@ export function Encounter() {
     <div className="space-y-3 pb-4">
       {/* who: the patient in the app's top bar (more room for the pad), with the layout, the whole-pad templates and the pad's settings; History, Photos and Reports as tabs under it */}
       {/* the record's header: the patient, then the pad's tabs with Save and Finish, stuck to the top (the app's top bar steps aside on a record) */}
-      <div className="sticky top-14 z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0">
+      <div className="sticky top-[64px] z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0">
       {(() => { const who = (
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <BackButton to="/dashboard" />
