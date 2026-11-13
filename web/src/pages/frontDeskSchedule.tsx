@@ -101,7 +101,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </div>);
   const keyRow = (
     <div className="fd-hkey">
-      <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span>
+      <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-done" />Seen</span>
       <span><i className="fd-k-booked fd-k-procsw" /><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded

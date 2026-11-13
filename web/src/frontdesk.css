@@ -171,7 +171,9 @@ html[data-theme="dark"] { --fd-proc: #2DD4BF; }
 .fd-k-waiting, .fd-k-intake, .fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-ink); }
 .fd-k-next { font-weight: 600; }
 .fd-k-doctor { background: var(--color-clay); color: #fff; }
-.fd-k-done, .fd-k-tests, .fd-k-late, .fd-k-noshow { background: var(--color-surface); color: var(--color-muted); }
+.fd-k-late, .fd-k-noshow { background: var(--color-surface); color: var(--color-muted); }
+/* seen / completed: light green, so the finished ones stand apart from the booked ones */
+.fd-k-done, .fd-k-tests { background: color-mix(in srgb, var(--color-sage) 14%, var(--color-surface)); color: var(--color-sage); }
 .fd-k-cancelled { color: color-mix(in srgb, var(--color-muted) 70%, transparent); }
 .fd-hkey i.fd-k-booked { box-shadow: inset 0 0 0 1px var(--color-line-2); }
 .fd-hkey i.fd-k-procsw { box-shadow: inset 3px 0 0 var(--fd-proc), inset 0 0 0 1px var(--color-line-2); margin-right: -2px; }
