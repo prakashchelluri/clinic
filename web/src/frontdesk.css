@@ -191,10 +191,15 @@ html[data-theme="dark"] { --fd-proc: #2DD4BF; }
 .fd-proc-ic { color: var(--fd-proc); }
 .fd-sub { font-weight: 400; }
 
-.fd-hc.off { background: var(--color-surface-2); }
-.fd-hchips { background: none; }
-.fd-free { color: transparent; }
+.fd-sch { --fd-nobook: color-mix(in srgb, var(--color-ink) 4.5%, var(--color-surface)); }
+.fd-hc.off { background: var(--fd-nobook); }
+/* one rule for empty places: white = bookable (a faint +, "+ Book" on hover), grey = not (the filler at the end of a row, a full or past hour) */
+.fd-hchips, .fd-hc:has(> .fd-hchips) { background: var(--fd-nobook); }
+.fd-hchips > .fd-k-cancelled { background: var(--color-surface); }
+.fd-free { color: color-mix(in srgb, var(--color-muted) 55%, transparent); gap: 4px; }
+.fd-free .fd-bk { display: none; }
 .fd-free:hover, .fd-free:focus-visible { color: var(--color-clay); }
+.fd-free:hover .fd-bk, .fd-free:focus-visible .fd-bk { display: inline; }
 .fd-fold { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-top: 1px solid var(--color-line-2); background: var(--color-surface-2); font-size: 13px; color: var(--color-ink-2); text-align: left; }
 .fd-fold:hover { background: var(--color-paper-2); }
 .fd-later { padding: 8px 12px; border-top: 1px solid var(--color-line-2); border-left: 1px solid var(--color-line-2); font-size: 13px; color: var(--color-muted); text-align: left; }

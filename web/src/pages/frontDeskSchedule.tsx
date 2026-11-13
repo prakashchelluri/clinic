@@ -238,13 +238,13 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               const all: ChipP[] = red?.kind === 'procedure' && kindF !== 'consult' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => { const sit = (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r); if (sit) setProcId(sit.id); else nav(`/worklist?day=${c.day}`); } } as ChipP].filter(keyOk).concat(chips) : chips;
               const free = showFree && kindF !== 'proc' && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
               return (
-                <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''}`}
+                <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''} ${past && !all.length ? 'off' : ''}`}
                   onDragOver={canDrop ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(one!.id); } } : undefined}
                   onDragLeave={() => setOver(null)} onDrop={canDrop ? (e) => drop(e, one) : undefined}>
                   {red && red.kind !== 'procedure' && <span className="fd-hcap">{red.note ?? 'Closed'}</span>}
                   {all.length + free > 0 && <div className="fd-hchips">
                     {all.map((p) => <Chip key={p.id} {...p} />)}
-                    {Array.from({ length: free }, (_, j) => <button key={j} type="button" className="fd-pc fd-free" aria-label={`Book ${hourLabel(r.start, r.end)}`} onClick={() => onBook!({ ...one, day: c.day })}>+ Book</button>)}
+                    {Array.from({ length: free }, (_, j) => <button key={j} type="button" className="fd-pc fd-free" aria-label={`Book ${hourLabel(r.start, r.end)}`} onClick={() => onBook!({ ...one, day: c.day })}><span aria-hidden>+</span><span className="fd-bk">Book</span></button>)}
                   </div>}
                 </div>);
             }),
