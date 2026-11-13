@@ -205,7 +205,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
             <span key={`t${r.start}`} className="fd-ht">{hourLabel(r.start, r.end)}</span>,
             <button key={`c${r.start}`} type="button" className="fd-later" style={{ gridColumn: `2 / span ${cols.length}` }} title="Open this hour" onClick={() => setOpened(new Set(opened).add(r.start))}>{lineOf(r)}</button>,
           ] : [
-            <span key={`t${r.start}`} className={`fd-ht ${i === nowRow ? 'now' : ''} ${!week && gone(day, r.end) ? 'past' : ''}`}>{hourLabel(r.start, r.end)}{i === nowRow && <small>now</small>}</span>,
+            <span key={`t${r.start}`} className={`fd-ht ${i === nowRow ? 'now' : ''} ${!week && gone(day, r.end) ? 'past' : ''}`}>{hourLabel(r.start, r.end)}{i === nowRow && <small>now</small>}{kindF !== 'proc' && !gone(day, r.end) && freeAt(r) > 0 && <em className="fd-htfree">{freeAt(r)} free</em>}</span>,
             ...cols.map((c) => {
               const { wsAt, chips } = cell(c, r); const nowC = i === nowRow && c.day === today ? 'now' : ''; const key = c.key + r.start;
               const names = chips.length > 0 && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}</div>;

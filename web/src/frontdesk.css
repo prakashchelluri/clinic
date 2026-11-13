@@ -101,6 +101,7 @@
 .fd-ht { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 10px; font-size: 12px; font-weight: 500; color: var(--color-muted); border-top: 1px solid var(--color-line-2); white-space: nowrap; }
 .fd-ht.past { color: var(--color-muted); }
 .fd-ht small { font-size: 11.5px; font-weight: 700; color: var(--color-rose); }
+.fd-htfree { font-style: normal; font-size: 11.5px; font-weight: 600; color: var(--color-sage); }
 /* the hour it is now: a red line across the grid, as on any calendar */
 .fd-ht.now, .fd-hc.now { border-top: 2px solid var(--color-rose); }
 
