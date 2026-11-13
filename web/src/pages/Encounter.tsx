@@ -807,7 +807,7 @@ export function Encounter() {
   const patientLine = [age ? `${age} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
 
   return (
-    <div className="pad-calm space-y-3 pb-4">
+    <div className={`pad-calm space-y-3 pb-4 ${side && LEFT[side] ? 'drawer-open' : ''}`} style={side && LEFT[side] ? ({ '--drawer-w': `${LEFT[side].width === 'max-w-xl' ? 560 : 640}px` } as React.CSSProperties) : undefined}>
       {/* who: the patient in the app's top bar (more room for the pad), with the layout, the whole-pad templates and the pad's settings; History, Photos and Reports as tabs under it */}
       {/* the record's header: the patient, then the pad's tabs with Save and Finish, stuck to the top (the app's top bar steps aside on a record) */}
       <div className="pad-head pad-head-calm sticky top-[64px] z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0">
@@ -875,7 +875,7 @@ export function Encounter() {
         {!canFinish && (!readOnly || Object.keys(answers).length > 0 || Object.keys(hist).length > 0) && <div className="card !p-0"><ScreenBlock lists={lists} answers={answers} onAnswers={(a) => set('screen', 'answers', a)} history={hist} onHistory={(h) => set('screen', 'history', h)} disabled={readOnly} open /></div>}
         {!canFinish && !padOf('history').show && cards.history}
 
-        <div className="grid items-start gap-3 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
+        <div className="pad-grid grid items-start gap-3 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
           {/* Tatva's left column: the patient's basic info, each opening its own drawer */}
           <aside className="card !p-0 overflow-hidden lg:sticky lg:top-[124px]" aria-label="Basic info">
             {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = k === 'vitals' && vitalCells.length > 0; return (
