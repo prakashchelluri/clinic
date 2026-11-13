@@ -122,7 +122,8 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const nBefore = mine.filter((x) => /^Before ·/.test(x.title ?? '')).length, nAfter = mine.filter((x) => /^After ·/.test(x.title ?? '')).length;
   const label = s ? `${s.procedure ?? 'Procedure'} · sitting ${s.sittingNo}${s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}` : '';
   // more sittings to come and none booked yet: reception books the next tentative date right here
-  const nextBooked = (s?.sittings ?? []).some((x: any) => x.state === 'confirmed' && x.id !== id);
+  const nextSit: any = (s?.sittings ?? []).find((x: any) => x.state === 'confirmed' && x.id !== id); const nextBooked = !!nextSit; // sittings come oldest first
+  const [movingNext, setMovingNext] = useState(false);
   // booked, and its time went by without it starting: the patient didn't come (the calendar shows it red); reception reschedules or marks it missed
   const nowT = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
   const overdue = !!s && s.state === 'confirmed' && (s.day < today() || (s.day === today() && s.endTime <= nowT));
@@ -174,6 +175,13 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
               {!nBefore && s.state === 'in_progress' && <span className="text-[12.5px] text-amber">No before photo yet</span>}
             </div>
           </div>}
+          {/* done with more to come: the next sitting the plan booked (or reception did), with Change date; else Book next sitting */}
+          {s.state === 'completed' && nextSit && <div className="rounded-[10px] border border-line bg-surface-2 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2"><span className="text-[13.5px] font-semibold">Next: sitting {nextSit.sittingNo}{s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}</span>{nextSit.autoBooked && <Chip tone="sky">Booked by the plan</Chip>}</div>
+            <div className="mt-0.5 text-[14px]">{new Date(nextSit.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · {nextSit.startTime}</div>
+            <div className="mt-0.5 text-[12.5px] text-muted">{nextSit.autoBooked ? 'Tell the patient now; the coordinator confirms it with them the week before.' : 'Tentative until the doctor approves the week.'}</div>
+            {canAct && <button type="button" className="btn btn-sm mt-2" onClick={() => setMovingNext(true)}><Icon name="calendar" className="h-3.5 w-3.5" />Change date</button>}
+          </div>}
           {canAct && more && <div className="rounded-[10px] border border-clay-line bg-clay-soft px-4 py-3">
             <div className="text-[13.5px] font-semibold text-clay-ink">Book the next sitting</div>
             <div className="mt-0.5 text-[12.5px] text-muted">{s.plan?.sittings ? `Sitting ${s.sittingNo + 1} of ${s.plan.sittings}. ` : ''}Pick a date with the patient now; it is tentative until the doctor approves the week.</div>
@@ -216,6 +224,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           </div>
         </>)}
         {shoot && s && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} sitting={{ id, label: `${label} · ${shoot}` }} phase={shoot} onClose={() => { setShoot(null); qc.invalidateQueries({ queryKey: ['photos', p.id] }); }} />}
+        {movingNext && s && nextSit && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} sitting={nextSit} onClose={() => { setMovingNext(false); refresh(); }} />}
         {moving && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} sitting={s} onClose={() => { setMoving(false); refresh(); }} />}
         {booking && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} onClose={() => { setBooking(false); ['procedure-session', 'psessions', 'worklist', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />}
       </aside>

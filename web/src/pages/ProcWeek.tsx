@@ -100,7 +100,7 @@ export function ProcWeek() {
   const drafts = booked.filter((s) => s.approval === 'draft');
   const byDoc = [...new Set(drafts.map((s) => s.doctor ?? 'No doctor'))].map((name) => ({ name, list: drafts.filter((s) => (s.doctor ?? 'No doctor') === name) }));
   const asked = booked.filter((s) => s.approval === 'change');
-  const summary = !all.length ? 'Nothing booked this week yet' : [n('draft') && `${n('draft')} tentative`, n('sent') && `${n('sent')} with the doctor`, n('change') && `${n('change')} sent back`, n('approved') && `${n('approved')} approved`].filter(Boolean).join(' · ');
+  const summary = !all.length ? 'Nothing booked this week yet' : [n('draft') && `${n('draft')} tentative`, n('sent') && `${n('sent')} with the doctor`, n('change') && `${n('change')} sent back`, n('approved') && `${n('approved')} approved`, all.filter((s: any) => s.autoBooked).length && `${all.filter((s: any) => s.autoBooked).length} booked by the plan, confirm with the patient`].filter(Boolean).join(' · ');
   const tapOk = (key: string) => !!tap && !check(tap, key);
 
   const opened = all.find((s) => s.id === openId);

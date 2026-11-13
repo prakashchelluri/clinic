@@ -323,6 +323,7 @@ export const procedureSession = pgTable('procedure_session', {
   approvedAt: ts('approved_at'),
   changed: boolean('changed').notNull().default(false), // moved or added after its week was sent
   bookedBy: uuid('booked_by'),                          // the user who booked or last moved it
+  autoBooked: boolean('auto_booked').notNull().default(false), // booked by the plan when the sitting before was done; cleared when someone moves it
 }, (t) => [index('psession_day').on(t.tenantId, t.day)]);
 
 // doctor's plan → worklists. One table serves both follow-up and procedure recommendations.

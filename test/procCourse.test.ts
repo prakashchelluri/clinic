@@ -80,14 +80,16 @@ test('course: planned with a gap, booked one sitting at a time, confirmed a week
   const other = (await R('POST', '/patients', { fullName: 'Not Theirs', phone: '9848011202' })).body;
   assert.equal((await R('POST', '/followups/log', { kind: 'confirm_day', refId: s1.id, patientId: other.id, outcome: 'confirmed' })).status, 404);
 
-  // sitting 1 done: sitting 2 falls due 28 days after it, and is back on the list to book
+  // sitting 1 done: the plan books sitting 2 itself, 28 days after it (Sunday skipped), so it is not on the list to book
   assert.equal((await R('PATCH', `/procedure-sessions/${s1.id}`, { state: 'in_progress', consent: true })).status, 200);
   assert.equal((await R('PATCH', `/procedure-sessions/${s1.id}`, { state: 'completed' })).status, 200);
-  const sDay = addDays(today(), 1);
-  const back = await calls('procedures');
-  assert.equal(back.length, 1, 'the old "will come" call does not hide the next sitting');
-  assert.equal(back[0].dueOn, addDays(sDay, 28)); assert.match(back[0].what, /sitting 2 of 3 to book/);
+  const sDay = addDays(today(), 1); const due = addDays(sDay, 28);
+  assert.equal((await calls('procedures')).length, 0, 'booked by the plan, nothing left to book');
+  const byPlan = (await R('GET', `/procedure-sessions?from=${due}&to=${addDays(due, 1)}&active=1`)).body.find((x: any) => x.recommendationId === rec.id);
+  assert.ok(byPlan?.autoBooked); assert.equal(byPlan.sittingNo, 2);
   assert.equal((await msgs(s1.id)).filter((x) => x.status === 'pending').length, 0, 'no reminder for a sitting already done');
+  // the desk books sitting 2 on another date instead: the plan's one is cancelled first
+  assert.equal((await R('PATCH', `/procedure-sessions/${byPlan.id}`, { state: 'cancelled', reason: 'patient wants it sooner' })).status, 200);
 
   // sitting 2 booked inside the week (at the desk): that is the week confirmation; missed drops its reminder and the course stays to book
   const s2 = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(today(), 5), startTime: '12:00', minutes: 30, force: true })).body;
