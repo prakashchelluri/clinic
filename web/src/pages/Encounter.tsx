@@ -231,8 +231,8 @@ function AdvicePicker({ options, have, onDone }: { options: string[]; have: stri
   );
 }
 
-/** Follow-up as Tatva: type "3 days" (or weeks, months), pick a date, or tap 2 Days / 2 Weeks / 2 Months. */
-function FollowUp({ days, disabled, onChange, byNumber = false }: { days: number | null; disabled?: boolean; onChange: (d: number | null) => void; /** Calm: the number typed offers N days, N weeks, N months */ byNumber?: boolean }) {
+/** Follow-up: type a number and pick N days / N weeks / N months (or type "3 weeks", or pick a date). */
+function FollowUp({ days, disabled, onChange }: { days: number | null; disabled?: boolean; onChange: (d: number | null) => void }) {
   const [v, setV] = useState(days ? afterText(days) : ''); const last = useRef(days); const cal = useRef<HTMLInputElement>(null);
   if (days !== last.current) { last.current = days; if (parseAfter(v) !== days) setV(days ? afterText(days) : ''); }
   const iso = (d: number) => new Date(Date.now() + d * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -241,13 +241,13 @@ function FollowUp({ days, disabled, onChange, byNumber = false }: { days: number
   return (
     <div>
       <div className="flex items-center gap-1.5">
-        <input aria-label="Follow-up after" className={`input !py-1.5 ${PH}`} placeholder={byNumber ? 'Type a number, e.g. 2' : 'e.g. 3 days'} maxLength={20} value={v} disabled={disabled} onChange={(e) => { setV(e.target.value); if (byNumber && /^\s*\d+\s*$/.test(e.target.value)) return; /* a bare number waits for days, weeks or months below */ const d = parseAfter(e.target.value); if (d || !e.target.value.trim()) set(d); }} />
+        <input aria-label="Follow-up after" className={`input !py-1.5 ${PH}`} placeholder="Type a number, e.g. 2" maxLength={20} value={v} disabled={disabled} onChange={(e) => { setV(e.target.value); if (/^\s*\d+\s*$/.test(e.target.value)) return; /* a bare number waits for days, weeks or months below */ const d = parseAfter(e.target.value); if (d || !e.target.value.trim()) set(d); }} />
         {/* the calendar opens from a button; the date box itself stays out of sight */}
         <span className="relative shrink-0"><button type="button" className="btn btn-icon !h-[34px] !w-[38px]" aria-label="Pick the follow-up date" disabled={disabled} onClick={() => { try { cal.current?.showPicker(); } catch { cal.current?.focus(); } }}><CalendarDays className="h-4 w-4" aria-hidden /></button>
           <input ref={cal} type="date" tabIndex={-1} aria-hidden className="pointer-events-none absolute inset-0 opacity-0" min={today} value={days ? iso(days) : ''} disabled={disabled} onChange={(e) => { const d = e.target.value ? Math.round((Date.parse(e.target.value) - Date.parse(today)) / 86400000) : 0; const n = d > 0 ? Math.min(365, d) : null; setV(n ? afterText(n) : ''); set(n); }} /></span>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">{(byNumber ? (() => { const n = Math.max(1, Math.min(365, parseInt(v, 10) || 1)); const pl = (w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
-        return ([[n, pl('day')], ...(n * 7 <= 365 ? [[n * 7, pl('week')]] : []), ...(n <= 12 ? [[n * 30, pl('month')]] : [])] as [number, string][]); })() : ([[2, '2 Days'], [14, '2 Weeks'], [60, '2 Months']] as const)).map(([d, l]) => <button key={l} type="button" disabled={disabled} aria-pressed={days === d} className={days === d ? 'pick-chip' : 'toggle-opt'} onClick={() => { setV(afterText(d)); set(days === d ? null : d); }}>{l}</button>)}</div>
+      <div className="mt-2 flex flex-wrap gap-1.5">{((() => { const n = Math.max(1, Math.min(365, parseInt(v, 10) || 1)); const pl = (w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+        return ([[n, pl('day')], ...(n * 7 <= 365 ? [[n * 7, pl('week')]] : []), ...(n <= 12 ? [[n * 30, pl('month')]] : [])] as [number, string][]); })()).map(([d, l]) => <button key={l} type="button" disabled={disabled} aria-pressed={days === d} className={days === d ? 'pick-chip' : 'toggle-opt'} onClick={() => { setV(afterText(d)); set(days === d ? null : d); }}>{l}</button>)}</div>
     </div>
   );
 }
@@ -297,16 +297,14 @@ export function Encounter() {
   useEffect(() => { if (!setNote) return; const t = setTimeout(() => setSetNote(''), 30_000); return () => clearTimeout(t); }, [setNote]); // the "Loaded from …" note closes by itself after 30 s
   // opened from Review on the doctor's Today (?review): the Rxpad at Lab investigations, where the values and reports are
   const [sp, setSp] = useSearchParams(); const wantReview = useRef(!!sp.get('review'));
-  // two pad designs: Classic (as it was) and Calm (v65: one sheet, quiet section tools, one summary card); each computer keeps its choice
-  const [calm, setCalmS] = useState(() => { try { return localStorage.getItem('pad.layout') === 'calm'; } catch { return false; } });
-  const setCalm = (v: boolean) => { setCalmS(v); try { localStorage.setItem('pad.layout', v ? 'calm' : 'classic'); } catch { /* storage blocked */ } };
-  const [addedSecs, setAddedSecs] = useState<Set<string>>(new Set()); // Calm: optional sections opened from 'Add a section'
+  // the pad's one design (v68, "Calm"; Classic was removed on 13 Nov 2026)
+  const [addedSecs, setAddedSecs] = useState<Set<string>>(new Set()); // optional sections opened from 'Add a section'
   const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad');
   useEffect(() => {
-    if (!calm || !loaded.current || !canFinish || !enc.data || ['completed', 'awaiting_reports'].includes(enc.data.status) || recs.some((r) => r.kind === 'followup')) return;
+    if (!loaded.current || !canFinish || !enc.data || ['completed', 'awaiting_reports'].includes(enc.data.status) || recs.some((r) => r.kind === 'followup')) return;
     const k = `pad.fu-default.${id}`; try { if (localStorage.getItem(k)) return; localStorage.setItem(k, '1'); } catch { return; }
     setRecs((cur) => (cur.some((r) => r.kind === 'followup') ? cur : [...cur, { kind: 'followup' as const, intervalDays: 30 }]));
-  }, [calm, recs, enc.data?.status]); // the pad, or one of the patient's collections beside it
+  }, [recs, enc.data?.status]); // the pad, or one of the patient's collections beside it
   useEffect(() => { if (sp.get('review')) { const n = new URLSearchParams(sp); n.delete('review'); setSp(n, { replace: true }); } }, []);
   const keys = useRef<(ev: KeyboardEvent) => void>(() => {}); // the pad's keys; the handler is set each render below
   useEffect(() => { const f = (ev: KeyboardEvent) => keys.current(ev); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f); }, []);
@@ -701,7 +699,7 @@ export function Encounter() {
     results: isDoctor ? <Card key="results" id="results" title="Lab results" meta="typed when reports arrive"><LabResultsCard patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} docs={myDocs} /></Card> : null,
     followup: isDoctor ? <section key="followup" id="sec-followup" className="card !p-0 anim-fade-up"><div className="grid gap-4 p-4 md:grid-cols-[300px_minmax(0,1fr)]">
       <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="followup" /><h3 className="text-[17px] font-bold tracking-[-0.01em]">Follow-up</h3></div>
-        <FollowUp days={followup?.intervalDays ?? null} disabled={readOnly} onChange={setFollowup} byNumber={calm} />
+        <FollowUp days={followup?.intervalDays ?? null} disabled={readOnly} onChange={setFollowup} />
         {followup?.intervalDays ? <div className="mt-1.5 text-xs text-muted">Review on {fmtDate(new Date(Date.now() + followup.intervalDays * 86400000).toISOString())}</div> : null}</div>
       <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="addnotes" /><h3 className="text-[17px] font-bold tracking-[-0.01em]">Additional notes</h3>
         {!readOnly && isDoctor && <span className="ml-auto flex items-center gap-0.5"><SectionTemplates compact kind="notes" sub="N" what="notes" sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={null} /><SaveTemplate what="notes" onSave={() => saveSection('notes')} /></span>}</div>
@@ -812,10 +810,10 @@ export function Encounter() {
   const patientLine = [age ? `${age} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
 
   return (
-    <div className={`space-y-3 pb-4 ${calm ? 'pad-calm' : ''}`}>
+    <div className="pad-calm space-y-3 pb-4">
       {/* who: the patient in the app's top bar (more room for the pad), with the layout, the whole-pad templates and the pad's settings; History, Photos and Reports as tabs under it */}
       {/* the record's header: the patient, then the pad's tabs with Save and Finish, stuck to the top (the app's top bar steps aside on a record) */}
-      <div className={`pad-head sticky top-[64px] z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0 ${calm ? 'pad-head-calm' : ''}`}>
+      <div className="pad-head pad-head-calm sticky top-[64px] z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0">
       {(() => { const who = (
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <BackButton to="/dashboard" />
@@ -842,7 +840,6 @@ export function Encounter() {
                   {applied && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => { clearLoaded(); setTplOpen(false); }}>Clear loaded ({applied})</button>}
                 </div>
               </Floating></>}
-            {isDoctor && <button type="button" className="btn btn-sm" aria-pressed={calm} title={calm ? 'Back to the Classic pad layout' : 'Try the Calm pad layout: one sheet, quieter section tools'} onClick={() => setCalm(!calm)}>{calm ? 'Classic layout' : 'Calm layout'}</button>}
             {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm btn-icon" aria-label="Configure pad: sections, required, printing" title="Configure pad: sections, required, printing" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" /></button>}
           </span>
         </div>);
@@ -853,12 +850,9 @@ export function Encounter() {
         {/* Stacked: save, preview and finish at the top, always in reach (Tatva's End visit) */}
         {<div className="flex flex-wrap items-center gap-2 py-1.5">
           {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
-          {!readOnly && isDoctor && !calm && <button type="button" className="btn btn-ghost btn-sm text-muted hover:text-rose" onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
           {!readOnly && !canFinish && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
           {!readOnly && canFinish && <>
-            {calm ? <MoreMenu items={[{ label: 'Save', onClick: () => save.mutate({ complete: false }) }, { label: 'Preview', onClick: () => { void preview(); } }, ...(isDoctor ? [{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }] : [])]} />
-              : <><button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
-            <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button></>}
+            {<MoreMenu items={[{ label: 'Save', onClick: () => save.mutate({ complete: false }) }, { label: 'Preview', onClick: () => { void preview(); } }, ...(isDoctor ? [{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }] : [])]} />}
             {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
             <button type="button" className={`btn btn-sm ${held && testsOpen ? '' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
           </>}
@@ -885,24 +879,24 @@ export function Encounter() {
 
         <div className="grid items-start gap-3 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
           {/* Tatva's left column: the patient's basic info, each opening its own drawer */}
-          <aside className={calm ? 'card !p-0 overflow-hidden lg:sticky lg:top-[124px]' : 'space-y-2 lg:sticky lg:top-[124px]'} aria-label="Basic info">
+          <aside className="card !p-0 overflow-hidden lg:sticky lg:top-[124px]" aria-label="Basic info">
             {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = k === 'vitals' && vitalCells.length > 0; return (
-              <button key={k} type="button" className={`${calm ? 'border-t border-line first:border-t-0' : 'card'} block w-full !px-3.5 !py-3 text-left transition-colors hover:bg-surface-2`} onClick={() => setSide(k)} aria-haspopup="dialog">
+              <button key={k} type="button" className="block w-full border-t border-line !px-3.5 !py-3 text-left transition-colors first:border-t-0 hover:bg-surface-2" onClick={() => setSide(k)} aria-haspopup="dialog">
                 <span className="flex items-center gap-2.5">
                   <SecIcon id={k} />
                   <span className="min-w-0 flex-1"><span className="block text-[15.5px] font-bold">{LEFT[k].title}</span>{!tiles && v && <span className="block truncate text-xs text-muted" title={v}>{v}</span>}</span>
                   <span className="shrink-0 text-[12.5px] font-semibold text-clay">{v ? 'Edit' : readOnly ? 'View' : '+ Add'}</span>
                 </span>
                 {/* vitals: only the ones taken, each in its own small tile */}
-                {tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val, fl]) => { const red = calm && fl; return <span key={l} className={`min-w-0 rounded-[8px] px-2 py-1.5 ring-1 ${red ? 'bg-rose-soft ring-rose/30' : 'bg-field ring-line'}`} title={red ? `${l} ${fl}` : undefined}><span className={`block truncate text-[10.5px] font-medium uppercase tracking-wide ${red ? 'text-rose' : 'text-muted'}`}>{l}{red ? ` · ${fl}` : ''}</span><span className={`block truncate text-[13.5px] font-bold ${red ? 'text-rose' : ''}`}>{val}</span></span>; })}</span>}
+                {tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val, fl]) => { const red = !!fl; return <span key={l} className={`min-w-0 rounded-[8px] px-2 py-1.5 ring-1 ${red ? 'bg-rose-soft ring-rose/30' : 'bg-field ring-line'}`} title={red ? `${l} ${fl}` : undefined}><span className={`block truncate text-[10.5px] font-medium uppercase tracking-wide ${red ? 'text-rose' : 'text-muted'}`}>{l}{red ? ` · ${fl}` : ''}</span><span className={`block truncate text-[13.5px] font-bold ${red ? 'text-rose' : ''}`}>{val}</span></span>; })}</span>}
               </button>); })}
           </aside>
           {(() => {
             const used: Record<string, boolean> = { tests: tests.length > 0, procedures: recs.some((r) => r.kind === 'procedure'), referral: !!(data.referral?.to || data.referral?.reason) };
             const OPT_TITLE: Record<string, string> = { tests: 'Investigations', procedures: 'Procedures', referral: 'Referral' };
-            const waiting = calm && !readOnly ? order.filter((k) => !LEFT[k] && k in OPT_TITLE && !used[k] && !addedSecs.has(k) && !padOf(k).required) : [];
+            const waiting = !readOnly ? order.filter((k) => !LEFT[k] && k in OPT_TITLE && !used[k] && !addedSecs.has(k) && !padOf(k).required) : [];
             const secs = order.filter((k) => !LEFT[k] && !waiting.includes(k));
-            return <div className={`min-w-0 space-y-3 ${calm ? 'pad-sheet' : ''}`}>
+            return <div className="pad-sheet min-w-0 space-y-3">
               {secs.map((k) => cards[k] ?? null)}
               {customSections.map(custom)}
               {waiting.length > 0 && <div className="card !px-4 !py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
