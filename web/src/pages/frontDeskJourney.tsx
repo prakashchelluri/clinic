@@ -7,7 +7,7 @@ import { can } from '../App';
 import { TakePayment } from '../takePayment';
 import { openPrint } from '../printPreview';
 import { FlagChips } from '../flags';
-import { Chip, Icon, Num, money } from '../ui';
+import { Chip, Floating, Icon, Num, money } from '../ui';
 import { vitalFields, vitalsText } from '../vitals';
 import { ReportDialog, type Order } from './TestReports';
 import '../frontdesk.css';
@@ -105,6 +105,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
         <button className="btn btn-icon" aria-label="Close" title="Close" onClick={onClose}><Icon name="x" className="h-4 w-4" /></button>
       </div>
 
+      <PatientActions patientId={v.patient.id} name={v.patient.fullName} />
       <ol className="m-0 list-none p-0">
         <Step i={0} state="done" title="Checked in" meta={`${hhmm(v.arrivedAt)} · ${v.category}`}>{d.complaint && <div className="mt-0.5 text-[12.5px] text-muted">{d.complaint}</div>}</Step>
         <Step i={1} state={vit[0]} title="Junior doctor" meta={vit[1]}>{vitals && <div className="mt-0.5 text-[12.5px] text-muted">{vitals}</div>}{canDesk && onToJunior && v.status === 'waiting' && <div className="mt-2"><button className="btn btn-sm" onClick={() => onToJunior(v.id)}>Send to junior doctor</button></div>}</Step>
@@ -126,7 +127,6 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
         <Step i={5} last state={finished ? 'done' : 'next'} title={left ? 'Left' : 'Done'} meta={finished ? (left ? 'did not see the doctor' : 'nothing left open') : held ? 'when the doctor has seen the reports' : ''} />
       </ol>
 
-      <PatientActions patientId={v.patient.id} name={v.patient.fullName} />
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3.5">
         <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>
         {v.encounterId && !left && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
@@ -136,20 +136,29 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
 }
 
 /** The two things the desk does for any patient on the calendar without leaving the Dashboard: bill them, and type in a lab result that came in. */
-export function PatientActions({ patientId, name }: { patientId: string; name: string }) {
+export type MoreItem = { label: string; icon?: any; onClick: () => void; danger?: boolean; gapBefore?: boolean };
+/** Under the main button: Create bill and Add lab results always shown, every other action of the drawer under More. */
+export function PatientActions({ patientId, name, more = [] }: { patientId: string; name: string; more?: MoreItem[] }) {
+  const [moreOpen, setMoreOpen] = useState(false); const moreBtn = useRef<HTMLButtonElement>(null);
   const { perms } = useOutletContext<any>() ?? {};
   const canBill = can(perms ?? [], 'payment.record'); const canLab = can(perms ?? [], 'document.write');
   const orders = useQuery<{ orders: Order[] }>({ queryKey: ['orders'], queryFn: () => get('/orders'), enabled: canLab });
   const [billing, setBilling] = useState(false); const [picking, setPicking] = useState(false); const [lab, setLab] = useState<{ o: Order; t: string } | null>(null);
   // the patient's tests still waiting for a result
   const waiting = (orders.data?.orders ?? []).filter((o) => o.patient.id === patientId).flatMap((o) => o.tests.filter((t) => !t.receivedAt && !t.reviewedAt).map((t) => ({ o, t })));
-  if (!canBill && !canLab) return null;
+  if (!canBill && !canLab && !more.length) return null;
   const addLab = () => waiting.length === 1 ? setLab({ o: waiting[0].o, t: waiting[0].t.id }) : setPicking(!picking);
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="flex gap-2 [&>.btn]:flex-1">
         {canBill && <button type="button" className="btn justify-center" onClick={() => setBilling(true)}><Icon name="plus" className="h-3.5 w-3.5" />Create bill</button>}
         {canLab && <button type="button" className="btn justify-center" disabled={!waiting.length} title={waiting.length ? '' : 'No tests waiting for a result'} aria-expanded={waiting.length > 1 ? picking : undefined} onClick={addLab}><Icon name="plus" className="h-3.5 w-3.5" />Add lab results</button>}
+        {more.length > 0 && <><button ref={moreBtn} type="button" className="btn !flex-none" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>More<Icon name="chevR" className="h-3.5 w-3.5 rotate-90" /></button>
+          <Floating anchor={moreBtn} open={moreOpen} onClose={() => setMoreOpen(false)} width={240}>
+            <div role="menu" className="p-1.5">{more.map((m) => <div key={m.label}>{m.gapBefore && <div className="my-1.5 border-t border-line" />}
+              <button type="button" role="menuitem" className={`flex w-full items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-left text-[14px] hover:bg-paper-2 ${m.danger ? 'text-rose' : ''}`} onClick={() => { setMoreOpen(false); m.onClick(); }}>
+                {m.icon && <Icon name={m.icon} className={`h-4 w-4 ${m.danger ? '' : 'text-muted'}`} />}{m.label}</button></div>)}</div>
+          </Floating></>}
       </div>
       {picking && waiting.length > 1 && <div className="rounded-[10px] border border-line p-1">{waiting.map(({ o, t }) =>
         <button key={t.id} type="button" className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-left text-[13.5px] hover:bg-surface-2" onClick={() => { setPicking(false); setLab({ o, t: t.id }); }}>

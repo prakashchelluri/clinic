@@ -69,15 +69,12 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
           </div>
 
           {onArrive && open && mode === null && a.window.day === today() && <button className="btn btn-primary justify-center" onClick={() => onArrive(a)}>Arrived · check in</button>}
-          {canWrite && open && mode === null && (
-            <div className="grid grid-cols-2 gap-2">
-              <button className="btn justify-center" onClick={() => remind.mutate()}><Icon name="message" />Send reminder</button>
-              <button className="btn justify-center" onClick={() => setMode('move')}><Icon name="calendar" />Move</button>
-              {a.window.day <= today() && <button className="btn justify-center" onClick={() => update.mutate({ status: 'no_show' })}>Did not come</button>}
-              <button className="btn justify-center !text-rose" onClick={() => setMode('cancel')}>Cancel</button>
-            </div>
-          )}
-          {canWrite && a.status === 'no_show' && mode === null && <button className="btn justify-center" onClick={() => update.mutate({ status: 'booked' })}>Undo “did not come”</button>}
+          {mode === null && <PatientActions patientId={a.patient.id} name={a.patient.fullName} more={!canWrite ? [] : open ? [
+            { label: 'Send reminder', icon: 'message', onClick: () => remind.mutate() },
+            { label: 'Move to another time', icon: 'calendar', onClick: () => setMode('move') },
+            ...(a.window.day <= today() ? [{ label: 'Did not come', icon: 'user', gapBefore: true, onClick: () => update.mutate({ status: 'no_show' }) }] : []),
+            { label: 'Cancel booking', icon: 'x', danger: true, gapBefore: a.window.day > today(), onClick: () => setMode('cancel') },
+          ] : a.status === 'no_show' ? [{ label: 'Undo “did not come”', icon: 'undo', onClick: () => update.mutate({ status: 'booked' }) }] : []} />}
 
           {mode === 'cancel' && (
             <div className="card space-y-3 anim-fade-up">
@@ -100,7 +97,6 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
             ))}
           </div>
 
-          <PatientActions patientId={a.patient.id} name={a.patient.fullName} />
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
             <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${a.patient.id}`); }}><Icon name="user" />Open record</button>
           </div>
