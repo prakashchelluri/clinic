@@ -232,7 +232,7 @@ function AdvicePicker({ options, have, onDone }: { options: string[]; have: stri
 }
 
 /** Follow-up as Tatva: type "3 days" (or weeks, months), pick a date, or tap 2 Days / 2 Weeks / 2 Months. */
-function FollowUp({ days, disabled, onChange }: { days: number | null; disabled?: boolean; onChange: (d: number | null) => void }) {
+function FollowUp({ days, disabled, onChange, byNumber = false }: { days: number | null; disabled?: boolean; onChange: (d: number | null) => void; /** Calm: the number typed offers N days, N weeks, N months */ byNumber?: boolean }) {
   const [v, setV] = useState(days ? afterText(days) : ''); const last = useRef(days); const cal = useRef<HTMLInputElement>(null);
   if (days !== last.current) { last.current = days; if (parseAfter(v) !== days) setV(days ? afterText(days) : ''); }
   const iso = (d: number) => new Date(Date.now() + d * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -241,12 +241,13 @@ function FollowUp({ days, disabled, onChange }: { days: number | null; disabled?
   return (
     <div>
       <div className="flex items-center gap-1.5">
-        <input aria-label="Follow-up after" className={`input !py-1.5 ${PH}`} placeholder="e.g. 3 days" maxLength={20} value={v} disabled={disabled} onChange={(e) => { setV(e.target.value); const d = parseAfter(e.target.value); if (d || !e.target.value.trim()) set(d); }} />
+        <input aria-label="Follow-up after" className={`input !py-1.5 ${PH}`} placeholder={byNumber ? 'Type a number, e.g. 2' : 'e.g. 3 days'} maxLength={20} value={v} disabled={disabled} onChange={(e) => { setV(e.target.value); if (byNumber && /^\s*\d+\s*$/.test(e.target.value)) return; /* a bare number waits for days, weeks or months below */ const d = parseAfter(e.target.value); if (d || !e.target.value.trim()) set(d); }} />
         {/* the calendar opens from a button; the date box itself stays out of sight */}
         <span className="relative shrink-0"><button type="button" className="btn btn-icon !h-[34px] !w-[38px]" aria-label="Pick the follow-up date" disabled={disabled} onClick={() => { try { cal.current?.showPicker(); } catch { cal.current?.focus(); } }}><CalendarDays className="h-4 w-4" aria-hidden /></button>
           <input ref={cal} type="date" tabIndex={-1} aria-hidden className="pointer-events-none absolute inset-0 opacity-0" min={today} value={days ? iso(days) : ''} disabled={disabled} onChange={(e) => { const d = e.target.value ? Math.round((Date.parse(e.target.value) - Date.parse(today)) / 86400000) : 0; const n = d > 0 ? Math.min(365, d) : null; setV(n ? afterText(n) : ''); set(n); }} /></span>
       </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">{([[2, '2 Days'], [14, '2 Weeks'], [60, '2 Months']] as const).map(([d, l]) => <button key={l} type="button" disabled={disabled} aria-pressed={days === d} className={days === d ? 'pick-chip' : 'toggle-opt'} onClick={() => { setV(afterText(d)); set(days === d ? null : d); }}>{l}</button>)}</div>
+      <div className="mt-2 flex flex-wrap gap-1.5">{(byNumber ? (() => { const n = Math.max(1, Math.min(365, parseInt(v, 10) || 1)); const pl = (w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+        return ([[n, pl('day')], ...(n * 7 <= 365 ? [[n * 7, pl('week')]] : []), ...(n <= 12 ? [[n * 30, pl('month')]] : [])] as [number, string][]); })() : ([[2, '2 Days'], [14, '2 Weeks'], [60, '2 Months']] as const)).map(([d, l]) => <button key={l} type="button" disabled={disabled} aria-pressed={days === d} className={days === d ? 'pick-chip' : 'toggle-opt'} onClick={() => { setV(afterText(d)); set(days === d ? null : d); }}>{l}</button>)}</div>
     </div>
   );
 }
@@ -300,7 +301,12 @@ export function Encounter() {
   const [calm, setCalmS] = useState(() => { try { return localStorage.getItem('pad.layout') === 'calm'; } catch { return false; } });
   const setCalm = (v: boolean) => { setCalmS(v); try { localStorage.setItem('pad.layout', v ? 'calm' : 'classic'); } catch { /* storage blocked */ } };
   const [addedSecs, setAddedSecs] = useState<Set<string>>(new Set()); // Calm: optional sections opened from 'Add a section'
-  const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
+  const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad');
+  useEffect(() => {
+    if (!calm || !loaded.current || !canFinish || !enc.data || ['completed', 'awaiting_reports'].includes(enc.data.status) || recs.some((r) => r.kind === 'followup')) return;
+    const k = `pad.fu-default.${id}`; try { if (localStorage.getItem(k)) return; localStorage.setItem(k, '1'); } catch { return; }
+    setRecs((cur) => (cur.some((r) => r.kind === 'followup') ? cur : [...cur, { kind: 'followup' as const, intervalDays: 30 }]));
+  }, [calm, recs, enc.data?.status]); // the pad, or one of the patient's collections beside it
   useEffect(() => { if (sp.get('review')) { const n = new URLSearchParams(sp); n.delete('review'); setSp(n, { replace: true }); } }, []);
   const keys = useRef<(ev: KeyboardEvent) => void>(() => {}); // the pad's keys; the handler is set each render below
   useEffect(() => { const f = (ev: KeyboardEvent) => keys.current(ev); window.addEventListener('keydown', f); return () => window.removeEventListener('keydown', f); }, []);
@@ -695,7 +701,7 @@ export function Encounter() {
     results: isDoctor ? <Card key="results" id="results" title="Lab results" meta="typed when reports arrive"><LabResultsCard patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} docs={myDocs} /></Card> : null,
     followup: isDoctor ? <section key="followup" id="sec-followup" className="card !p-0 anim-fade-up"><div className="grid gap-4 p-4 md:grid-cols-[300px_minmax(0,1fr)]">
       <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="followup" /><h3 className="text-[17px] font-bold tracking-[-0.01em]">Follow-up</h3></div>
-        <FollowUp days={followup?.intervalDays ?? null} disabled={readOnly} onChange={setFollowup} />
+        <FollowUp days={followup?.intervalDays ?? null} disabled={readOnly} onChange={setFollowup} byNumber={calm} />
         {followup?.intervalDays ? <div className="mt-1.5 text-xs text-muted">Review on {fmtDate(new Date(Date.now() + followup.intervalDays * 86400000).toISOString())}</div> : null}</div>
       <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="addnotes" /><h3 className="text-[17px] font-bold tracking-[-0.01em]">Additional notes</h3>
         {!readOnly && isDoctor && <span className="ml-auto flex items-center gap-0.5"><SectionTemplates compact kind="notes" sub="N" what="notes" sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={null} /><SaveTemplate what="notes" onSave={() => saveSection('notes')} /></span>}</div>
@@ -896,10 +902,10 @@ export function Encounter() {
             const OPT_TITLE: Record<string, string> = { tests: 'Investigations', procedures: 'Procedures', referral: 'Referral' };
             const waiting = calm && !readOnly ? order.filter((k) => !LEFT[k] && k in OPT_TITLE && !used[k] && !addedSecs.has(k) && !padOf(k).required) : [];
             const secs = order.filter((k) => !LEFT[k] && !waiting.includes(k));
-            return <div className={`min-w-0 ${calm ? 'pad-sheet card !p-0 overflow-hidden' : 'space-y-3'}`}>
+            return <div className={`min-w-0 space-y-3 ${calm ? 'pad-sheet' : ''}`}>
               {secs.map((k) => cards[k] ?? null)}
               {customSections.map(custom)}
-              {waiting.length > 0 && <div className="border-t border-line px-4 py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
+              {waiting.length > 0 && <div className="card !px-4 !py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
             </div>; })()}
         </div>
       </>}
