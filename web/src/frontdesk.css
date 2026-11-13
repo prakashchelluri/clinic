@@ -205,5 +205,5 @@ html[data-theme="dark"] { --fd-proc: #2DD4BF; }
 .fd-later { padding: 8px 12px; border-top: 1px solid var(--color-line-2); border-left: 1px solid var(--color-line-2); font-size: 13px; color: var(--color-muted); text-align: left; }
 .fd-later:hover { background: var(--color-surface-2); color: var(--color-ink); }
 /* v63: the colour key sits quietly on the calendar's bottom edge, not under the toolbar */
-.fd-sch > .fd-hkey { border-bottom: 0; border-top: 1px solid var(--color-line); padding: 8px 14px; font-size: 12px; gap: 12px; }
+.fd-sch > .fd-hkey { border-top: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line); padding: 8px 14px; font-size: 12px; gap: 12px; }
 .fd-sch > .fd-hkey i { width: 10px; height: 10px; }

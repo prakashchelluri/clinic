@@ -118,7 +118,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       {keyF.size > 0 && <button type="button" className="fd-key clear" onClick={() => setKeyF(new Set())}>Show all</button>}
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
-  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{inner}{!list && keyRow}
+  const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{!list && keyRow}{inner}
     {procId && <ProcedureDrawer key={procId} id={procId} canAct={can(perms ?? [], 'worklist.write')} onClose={() => setProcId(null)} />}</div>;
   const days: any[] | undefined = week ? range.data : cal.data && [cal.data];
   if (!days || (!week && !isToday && other.isLoading)) return sheet(<div className="p-4"><Skeleton rows={4} /></div>);
