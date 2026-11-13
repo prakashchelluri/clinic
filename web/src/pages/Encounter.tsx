@@ -294,6 +294,7 @@ export function Encounter() {
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
   const [tplOpen, setTplOpen] = useState(false); const [tplQ, setTplQ] = useState(''); const [tplSel, setTplSel] = useState<any>(null); const tplBtn = useRef<HTMLButtonElement>(null);
   const [setNote, setSetNote] = useState('');
+  useEffect(() => { if (!setNote) return; const t = setTimeout(() => setSetNote(''), 30_000); return () => clearTimeout(t); }, [setNote]); // the "Loaded from …" note closes by itself after 30 s
   // opened from Review on the doctor's Today (?review): the Rxpad at Lab investigations, where the values and reports are
   const [sp, setSp] = useSearchParams(); const wantReview = useRef(!!sp.get('review'));
   const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
@@ -835,7 +836,7 @@ export function Encounter() {
       <CarefulBanner flags={p.flags} />
       {/* tabs (an underline, not pills): the Rxpad, and the patient's past visits, photos and reports beside it */}
       {<div className="sticky top-[60px] z-20 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-1 bg-paper/95 px-1 backdrop-blur-xl">
-        {isDoctor ? <Tabs<'pad' | 'visits' | 'photos' | 'docs'> className="min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'pad', label: 'Rxpad' }, { value: 'visits', label: 'Past visits', count: previous.length || undefined }, { value: 'photos', label: 'Photos', count: ph.length || undefined }]} /> : <span className="flex-1" />}
+        {isDoctor ? <Tabs<'pad' | 'visits' | 'photos' | 'docs'> className="tabs-lg min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'pad', label: 'Rxpad' }, { value: 'visits', label: 'Past visits', count: previous.length || undefined }, { value: 'photos', label: 'Photos', count: ph.length || undefined }]} /> : <span className="flex-1" />}
         {/* Stacked: save, preview and finish at the top, always in reach (Tatva's End visit) */}
         {<div className="flex flex-wrap items-center gap-2 py-1.5">
           {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
