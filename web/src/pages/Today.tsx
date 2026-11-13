@@ -99,7 +99,7 @@ export function Today() {
   const otherCount = stopped.length + drafts.length + noDoc.length + (overdue.length ? 1 : 0) + (toApprove ? 1 : 0) + asksN;
 
   const tw: any[] = tom.data?.windows ?? [];
-  const tBooked = tw.reduce((n, w) => n + (w.appointments ?? []).length, 0);
+  const tBooked = tw.reduce((n, w) => n + (w.appointments ?? []).filter((a: any) => a.status !== 'cancelled').length, 0);
   const dateLabel = new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
   const canChange = !!doc;
   const nextMed = medical(nextTl.data?.patient, cfg);

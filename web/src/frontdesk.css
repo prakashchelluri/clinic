@@ -142,6 +142,8 @@
 /* space after the last slot of an hour is shaded, not left as a hole */
 .fd-hchips { background: repeating-linear-gradient(45deg, rgba(0,0,0,.03) 0 6px, transparent 6px 12px); }
 /* an empty place in the hour: a dashed box that books it */
+.fd-k-cancelled { background: var(--color-surface); color: var(--color-muted); }
+.fd-k-cancelled .truncate { text-decoration: line-through; }
 .fd-free { justify-content: center; color: var(--color-muted); font-weight: 500; background: var(--color-surface); }
 .fd-free:hover { color: var(--color-clay); background: var(--color-clay-soft); filter: none; }
 .fd-wtabs { padding: 0 14px; border-bottom: 1px solid var(--color-line); }
