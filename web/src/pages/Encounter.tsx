@@ -19,6 +19,7 @@ import { VitalsCard, vitalFields, vitalsText, bmiOf, vitalFlag } from '../vitals
 import { LabResultsCard, ReportLink, reportFor } from '../labs';
 import { ReportList } from '../labHistory';
 import type { PadCanvas } from '../padCanvas';
+import { AddModuleDrawer, ModuleInfo, ModuleLoadPrev, ModuleMenu, ModuleTable, deleteModule, filledRows, setOnPad, usePadModules, type ModuleData, type PadModule } from '../padModules';
 // the drawing board loads only when the Canvas drawer opens (it is a large library)
 const CanvasDrawer = lazy(() => import('../padCanvas').then((m) => ({ default: m.CanvasDrawer })));
 
@@ -281,6 +282,7 @@ export function Encounter() {
   const tpls = useQuery({ queryKey: ['rx-templates'], queryFn: () => get('/rx-templates'), enabled: isDoctor });
   const stock = useQuery({ queryKey: ['encounters-stock'], queryFn: () => get('/encounters-stock'), enabled: isDoctor, staleTime: 60_000 });
   const sets = useTemplates();
+  const padMods = usePadModules(isDoctor); const [modDrawer, setModDrawer] = useState<{ edit?: PadModule } | null>(null);
   const photos = usePhotos(enc.data?.patientId);
   const [data, setData] = useState<Record<string, any>>({});
   const [rx, setRx] = useState<RxItem[]>([]);
@@ -733,6 +735,32 @@ export function Encounter() {
   const shown = pad.length ? pad.filter((s) => s.show).map((s) => s.key) : Object.keys(cards);
   // the doctor's photos live on their own tab; the junior takes the "before" pictures at intake, so intake keeps the card
   const order = isDoctor ? shown.filter((k) => k !== 'photos') : [...shown.filter((k) => k !== 'photos'), ...(can(perms, 'document.write') ? ['photos'] : [])];
+  // custom modules: the ones on my pad, and any this pad already has lines in (so a removed one never hides what was written)
+  const modLib = new Map((padMods.data ?? []).map((m) => [m.id, m])); const modData: Record<string, ModuleData> = data.modules ?? {};
+  const myMods = (padMods.data ?? []).filter((m) => m.onPad);
+  const modIds = uniq([...(readOnly ? [] : myMods.map((m) => m.id)), ...Object.keys(modData).filter((k) => filledRows(modData[k]).length)]);
+  // a module keeps the name and columns it had once lines are written; an empty one follows the list
+  const modOf = (k: string): ModuleData | null => { const d = modData[k]; const lib = modLib.get(k); return d && (filledRows(d).length || !lib) ? d : lib ? { name: lib.name, columns: lib.columns, rows: d?.rows ?? [] } : null; };
+  const setModRows = (k: string, rows: string[][]) => { const m = modOf(k); if (m) setData((d) => ({ ...d, modules: { ...(d.modules ?? {}), [k]: { name: m.name, columns: m.columns, rows } } })); };
+  const saveModTpl = async (k: string) => {
+    const m = modOf(k); const rows = filledRows(m); if (!m || !rows.length) return toast(`There is nothing to save yet: ${m?.name ?? 'the module'} is empty.`, 'info');
+    const r = await ask({ title: `Save ${m.name} as a template`, body: 'It appears under Templates on this module.', confirmLabel: 'Save', field: { label: 'Name', required: true, maxLength: 80 } });
+    if (!r?.value || r.value.trim().length < 2) return;
+    try { await post('/templates', { kind: 'module', name: r.value.trim(), linked: {}, payload: { moduleId: k, rows: rows.map((x) => m.columns.map((_, j) => x[j] ?? '')) } }); qc.invalidateQueries({ queryKey: ['templates'] }); toast(`Saved as “${r.value.trim()}”`); }
+    catch (er) { toast(er instanceof ApiError && er.body?.code === 'DUPLICATE' ? 'A template by that name already exists.' : errText(er), 'err'); }
+  };
+  const moduleCard = (k: string) => { const m = modOf(k); if (!m) return null; const lib = modLib.get(k); const rows = filledRows(m);
+    const acts = readOnly || !isDoctor ? undefined : <>
+      <ModuleLoadPrev id={k} previous={previous} onLoad={(xs) => setModRows(k, [...rows, ...xs])} />
+      <SectionTemplates compact kind="module" sub="" what={m.name} sets={(sets.data ?? []).filter((t) => t.kind === 'module' && t.payload?.moduleId === k)} onPick={(t) => setModRows(k, [...rows, ...(t.payload?.rows ?? [])])} onClear={null} />
+      <SaveTemplate what={m.name} onSave={() => saveModTpl(k)} />
+      {rows.length > 0 && <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" aria-label={`Clear ${m.name}`} onClick={() => clearSection(m.name, () => setModRows(k, []))}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}
+      {lib && <ModuleMenu items={[
+        ...(lib.onPad ? [{ label: 'Remove from Rx pad', onClick: () => setOnPad(lib, false) }] : [{ label: 'Add to my Rx pad', onClick: () => setOnPad(lib, true) }]),
+        { label: 'Edit module', disabled: lib.canEdit ? undefined : lib.used ? 'Locked: it has been used on a prescription' : 'Only the doctor who made it can change it', onClick: () => setModDrawer({ edit: lib }) },
+        { label: 'Delete module', danger: true, disabled: lib.canEdit ? undefined : lib.used ? 'Locked: it has been used on a prescription' : 'Only the doctor who made it can delete it', onClick: () => deleteModule(lib) },
+      ]} />}</>;
+    return <Card key={`mod-${k}`} id={`mod-${k}`} title={m.name} meta={<ModuleInfo m={lib} />} actions={acts}><ModuleTable mod={m} readOnly={readOnly} onChange={(xs) => setModRows(k, xs)} /></Card>; };
   const custom = (x: any) => (
     <Card key={x.key} id={x.key} title={x.title} required={x.fields.some((f: Field) => f.required)} invalid={bad(x.key)}>
       <div className="space-y-2">{x.fields.map((f: Field) => <div key={f.key} data-invalid={!!err(x.key, f.key)}><CompactField f={f} value={data[x.key]?.[f.key]} onChange={(v) => set(x.key, f.key, v)} disabled={readOnly} invalid={!!err(x.key, f.key)} />{err(x.key, f.key) && <div className="mt-1 text-xs text-rose">{f.label} is required</div>}</div>)}</div>
@@ -810,6 +838,7 @@ export function Encounter() {
   const histRows = (cfg?.historyCategories ?? []).map((c: any) => ({ label: c.short ?? c.label, allergy: /allerg/i.test(c.key), names: (Array.isArray(p.history?.[c.key]) ? p.history[c.key] : []).map((x: any) => x.name).filter(Boolean) as string[] }))
     .filter((r: any) => r.names.length).sort((a: any, b: any) => Number(b.allergy) - Number(a.allergy));
   const histNote = typeof p.history?.notes === 'string' ? p.history.notes.trim() : '';
+  const privNote = typeof data.notes?.private === 'string' ? data.notes.private.trim() : '';
   const leftKeys = ['vitals', 'history', 'notes', 'reports', 'canvas'].filter((k) => (['reports', 'canvas', 'notes'].includes(k) ? isDoctor : true) && (['reports', 'canvas'].includes(k) || order.includes(k)));
   const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">{saveFailed === 'kept' ? 'Not saved — kept on this computer, will send when the internet is back' : 'Not saved — your notes are still here. Try Save again.'}</span>;
   const restoreAt = restore ? new Date(restore.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -890,7 +919,7 @@ export function Encounter() {
         <div className="pad-grid grid items-start gap-3 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
           {/* Tatva's left column: the patient's basic info, each opening its own drawer */}
           <aside className="card !p-0 overflow-hidden lg:sticky lg:top-[124px]" aria-label="Basic info">
-            {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = (k === 'vitals' && vitalCells.length > 0) || (k === 'history' && (histRows.length > 0 || !!histNote)); return (
+            {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = (k === 'vitals' && vitalCells.length > 0) || (k === 'history' && (histRows.length > 0 || !!histNote)) || (k === 'notes' && !!privNote); return (
               <button key={k} type="button" className="block w-full border-t border-line !px-3.5 !py-3 text-left transition-colors first:border-t-0 hover:bg-surface-2" onClick={() => setSide(k)} aria-haspopup="dialog">
                 <span className="flex items-center gap-2.5">
                   <SecIcon id={k} />
@@ -900,6 +929,7 @@ export function Encounter() {
                 {/* vitals: only the ones taken, each in its own small tile */}
                 {k === 'history' && histRows.length > 0 && <span className="mt-2.5 grid grid-cols-[76px_minmax(0,1fr)] items-start gap-x-2 gap-y-1.5 text-[12.5px]">{histRows.map((r: any) => <Fragment key={r.label}><span className={`pt-[3px] ${r.allergy ? 'font-semibold text-rose' : 'text-muted'}`}>{r.label}</span><span className="flex flex-wrap gap-1">{r.names.map((n: string) => <span key={n} className={`rounded-[6px] px-2 py-0.5 font-medium ring-1 ${r.allergy ? 'bg-rose-soft text-rose ring-rose/30' : 'bg-field ring-line'}`}>{n}</span>)}</span></Fragment>)}</span>}
                 {k === 'history' && histNote && <span className="mt-2 block border-t border-line pt-1.5 text-[12.5px] text-muted">{histNote}</span>}
+                {k === 'notes' && privNote && <span className="mt-2 line-clamp-3 whitespace-pre-line text-[13px] leading-snug" title={privNote}>{privNote}</span>}
                 {k === 'vitals' && tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val, fl]) => { const red = !!fl; return <span key={l} className={`min-w-0 rounded-[8px] px-2 py-1.5 ring-1 ${red ? 'bg-rose-soft ring-rose/30' : 'bg-field ring-line'}`} title={red ? `${l} ${fl}` : undefined}><span className={`block truncate text-[10.5px] font-medium uppercase tracking-wide ${red ? 'text-rose' : 'text-muted'}`}>{l}{red ? ` · ${fl}` : ''}</span><span className={`block truncate text-[13.5px] font-bold ${red ? 'text-rose' : ''}`}>{val}</span></span>; })}</span>}
               </button>); })}
           </aside>
@@ -911,7 +941,11 @@ export function Encounter() {
             return <div className="pad-sheet min-w-0 space-y-3">
               {secs.map((k) => cards[k] ?? null)}
               {customSections.map(custom)}
-              {waiting.length > 0 && <div className="card !px-4 !py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
+              {modIds.map(moduleCard)}
+              {waiting.length > 0 &&<div className="card !px-4 !py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
+              {/* Tatva's custom modules: pick one the clinic has or create a new one */}
+              {!readOnly && isDoctor && <button type="button" className="card flex w-full items-center gap-2 !px-4 !py-3 text-left text-[15px] font-semibold text-clay hover:bg-surface-2" onClick={() => setModDrawer({})}><Icon name="plus" className="h-4 w-4" />Add custom module<span className="ml-auto text-[13px] font-normal text-muted">{myMods.length ? `${myMods.length} on your pad` : 'Your own table on the pad'}</span></button>}
+              {modDrawer && <AddModuleDrawer editing={modDrawer.edit} onClose={() => setModDrawer(null)} />}
             </div>; })()}
         </div>
       </>}
