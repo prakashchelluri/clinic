@@ -11,7 +11,7 @@ import { CourseDialog } from '../courses';
 import { Drawer, PageSearchBox, Avatar, Chip, Floating, Icon, Modal, Segmented, MoneyInput, MoreMenu, Num, Skeleton, cleanMoney, money, toast, fmtDate, toPaise, ask, Empty, Filter, usePageSearch } from '../ui';
 import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
-import { NextForYou, JourneyPanel, StageStrip, Filmstrip } from './frontDeskJourney';
+import { JourneyPanel, StageStrip } from './frontDeskJourney';
 import { DaySchedule } from './frontDeskSchedule';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { BookForm } from './Booking';
@@ -41,7 +41,7 @@ function downloadCsv(filename: string, rows: (string | number | null | undefined
 
 /** The desk's dashboard: the same day as a Calendar (by the hour, with who is waiting beside it) or as a List (by stage).
  *  One toolbar on top, the same in both views: the view, the search, History. */
-export function FrontDesk({ lead }: { lead?: React.ReactNode }) {
+export function FrontDesk() {
   const { perms, cfg, me } = useOutletContext<Ctx>();
   const nav = useNavigate();
   const day = today(); const isToday = true;
@@ -174,7 +174,7 @@ export function FrontDesk({ lead }: { lead?: React.ReactNode }) {
   const nextIds = new Set<string>(); { const seen = new Set<string>(); for (const v of visitsAll) if (['waiting', 'screened'].includes(v.status) && !(screening === 'required' && v.status === 'waiting') && !seen.has(v.practitionerId ?? '')) { seen.add(v.practitionerId ?? ''); nextIds.add(v.id); } }
   const sendIn = (v: any) => upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
   const toJunior = (v: any) => upVisit.mutate({ id: v.id, status: 'intake' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent to the junior doctor`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
-  const onSchedule = view === 'schedule' && canDesk && tab !== 'history';
+  const onSchedule = canDesk && tab !== 'history'; // the desk always has the calendar and the rail; List only swaps the grid for rows
   const waitingPanel = (
     <aside className="flex flex-col gap-4">
       <section className="fd-sheet overflow-hidden">
@@ -196,6 +196,18 @@ export function FrontDesk({ lead }: { lead?: React.ReactNode }) {
           <button key={v.id} type="button" className={`btn btn-sm !h-auto !justify-start !py-1.5 text-left ${selV?.id === v.id ? '!bg-surface-2' : ''}`} onClick={() => setPickV(v.id)}>
             <span className="fd-warn">!</span><span className="min-w-0"><span className="block truncate font-semibold">{v.patient.fullName}</span>
               <span className="block truncate text-[12px] font-medium text-muted">{[t.length && `Tests: ${t.map((r: any) => r.notes).filter(Boolean).join(', ') || t.length}`, pr.length && `Procedure: ${pr.map((r: any) => r.procedure ?? 'procedure').join(', ')}`, open.some((r: any) => r.kind === 'followup') && 'Review to book'].filter(Boolean).join(' · ')}</span></span></button>); })}
+      </section>}
+      {reportsIn.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
+        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Reports in · {reportsIn.length}</span>
+        {reportsIn.map((o) => (
+          <div key={o.encounterId} className="flex items-center gap-2"><span className="min-w-0 flex-1"><span className="block truncate text-[13.5px] font-semibold">{o.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{o.tests.map((t: any) => t.name).join(', ')}</span></span>
+            <button type="button" className="btn btn-sm shrink-0" disabled={backIn.isPending} title="The patient is back with the reports" onClick={() => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })}>Check in</button></div>))}
+      </section>}
+      {withDue.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
+        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">To collect · {withDue.length}</span>
+        {withDue.map((v) => (
+          <div key={v.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{v.patient.fullName}</span>
+            <button type="button" className="btn btn-sm shrink-0" onClick={() => setCollecting(v)}>Collect {money(dueOf(v))}</button></div>))}
       </section>}
     </aside>);
   const render = (r: Row) => {
@@ -247,7 +259,6 @@ export function FrontDesk({ lead }: { lead?: React.ReactNode }) {
     <div className="fd flex min-h-0 flex-1 flex-col">
       <h1 className="sr-only">Dashboard</h1>
       {tab !== 'history' && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
-        {lead}
         {canDesk && <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} />}
         <span className="ml-auto" />
         <PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[280px] max-w-full" />
@@ -279,19 +290,13 @@ export function FrontDesk({ lead }: { lead?: React.ReactNode }) {
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} />
+                list={view === 'table'} onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} />
               {waitingPanel}</div>
-            : tab === 'now' ? <NextForYou sendable={sendable} arrange={checkout} reportsIn={reportsIn} reportsLate={reportsLate} late={late} withDue={withDue} idle={idle} selectedId={selV?.id ?? null} onSelect={setPickV} canSend={canSend}
-                onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })}
-                onReportsArrive={(o) => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })} freeDays={freeDays}
-                onCheckIn={(a) => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })} onCollect={(v) => setCollecting(v)} doctorHead={docOptions.length > 2 && <span className="fd-thf"><Filter icon="stetho" value={docFilter ?? 'all'} onChange={(v) => setDocFilter(v === 'all' ? null : v)} options={docOptions} />{docFilter && <button type="button" className="fd-x" aria-label="Show all doctors" onClick={() => setDocFilter(null)}>×</button>}</span>} docName={docName} catName={(code) => (cfg?.feeCategories ?? []).find((c: any) => c.code === code)?.name?.split(' (')[0] ?? code} />
             : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/dashboard?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/dashboard?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
               </div>)}
-            {canDesk && tab !== 'history' && !onSchedule && <Filmstrip visits={visitsAll} selectedId={selV?.id ?? null} onSelect={setPickV}
-              onEnter={(v) => { const s = canSend(v); if (['waiting', 'screened'].includes(v.status) && s.ok) upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') }); else if (['waiting', 'screened'].includes(v.status)) toast(s.why, 'info'); }} />}
           </div>
           {collecting && <TakePayment patientId={collecting.patientId} patientName={collecting.patient.fullName} onClose={() => { setCollecting(null); refresh(); }} />}
           {moving && <Modal title="Change doctor" subtitle={`${moving.patient.fullName} · token ${moving.opNumber}`} onClose={() => setMoving(null)} width="max-w-sm">

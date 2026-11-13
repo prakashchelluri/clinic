@@ -32,7 +32,7 @@ type Item = { key: string; label: string; patientId?: string; visit?: any; proc?
 
 /** The doctor's dashboard: the calendar on the left (their own; every doctor's for the owner), and on the right the next patient,
  *  the results to review, what else needs them, and tomorrow. No money. */
-export function Today({ lead }: { lead?: ReactNode }) {
+export function Today() {
   const { me, perms, cfg } = useOutletContext<any>();
   const nav = useNavigate();
   const doc: string | null = me.practitionerId ?? null;
@@ -107,7 +107,7 @@ export function Today({ lead }: { lead?: ReactNode }) {
   return (
     <div className="fd-doc space-y-4">
       <header className="flex flex-wrap items-center gap-2.5 anim-fade-up">
-        <h1 className="sr-only">Dashboard</h1>{lead}<span className="text-[14px] font-semibold text-muted">{docName && doc ? docName : dateLabel}</span>
+        <h1 className="sr-only">Dashboard</h1><span className="text-[14px] font-semibold text-muted">{docName && doc ? docName : dateLabel}</span>
         {[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id}>{b.note}</Chip>)}
         <span className="ml-auto" />
         <Chip>{waiting.length} waiting</Chip><Chip>{seen} seen</Chip>{readyOrders.length > 0 && <Chip>{readyOrders.length} result{readyOrders.length === 1 ? '' : 's'} to review</Chip>}
