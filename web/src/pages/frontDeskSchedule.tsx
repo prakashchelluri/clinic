@@ -8,7 +8,7 @@ import { Floating, cap, Icon, Segmented, Skeleton, Tabs, ask, toast } from '../u
 import { told } from '../apptDrawer';
 
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow' | 'cancelled';
-const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Done · tests & procedures pending', done: 'Done', noshow: "Didn't come", cancelled: 'Cancelled' };
+const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Completed · tests & procedures pending', done: 'Completed', noshow: "Didn't come", cancelled: 'Cancelled' };
 const SITTING: Record<string, Kind> = { confirmed: 'booked', in_progress: 'doctor', completed: 'done', missed: 'noshow' };
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -101,7 +101,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </div>);
   const keyRow = (
     <div className="fd-hkey">
-      <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-done" />Seen</span>
+      <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-done" />Completed</span><span><i className="fd-k-noshow" />Didn't come</span>
       <span><i className="fd-k-booked fd-k-procsw" /><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
@@ -191,7 +191,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const chipsAt = (r: { start: string }) => cols.flatMap((c) => cell(c, r).chips);
   const folded = new Set(calm && !showPast ? rows.filter((r) => gone(day, r.end) && !chipsAt(r).some((x) => ACTIVE.includes(x.k))) : []);
   const pastSum = (() => { if (!calm) return ''; const all = rows.filter((r) => gone(day, r.end)).flatMap(chipsAt); const k = (...ks: Kind[]) => all.filter((x) => ks.includes(x.k)).length;
-    return [k('done', 'tests') && `${k('done', 'tests')} seen`, k('late', 'noshow') && `${k('late', 'noshow')} didn't come`, k('cancelled') && `${k('cancelled')} cancelled`].filter(Boolean).join(' · ') || 'nobody'; })();
+    return [k('done', 'tests') && `${k('done', 'tests')} completed`, k('late', 'noshow') && `${k('late', 'noshow')} didn't come`, k('cancelled') && `${k('cancelled')} cancelled`].filter(Boolean).join(' · ') || 'nobody'; })();
   const anchor = nowRow >= 0 ? nowRow : rows.findIndex((r) => toMin(r.start) > nowM);
   const compact = (i: number, r: { start: string }) => calm && anchor >= 0 && i > anchor + 2 && !opened.has(r.start);
   const freeAt = (r: { start: string }) => cols.reduce((n, c) => { const ws = c.ws.filter((w) => w.startTime === r.start); return n + (ws.length === 1 && !(ws[0].effectiveCapacity === 0 && ws[0].reductions?.length) ? Math.max(0, ws[0].free) : 0); }, 0);

@@ -108,7 +108,7 @@ export function Clinic() {
         <section className="fd-sheet p-5 anim-fade-up">
           <b className="text-[15px]">Doctors today</b>
           <div className="mt-2 grid grid-cols-[minmax(0,1fr)_64px_72px_110px] gap-x-3 text-[13.5px] tabular-nums">
-            {['Doctor', 'Seen', 'Waiting', 'Collected'].map((h, i) => <span key={h} className={`pb-1.5 text-[11.5px] font-bold uppercase tracking-wider text-muted ${i === 3 ? 'text-right' : ''}`}>{h}</span>)}
+            {['Doctor', 'Completed', 'Waiting', 'Collected'].map((h, i) => <span key={h} className={`pb-1.5 text-[11.5px] font-bold uppercase tracking-wider text-muted ${i === 3 ? 'text-right' : ''}`}>{h}</span>)}
             {tiles.map((d) => [
               <b key={d.id} className="truncate border-t border-line py-2.5">{d.name}</b>,
               <span key={d.id + 's'} className="border-t border-line py-2.5">{visits.filter((v) => v.practitionerId === d.id && v.status === 'done').length}</span>,

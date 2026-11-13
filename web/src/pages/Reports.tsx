@@ -113,7 +113,7 @@ export function Reports() {
 }
 
 // [key, label, money?, lower is better?]
-const FIGS: [string, string, boolean, boolean][] = [['patients', 'Patients seen', false, false], ['newPatients', 'New patients', false, false], ['returning', 'Returning patients', false, false], ['collectedPaise', 'Collected', true, false],
+const FIGS: [string, string, boolean, boolean][] = [['patients', 'Patients completed', false, false], ['newPatients', 'New patients', false, false], ['returning', 'Returning patients', false, false], ['collectedPaise', 'Collected', true, false],
   ['duePaise', 'Still due', true, true], ['sittings', 'Procedure sittings done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'Booked, did not come', false, true]];
 
 function Overview({ d }: { d: any }) {

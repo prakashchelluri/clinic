@@ -97,7 +97,7 @@ function Reception() {
       ['Waiting', 'Checked in, waiting to be called. The longest wait is shown.'],
       ['Not here yet', 'Booked for today and not arrived yet. Tap Check in when they arrive.'],
       ['With doctor', 'In the consultation room now.'],
-      ['Checkout', 'Seen by the doctor, and something is still to arrange. This is where you work after the doctor.'],
+      ['Checkout', 'Consultation completed, and something is still to arrange. This is where you work after the doctor.'],
       ['Awaiting reports', 'The lab slip is given. They stay here until the reports are reviewed and the patient is told.'],
       ['Completed', 'Finished for today.'],
       ['All', 'Everyone for today in one list.'],
