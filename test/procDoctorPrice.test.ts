@@ -55,6 +55,11 @@ test("the doctor's amount is the course price; a sitting done before a course is
   const ch = (await owner('GET', `/patients/${b.p.id}/timeline`)).json().charges.filter((x: any) => /Chemical peel sitting/.test(x.description));
   assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 600000); assert.match(ch[0].description, /doctor's price/);
 
+  // the printed Rx names the procedure
+  const enc = (await owner('GET', `/patients/${a.p.id}/timeline`)).json().encounters[0];
+  const pr = (await owner('GET', `/encounters/${enc.id}/print`)).json();
+  assert.equal(pr.recommendations.find((x: any) => x.kind === 'procedure').procedureName, 'Chemical peel');
+
   // empty: the standard price
   const s = await plan(owner, reception, 'Price Standard', '9848066603', null);
   const cs = (await reception('POST', '/courses', { recommendationId: s.rec.id })).json();
