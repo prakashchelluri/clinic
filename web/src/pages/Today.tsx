@@ -84,7 +84,6 @@ export function Today() {
   const away = blocks.find((b) => b.kind === 'leave');
 
   // --- counts for the header ---
-  const seen = visits.filter((v) => v.status === 'done').length;
   // test orders whose every report is in: the doctor reviews each once (names of the tests only, values open in the review)
   // the patient is here with these reports: the doctor goes over them in the consultation, not from this list
   const hereWith = new Set(((d?.visits ?? []) as any[]).filter((v) => v.details?.reportsEncounterId && v.status !== 'done' && v.status !== 'left').map((v) => v.details.reportsEncounterId));
@@ -112,7 +111,6 @@ export function Today() {
         <h1 className="sr-only">Dashboard</h1><span className="text-[14px] font-semibold text-muted">{docName && doc ? docName : dateLabel}</span>
         {[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id}>{b.note}</Chip>)}
         <span className="ml-auto" />
-        <Chip>{waiting.length} waiting</Chip><Chip>{seen} seen</Chip>{readyOrders.length > 0 && <Chip>{readyOrders.length} result{readyOrders.length === 1 ? '' : 's'} to review</Chip>}
         {canChange && <><button className="btn btn-sm" onClick={() => setChange({ kind: 'late' })}><Icon name="clock" className="h-3.5 w-3.5" />Running late</button>
           <button className="btn btn-sm" onClick={() => setChange({ kind: 'early' })}>Change my day</button></>}
       </header>
