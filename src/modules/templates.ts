@@ -24,8 +24,10 @@ const Payload = {
   notes: z.object({ text: z.string().trim().min(1).max(2000) }),
   // a drawing to start from (body outline, face …): the drawing tool's own elements and image files
   canvas: z.object({ elements: z.array(z.any()).max(2000), files: z.record(z.string(), z.any()).optional() }),
+  // lines for one custom module on the pad (its id, then a box per column)
+  module: z.object({ moduleId: z.string().uuid(), rows: z.array(z.array(z.string().max(200)).max(4)).min(1).max(30) }),
 } as const;
-const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure', 'symptom', 'diagnosis', 'notes', 'canvas']);
+const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure', 'symptom', 'diagnosis', 'notes', 'canvas', 'module']);
 const Linked = z.object({ complaints: z.array(Str).max(20).optional(), diagnoses: z.array(Str).max(20).optional() }).default({});
 const Body = z.object({ kind: Kind, name: z.string().trim().min(2).max(80), linked: Linked, mode: z.enum(['chip', 'auto']).default('chip'), payload: z.record(z.string(), z.any()) });
 const checkPayload = (kind: keyof typeof Payload, payload: unknown) => { const r = Payload[kind].safeParse(payload); if (!r.success) throw new HttpError(400, 'BAD_TEMPLATE', { errors: r.error.issues }); return r.data as Record<string, any>; };
@@ -41,7 +43,7 @@ export function templateRoutes(app: FastifyInstance) {
 
   /** The owner creates sets directly. A doctor's "Save as template" lands as a draft for the owner to approve. */
   route(app, 'post', '/templates', null, async (req, tx) => {
-    const direct = can(req.perms, 'config.write');
+    const direct = can(req.perms, 'config.write') || (req.body as any)?.kind === 'module'; // a custom module's lines are the doctor's own: no approval
     if (!direct && !can(req.perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:encounter.complete');
     const b = Body.parse(req.body); const payload = checkPayload(b.kind, b.payload);
     const dup = await tx.select().from(tmpl).where(and(eq(tmpl.tenantId, req.ctx.tenantId), eq(tmpl.kind, b.kind), sql`lower(${tmpl.name}) = lower(${b.name})`)).then((r) => r[0]);

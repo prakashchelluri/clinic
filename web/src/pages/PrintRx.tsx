@@ -34,6 +34,8 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
   const outOnly = results ? false : d.labs?.printOutOfRangeOnly ?? pr.outOfRangeOnly;
   const labs: any[] = (e.labs ?? []).filter((r: any) => !outOnly || ['low', 'high', 'abnormal'].includes(r.flag));
   const exam: any[] = Array.isArray(d.exam?.items) ? d.exam.items : [];
+  // custom modules (Tatva's): the lines written, under the module's name as it was on the pad
+  const modules: any[] = results ? [] : Object.values(d.modules ?? {}).map((m: any) => ({ ...m, rows: (m?.rows ?? []).filter((r: any[]) => Array.isArray(r) && r.some((c) => String(c ?? '').trim())) })).filter((m: any) => m.rows.length && Array.isArray(m.columns));
   const canvases: any[] = results ? [] : (Array.isArray(d.canvases) ? d.canvases : []).filter((c: any) => c.showInRx && c.docId);
   const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
   const hist = p.history ?? {}; const histLine = ['conditions', 'drugAllergies', 'otherAllergies'].flatMap((k) => (hist[k] ?? []).map((x: any) => x.name)).join(', ');
@@ -77,6 +79,7 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
       {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {advice.join(' · ')}{localLine(advice) && <div className="text-gray-800">{localLine(advice)}</div>}</div>}
       {plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).length > 0 && <div className="mt-2">{plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `${r.procedure?.name ?? r.procedureName ?? 'Procedure'} advised${r.sittings ? ` (${r.sittings} sittings)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
       {d.plan?.notes && <div className="mt-2 whitespace-pre-line"><b>Notes:</b> {d.plan.notes}</div>}
+      {modules.map((m: any, k: number) => <div key={k} className="mt-2"><b>{m.name}:</b><table className="mt-0.5 w-full border-collapse text-[11.5px]"><thead><tr>{m.columns.map((c: string) => <th key={c} className="border-b border-gray-400 py-0.5 pr-2 text-left font-semibold">{c}</th>)}</tr></thead><tbody>{m.rows.map((r: string[], i: number) => <tr key={i}>{m.columns.map((c: string, j: number) => <td key={c} className="py-0.5 pr-2 align-top whitespace-pre-line">{r[j] ?? ''}</td>)}</tr>)}</tbody></table></div>)}
       {canvases.map((c: any) => <img key={c.id} src={`/api/documents/${c.docId}/file`} alt={c.name} className="mt-2 max-h-[70mm] max-w-full border border-gray-300" />)}
       {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
       {(e.amendments ?? []).length > 0 && <div className="mt-3 border-t border-black pt-1 text-[11px]">{e.amendments.map((a: any, k: number) => <div key={k}><b>Amended on {new Date(a.at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}:</b> {a.reason}</div>)}</div>}

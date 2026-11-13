@@ -93,3 +93,9 @@ export function validate(schema: { sections: { key: string; title?: string; fiel
   }
   return errors;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The ids of modules that hold something on this pad: saving such a pad locks them. */
+export const usedModuleIds = (data: Record<string, any>) => Object.entries(data?.modules ?? {})
+  .filter(([k, m]: [string, any]) => UUID.test(k) && Array.isArray(m?.rows) && m.rows.some((r: unknown) => Array.isArray(r) && r.some((c) => String(c ?? '').trim())))
+  .map(([k]) => k);

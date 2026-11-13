@@ -749,7 +749,7 @@ export function Encounter() {
     try { await post('/templates', { kind: 'module', name: r.value.trim(), linked: {}, payload: { moduleId: k, rows: rows.map((x) => m.columns.map((_, j) => x[j] ?? '')) } }); qc.invalidateQueries({ queryKey: ['templates'] }); toast(`Saved as “${r.value.trim()}”`); }
     catch (er) { toast(er instanceof ApiError && er.body?.code === 'DUPLICATE' ? 'A template by that name already exists.' : errText(er), 'err'); }
   };
-  const moduleCard = (k: string) => { const m = modOf(k); if (!m) return null; const lib = modLib.get(k); const rows = filledRows(m);
+  const moduleCard = (k: string) => { const m = modOf(k); if (!m) return null; const lib = modLib.get(k); const rows = filledRows(m); // lines here lock it, even before the list hears so
     const acts = readOnly || !isDoctor ? undefined : <>
       <ModuleLoadPrev id={k} previous={previous} onLoad={(xs) => setModRows(k, [...rows, ...xs])} />
       <SectionTemplates compact kind="module" sub="" what={m.name} sets={(sets.data ?? []).filter((t) => t.kind === 'module' && t.payload?.moduleId === k)} onPick={(t) => setModRows(k, [...rows, ...(t.payload?.rows ?? [])])} onClear={null} />
@@ -757,8 +757,8 @@ export function Encounter() {
       {rows.length > 0 && <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" aria-label={`Clear ${m.name}`} onClick={() => clearSection(m.name, () => setModRows(k, []))}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}
       {lib && <ModuleMenu items={[
         ...(lib.onPad ? [{ label: 'Remove from Rx pad', onClick: () => setOnPad(lib, false) }] : [{ label: 'Add to my Rx pad', onClick: () => setOnPad(lib, true) }]),
-        { label: 'Edit module', disabled: lib.canEdit ? undefined : lib.used ? 'Locked: it has been used on a prescription' : 'Only the doctor who made it can change it', onClick: () => setModDrawer({ edit: lib }) },
-        { label: 'Delete module', danger: true, disabled: lib.canEdit ? undefined : lib.used ? 'Locked: it has been used on a prescription' : 'Only the doctor who made it can delete it', onClick: () => deleteModule(lib) },
+        { label: 'Edit module', disabled: lib.canEdit && !rows.length ? undefined : lib.used || rows.length ? 'Locked: it has been used on a prescription' : 'Only the doctor who made it can change it', onClick: () => setModDrawer({ edit: lib }) },
+        { label: 'Delete module', danger: true, disabled: lib.canEdit && !rows.length ? undefined : lib.used || rows.length ? 'Locked: it has been used on a prescription' : 'Only the doctor who made it can delete it', onClick: () => deleteModule(lib) },
       ]} />}</>;
     return <Card key={`mod-${k}`} id={`mod-${k}`} title={m.name} meta={<ModuleInfo m={lib} />} actions={acts}><ModuleTable mod={m} readOnly={readOnly} onChange={(xs) => setModRows(k, xs)} /></Card>; };
   const custom = (x: any) => (

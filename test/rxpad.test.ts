@@ -60,3 +60,10 @@ test('finish needs only what the clinic ticked: the form definition alone no lon
   const pad = padConfig({ pad: { sections: [{ key: 'diagnosis', show: true, required: true, print: true }, { key: 'symptoms', show: true, required: true, print: true }] } });
   assert.deepEqual(validate(DERM_ENCOUNTER, {}, pad).map((e) => e.path).sort(), ['assessment.diagnosis', 'complaint.chief_complaint']);
 });
+
+test('a custom module locks only once a line on the pad holds something', async () => {
+  const { usedModuleIds } = await import('../src/lib/pad.js');
+  const a = '11111111-1111-4111-8111-111111111111', b = '22222222-2222-4222-8222-222222222222';
+  assert.deepEqual(usedModuleIds({ modules: { [a]: { rows: [['', ' '], ['Rice', '']] }, [b]: { rows: [['', '']] }, junk: { rows: [['x']] } } }), [a], 'blank lines and a bad id lock nothing');
+  assert.deepEqual(usedModuleIds({}), []);
+});

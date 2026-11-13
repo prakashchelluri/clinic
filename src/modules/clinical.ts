@@ -4,6 +4,7 @@ import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
 import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, feeCategory, medicine, type FormSchema } from '../db/schema.js';
 import { rxProblems, needsReason, pregnancyFlag, firstName } from '../lib/rxSafety.js';
 import { queueRxMessage } from './rxpad.js';
+import { lockUsedModules } from './padModules.js';
 import { padConfig, printSettings, localPhrase, validate } from '../lib/pad.js';
 import { normHistory } from '../lib/history.js';
 import { route } from '../lib/route.js';
@@ -103,6 +104,7 @@ export function clinicalRoutes(app: FastifyInstance) {
       const open = needsReason(rxProblems(meds, { name: firstName(pat?.fullName), allergies: pat?.allergies, pregnant: pregnancyFlag(normHistory(pat?.history)) }), data.overrides);
       if (open.length) throw new HttpError(409, 'RX_NEEDS_REASON', { warnings: open });
     }
+    await lockUsedModules(tx, t, data); // a custom module used on a pad can no longer be changed
     const today = todayIn(req.ctx.timezone);
     let newRx = 0;
     if (held || amending) {

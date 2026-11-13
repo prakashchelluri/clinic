@@ -615,6 +615,16 @@ export const tmpl = pgTable('tmpl', {
   sortOrder: integer('sort_order').notNull().default(0),
 }, (t) => [index('tmpl_t').on(t.tenantId, t.kind)]);
 
+// Custom modules on the Rx pad: a small table (name + 1–4 columns) any doctor can add to their pad. Locked once used on a pad.
+export const padModule = pgTable('pad_module', {
+  ...tenantCols,
+  name: text('name').notNull(),
+  columns: text('columns').array().notNull(),
+  createdBy: uuid('created_by'),
+  onPad: uuid('on_pad').array().notNull().default([]), // the users who keep it on their pad
+  used: boolean('used').notNull().default(false),
+}, (t) => [index('pad_module_t').on(t.tenantId)]);
+
 // Patients who want an earlier place; offered one when a place opens.
 export const waitlist = pgTable('waitlist', {
   ...tenantCols,
