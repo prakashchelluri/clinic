@@ -37,18 +37,19 @@
 .pw-free { align-self: center; font-size: 13px; color: var(--color-muted); opacity: .7; }
 
 /* Week: hours down, days across */
-.pw-week { display: grid; grid-template-columns: 76px repeat(6, minmax(0, 1fr)); min-width: 900px; }
+.pw-week { display: grid; grid-template-columns: 84px repeat(6, minmax(0, 1fr)); min-width: 900px; }
 .pw-week .hd { position: sticky; top: 0; z-index: 1; padding: 9px 8px; font-size: 13px; font-weight: 700; background: var(--color-surface); border-left: 1px solid var(--color-line); }
 .pw-week .hd small { display: block; font-size: 11.5px; font-weight: 600; color: var(--color-muted); }
 .pw-week .hd small.red { color: var(--color-rose); }
 .pw-week .hd.today { color: var(--color-clay); }
-.pw-week .t { white-space: nowrap; padding: 8px; font-size: 12px; font-weight: 500; color: var(--color-muted); text-align: right; border-top: 1px solid var(--color-line); }
-.pw-week .c { min-height: 64px; padding: 5px; display: flex; flex-direction: column; gap: 5px; min-width: 0; border-left: 1px solid var(--color-line); border-top: 1px solid var(--color-line); transition: background-color .15s, box-shadow .15s, opacity .15s; }
+.pw-week .t { white-space: nowrap; padding: 12px 10px; font-size: 12px; font-weight: 500; color: var(--color-muted); text-align: right; border-top: 1px solid var(--color-line); }
+.pw-week .c { min-height: 44px; padding: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; border-left: 1px solid var(--color-line); border-top: 1px solid var(--color-line); transition: background-color .15s, box-shadow .15s, opacity .15s; }
 .pw-week .c.past { background: var(--color-surface-2); }
 .pw-week .c.away { background: repeating-linear-gradient(135deg, var(--color-surface-2) 0 6px, var(--color-paper-2) 6px 12px); }
-.pw-week .pw-blk { width: 100%; padding: 6px 8px; font-size: 11.5px; gap: 1px; }
-.pw-week .pw-blk b { font-size: 13px; }
-.pw-week .pw-blk .top { font-size: 11px; }
+/* the same box as Today's sittings, only as wide as the day */
+.pw-week .pw-blk { width: 100%; }
+.pw-week .pw-blk .top { flex-wrap: wrap; column-gap: 6px; row-gap: 0; }
+.pw-week .pw-free { align-self: flex-start; padding: 2px 4px; }
 
 /* the lifted box and the cells it passes over */
 .pw-can { background: color-mix(in srgb, var(--color-clay) 7%, transparent) !important; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color-clay) 35%, transparent); }
@@ -73,7 +74,8 @@
 .pw-pend-hov { outline: 2.5px solid var(--color-clay); outline-offset: -6px; background: var(--color-clay-soft) !important; }
 
 /* the week header: the range opens a month to pick any week */
-.pw-range { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; border-radius: 10px; font-size: 17px; font-weight: 800; color: var(--color-ink); }
+/* the week header: the same date button as Today's sittings; it opens a month to pick any week */
+.pw-range { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; font-size: 14px; font-weight: 700; color: var(--color-ink); white-space: nowrap; }
 .pw-range:hover { background: var(--color-surface-2); }
 .pw-cal { width: 292px; padding: 12px; }
 .pw-cal .row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); width: 100%; padding: 2px 0; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--color-ink-2); }

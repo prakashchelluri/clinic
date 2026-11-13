@@ -115,19 +115,20 @@ export function ProcWeek() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous week" onClick={() => setMon(addDay(mon, -7))}><Icon name="chevL" className="h-4 w-4" /></button>
-        <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next week" onClick={() => setMon(addDay(mon, 7))}><Icon name="chevR" className="h-4 w-4" /></button>
-        <button ref={rangeBtn} type="button" className="pw-range" aria-haspopup="dialog" aria-expanded={calOpen} onClick={() => setCalOpen(!calOpen)}>{mon === addDay(mondayOf(t), 7) ? 'Next week · ' : mon === mondayOf(t) ? 'This week · ' : ''}{rangeText(mon)}<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 opacity-60" /></button>
-        <Floating anchor={rangeBtn} open={calOpen} onClose={() => setCalOpen(false)} width={292} align="left"><MiniCal mon={mon} onPick={(m) => { setMon(m); setCalOpen(false); }} /></Floating>
-        <span className="ml-auto text-[13.5px] text-muted">{summary}{wk.data?.sent && !n('draft') && all.length > 0 && mon > mondayOf(t) ? ' · changes reach the doctor straight away' : ''}</span>
-        {canWrite && drafts.length > 0 && <button type="button" className="btn btn-primary" onClick={() => setReview(true)}>Send {drafts.length} to the doctor</button>}
-      </div>
       {tap && <div className="flex items-center gap-3 rounded-2xl bg-clay-soft px-4 py-2.5 text-[14px] font-semibold text-clay-ink anim-fade-up"><span className="flex-1">Scheduling {tap.title}: tap Free on an hour.</span><button className="btn btn-sm" onClick={() => setTap(null)}>Stop</button></div>}
       {asked.length > 0 && <div className="rounded-[10px] bg-rose-soft px-4 py-2.5 text-[13.5px] text-rose" role="status"><b>{asked.length} sent back by the doctor:</b> {asked.map((x) => `${x.patient.fullName} (${x.approvalNote ?? 'change asked'})`).join('; ')}. Open one to move or cancel it; a move reaches the doctor straight away.</div>}
 
       <div>
         <section className="fd-sheet fd-sch overflow-hidden">
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+            <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous week" onClick={() => setMon(addDay(mon, -7))}><Icon name="chevL" className="h-4 w-4" /></button>
+            <button ref={rangeBtn} type="button" className="pw-range" aria-haspopup="dialog" aria-expanded={calOpen} onClick={() => setCalOpen(!calOpen)}>{mon === addDay(mondayOf(t), 7) ? 'Next week · ' : mon === mondayOf(t) ? 'This week · ' : ''}{rangeText(mon)}<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 opacity-60" /></button>
+            <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next week" onClick={() => setMon(addDay(mon, 7))}><Icon name="chevR" className="h-4 w-4" /></button>
+            {mon !== mondayOf(t) && <button type="button" className="btn btn-sm" onClick={() => setMon(mondayOf(t))}>This week</button>}
+            <Floating anchor={rangeBtn} open={calOpen} onClose={() => setCalOpen(false)} width={292} align="left"><MiniCal mon={mon} onPick={(m) => { setMon(m); setCalOpen(false); }} /></Floating>
+            <span className="ml-auto text-[13.5px] text-muted">{summary}{wk.data?.sent && !n('draft') && all.length > 0 && mon > mondayOf(t) ? ' · changes reach the doctor straight away' : ''}</span>
+            {canWrite && drafts.length > 0 && <button type="button" className="btn btn-primary" onClick={() => setReview(true)}>Send {drafts.length} to the doctor</button>}
+          </div>
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">
               <div className="pw-week">
@@ -147,6 +148,7 @@ export function ProcWeek() {
                         {why && why !== 'same' && <span className="pw-why">{why}</span>}
                         {lifted && drag.cellCls(key) === 'pw-hov-ok' && <span className="pw-drop">Drop here</span>}
                         {tap && tapOk(key) && <button type="button" className="pw-put" onClick={() => dropOn(tap, key)}>Free</button>}
+                        {!tap && !lifted && !here.length && !fill.length && !pastCell(d, h) && !awayDays.has(d) && <span className="pw-free">Free</span>}
                       </div>);
                   }),
                 ])}
