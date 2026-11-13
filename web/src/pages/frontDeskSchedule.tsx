@@ -165,8 +165,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
 
   const nowRow = cols.some((c) => c.day === today) ? rows.findIndex((r) => toMin(r.start) <= nowM && nowM < toMin(r.end)) : -1;
   return sheet(<>
-      <div className="overflow-x-auto">
-        <div className="fd-hgrid" style={{ minWidth: 88 + cols.length * (week ? 150 : 230), gridTemplateColumns: `88px repeat(${cols.length}, minmax(0, 1fr))` }}>
+      <div>
+        <div className="fd-hgrid" style={{ gridTemplateColumns: `88px repeat(${cols.length}, minmax(0, 1fr))` }}>
           {(week || cols.length > 1) && <><span className="fd-hh" />{cols.map((c) => <span key={c.key} className="fd-hh">{c.head}</span>)}</>}
           {rows.map((r, i) => [
             <span key={`t${r.start}`} className={`fd-ht ${i === nowRow ? 'now' : ''} ${!week && gone(day, r.end) ? 'past' : ''}`}>{hourLabel(r.start, r.end)}{i === nowRow && <small>now</small>}</span>,

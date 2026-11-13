@@ -109,7 +109,7 @@
 .fd-hcap { font-size: 11.5px; font-weight: 500; color: var(--color-muted); }
 /* up to four patients side by side; a narrow column (week, many doctors) falls back to fewer */
 /* the places in an hour are cells of a small table: lines between every slot, stronger lines between hours */
-.fd-hchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(150px, 25%), 1fr)); margin: 0 -1px -1px 0; }
+.fd-hchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(150px, 25%)), 1fr)); margin: 0 -1px -1px 0; }
 /* an hour with slots is divided into them edge to edge: no padding, the slot lines are the cell lines */
 .fd-hc:has(> .fd-hchips) { padding: 0; gap: 0; }
 .fd-hc:has(> .fd-hchips) > .fd-hcap { padding: 6px 10px; border-bottom: 1px solid var(--color-line); }
