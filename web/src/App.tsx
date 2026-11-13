@@ -91,7 +91,7 @@ function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onN
         {items.map((n, i) => <span key={n.to} className="contents">{i > 0 && GROUP[n.to] && <span className="side-group" aria-hidden="true">{GROUP[n.to]}</span>}{link(n)}</span>)}
       </nav>
       <Link to="/help" onClick={onNavigate} title={slim ? 'Help' : undefined} className={`nav-item mt-2 ${active === null && location.pathname.startsWith('/help') ? 'active' : ''}`}><Icon name="help" className="h-4 w-4" /><span className="flex-1">Help</span></Link>
-      {onCollapse && <button type="button" onClick={onCollapse} className="nav-item" aria-label={slim ? 'Expand menu' : 'Collapse menu'} title={slim ? 'Expand menu' : undefined}>{slim ? <PanelLeftOpen className="h-4 w-4 shrink-0" /> : <PanelLeftClose className="h-4 w-4 shrink-0" />}<span className="flex-1">Collapse menu</span></button>}
+      {onCollapse && <button type="button" onClick={onCollapse} className="nav-item !w-10 !justify-center !px-0" aria-label={slim ? 'Expand menu' : 'Collapse menu'} title={slim ? 'Expand menu' : 'Collapse menu'}>{slim ? <PanelLeftOpen className="h-4 w-4 shrink-0" /> : <PanelLeftClose className="h-4 w-4 shrink-0" />}</button>}
       {/* on a record the top bar steps aside, so its light / dark switch comes here */}
       {slim && onTheme && <button type="button" onClick={onTheme} className="nav-item" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>}
       <div className="side-foot mt-2 flex items-center gap-2.5 border-t border-line px-1 pt-3">
