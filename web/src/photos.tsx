@@ -48,7 +48,7 @@ function ConsentStep({ patientId, name, onDone, dark = false }: { patientId: str
 type Shot = { id: string; dataUrl: string; area: string; view: string };
 
 /** Full-screen camera for the clinic phone. The last photo of the same area and view is shown faintly over the live picture. */
-export function PhotoCapture({ patient, sitting, onClose }: { patient: { id: string; fullName: string }; sitting?: { id: string; label: string } | null; onClose: () => void }) {
+export function PhotoCapture({ patient, sitting, phase, onClose }: { patient: { id: string; fullName: string }; sitting?: { id: string; label: string } | null; /** a procedure sitting's before or after photos */ phase?: 'before' | 'after'; onClose: () => void }) {
   useScrollLock();
   const q = usePhotos(patient.id);
   const video = useRef<HTMLVideoElement>(null); const stream = useRef<MediaStream | null>(null);
@@ -94,7 +94,7 @@ export function PhotoCapture({ patient, sitting, onClose }: { patient: { id: str
     setSaving(true); let ok = 0;
     for (const s of shots) {
       try {
-        await post('/documents', { patientId: patient.id, kind: 'photo', area: s.area, view: s.view, procedureSessionId: sitting?.id, title: `${s.area} · ${viewLabel(s.view)} · ${shortDay(new Date().toISOString())}`, mime: 'image/jpeg', dataBase64: s.dataUrl });
+        await post('/documents', { patientId: patient.id, kind: 'photo', area: s.area, view: s.view, procedureSessionId: sitting?.id, title: `${phase ? `${phase === 'before' ? 'Before' : 'After'} · ` : ''}${s.area} · ${viewLabel(s.view)} · ${shortDay(new Date().toISOString())}`, mime: 'image/jpeg', dataBase64: s.dataUrl });
         ok++; setShots((x) => x.filter((y) => y.id !== s.id));
       } catch (e) { toast(errText(e), 'err'); break; }
     }

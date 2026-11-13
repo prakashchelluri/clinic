@@ -266,7 +266,14 @@ export function procedureRoutes(app: FastifyInstance) {
     await emit(tx, req.ctx, 'procedure_session.rescheduled', 'procedure_session', id, { from: { day: ps.day, startTime: ps.startTime, roomId: ps.roomId }, to: { day: body.day, startTime: body.startTime, roomId: body.roomId }, reason: body.reason, forced: c.length > 0 });
     return { ...moved, warnings: c };
   };
-  route(app, 'post', '/procedure-sessions/:id/reschedule', 'worklist.write', move);
+  // the desk moves any sitting; a doctor moves their own (from the approval list), and that move counts as approved
+  route(app, 'post', '/procedure-sessions/:id/reschedule', null, async (req, tx) => {
+    if (!can(req.perms, 'worklist.write')) {
+      const ps = await tx.select({ d: procedureSession.practitionerId }).from(procedureSession).where(and(eq(procedureSession.id, (req.params as any).id), eq(procedureSession.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+      if (!ps || !req.ctx.practitionerId || ps.d !== req.ctx.practitionerId || !can(req.perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:worklist.write');
+    }
+    return move(req, tx);
+  });
 
   /**
    * Drop a sitting on an hour: the coordinator's week (a course's next sitting, or one already booked), or a doctor moving their own.

@@ -40,14 +40,15 @@ export async function printQuote(id: string) {
 
 /** A procedure plan's money in one place for the desk: the fixed price (list or a clinic package), the quote, booking, and paying sittings ahead.
  *  Nobody types a price here: a reduction is a discount on the bill, where above the clinic limit it waits for approval. */
-export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { id: string; procedureId: string; procedure?: string; sittings?: number; patient?: any }; patientId: string; patientName: string; onClose: () => void }) {
+export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { id: string; procedureId: string; procedure?: string; sittings?: number; amountPaise?: number | null; patient?: any }; patientId: string; patientName: string; onClose: () => void }) {
   const [booking, setBooking] = useState(false); const [paying, setPaying] = useState(false);
   const { cfg, perms } = useOutletContext<any>();
   const cs = useCourses(patientId); const c = (cs.data ?? []).find((x: any) => x.recommendationId === rec.id);
   const proc = cfg?.procedures?.find((p: any) => p.id === rec.procedureId);
-  const sittings = rec.sittings ?? 1; const list = (proc?.pricePaise ?? 0) * sittings;
+  const sittings = rec.sittings ?? 1; const custom = rec.amountPaise && rec.amountPaise > 0 ? rec.amountPaise : 0; // the doctor's own price, for all sittings
+  const list = custom || (proc?.pricePaise ?? 0) * sittings;
   const [pkg, setPkg] = useState(''); const [days, setDays] = useState(15);
-  const pkgs: Pkg[] = ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.procedureId === rec.procedureId && k.pricePaise > 0);
+  const pkgs: Pkg[] = custom ? [] : ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.procedureId === rec.procedureId && k.pricePaise > 0);
   const qs = useQuery({ queryKey: ['quotes', rec.id], queryFn: () => get(`/quotes?recommendationId=${rec.id}`) }); const quotes: any[] = qs.data ?? [];
   const makeQuote = useMutation({ mutationFn: (send: 'whatsapp' | 'print') => post('/quotes', { recommendationId: rec.id, validDays: days, send, ...(pkg ? { packageId: pkg } : {}) }),
     onSuccess: (r: any, send) => { qc.invalidateQueries({ queryKey: ['quotes', rec.id] }); if (r.whatsapp === 'opted_out') { toast(`Quote ${r.number} saved. ${NO_WHATSAPP}`, 'info', { label: 'Print', run: () => printQuote(r.id) }); return; }
@@ -66,7 +67,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
     <Drawer title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${c?.sittings ?? sittings} sittings planned`} onClose={onClose} width="max-w-lg">
       {!cs.data ? <div className="text-sm text-muted">Loading…</div> : !c ? (
         <div className="space-y-4">
-          <div className="text-sm">Price: <b>{money(list)}</b> for {sittings} sittings ({money(proc?.pricePaise ?? 0)} each), from the price list.</div>
+          <div className="text-sm">Price: <b>{money(list)}</b> for {sittings} sittings{custom ? <>, <b>set by the doctor</b>.</> : ` (${money(proc?.pricePaise ?? 0)} each), the standard price.`} <span className="text-muted">A lower price is a discount on the bill; above the clinic's limit it needs approval.</span></div>
           {pkgs.length > 0 && <div className="flex flex-wrap items-center gap-1.5 text-sm"><span className="text-muted">Or a package:</span>
             <button type="button" className={`toggle-opt !py-1 ${pkg === '' ? 'on' : ''}`} aria-pressed={pkg === ''} onClick={() => setPkg('')}>List price</button>
             {pkgs.map((k) => <button key={k.id} type="button" className={`toggle-opt !py-1 ${pkg === k.id ? 'on' : ''}`} aria-pressed={pkg === k.id} onClick={() => setPkg(k.id)}>{k.name} · {k.sittings} sittings · {money(k.pricePaise)}</button>)}</div>}
@@ -77,7 +78,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
             <div className="flex flex-wrap gap-2"><button className="btn btn-sm" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate('whatsapp')}>Send on WhatsApp</button><button className="btn btn-sm" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate('print')}>Print</button></div>
             <div className="text-xs text-muted">The quote never shows consultation or pharmacy prices. A discount is given on the bill, not on the quote.</div>
           </div>
-          <div className="modal-foot"><button className="btn btn-sm mr-auto" onClick={() => setBooking(true)}>Book first sitting</button><button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && <button className="btn btn-primary" onClick={() => setPaying(true)}><Icon name="plus" />Pay for sittings</button>}</div>
+          <div className="modal-foot"><button className="btn btn-ghost mr-auto" onClick={onClose}>Close</button>{canPay && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Take advance</button>}<button className="btn btn-primary" onClick={() => setBooking(true)}>Book first sitting</button></div>
         </div>
       ) : (
         <div className="space-y-4">

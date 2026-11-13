@@ -90,10 +90,12 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
       if (left <= 0 || !max) return null;
       return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(c.procedureId)} · paid ahead`, sub: `${c.doneSittings} of ${c.sittings} done, ${c.unusedSittings} paid ahead · ${money(c.perSittingPaise)} a sitting`, unitPaise: c.perSittingPaise, qty: 1, maxQty: max, capPaise: left, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(c.procedureId), noDiscount: waiting.has(c.id) ? 'A discount on this course is waiting for approval' : undefined };
     }
-    const k = packageId ? pkgs.find((x) => x.id === packageId) : null; const per = procs.find((p) => p.id === r.procedureId)?.pricePaise ?? 0;
-    const n = k ? k.sittings : r.sittings ?? 1; const total = k ? k.pricePaise : per * n;
+    const custom = r.amountPaise > 0 ? r.amountPaise as number : 0; // the doctor's own amount, for all sittings: no package then
+    const k = packageId && !custom ? pkgs.find((x) => x.id === packageId) : null; const n = k ? k.sittings : r.sittings ?? 1;
+    const per = custom ? Math.round(custom / n) : procs.find((p) => p.id === r.procedureId)?.pricePaise ?? 0;
+    const total = custom || (k ? k.pricePaise : per * n);
     if (!total) return null;
-    return { key: `a:${recId}`, kind: 'ahead', id: recId, packageId, what: `${procName(r.procedureId)} · paid ahead`, sub: k ? `${k.name} package · ${n} sittings for ${money(total)}` : `${n} sittings at ${money(per)}`, unitPaise: Math.round(total / n), qty: k ? n : 1, maxQty: n, capPaise: total, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId) };
+    return { key: `a:${recId}`, kind: 'ahead', id: recId, packageId: k ? packageId : undefined, what: `${procName(r.procedureId)} · paid ahead`, sub: k ? `${k.name} package · ${n} sittings for ${money(total)}` : custom ? `${n} sittings for ${money(total)}, the doctor's price` : `${n} sittings at ${money(per)}`, unitPaise: Math.round(total / n), qty: k ? n : 1, maxQty: n, capPaise: total, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId) };
   };
 
   const [lines, setLines] = useState<Line[]>(() => {

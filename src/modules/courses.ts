@@ -31,7 +31,8 @@ export async function standing(tx: Tx, t: string, c: Course) {
 }
 
 type Pkg = { id: string; name: string; procedureId: string; sittings: number; pricePaise: number };
-/** The course for a procedure plan, made on first need at a fixed price: list price × sittings, or a clinic package. Nobody types a price. */
+/** The course for a procedure plan, made on first need: the doctor's own amount when they set one on the pad (the total for all sittings),
+ *  otherwise the standard price (list price × sittings) or a clinic package. The desk never types a price; a reduction is a discount on a bill. */
 export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, packageId?: string) {
   const t = ctx.tenantId;
   const have = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, recommendationId))).then((r) => r[0]);
@@ -40,9 +41,12 @@ export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, p
   if (!rec || !rec.procedureId) throw new HttpError(404, 'PLAN_NOT_FOUND');
   const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
   let sittings = rec.sittings ?? 1; let total = (proc?.pricePaise ?? 0) * sittings;
+  const custom = rec.amountPaise != null && rec.amountPaise > 0; // the doctor's price beats the list and any package
+  if (custom && packageId) throw new HttpError(409, 'DOCTOR_SET_THE_PRICE');
+  if (custom) total = rec.amountPaise!;
   const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
   const pkgs = (((ten?.settings as any)?.packages ?? []) as Pkg[]).filter((x) => x.procedureId === rec.procedureId);
-  if (!packageId) { // a quote still open for a package: the patient was told that price
+  if (!packageId && !custom) { // a quote still open for a package: the patient was told that price
     const told = await tx.select().from(quote).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open'))).orderBy(desc(quote.createdAt)).limit(1).then((r) => r[0]);
     if (told && told.validUntil >= todayIn(ctx.timezone)) packageId = pkgs.find((x) => x.pricePaise === told.totalPaise && x.sittings === told.sittings)?.id;
   }
@@ -53,7 +57,7 @@ export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, p
     if (rec.sittings !== sittings) await tx.update(recommendation).set({ sittings }).where(eq(recommendation.id, rec.id)); // the package says how many sittings
   }
   if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
-  const list = Math.max(total, (proc?.pricePaise ?? 0) * sittings);
+  const list = custom ? total : Math.max(total, (proc?.pricePaise ?? 0) * sittings);
   const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name }).returning();
   await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
   await emit(tx, ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings, packageId: packageId ?? null });
@@ -66,11 +70,13 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   const t = ctx.tenantId;
   if (await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID))).then((r) => r.length)) return;
   const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
-  if (!c) {
+  if (!c) { // no course agreed: billed per sitting at the doctor's amount (its share) or the standard price
     const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
-    if (!proc?.pricePaise) return; // no price anywhere: nothing to bill
-    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc.name} sitting ${ps.sittingNo ?? 1}`, amountPaise: proc.pricePaise, taxRateBp: proc.taxRateBp, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
-    await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: proc.pricePaise, listPrice: true });
+    const rec = await tx.select({ amountPaise: recommendation.amountPaise, sittings: recommendation.sittings }).from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
+    const price = rec?.amountPaise ? Math.round(rec.amountPaise / Math.max(1, rec.sittings ?? 1)) : proc?.pricePaise;
+    if (!price) return; // no price anywhere: nothing to bill
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} sitting ${ps.sittingNo ?? 1}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
+    await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: price, listPrice: !rec?.amountPaise });
     return;
   }
   const st = await standing(tx, t, c);

@@ -342,6 +342,7 @@ export const recommendation = pgTable('recommendation', {
   dueOn: date('due_on'),
   sittings: integer('sittings'),
   gapDays: integer('gap_days'),            // procedures: days between sittings; the next falls due this long after the last one done
+  amountPaise: integer('amount_paise'),     // procedures: the doctor's own price, total for all sittings; null = the clinic's standard price
   notes: text('notes'),
   status: text('status').notNull().default('open'), // open | contacted | scheduled | done | cancelled (for a test: open = pending, done = report received)
   contactLog: jsonb('contact_log').$type<{ at: string; by: string; outcome: string; note?: string }[]>().notNull().default([]),

@@ -24,7 +24,7 @@ const CanvasDrawer = lazy(() => import('../padCanvas').then((m) => ({ default: m
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; durationNote?: string | null; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
-type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; gapDays?: number; notes?: string; orderNo?: number; status?: string; id?: string };
+type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; gapDays?: number; /** procedures: the doctor's own price, total for all sittings; empty = standard */ amountPaise?: number | null; notes?: string; orderNo?: number; status?: string; id?: string };
 type Sym = { name: string; since?: string; severity?: string; note?: string };
 type Dx = { name: string; since?: string; severity?: string; status?: string; note?: string };
 /** An examination finding as a row (Tatva): the finding and a note. */
@@ -338,7 +338,7 @@ export function Encounter() {
       if (isDoctor && enc.data.status === 'draft' && (isReviewVisit(enc.data.visit, cfg) || (lastDone?.prescription ?? []).length > 0) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
       loaded.current = true; justLoaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
-      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, gapDays: r.gapDays ?? undefined, notes: r.notes,
+      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, gapDays: r.gapDays ?? undefined, amountPaise: r.amountPaise ?? null, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
       // a copy kept on this computer that is newer than the server's: offer it back; an older one, or one for a signed pad, goes
       let kept: Kept | null = null; try { kept = JSON.parse(localStorage.getItem(localKey) ?? 'null'); } catch { kept = null; }
@@ -712,6 +712,9 @@ export function Encounter() {
           <b className="rx-name">{procName(r.procedureId)}</b>
           <label className="flex w-28 items-center pr-2 text-xs text-muted"><NumInput aria-label="Sittings" max={50} className="cell-in !w-12" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, sittings: Number(ev.target.value) } : x)))} />sittings</label>
           {(r.sittings ?? 0) > 1 ? <label className="flex w-36 items-center px-2 text-xs text-muted">every<NumInput aria-label="Days between sittings" max={365} className="cell-in !w-12" value={r.gapDays ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, gapDays: Number(ev.target.value) || undefined } : x)))} />days</label> : <span className="w-36" />}
+          {(() => { const std = (cfg?.procedures?.find((x: any) => x.id === r.procedureId)?.pricePaise ?? 0) * Math.max(1, r.sittings ?? 1); return (
+            <label className="flex w-48 items-center gap-1 px-2 text-xs text-muted" title="The total for all sittings. Leave empty for the clinic's standard price.">₹<NumInput aria-label="Amount, total for all sittings" max={10000000} className={`cell-in !w-24 ${PH}`} placeholder={std ? (std / 100).toLocaleString('en-IN') : 'Amount'} value={r.amountPaise ? String(r.amountPaise / 100) : ''} disabled={readOnly}
+              onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, amountPaise: ev.target.value ? Math.round(Number(ev.target.value) * 100) : null } : x)))} />{r.amountPaise ? 'total' : 'standard'}</label>); })()}
           <input aria-label="Notes" className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Notes" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, notes: ev.target.value } : x)))} />
         </Row>))}
       {!readOnly && <SearchLine placeholder="Search surgeries / procedures" options={(cfg?.procedures ?? []).map((x: any) => x.name)} onAdd={(t) => { const pr = (cfg?.procedures ?? []).find((x: any) => x.name.toLowerCase() === t.toLowerCase()); if (!pr) return toast(`“${t}” is not in the procedure list. Add it in Settings first.`, 'info'); if (recs.some((r) => r.kind === 'procedure' && r.procedureId === pr.id)) return toast('Already on the pad', 'info'); setRecs([...recs, { kind: 'procedure', procedureId: pr.id, sittings: pr.typicalSittings, gapDays: gapFor(pr.id) }]); }} />}

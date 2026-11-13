@@ -239,6 +239,13 @@
       "when": 1795400000000,
       "tag": "0033_rx_duration_note",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795500000000,
+      "tag": "0034_procedure_amount",
+      "breakpoints": true
     }
   ]
 }

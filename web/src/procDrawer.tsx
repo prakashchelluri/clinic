@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router';
 import { get, patch, post, qc, today, errText } from './api';
 import { Chip, Icon, Modal, Skeleton, ask, money, toast } from './ui';
 import { FlagChips } from './flags';
+import { PhotoCapture, usePhotos } from './photos';
+import { ScheduleModal } from './pages/Worklist';
 
 // prepaidPaise: a partly used advance covers that much; amountPaise is then the balance due
 type Money = { kind: 'prepaid' | 'due' | 'paid' | 'none'; amountPaise: number; prepaidPaise?: number } | null | undefined;
@@ -105,6 +107,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
   const [signing, setSigning] = useState(false);
+  const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false);
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
     onSuccess: (_r, b) => { setSigning(false); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Sitting marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Sitting started'); },
     onError: (e) => toast(errText(e), 'err') });
@@ -113,6 +116,14 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const p = s?.patient;
   const conditions: any[] = p?.history?.conditions ?? [];
   const asked = conditions.length > 0 || (p?.history?.none ?? []).includes('conditions');
+  // this sitting's photos, before and after (the title says which)
+  const photos = usePhotos(p?.id ?? '');
+  const mine: any[] = (photos.data?.photos ?? []).filter((x: any) => (x.sitting?.id ?? x.procedureSessionId) === id);
+  const nBefore = mine.filter((x) => /^Before ·/.test(x.title ?? '')).length, nAfter = mine.filter((x) => /^After ·/.test(x.title ?? '')).length;
+  const label = s ? `${s.procedure ?? 'Procedure'} · sitting ${s.sittingNo}${s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}` : '';
+  // more sittings to come and none booked yet: reception books the next tentative date right here
+  const nextBooked = (s?.sittings ?? []).some((x: any) => x.state === 'confirmed' && x.id !== id);
+  const more = !!s && s.state === 'completed' && !nextBooked && (!s.plan?.sittings || s.sittingNo < s.plan.sittings);
 
   return createPortal(
       <aside role="dialog" aria-label="Procedure sitting" className="side-drawer">
@@ -138,6 +149,20 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => s.consentNeeded ? setSigning(true) : setState.mutate({ state: 'in_progress' })}><Icon name="check" />Start sitting</button>}
           {signing && <ConsentDialog s={s} onClose={() => setSigning(false)} onStart={(b) => setState.mutate(b)} />}
           {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
+
+          {canAct && ['confirmed', 'in_progress', 'completed'].includes(s.state) && <div>
+            <Head>Photos of this sitting</Head>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="btn btn-sm" onClick={() => setShoot('before')}><Icon name="spark" className="h-3.5 w-3.5" />Before photo{nBefore ? ` · ${nBefore}` : ''}</button>
+              {s.state !== 'confirmed' && <button type="button" className="btn btn-sm" onClick={() => setShoot('after')}><Icon name="spark" className="h-3.5 w-3.5" />After photo{nAfter ? ` · ${nAfter}` : ''}</button>}
+              {!nBefore && s.state === 'in_progress' && <span className="text-[12.5px] text-amber">No before photo yet</span>}
+            </div>
+          </div>}
+          {canAct && more && <div className="rounded-[10px] border border-clay-line bg-clay-soft px-4 py-3">
+            <div className="text-[13.5px] font-semibold text-clay-ink">Book the next sitting</div>
+            <div className="mt-0.5 text-[12.5px] text-muted">{s.plan?.sittings ? `Sitting ${s.sittingNo + 1} of ${s.plan.sittings}. ` : ''}Pick a date with the patient now; it is tentative until the doctor approves the week.</div>
+            <button type="button" className="btn btn-primary btn-sm mt-2" onClick={() => setBooking(true)}>Book next sitting</button>
+          </div>}
 
           <div>
             <Head>Before you start</Head>
@@ -174,6 +199,8 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
             {extra}<button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${p.id}`); }}><Icon name="user" />Open full record</button>
           </div>
         </>)}
+        {shoot && s && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} sitting={{ id, label: `${label} · ${shoot}` }} phase={shoot} onClose={() => { setShoot(null); qc.invalidateQueries({ queryKey: ['photos', p.id] }); }} />}
+        {booking && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} onClose={() => { setBooking(false); ['procedure-session', 'psessions', 'worklist', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />}
       </aside>
   , document.body);
 }
