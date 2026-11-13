@@ -74,7 +74,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const onD = docList.filter((c) => c.on), onR = roomList.filter((c) => c.on);
   // what the closed button says: up to two names, else counts, so the bar stays one line
   const n = (k: number, one: string) => `${k} ${one}${k === 1 ? '' : 's'}`;
-  const summary = onD.length + onR.length === 0 ? 'Nothing' : onD.length + onR.length <= 2 ? [...onD, ...onR].map((c) => c.label).join(', ') : onD.length === docList.length && !onR.length ? 'All doctors' : [onD.length && n(onD.length, 'doctor'), onR.length && n(onR.length, 'room')].filter(Boolean).join(' · ');
+  const summary = onD.length + onR.length === 0 ? 'Nothing' : onD.length + onR.length === 1 ? [...onD, ...onR][0].label : onD.length === docList.length && !onR.length ? 'All doctors' : [onD.length && n(onD.length, 'doctor'), onR.length && n(onR.length, 'room')].filter(Boolean).join(' · ');
   const tick = (c: { key: string; label: string; on: boolean }) => <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-[13.5px] hover:bg-paper-2"><input type="checkbox" className="accent-ink h-4 w-4" checked={c.on} onChange={(e) => setShown(c.key, e.target.checked)} />{c.label}</label>;
   const bar = (
     <div className="fd-sch-bar">
@@ -116,14 +116,15 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const docNameOf = (id: string) => doctors.find((d) => d.id === id)?.name ?? '';
   let cols: Col[];
   if (week) {
-    const roomIds = new Set(onRooms.map((r) => r.id));
-    const wd = onDocs.find((d) => d.id === weekDoc) ?? onDocs[0]; const wIds = new Set(wd ? [wd.id] : []);
-    if (onDocs.length > 1) docTabs = <Tabs className="fd-wtabs" value={wd.id} onChange={setWeekDoc}
-      options={onDocs.map((d) => ({ value: d.id, label: d.name, count: days.reduce((n: number, D: any) => n + D.windows.filter((w: any) => w.practitionerId === d.id).reduce((m: number, w: any) => m + w.allocated, 0), 0) }))} />;
-    cols = days.filter((D, i) => i < 6 || D.windows.length).map((D) => ({ key: D.day, day: D.day, // Sunday only when someone works it
-      head: <button type="button" className="text-left" title="Open this day" onClick={() => { setDay(D.day); setMode('day'); }}><b className={D.day === today ? 'text-clay' : ''}>{new Date(D.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })}</b>{D.day === today && <span> today</span>}</button>,
+    // one week at a time: a tab per shown doctor, then a tab per shown room
+    const tabs = [...onDocs.map((d) => ({ id: d.id, name: d.name as string, room: false })), ...onRooms.map((r) => ({ id: r.id, name: r.name as string, room: true }))];
+    const wt = tabs.find((t) => t.id === weekDoc) ?? tabs[0]; const wIds = new Set(wt && !wt.room ? [wt.id] : []);
+    if (tabs.length > 1) docTabs = <Tabs className="fd-wtabs" value={wt.id} onChange={setWeekDoc}
+      options={tabs.map((t) => ({ value: t.id, label: t.name, count: days.reduce((n: number, D: any) => n + (t.room ? D.procedures.filter((p: any) => p.roomId === t.id).length : D.windows.filter((w: any) => w.practitionerId === t.id).reduce((m: number, w: any) => m + w.allocated, 0)), 0) }))} />;
+    cols = days.filter((D, i) => i < 6 || D.windows.length).map((D) => ({ key: D.day, day: D.day, room: !!wt?.room, // Sunday only when someone works it
+      head: <button type="button" className="text-left" title="Open this day" onClick={() => { setDay(D.day); setMode('day'); }}><b className={D.day === today ? 'text-clay' : ''}>{new Date(D.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })}</b>{D.day === today && <span> Today</span>}</button>,
       ws: D.windows.filter((w: any) => wIds.has(w.practitionerId)), visits: D.day === today ? visitsToday.filter((v) => wIds.has(v.practitionerId)) : null,
-      sits: D.procedures.filter((p: any) => (procsInDoc && wIds.has(p.practitionerId)) || roomIds.has(p.roomId)) }));
+      sits: D.procedures.filter((p: any) => wt?.room ? p.roomId === wt.id : procsInDoc && wIds.has(p.practitionerId)) }));
   } else {
     const D = days[0]; const procs: any[] = D.procedures ?? []; const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
     const roomCols: Col[] = [...onRooms, ...(onRooms.length && procs.some((p) => !p.roomId) ? [{ id: '__none', name: 'No room' }] : [])]
@@ -139,6 +140,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const rows = [...new Set(allWs.map((w) => w.startTime))].sort().map((s) => ({ start: s as string, end: allWs.find((w) => w.startTime === s)!.endTime as string }));
   for (const p of cols.flatMap((c) => c.sits)) if (!rows.some((r) => p.startTime >= r.start && p.startTime < r.end)) rows.push({ start: p.startTime, end: p.endTime });
   rows.sort((a, b) => a.start.localeCompare(b.start));
+  if (!rows.length) return sheet(<div className="py-10 text-center text-muted">Nothing booked {week ? 'this week' : 'on this day'}.</div>);
   const rowOf = (t: string) => rows.find((r) => t >= r.start && t < r.end) ?? [...rows].reverse().find((r) => r.start <= t) ?? rows[0];
 
   // a checked-in patient sits in their booking's hour; a walk-in in the hour they arrived
