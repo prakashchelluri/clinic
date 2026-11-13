@@ -6,7 +6,7 @@ import { get, post, qc, today, errText } from '../api';
 import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
 import { Avatar, Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
-import { ChangeMyDay, type ChangeKind } from '../dayChange';
+import { ChangeMyDay, DAY_CHANGES, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 import { ageText } from '../rxLine';
 import { ProcReview, useApprovals } from '../procReview';
@@ -118,9 +118,8 @@ export function Today() {
               <span className="relative"><button type="button" className="btn btn-sm" aria-haspopup="menu" aria-expanded={dayMenu} onClick={() => setDayMenu(!dayMenu)}><Icon name="clock" className="h-3.5 w-3.5" />My day<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 text-muted" /></button>
                 {dayMenu && <><div className="fixed inset-0 z-30" onClick={() => setDayMenu(false)} />
                   <div className="menu anim-menu z-40" role="menu">
-                    <button role="menuitem" onClick={() => { setDayMenu(false); setChange({ kind: 'late' }); }}>Running late</button>
-                    <button role="menuitem" onClick={() => { setDayMenu(false); setChange({ kind: 'early' }); }}>Change my day</button>
-                    <button role="menuitem" onClick={() => { setDayMenu(false); setChange({ kind: 'away', day: tmr }); }}>I'm not coming tomorrow</button>
+                    {DAY_CHANGES.map((o) => <span key={o.k} className="contents">{o.k === 'away' && <span className="my-1 block border-t border-line" />}
+                      <button role="menuitem" onClick={() => { setDayMenu(false); setChange({ kind: o.k, day: o.k === 'away' ? tmr : undefined }); }}><Icon name={o.icon} className="h-4 w-4 text-muted" />{o.title}{o.k === 'away' ? '…' : ''}</button></span>)}
                   </div></>}</span></>} />
         </div>
 
