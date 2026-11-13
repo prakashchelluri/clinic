@@ -6,7 +6,9 @@ import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { BackButton, Drawer, Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
-import { EncounterDetail, UploadButton, joinList } from '../encounterDetail';
+import { UploadButton, joinList } from '../encounterDetail';
+import { PrintRx } from './PrintRx';
+import { openPrint } from '../printPreview';
 import { enabledVitals } from '../vitals';
 import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
@@ -62,7 +64,7 @@ export function Patients() {
 }
 
 type Sec = 'visits' | 'reports' | 'photos' | 'plans' | 'bills' | 'messages' | 'missed';
-const SEC_TITLE: Record<Sec, string> = { visits: 'Visit summary', reports: 'Test reports', photos: 'Photos & skin map', plans: 'Plans & sittings', bills: 'Bills & payments', messages: 'Messages', missed: 'Missed' };
+const SEC_TITLE: Record<Sec, string> = { visits: 'Visit summary', reports: 'Test reports', photos: 'Photos', plans: 'Procedures', bills: 'Bills & payments', messages: 'Messages', missed: 'Missed' };
 
 /** One patient: who they are on top, the record's parts as tabs below; a part's own actions sit beside the tabs. Visit summary =
  *  vitals by date and the history beside one visit at a time. */
@@ -84,24 +86,28 @@ function Timeline({ id }: { id: string }) {
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
   const { patient: p, encounters, recommendations, charges, outstandingPaise, visits, guardian, sharingPhone } = t.data;
   const openPlans = recommendations.filter((r: any) => !['done', 'cancelled'].includes(r.status));
-  const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo');
+  const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo' && d.kind !== 'canvas');
   const photos = (docs.data ?? []).filter((d: any) => d.kind === 'photo');
   const missed: any[] = t.data.missed ?? []; const sessions: any[] = t.data.sessions ?? [];
+  const procName = (r: any) => cfg?.procedures?.find((x: any) => x.id === r.procedureId)?.name ?? r.notes ?? 'Procedure';
+  const procPlans: any[] = recommendations.filter((r: any) => r.kind === 'procedure' && r.status !== 'cancelled');
+  const pendingNow: any[] = openPlans.filter((r: any) => r.kind !== 'procedure'); // tests and the review; procedures have their own tab
   const hist = p.history ?? {};
   const onNow = new Map<string, Date>();
   for (const e of encounters) for (const i of e.prescription) { if (!i.durationDays) continue; const till = new Date(new Date(e.createdAt).getTime() + i.durationDays * 864e5); if (till >= new Date() && !(onNow.get(i.name)! > till)) onNow.set(i.name, till); }
-  const planText = (r: any) => (r.kind === 'followup' ? 'Review' : r.kind === 'investigation' ? `Test: ${r.notes}` : `Procedure${r.notes ? `: ${r.notes}` : ''}${r.sittings ? ` · ${r.sittings} sittings` : ''}`);
+  const planText = (r: any) => (r.kind === 'followup' ? 'Review visit' : r.kind === 'investigation' ? `Test: ${r.notes}` : `${procName(r)}${r.sittings ? ` · ${r.sittings} sittings` : ''}`);
   // vitals as the desk took them at check-in, one column per visit (the last three that have any)
   const vf = enabledVitals(cfg?.tenant?.settings);
   const vCols = (visits as any[]).filter((v) => vf.some((f) => v.details?.[f.key] !== undefined && v.details[f.key] !== null && v.details[f.key] !== '')).slice(0, 3);
   const showBills = can(perms, 'fees.see') || can(perms, 'payment.record');
   const SECS: [Sec, number | undefined][] = [
-    ['visits', encounters.length || undefined], ['reports', reports.length || undefined], ['photos', photos.length || undefined], ['plans', openPlans.length || undefined],
+    ['visits', encounters.length || undefined], ['reports', reports.length || undefined], ['photos', photos.length || undefined], ['plans', procPlans.length || undefined],
     ...(showBills ? [['bills', charges.length || undefined] as [Sec, number | undefined]] : []),
     ...(can(perms, 'appointment.read') ? [['messages', undefined] as [Sec, number | undefined]] : []),
     ...(missed.length ? [['missed', missed.length] as [Sec, number | undefined]] : []),
   ];
   const e = encounters[Math.min(vi, Math.max(0, encounters.length - 1))];
+  for (const n of [vi - 1, vi + 1]) { const x = encounters[n]; if (x) void qc.prefetchQuery({ queryKey: ['print', x.id], queryFn: () => get(`/encounters/${x.id}/print`) }); }
   const startEdit = () => setEdit({ fullName: p.fullName, phone: p.phone ?? '', ageYears: p.ageYears ?? '', sex: p.sex ?? '', locality: p.locality ?? '', allergies: p.allergies ?? '', notes: p.notes ?? '', referralCard: p.referralCard, contactLabel: p.contactLabel ?? '', guardian, language: p.language ?? '', noWhatsapp: !!p.noWhatsapp });
   const Line = ({ label, children }: { label: string; children: React.ReactNode }) => <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{label}</div><div className="text-[14px] font-semibold">{children}</div></div>;
   return (
@@ -171,11 +177,12 @@ function Timeline({ id }: { id: string }) {
                 </div>
               </section>
               <section className="card-flat overflow-hidden anim-fade-up">
-                <div className="border-b border-line/70 px-5 py-3"><b className="text-[15px]">Now and next</b></div>
-                <div className="flex flex-col gap-3 px-5 py-4">
-                  <Line label="On now">{onNow.size ? [...onNow].map(([name, till]) => <div key={name}>{name} <span className="text-[13px] font-medium text-muted">· till {fmtDate(till.toISOString())}</span></div>) : <span className="text-sm font-medium text-muted">No running medicines</span>}</Line>
-                  <Line label="Next">{openPlans.length ? openPlans.slice(0, 3).map((r: any) => <div key={r.id}>{planText(r)}{r.dueOn && <span className="text-[13px] font-medium text-muted"> · due {fmtDate(r.dueOn)}</span>}</div>) : <span className="text-sm font-medium text-muted">Nothing pending</span>}</Line>
-                </div>
+                <div className="border-b border-line/70 px-5 py-3"><b className="text-[15px]">Current medicines</b></div>
+                <div className="flex flex-col gap-1 px-5 py-4 text-[14px] font-semibold">{onNow.size ? [...onNow].map(([name, till]) => <div key={name}>{name} <span className="text-[13px] font-medium text-muted">· till {fmtDate(till.toISOString())}</span></div>) : <span className="text-sm font-medium text-muted">None running</span>}</div>
+              </section>
+              <section className="card-flat overflow-hidden anim-fade-up">
+                <div className="border-b border-line/70 px-5 py-3"><b className="text-[15px]">Pending</b></div>
+                <div className="flex flex-col gap-1 px-5 py-4 text-[14px] font-semibold">{pendingNow.length ? pendingNow.map((r: any) => <div key={r.id}>{planText(r)}{r.dueOn && <span className="text-[13px] font-medium text-muted"> · due {fmtDate(r.dueOn)}</span>}</div>) : <span className="text-sm font-medium text-muted">Nothing pending</span>}</div>
               </section>
             </div>
             <section className="card-flat min-w-0 overflow-hidden anim-fade-up">
@@ -185,8 +192,10 @@ function Timeline({ id }: { id: string }) {
                   <button className="btn btn-sm !px-2" aria-label="Newer visit" disabled={vi === 0} onClick={() => setVi(vi - 1)}><Icon name="chevL" className="h-4 w-4" /></button>
                   <b className="min-w-[48px] text-center text-sm">{Math.min(vi, encounters.length - 1) + 1} / {encounters.length}</b>
                   <button className="btn btn-sm !px-2" aria-label="Older visit" disabled={vi >= encounters.length - 1} onClick={() => setVi(vi + 1)}><Icon name="chevR" className="h-4 w-4" /></button>
+                  <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: e.id })}><Icon name="print" className="h-3.5 w-3.5" />Print</button>
                 </div>
-                <div className="px-5 py-4"><EncounterDetail key={e.id} id={e.id} /></div>
+                {/* the prescription as it was written and printed */}
+                <div className="overflow-x-auto bg-paper-2 p-4"><div className="mx-auto w-fit bg-white shadow-md"><PrintRx key={e.id} id={e.id} embed /></div></div>
               </>}
             </section>
           </div>}
@@ -201,12 +210,17 @@ function Timeline({ id }: { id: string }) {
           </section>}
 
           {sec === 'plans' && <>
-            <Section title="Open plans">
-              {openPlans.length === 0 ? <div className="p-4 text-sm text-muted">Nothing pending.</div> :
-                openPlans.map((r: any) => <div key={r.id} className="row"><Icon name={r.kind === 'followup' ? 'clock' : r.kind === 'investigation' ? 'search' : 'stetho'} className="h-4 w-4 shrink-0 text-clay" /><div className="min-w-0 flex-1 truncate text-sm">{planText(r)}</div>{r.dueOn && <Chip>due {fmtDate(r.dueOn)}</Chip>}<Chip tone={r.status === 'scheduled' ? 'sage' : ''}>{r.status}</Chip></div>)}
+            <Section title="Procedures">
+              {procPlans.length === 0 ? <div className="p-4 text-sm text-muted">No procedures prescribed.</div> :
+                procPlans.map((r: any) => { const sits = sessions.filter((x: any) => x.recommendationId === r.id); const done = sits.filter((x: any) => x.state === 'completed').length;
+                  const next = sits.filter((x: any) => x.state === 'confirmed').sort((a: any, b: any) => String(a.day).localeCompare(String(b.day)))[0];
+                  const finished = !!r.sittings && done >= r.sittings; const closed = !finished && r.status === 'done'; // closed early, before every sitting was done
+                  return <div key={r.id} className="row"><Icon name="stetho" className="h-4 w-4 shrink-0 text-clay" /><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{procName(r)}</div>
+                    <div className="text-xs text-muted">{done} of {r.sittings ?? '?'} sittings done · {finished ? 'course finished' : closed ? 'closed before the last sitting' : next ? `next on ${fmtDate(next.day)} ${next.startTime}` : 'next sitting not booked'}</div></div>
+                    <Chip tone={finished ? 'sage' : closed ? '' : done || next ? 'sky' : 'amber'}>{finished ? 'Finished' : closed ? 'Closed' : done || next ? 'In progress' : 'Not started'}</Chip></div>; })}
             </Section>
-            {sessions.length > 0 && <Section title="Sittings">{sessions.map((s: any) => <div key={s.id} className="row"><div className="min-w-0 flex-1 text-sm"><b>{s.procedure ?? 'Procedure'}</b> · sitting {s.sittingNo}<div className="text-xs text-muted">{fmtDate(s.day)} {s.startTime}{s.doctor ? ` · ${s.doctor}` : ''}</div></div><Chip tone={s.state === 'completed' ? 'sage' : s.state === 'missed' ? 'rose' : ''}>{s.state}</Chip></div>)}</Section>}
             <CoursesCard patientId={id} patientName={p.fullName} />
+            {sessions.length > 0 && <Section title="Sittings">{sessions.map((x: any) => <div key={x.id} className="row"><div className="min-w-0 flex-1 text-sm"><b>{x.procedure ?? 'Procedure'}</b> · sitting {x.sittingNo}<div className="text-xs text-muted">{fmtDate(x.day)} {x.startTime}{x.doctor ? ` · ${x.doctor}` : ''}</div></div><Chip tone={x.state === 'completed' ? 'sage' : x.state === 'missed' ? 'rose' : ''}>{({ completed: 'Done', missed: 'Missed', confirmed: 'Booked', in_progress: 'In progress', cancelled: 'Cancelled' } as Record<string, string>)[x.state] ?? x.state}</Chip></div>)}</Section>}
           </>}
 
           {sec === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}
