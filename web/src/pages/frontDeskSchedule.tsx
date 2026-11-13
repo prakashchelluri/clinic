@@ -262,7 +262,11 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </>);
 }
 
+/** an hour's row of four places is its four quarters: a sitting takes the quarters it runs in and patients fill the rest; a column too narrow for four gives it a line of its own, as long as its share */
+const quarters = ([s, n]: [number, number]) => { const qs = Math.min(3, Math.floor(s * 4 + 0.01)); const qn = Math.max(1, Math.min(4 - qs, Math.round(n * 4)));
+  return { '--qs': qs + 1, '--qn': qn, '--qo': `${s * 100}%`, '--qw': `${n * 100}%` } as React.CSSProperties; };
+
 function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info, at }: ChipP) {
-  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${sel ? 'sel' : ''}`} style={at ? { gridColumn: '1 / -1', marginLeft: `${at[0] * 100}%`, width: `${at[1] * 100}%` } : undefined} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
+  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${at ? 'qtr' : ''} ${sel ? 'sel' : ''}`} style={at ? quarters(at) : undefined} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
     {tok && <span className="tk">{tok}</span>}{proc && <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5 shrink-0" />}<span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{cap(tag)}</span>}</button>;
 }

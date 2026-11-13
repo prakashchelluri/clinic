@@ -114,6 +114,11 @@
 /* an hour with slots is divided into them edge to edge: no padding, the slot lines are the cell lines */
 .fd-hc:has(> .fd-hchips) { padding: 0; gap: 0; }
 .fd-hc:has(> .fd-hchips) > .fd-hcap { padding: 6px 10px; border-bottom: 1px solid var(--color-line); }
+/* a procedure takes its quarters of the hour (4 places = 4 quarters) and patients fill round it; under 600px there are fewer than 4 places, so it gets its own line, as wide as its share */
+.fd-hc { container-type: inline-size; }
+.fd-hchips { grid-auto-flow: row dense; }
+.fd-hchips > .fd-pc.qtr { grid-column: var(--qs) / span var(--qn); }
+@container (max-width: 599.98px) { .fd-hchips > .fd-pc.qtr { grid-column: 1 / -1; margin-left: var(--qo); width: var(--qw); } }
 .fd-hchips > .fd-pc { height: 36px; border-radius: 0; border-right: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line); }
 .fd-sch-free { align-self: flex-start; display: inline-flex; align-items: center; height: 24px; padding: 0 6px; border-radius: 4px; font-size: 12px; font-weight: 600; color: var(--color-clay); white-space: nowrap; }
 .fd-sch-free:hover { background: var(--color-clay-soft); }
