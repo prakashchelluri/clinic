@@ -4,7 +4,8 @@ import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
 import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
-import { Avatar, Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
+import { Avatar, Chip, Drawer, Icon, Skeleton, toast, fmtDate } from '../ui';
+import { BookForm } from './Booking';
 import { ChangeMyDay, DAY_CHANGES, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 import { ageText } from '../rxLine';
@@ -57,6 +58,7 @@ export function Today() {
   const discountAsks = useDiscountAsks(can(perms, 'discount.approve')); const asksN: number = discountAsks.data?.length ?? 0; // discounts above the limit wait for whoever approves them
   const [picked, setPicked] = useState<Item | null>(null);
   const [apptId, setApptId] = useState<string | null>(null); // a booking opened from the calendar
+  const [booking, setBooking] = useState<any>(null); // a free place clicked on the calendar
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null); // the doctor checks a booked patient in themself
   const seeAll = (me.roles ?? []).includes('owner') || !doc; // a doctor sees their own calendar; the owner sees everyone's
 
@@ -113,7 +115,7 @@ export function Today() {
           <DaySchedule today={today()} visitsToday={seeAll ? d.visits ?? [] : visits} doctors={(d.doctors ?? []).filter((x: any) => seeAll || x.id === doc)} rooms={seeAll ? (cfg?.rooms ?? []).filter((r: any) => r.active !== false) : []}
             selectedId={picked?.visit?.id ?? null} nextIds={new Set(next ? [next.id] : [])} procsInDoc
             kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? 'done' : 'waiting'}
-            onVisit={(id) => { const v = (d.visits ?? []).find((x: any) => x.id === id); if (v) setPicked({ key: v.id, label: v.patient.fullName, patientId: v.patient.id, visit: v, hour: '' }); }} onOpenAppt={setApptId}
+            onVisit={(id) => { const v = (d.visits ?? []).find((x: any) => x.id === id); if (v) setPicked({ key: v.id, label: v.patient.fullName, patientId: v.patient.id, visit: v, hour: '' }); }} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
             tools={canChange && <>{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}
               <span className="relative"><button type="button" className="btn btn-sm" aria-haspopup="menu" aria-expanded={dayMenu} onClick={() => setDayMenu(!dayMenu)}><Icon name="clock" className="h-3.5 w-3.5" />My day<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 text-muted" /></button>
                 {dayMenu && <><div className="fixed inset-0 z-30" onClick={() => setDayMenu(false)} />
@@ -172,6 +174,8 @@ export function Today() {
         const btn = !ok ? null : ['waiting', 'screened'].includes(v.status) ? 'Start consultation' : v.status === 'in_consult' ? 'Back to the prescription' : v.status === 'done' && v.encounterStatus === 'draft' ? 'Finish the note' : null;
         return <JourneyPanel key={v.id} v={v} screening={screening} inLine={waiting.findIndex((x) => x.id === v.id) + 1} canDesk={false} arrangeSlot={null} canSend={() => ({ ok: false, why: '' })} onSendIn={() => {}} onClose={() => setPicked(null)}
           action={btn && <button className="btn btn-primary justify-center" disabled={busy} onClick={go}>{btn}</button>} />; })()}
+      {booking && <Drawer title="Book" subtitle={`${booking.day === today() ? 'Today' : new Date(booking.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · ${booking.startTime}–${booking.endTime}${(d.doctors ?? []).find((x: any) => x.id === booking.practitionerId) ? ` · ${(d.doctors ?? []).find((x: any) => x.id === booking.practitionerId).name}` : ''}`} onClose={() => setBooking(null)} width="max-w-md">
+        <BookForm session={booking} arriveEarly={cfg?.tenant?.settings?.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { ['calendar', 'frontdesk'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); setBooking(null); }} /></Drawer>}
       {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onClose={() => setApptId(null)}
         onArrive={can(perms, 'visit.write') ? (a) => { setApptId(null); setArrive({ patientId: a.patient.id ?? a.patientId, appointmentId: a.id, name: a.patient.fullName }); } : undefined} />}
       {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} todayAppts={(d.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status))}

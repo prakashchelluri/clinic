@@ -17,7 +17,7 @@ export type Ctx = { tenantId: string; userId: string; role: string; roles: strin
 export const DEFAULT_ROLES: Record<string, string[]> = {
   owner: ['*'],
   admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'fees.*', 'day.close', 'document.read'],
-  doctor: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'visit.read', 'visit.write', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
+  doctor: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'appointment.write', 'visit.read', 'visit.write', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
   receptionist: ['fees.see', 'patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
   coordinator: ['fees.see', 'patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
