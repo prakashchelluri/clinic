@@ -32,14 +32,14 @@ export function PadTab({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] xl:items-start">
-        <Section title="Sections on the pad" aside={<span className="text-xs text-muted">Diagnosis always shows and is required</span>}>
+        <Section title="Sections on the pad" aside={<span className="text-xs text-muted">Tick Required for what Finish needs; nothing is required unless ticked</span>}>
           <div className="grid grid-cols-[24px_minmax(0,1fr)_64px_80px_64px_64px] items-center gap-2 px-4 py-2 text-[11.5px] font-semibold text-muted"><span /><span>Section</span><span>Show</span><span>Required</span><span>Print</span><span>Order</span></div>
           {secs.map((s, i) => { const k = known(s.key); return (
             <div key={s.key} className={`grid grid-cols-[24px_minmax(0,1fr)_64px_80px_64px_64px] items-center gap-2 border-t border-line px-4 py-2 text-[13px] ${s.show ? '' : 'text-muted'}`}>
               <span className="text-muted">⋮⋮</span>
               <span className="font-medium">{k?.label ?? s.key}{s.key === 'notes' && <span className="ml-2 text-xs text-muted">never printed</span>}</span>
               <Tick label={`Show ${k?.label}`} on={s.show} disabled={s.key === 'diagnosis'} onChange={(v) => upd(i, { show: v })} />
-              <Tick label={`Require ${k?.label}`} on={s.required} disabled={!k?.canRequire || s.key === 'diagnosis'} onChange={(v) => upd(i, { required: v })} />
+              <Tick label={`Require ${k?.label}`} on={s.required} disabled={!k?.canRequire} onChange={(v) => upd(i, { required: v })} />
               <Tick label={`Print ${k?.label}`} on={s.print} disabled={!k?.canPrint} onChange={(v) => upd(i, { print: v })} />
               <span className="flex gap-0.5"><button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label="Move up" disabled={i === 0} onClick={() => move(i, -1)}><Icon name="up" className="h-3.5 w-3.5" /></button><button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label="Move down" disabled={i === secs.length - 1} onClick={() => move(i, 1)}><Icon name="up" className="h-3.5 w-3.5 rotate-180" /></button></span>
             </div>); })}

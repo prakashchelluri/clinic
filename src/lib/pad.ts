@@ -7,13 +7,13 @@ export const PAD_SECTIONS: { key: string; label: string; canRequire?: boolean; c
   { key: 'diagnosis', label: 'Diagnosis', canRequire: true, canPrint: true },
   { key: 'exam', label: 'Examination', canRequire: true, canPrint: true },
   { key: 'medicines', label: 'Medicines', canRequire: true, canPrint: true },
-  { key: 'advice', label: 'Advice', canPrint: true },
-  { key: 'tests', label: 'Tests', canPrint: true },
+  { key: 'advice', label: 'Advice', canRequire: true, canPrint: true },
+  { key: 'tests', label: 'Tests', canRequire: true, canPrint: true },
   { key: 'results', label: 'Lab results', canPrint: true },
-  { key: 'followup', label: 'Follow-up', canPrint: true },
-  { key: 'procedures', label: 'Procedures', canPrint: true },
+  { key: 'followup', label: 'Follow-up', canRequire: true, canPrint: true },
+  { key: 'procedures', label: 'Procedures', canRequire: true, canPrint: true },
   { key: 'notes', label: 'Private note' },
-  { key: 'referral', label: 'Refer to', canPrint: true },
+  { key: 'referral', label: 'Refer to', canRequire: true, canPrint: true },
   { key: 'photos', label: 'Photos on the pad' },
 ];
 const DEFAULT_OFF = new Set(['photos']);
@@ -24,8 +24,8 @@ export function padConfig(settings: any): PadSection[] {
   // "next" (follow-up and procedures in one) was split in two: a clinic's saved choice for it carries to both, in its place
   const saved: PadSection[] = (Array.isArray(settings?.pad?.sections) ? settings.pad.sections : []).flatMap((s: PadSection) => (s.key === 'next' ? [{ ...s, key: 'followup' }, { ...s, key: 'procedures' }] : [s]));
   const known = new Set(PAD_SECTIONS.map((s) => s.key));
-  const out: PadSection[] = saved.filter((s) => known.has(s.key)).map((s) => ({ key: s.key, show: s.key === 'diagnosis' ? true : !!s.show, required: s.key === 'diagnosis' ? true : !!s.required, print: s.key === 'notes' ? false : !!s.print }));
-  for (const s of PAD_SECTIONS) if (!out.some((o) => o.key === s.key)) out.push({ key: s.key, show: !DEFAULT_OFF.has(s.key), required: s.key === 'diagnosis', print: !DEFAULT_NOPRINT.has(s.key) });
+  const out: PadSection[] = saved.filter((s) => known.has(s.key)).map((s) => ({ key: s.key, show: s.key === 'diagnosis' ? true : !!s.show, required: !!s.required, print: s.key === 'notes' ? false : !!s.print }));
+  for (const s of PAD_SECTIONS) if (!out.some((o) => o.key === s.key)) out.push({ key: s.key, show: !DEFAULT_OFF.has(s.key), required: false, print: !DEFAULT_NOPRINT.has(s.key) });
   return out;
 }
 
@@ -73,4 +73,23 @@ export function localPhrase(lang: PrintSettings['lang'], phrase: string | null |
   if (lang !== 'hi+en') return te(phrase, settings);
   const k = phrase.trim().toLowerCase(); if (k in HI) return HI[k];
   const d = k.match(/^(\d+)\s*days?$/); return d ? `${d[1]} दिन` : null;
+}
+
+/** Validate submitted data against the form definition: required fields and option membership only. */
+export function validate(schema: { sections: { key: string; title?: string; fields: { key: string; label: string; type: string; required?: boolean; options?: string[] }[] }[] }, data: Record<string, any>, pad: { key: string; required: boolean }[] = []) {
+  const padReq = (k: string) => !!pad.find((s) => s.key === k)?.required;
+  const errors: { path: string; message: string }[] = [];
+  for (const s of schema.sections) for (const f of s.fields) {
+    const v = data[s.key]?.[f.key];
+    const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
+    // symptoms and diagnosis are required only when the clinic ticked them on its pad; other form fields keep their own flag
+    const required = s.key === 'complaint' && f.key === 'chief_complaint' ? padReq('symptoms') : f.type === 'diagnoses' ? padReq('diagnosis') : s.key === 'exam' ? false : f.required;
+    if (required && empty) errors.push({ path: `${s.key}.${f.key}`, message: 'required' });
+    if (!empty && f.options && f.type !== 'tags') {
+      // name the field and the value, so the pad can say what to fix ("Site: Chest is not one of the choices")
+      const bad = f.type === 'select' ? (f.options.includes(v) ? [] : [String(v)]) : f.type === 'multiselect' ? (v as string[]).filter((x) => !f.options!.includes(x)) : [];
+      if (bad.length) errors.push({ path: `${s.key}.${f.key}`, message: `${f.label}: ${bad.join(', ')} ${bad.length === 1 ? 'is' : 'are'} not one of the choices` });
+    }
+  }
+  return errors;
 }

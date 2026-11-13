@@ -4,7 +4,7 @@ import { and, eq, asc, desc, sql, inArray } from 'drizzle-orm';
 import { encounter, visit, prescriptionItem, recommendation, formDefinition, patient, practitioner, procedureCatalog, procedureSession, room, tenant, rxTemplate, stockBatch, labResult, feeCategory, medicine, type FormSchema } from '../db/schema.js';
 import { rxProblems, needsReason, pregnancyFlag, firstName } from '../lib/rxSafety.js';
 import { queueRxMessage } from './rxpad.js';
-import { padConfig, printSettings, localPhrase } from '../lib/pad.js';
+import { padConfig, printSettings, localPhrase, validate } from '../lib/pad.js';
 import { normHistory } from '../lib/history.js';
 import { route } from '../lib/route.js';
 import { auditView, writeAudit } from '../lib/audit.js';
@@ -19,24 +19,9 @@ const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup
   intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), gapDays: z.number().int().min(1).max(365).nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false), reviewed: z.boolean().default(false) });
 
-/** Validate submitted data against the form definition: required fields and option membership only. */
 /** Assistant-only users save intake and hand back to the doctor; a doctor who also holds assistant stays in consult. */
 function isIntakeOnly(req: any) { return req.ctx.roles.includes('assistant') && !req.perms.some((p: string) => p === '*' || p === 'encounter.*' || p === 'encounter.complete'); }
 
-function validate(schema: FormSchema, data: Record<string, any>) {
-  const errors: { path: string; message: string }[] = [];
-  for (const s of schema.sections) for (const f of s.fields) {
-    const v = data[s.key]?.[f.key];
-    const empty = v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length);
-    if (f.required && empty) errors.push({ path: `${s.key}.${f.key}`, message: 'required' });
-    if (!empty && f.options && f.type !== 'tags') {
-      // name the field and the value, so the pad can say what to fix ("Site: Chest is not one of the choices")
-      const bad = f.type === 'select' ? (f.options.includes(v) ? [] : [String(v)]) : f.type === 'multiselect' ? (v as string[]).filter((x) => !f.options!.includes(x)) : [];
-      if (bad.length) errors.push({ path: `${s.key}.${f.key}`, message: `${f.label}: ${bad.join(', ')} ${bad.length === 1 ? 'is' : 'are'} not one of the choices` });
-    }
-  }
-  return errors;
-}
 
 export function clinicalRoutes(app: FastifyInstance) {
   /** Open (or create) the encounter for a visit. Doctor opens from queue; assistant opens for intake. */
@@ -107,7 +92,8 @@ export function clinicalRoutes(app: FastifyInstance) {
     const form = await tx.select().from(formDefinition).where(eq(formDefinition.id, enc.formDefinitionId)).then((r) => r[0]);
     const data = { ...enc.data, ...body.data };
     if (body.complete) {
-      const errors = validate(form.schema, data);
+      const settings = await tx.select({ s: tenant.settings }).from(tenant).where(eq(tenant.id, t)).then((r) => r[0]?.s);
+      const errors = validate(form.schema, data, padConfig(settings));
       if (errors.length) throw new HttpError(422, 'FORM_INVALID', { errors });
       // allergy, pregnancy or a serious interaction: Finish needs the doctor's reason for each (data.overrides), the same check the pad runs
       const pat = await tx.select({ fullName: patient.fullName, allergies: patient.allergies, history: patient.history }).from(patient).where(eq(patient.id, enc.patientId)).then((r) => r[0]);

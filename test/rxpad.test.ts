@@ -27,7 +27,8 @@ test('old yes/no history becomes the six categories, once', () => {
 
 test('pad defaults fill what the clinic has not configured', () => {
   const d = padConfig({});
-  assert.equal(d.find((s) => s.key === 'diagnosis')!.required, true);
+  assert.ok(d.every((s) => !s.required), 'nothing is required until the clinic ticks it');
+  assert.equal(padConfig({ pad: { sections: [{ key: 'diagnosis', show: true, required: true, print: true }] } }).find((s) => s.key === 'diagnosis')!.required, true);
   assert.equal(d.find((s) => s.key === 'photos')!.show, false);
   assert.equal(d.find((s) => s.key === 'notes')!.print, false);
   const saved = padConfig({ pad: { sections: [{ key: 'medicines', show: true, required: false, print: true }, { key: 'diagnosis', show: false, required: false, print: true }, { key: 'junk', show: true, required: false, print: true }] } });
@@ -50,4 +51,12 @@ test("the clinic's own phrases and history options sit on top of the built-in li
   assert.ok(Object.keys(teluguTable(s)).length > 40, 'the merged table keeps every built-in phrase');
   assert.deepEqual(historyCategories(s).find((c) => c.key === 'conditions')!.options, ['BP', 'Anaemia']);
   assert.equal(historyCategories(s).find((c) => c.key === 'family')!.options.length, historyCategories({}).find((c) => c.key === 'family')!.options.length, 'untouched categories keep the defaults');
+});
+
+test('finish needs only what the clinic ticked: the form definition alone no longer makes symptoms or diagnosis required', async () => {
+  const { validate } = await import('../src/lib/pad.js');
+  const DERM_ENCOUNTER = { sections: [{ key: 'complaint', fields: [{ key: 'chief_complaint', label: 'Complaints', type: 'tags', required: true }] }, { key: 'assessment', fields: [{ key: 'diagnosis', label: 'Diagnoses', type: 'diagnoses', required: true }] }] };
+  assert.deepEqual(validate(DERM_ENCOUNTER, {}, padConfig({})), [], 'an empty pad finishes by default');
+  const pad = padConfig({ pad: { sections: [{ key: 'diagnosis', show: true, required: true, print: true }, { key: 'symptoms', show: true, required: true, print: true }] } });
+  assert.deepEqual(validate(DERM_ENCOUNTER, {}, pad).map((e) => e.path).sort(), ['assessment.diagnosis', 'complaint.chief_complaint']);
 });

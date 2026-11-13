@@ -62,7 +62,7 @@ function Card({ id, title, meta, actions, children, required, invalid }: { id: s
     <section id={`sec-${id}`} className={`card !p-0 anim-fade-up ${invalid ? 'outline-2 outline-rose/70' : ''}`} style={{ '--sec': color } as Record<string, string>} aria-invalid={invalid || undefined}>
       <div className="flex flex-wrap items-center gap-2.5 border-b border-line px-4 py-2.5">
         <SecIcon id={id} />
-        <h3 className="text-[15.5px] font-bold tracking-[-0.01em] text-ink">{title}{required && <span className="text-rose" title="Required to finish"> *</span>}</h3>
+        <h3 className="text-[17px] font-bold tracking-[-0.01em] text-ink">{title}{required && <span className="text-rose" title="Required to finish"> *</span>}</h3>
         {meta && <span className="text-xs text-muted">{meta}</span>}
         {actions && <span className="ml-auto flex flex-wrap items-center gap-0.5">{actions}</span>}
       </div>
@@ -523,12 +523,17 @@ export function Encounter() {
   const missingNow = (): { path: string; message: string }[] => {
     const out: { path: string; message: string }[] = [];
     if (padOf('symptoms').required && !syms.length) out.push({ path: 'complaint.chief_complaint', message: 'Symptoms is required' });
-    if (!dxs.length) out.push({ path: 'assessment.diagnosis', message: 'Diagnosis is required' });
+    if (padOf('diagnosis').required && !dxs.length) out.push({ path: 'assessment.diagnosis', message: 'Diagnosis is required' });
+    if (padOf('advice').required && !adviceLines.length) out.push({ path: 'advice._', message: 'Advice is required' });
+    if (padOf('tests').required && !tests.length) out.push({ path: 'tests._', message: 'Tests is required' });
+    if (padOf('followup').required && !followup?.intervalDays) out.push({ path: 'followup._', message: 'Follow-up is required' });
+    if (padOf('procedures').required && !recs.some((r) => r.kind === 'procedure')) out.push({ path: 'procedures._', message: 'Procedures is required' });
+    if (padOf('referral').required && !data.referral?.to?.trim()) out.push({ path: 'referral._', message: 'Referral is required' });
     if (padOf('exam').required && !asExam(data.exam).length) out.push({ path: 'exam._', message: 'Examination is required' });
     if (padOf('medicines').required && !rx.some((i) => i.name)) out.push({ path: 'medicines._', message: 'Medicines is required' });
     // a medicine line must say how often and for how long, or it prints as a bare name
-    if (canFinish) rx.forEach((i, k) => { if (!i.name || i._issued) return; const gap = [!i.frequency?.trim() && 'how often', !i.durationDays && !i.durationNote && 'for how many days'].filter(Boolean).join(' and '); if (gap) out.push({ path: `medicines.${k}`, message: `Add ${gap} for ${i.name}` }); });
-    for (const s of formSections as any[]) for (const f of (s.key === 'exam' ? [] : s.fields ?? []) as Field[]) { const v = data[s.key]?.[f.key]; if (f.required && !(Array.isArray(v) ? v.length : v) && !out.some((x) => x.path === `${s.key}.${f.key}`)) out.push({ path: `${s.key}.${f.key}`, message: `${(s.fields as Field[]).filter((x) => x.required).length > 1 ? `${s.title} › ${f.label}` : f.label} is required` }); }
+    if (canFinish && padOf('medicines').required) rx.forEach((i, k) => { if (!i.name || i._issued) return; const gap = [!i.frequency?.trim() && 'how often', !i.durationDays && !i.durationNote && 'for how many days'].filter(Boolean).join(' and '); if (gap) out.push({ path: `medicines.${k}`, message: `Add ${gap} for ${i.name}` }); });
+    for (const s of formSections as any[]) for (const f of (s.key === 'exam' ? [] : s.fields ?? []) as Field[]) { const v = data[s.key]?.[f.key]; const req = s.key === 'complaint' && f.key === 'chief_complaint' ? padOf('symptoms').required : f.type === 'diagnoses' ? padOf('diagnosis').required : f.required; if (req && !(Array.isArray(v) ? v.length : v) && !out.some((x) => x.path === `${s.key}.${f.key}`)) out.push({ path: `${s.key}.${f.key}`, message: `${(s.fields as Field[]).filter((x) => x.required).length > 1 ? `${s.title} › ${f.label}` : f.label} is required` }); }
     return out;
   };
   const finish = () => { if (!canFinish) return;
@@ -620,9 +625,8 @@ export function Encounter() {
         </Row>)}
         {!readOnly && <SearchLine placeholder="Start typing a symptom · “itching 2 weeks”" options={symField?.options ?? []} invalid={!!err('complaint', 'chief_complaint')} onAdd={(t) => smartAdd(t, 'symptom')} />}
         {err('complaint', 'chief_complaint') && <div className="mt-1 text-xs text-rose">At least one symptom is required</div>}
-        {otherFields('complaint', ['chief_complaint', 'duration', 'site']).map((f: Field) => <div key={f.key} className="mt-2" data-invalid={!!err('complaint', f.key)}><CompactField f={f} value={data.complaint?.[f.key]} onChange={(v) => set('complaint', f.key, v)} disabled={readOnly} invalid={!!err('complaint', f.key)} /></div>)}
       </div></Card>,
-    diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required={canFinish} invalid={bad('diagnosis')} meta={isDoctor ? undefined : 'the doctor decides; leave it if unsure'} actions={cardActs('diagnosis')}>
+    diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required={canFinish && padOf('diagnosis').required} invalid={bad('diagnosis')} meta={isDoctor ? undefined : 'the doctor decides; leave it if unsure'} actions={cardActs('diagnosis')}>
       <div data-invalid={!!err('assessment', 'diagnosis')}>
         {dxs.map((d, i) => <Row key={d.name} label={d.name} onRemove={readOnly ? null : () => setDxs(dxs.filter((_, j) => j !== i))}>
           <b className="rx-name">{d.name}</b>
@@ -648,7 +652,7 @@ export function Encounter() {
     medicines: isDoctor ? <Card key="medicines" id="medicines" title="Medications (Rx)" required={padOf('medicines').required} invalid={bad('medicines')} meta={rx.filter((i) => i.name).length ? `${rx.filter((i) => i.name).length} on the Rx` : undefined} actions={cardActs('medicines')}>
       {/* one table: a row per medicine, a column per detail, so the prescription reads across like the printed one */}
       {rx.filter((i) => i.name || !readOnly).length > 0 && <div className="rx-grid overflow-x-auto">
-        <table className="w-full min-w-[860px] table-fixed border-collapse text-[13px]" onKeyDown={(ev) => { if (ev.key !== "Enter" || ev.defaultPrevented) return; /* Enter goes down to the same column, like a sheet */ const td = (ev.target as HTMLElement).closest("td"); const next = td?.parentElement?.nextElementSibling?.children[td.cellIndex]?.querySelector("input"); if (next) { ev.preventDefault(); (next as HTMLInputElement).focus(); } }}>
+        <table className="w-full min-w-[860px] table-fixed border-collapse text-[14.5px]" onKeyDown={(ev) => { if (ev.key !== "Enter" || ev.defaultPrevented) return; /* Enter goes down to the same column, like a sheet */ const td = (ev.target as HTMLElement).closest("td"); const next = td?.parentElement?.nextElementSibling?.children[td.cellIndex]?.querySelector("input"); if (next) { ev.preventDefault(); (next as HTMLInputElement).focus(); } }}>
           <colgroup><col className="w-7" /><col /><col className="w-[104px]" /><col className="w-[108px]" /><col className="w-[128px]" /><col className="w-[118px]" /><col className="w-[56px]" /><col className="w-[16%]" /><col className="w-[92px]" /><col className="w-9" /></colgroup>
           <thead><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted">{['#', 'Medicine', 'Unit per dose', 'Frequency', 'When', 'Duration', 'Qty', 'Note', 'Stock', ''].map((h, n) => <th key={n} scope="col" className="px-2 py-2 font-semibold">{h}</th>)}</tr></thead>
           <tbody>{rx.map((i, k) => { const n = onHand(i); const hit = allergyHit(p.allergies, medText(i)); const off = readOnly || i._issued; const cell = 'p-0 align-middle'; return (
@@ -688,10 +692,10 @@ export function Encounter() {
     </Card> : null,
     results: isDoctor ? <Card key="results" id="results" title="Lab results" meta="typed when reports arrive"><LabResultsCard patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} docs={myDocs} /></Card> : null,
     followup: isDoctor ? <section key="followup" id="sec-followup" className="card !p-0 anim-fade-up"><div className="grid gap-4 p-4 md:grid-cols-[300px_minmax(0,1fr)]">
-      <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="followup" /><h3 className="text-[15.5px] font-bold tracking-[-0.01em]">Follow-up</h3></div>
+      <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="followup" /><h3 className="text-[17px] font-bold tracking-[-0.01em]">Follow-up</h3></div>
         <FollowUp days={followup?.intervalDays ?? null} disabled={readOnly} onChange={setFollowup} />
         {followup?.intervalDays ? <div className="mt-1.5 text-xs text-muted">Review on {fmtDate(new Date(Date.now() + followup.intervalDays * 86400000).toISOString())}</div> : null}</div>
-      <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="addnotes" /><h3 className="text-[15.5px] font-bold tracking-[-0.01em]">Additional notes</h3>
+      <div><div className="mb-3 flex items-center gap-2.5"><SecIcon id="addnotes" /><h3 className="text-[17px] font-bold tracking-[-0.01em]">Additional notes</h3>
         {!readOnly && isDoctor && <span className="ml-auto flex items-center gap-0.5"><SectionTemplates compact kind="notes" sub="N" what="notes" sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={null} /><SaveTemplate what="notes" onSave={() => saveSection('notes')} /></span>}</div>
         <textarea aria-label="Additional notes" className="input min-h-[72px]" maxLength={2000} placeholder="Enter any specific note here · printed on the prescription" value={data.plan?.notes ?? ''} disabled={readOnly} onChange={(ev) => set('plan', 'notes', ev.target.value)} /></div>
     </div></section> : null,
@@ -869,7 +873,7 @@ export function Encounter() {
               <button key={k} type="button" className="card block w-full !px-3.5 !py-3 text-left transition-colors hover:bg-surface-2" onClick={() => setSide(k)} aria-haspopup="dialog">
                 <span className="flex items-center gap-2.5">
                   <SecIcon id={k} />
-                  <span className="min-w-0 flex-1"><span className="block text-[14.5px] font-bold">{LEFT[k].title}</span>{!tiles && v && <span className="block truncate text-xs text-muted" title={v}>{v}</span>}</span>
+                  <span className="min-w-0 flex-1"><span className="block text-[15.5px] font-bold">{LEFT[k].title}</span>{!tiles && v && <span className="block truncate text-xs text-muted" title={v}>{v}</span>}</span>
                   <span className="shrink-0 text-[12.5px] font-semibold text-clay">{v ? 'Edit' : readOnly ? 'View' : '+ Add'}</span>
                 </span>
                 {/* vitals: only the ones taken, each in its own small tile */}
