@@ -168,25 +168,23 @@
 :root { --fd-proc: #0D9488; }
 html[data-theme="dark"] { --fd-proc: #2DD4BF; }
 .fd-k-booked, .fd-k-proc { background: var(--color-surface); color: var(--color-ink); }
-.fd-k-waiting, .fd-k-intake, .fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-ink); }
+.fd-k-waiting, .fd-k-intake, .fd-k-next { background: color-mix(in srgb, var(--color-clay) 10%, var(--color-surface)); color: var(--color-ink); }
 .fd-k-next { font-weight: 600; }
-.fd-k-doctor { background: var(--color-clay); color: #fff; }
+.fd-k-doctor { background: color-mix(in srgb, var(--color-clay) 24%, var(--color-surface)); color: var(--color-ink); font-weight: 600; }
 .fd-k-late, .fd-k-noshow { background: var(--color-surface); color: var(--color-muted); }
 /* seen / completed: light green, so the finished ones stand apart from the booked ones */
-.fd-k-done, .fd-k-tests { background: color-mix(in srgb, var(--color-sage) 3.5%, var(--color-surface)); color: color-mix(in srgb, var(--color-sage) 75%, var(--color-surface)); }
+.fd-k-done, .fd-k-tests { background: color-mix(in srgb, var(--color-sage) 9%, var(--color-surface)); color: var(--color-ink); }
 /* didn't come (booked hour gone, or marked no-show): a very light red */
-.fd-k-late, .fd-k-noshow { background: color-mix(in srgb, var(--color-rose) 3.5%, var(--color-surface)); color: color-mix(in srgb, var(--color-rose) 70%, var(--color-surface)); }
+.fd-k-late, .fd-k-noshow { background: color-mix(in srgb, var(--color-rose) 8%, var(--color-surface)); color: var(--color-ink); }
 /* the key: the same colours, with a thin edge so a pale swatch still shows */
 .fd-hkey i.fd-k-done { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-sage) 45%, transparent); }
 .fd-hkey i.fd-k-noshow { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-rose) 45%, transparent); }
 .fd-k-cancelled { color: color-mix(in srgb, var(--color-muted) 70%, transparent); }
 .fd-hkey i.fd-k-booked { box-shadow: inset 0 0 0 1px var(--color-line-2); }
-.fd-hkey i.fd-k-procsw { box-shadow: inset 3px 0 0 var(--fd-proc), inset 0 0 0 1px var(--color-line-2); margin-right: -2px; }
-.fd-pc.proc { box-shadow: inset 3px 0 0 var(--fd-proc); }
-.fd-pc.proc.sel { box-shadow: inset 3px 0 0 var(--fd-proc), 0 0 0 2px var(--color-ink); }
+/* a procedure is marked by its icon only, no edge line */
 .fd-proc-ic { color: var(--fd-proc); }
-.fd-sub { font-weight: 400; color: var(--fd-proc); }
-.fd-k-doctor .fd-proc-ic, .fd-k-doctor .fd-sub { color: #CCFBF1; }
+.fd-sub { font-weight: 400; }
+
 .fd-hc.off { background: var(--color-surface-2); }
 .fd-hchips { background: none; }
 .fd-free { color: transparent; }

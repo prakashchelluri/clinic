@@ -102,7 +102,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const keyRow = (
     <div className="fd-hkey">
       <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-done" />Completed</span><span><i className="fd-k-noshow" />Didn't come</span>
-      <span><i className="fd-k-booked fd-k-procsw" /><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
+      <span><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
   const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{inner}{!list && keyRow}
@@ -179,7 +179,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
             <td className="whitespace-nowrap text-muted">{hourLabel(p.r.start, p.r.end)}</td>
             <td><button type="button" className="text-left font-semibold hover:underline" >{p.name}</button>{p.tag && <span className="ml-2 text-[12px] text-muted">{p.tag}</span>}</td>
             <td>{p.who}</td>
-            <td className={p.k === 'late' || p.k === 'noshow' ? 'text-rose' : p.k === 'done' || p.k === 'cancelled' ? 'text-muted' : ''}><i className={`sw fd-k-${p.next ? 'next' : p.k}`} />{p.warn && <span className="fd-warn mr-1.5">!</span>}{p.next ? 'Next' : LABEL[p.k]}</td>
+            <td className={p.k === 'cancelled' ? 'text-muted' : ''}><i className={`sw fd-k-${p.next ? 'next' : p.k}`} />{p.warn && <span className="fd-warn mr-1.5">!</span>}{p.next ? 'Next' : LABEL[p.k]}</td>
           </tr>))}</tbody>
       </table></div>));
   }
