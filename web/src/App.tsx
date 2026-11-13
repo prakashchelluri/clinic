@@ -72,7 +72,7 @@ const GROUP: Record<string, string> = { '/worklist': 'Care', '/pharmacy': 'Stock
 
 /** The side menu (v61 · Pro): dark, every allowed page by name, counts as small badges, quiet group headings.
  *  The same menu on desktop (fixed) and on phones (the drawer). */
-function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, slim = false }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; slim?: boolean }) {
+function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, slim = false, theme, onTheme }: { items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; slim?: boolean; theme?: string; onTheme?: (e: React.MouseEvent) => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} title={slim ? n.label : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
       <Icon name={n.icon} className="h-4 w-4 shrink-0" /><span className="flex-1 truncate">{n.label}</span>
@@ -89,6 +89,8 @@ function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onN
         {items.map((n, i) => <span key={n.to} className="contents">{i > 0 && GROUP[n.to] && <span className="side-group" aria-hidden="true">{GROUP[n.to]}</span>}{link(n)}</span>)}
       </nav>
       <Link to="/help" onClick={onNavigate} title={slim ? 'Help' : undefined} className={`nav-item mt-2 ${active === null && location.pathname.startsWith('/help') ? 'active' : ''}`}><Icon name="help" className="h-4 w-4" /><span className="flex-1">Help</span></Link>
+      {/* on a record the top bar steps aside, so its light / dark switch comes here */}
+      {slim && onTheme && <button type="button" onClick={onTheme} className="nav-item" aria-label={theme === 'dark' ? 'Switch to light' : 'Switch to dark'} title={theme === 'dark' ? 'Light' : 'Dark'}><Icon name={theme === 'dark' ? 'spark' : 'moon'} className="h-4 w-4" /></button>}
       <div className="side-foot mt-2 flex items-center gap-2.5 border-t border-line px-1 pt-3">
         <span className="relative shrink-0"><Avatar name={me.name} size="h-8 w-8 text-[11px]" /><span className="absolute -bottom-px -right-px h-2.5 w-2.5 rounded-full bg-sage" style={{ boxShadow: '0 0 0 2px var(--color-sidebar)' }} /></span>
         <div className="side-text min-w-0 flex-1"><div className="truncate text-[13px] font-medium text-ink">{me.name}</div><div className="truncate text-[11.5px] text-muted">{roles.map(roleLabel).join(' · ')}</div></div>
@@ -195,7 +197,7 @@ export function App() {
       {/* one top row across the whole screen: the Cubott logo over the menu, the clinic, where you are, and the few app actions.
           A page's search lives with its own table, not up here. */}
       <aside className={`no-print fixed inset-y-0 left-0 z-30 hidden transition-[width] duration-200 md:block ${record ? 'w-[64px]' : 'w-[232px]'}`} aria-label="Main">
-        <Sidebar {...side} slim={record} />
+        <Sidebar {...side} slim={record} theme={theme} onTheme={(e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme)} />
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
