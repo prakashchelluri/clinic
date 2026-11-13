@@ -630,6 +630,25 @@ export function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, on
             )}
             {dup && <div className="flex flex-wrap items-center gap-2 text-sm rounded-xl bg-amber-soft px-3.5 py-2.5" role="alert"><Icon name="spark" className="h-4 w-4 text-amber" /><span>This looks like a patient already registered: {dup.fullName ?? ''} ({dup.patientNo}){dup.phone ? ` · ${dup.phone}` : ''}{dup.ageYears ? ` · ${dup.ageYears} yrs` : ''}.</span><button className="btn btn-sm ml-auto" onClick={() => { setPatientId(dup.id); setNewP(null); setDup(null); }}>Use existing</button><button className="btn btn-sm" onClick={() => { setForceNew(true); setDup(null); }}>It is someone else</button></div>}
 
+            {/* complaints */}
+            <Sec n={n++} title="Complaints">
+              {reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px] text-amber"><b>Back with reports:</b> {reports.tests}. No new complaint is needed; the doctor opens the same consultation.{reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
+              <div className="flex flex-col gap-2">
+                {list.map((c, i) => (
+                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5 anim-scale-in">
+                    <div className="input flex items-center !bg-surface-2 !shadow-none font-semibold">{c.text}</div>
+                    <input className="input" aria-label={`${c.text}: since when`} placeholder="Since when" maxLength={30} value={c.duration} onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, duration: e.target.value } : x)))} />
+                    <button type="button" className="btn btn-ghost btn-icon" aria-label={`Remove ${c.text}`} onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
+                  </div>))}
+                <div className="grid grid-cols-[minmax(0,1fr)_150px_auto] items-center gap-2.5">
+                  <input className="input" aria-label="Complaint" placeholder={list.length ? 'Another complaint…' : 'Main complaint…'} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                  <input className="input" aria-label="Since when" placeholder="Since when" value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
+                  <button type="button" className="btn" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
+                </div>
+                {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-1"><span className="quick-label">Quick add</span>{suggestions.map((t) => <button key={t.id} type="button" className="opt-add" onClick={() => setList([...list, { text: t.name, duration: '' }])}>{t.name}</button>)}</div>}
+              </div>
+            </Sec>
+
             {/* 2 · first visit: asked once */}
             {isFirst && (
               <Sec n={n++} title="About the patient" hint="Asked once, on the first visit; the doctor sees it on every visit.">
@@ -664,24 +683,6 @@ export function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, on
               {badVital && <p className="-mt-1 text-[12.5px] font-semibold text-rose">{badVital}</p>}
             </Sec>
 
-            {/* complaints */}
-            <Sec n={n++} title="Complaints">
-              {reports && <div className="rounded-[12px] bg-amber-soft px-3.5 py-2.5 text-[13px] text-amber"><b>Back with reports:</b> {reports.tests}. No new complaint is needed; the doctor opens the same consultation.{reports.free ? ' Within the free-return days, so no fee unless the visit type says otherwise.' : ' Outside the free-return days: the usual fee applies.'}</div>}
-              <div className="flex flex-col gap-2">
-                {list.map((c, i) => (
-                  <div key={i} className="grid grid-cols-[minmax(0,1fr)_150px_40px] items-center gap-2.5 anim-scale-in">
-                    <div className="input flex items-center !bg-surface-2 !shadow-none font-semibold">{c.text}</div>
-                    <input className="input" aria-label={`${c.text}: since when`} placeholder="Since when" maxLength={30} value={c.duration} onChange={(e) => setList(list.map((x, j) => (j === i ? { ...x, duration: e.target.value } : x)))} />
-                    <button type="button" className="btn btn-ghost btn-icon" aria-label={`Remove ${c.text}`} onClick={() => setList(list.filter((_, j) => j !== i))}><Icon name="x" className="h-4 w-4" /></button>
-                  </div>))}
-                <div className="grid grid-cols-[minmax(0,1fr)_150px_auto] items-center gap-2.5">
-                  <input className="input" aria-label="Complaint" placeholder={list.length ? 'Another complaint…' : 'Main complaint…'} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
-                  <input className="input" aria-label="Since when" placeholder="Since when" value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }} />
-                  <button type="button" className="btn" disabled={!draft.text.trim()} onClick={commit}><Icon name="plus" className="h-4 w-4" />Add</button>
-                </div>
-                {suggestions.length > 0 && <div className="flex flex-wrap items-center gap-1"><span className="quick-label">Quick add</span>{suggestions.map((t) => <button key={t.id} type="button" className="opt-add" onClick={() => setList([...list, { text: t.name, duration: '' }])}>{t.name}</button>)}</div>}
-              </div>
-            </Sec>
           </div>
 
           {/* the rail: doctor, fee and the one button, always in view */}
