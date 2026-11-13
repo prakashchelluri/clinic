@@ -13,6 +13,7 @@ import { useTemplates, norm } from '../templates';
 import { chime, makeOnceWatcher } from '../chime';
 import { JourneyPanel, StageStrip } from './frontDeskJourney';
 import { DaySchedule } from './frontDeskSchedule';
+import { ProcedureDrawer } from '../procDrawer';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -46,6 +47,8 @@ export function FrontDesk() {
   const nav = useNavigate();
   const day = today(); const isToday = true;
   const q = useQuery({ queryKey: ['frontdesk', day], queryFn: () => get(`/frontdesk?day=${day}`), refetchInterval: isToday ? 5000 : false });
+  const calq = useQuery({ queryKey: ['calendar', day, 'all'], queryFn: () => get(`/calendar?day=${day}`), refetchInterval: 15000 }); // the same as the calendar's: this hour's procedures for the Action panel
+  const [procOpen, setProcOpen] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(can(perms, 'visit.write') ? 'now' : 'waiting');
   const [pickV, setPickV] = useState<string | null>(null); // the patient whose journey is open; null = the first that needs the desk, '' = closed
   const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not here yet; null when not selecting
@@ -175,40 +178,50 @@ export function FrontDesk() {
   const sendIn = (v: any) => upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
   const toJunior = (v: any) => upVisit.mutate({ id: v.id, status: 'intake' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent to the junior doctor`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
   const onSchedule = canDesk && tab !== 'history'; // the desk always has the calendar and the rail; List only swaps the grid for rows
+  // One Action panel (v62): what the desk does next, in one card. Send in (one filled button: the first who can go in),
+  // this hour's procedures, patients back with reports, tests and procedures advised, money to collect.
+  const many = (d?.doctors ?? []).length > 1;
+  const firstNext = waiting.find((v) => nextIds.has(v.id))?.id;
+  const procsNow = ((calq.data?.procedures ?? []) as any[]).filter((p) => p.state === 'in_progress' || (p.state === 'confirmed' && Math.abs(toMin(p.startTime) - nowMin()) <= 60))
+    .filter((p) => !f || norm(p.patient ?? '').includes(norm(f))).sort((x, y) => x.startTime.localeCompare(y.startTime));
+  const head = (t: string, n?: number) => <div className="border-t border-line px-4 pb-1.5 pt-3 text-[12.5px] font-semibold text-muted first:border-t-0">{t}{n ? ` · ${n}` : ''}</div>;
   const waitingPanel = (
     <aside className="flex flex-col gap-4">
       <section className="fd-sheet overflow-hidden">
-        <div className="flex items-baseline gap-2 px-4 pb-2 pt-3.5"><b className="text-[15px]">Waiting</b><span className="text-[12.5px] text-muted">by token</span></div>
-        {waiting.length === 0 && <div className="px-4 pb-4 text-[13px] text-muted">{f ? 'Nobody waiting matches the search.' : 'Nobody waiting.'}</div>}
+        <div className="px-4 pb-1 pt-3.5"><b className="text-[15px]">Action</b></div>
+        {head('Send in', waiting.length)}
+        {waiting.length === 0 && <div className="px-4 pb-3 text-[13px] text-muted">{f ? 'Nobody waiting matches the search.' : 'Nobody waiting.'}</div>}
         {waiting.map((v) => { const s = canSend(v); const jr = v.status === 'intake'; const screened = v.status === 'screened'; const due = dueOf(v); return (
           <div key={v.id} className={`flex items-center gap-2 border-t border-line px-3 py-2.5 ${selV?.id === v.id ? 'bg-surface-2' : ''}`}>
             <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" title="Show the journey" onClick={() => setPickV(v.id)}>
-              <span className="grid h-8 min-w-8 shrink-0 place-items-center rounded-[9px] bg-paper-2 px-1.5 text-[13px] font-bold">{v.opNumber}</span>
-              <span className="min-w-0"><span className="block truncate text-[14px] font-semibold">{v.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{meta([v.doctor ?? 'no doctor', jr ? 'with junior' : screened ? 'screened' : `${minsSince(v.arrivedAt)} min`, due ? `${money(due)} due` : null])}</span></span>
+              <span className="grid h-7 min-w-7 shrink-0 place-items-center rounded-[6px] bg-paper-2 px-1.5 text-[12.5px] font-semibold">{v.opNumber}</span>
+              <span className="min-w-0"><span className="block truncate text-[14px] font-medium">{v.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{meta([many ? v.doctor ?? 'no doctor' : null, jr ? 'with the junior doctor' : screened ? 'screened' : waitText(minsSince(v.arrivedAt)), due ? `${money(due)} due` : null])}</span></span>
             </button>
-            {jr ? <span className="shrink-0 text-[12px] text-muted">with junior</span> : !screened && <button className="btn btn-sm shrink-0" disabled={upVisit.isPending} title="Send to the junior doctor for screening" onClick={() => toJunior(v)}>Jr doctor</button>}
-            <button className={`btn btn-sm shrink-0 ${nextIds.has(v.id) ? 'btn-primary' : ''}`} disabled={!s.ok} title={s.why} onClick={() => sendIn(v)}>Send in</button>
+            {!jr && <button className={`btn btn-sm shrink-0 ${v.id === firstNext ? 'btn-primary' : ''}`} disabled={!s.ok} title={s.why} onClick={() => sendIn(v)}>Send in</button>}
+            {!jr && !screened && <MoreMenu items={[{ label: 'Send to the junior doctor', onClick: () => toJunior(v) }]} />}
           </div>); })}
+        {procsNow.length > 0 && <>{head('Procedures this hour', procsNow.length)}
+          {procsNow.map((p) => (
+            <div key={p.id} className="flex items-center gap-2 border-t border-line px-3 py-2.5" style={{ boxShadow: 'inset 3px 0 0 var(--fd-proc)' }}>
+              <Icon name="syringe" className="fd-proc-ic h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-medium">{p.patient}</span><span className="block truncate text-[12px] text-muted">{[p.procedure, p.startTime, p.room].filter(Boolean).join(' · ')}</span></span>
+              {p.state === 'in_progress' ? <Chip>in progress</Chip> : <button type="button" className="btn btn-sm shrink-0" title="Open the sitting: consent, then start" onClick={() => setProcOpen(p.id)}>Start</button>}
+            </div>))}</>}
+        {reportsIn.length > 0 && <>{head('Check in · back with reports', reportsIn.length)}
+          {reportsIn.map((o) => (
+            <div key={o.encounterId} className="flex items-center gap-2 border-t border-line px-3 py-2.5"><span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-medium">{o.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{o.tests.map((t: any) => t.name).join(', ')}</span></span>
+              <button type="button" className="btn btn-sm shrink-0" disabled={backIn.isPending} title="The patient is back with the reports" onClick={() => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })}>Check in</button></div>))}</>}
+        {checkout.length > 0 && <>{head('Tests & procedures advised', checkout.length)}
+          {checkout.map((v) => { const open = (v.recommendations ?? []).filter((r: any) => r.status === 'open'); const t = open.filter((r: any) => r.kind === 'investigation'); const pr = open.filter((r: any) => r.kind === 'procedure'); return (
+            <button key={v.id} type="button" className={`flex w-full items-center gap-2 border-t border-line px-3 py-2.5 text-left hover:bg-surface-2 ${selV?.id === v.id ? 'bg-surface-2' : ''}`} onClick={() => setPickV(v.id)}>
+              <span className="fd-warn">!</span><span className="min-w-0"><span className="block truncate text-[14px] font-medium">{v.patient.fullName}</span>
+                <span className="block truncate text-[12px] text-muted">{[t.length && `Tests: ${t.map((r: any) => r.notes).filter(Boolean).join(', ') || t.length}`, pr.length && `Procedure: ${pr.map((r: any) => r.procedure ?? 'procedure').join(', ')}`, open.some((r: any) => r.kind === 'followup') && 'Review to book'].filter(Boolean).join(' · ')}</span></span></button>); })}</>}
+        {withDue.length > 0 && <>{head('To collect', withDue.length)}
+          {withDue.map((v) => (
+            <div key={v.id} className="flex items-center gap-2 border-t border-line px-3 py-2.5"><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{v.patient.fullName}</span>
+              <button type="button" className="btn btn-sm shrink-0" onClick={() => setCollecting(v)}>Collect {money(dueOf(v))}</button></div>))}</>}
       </section>
-      {checkout.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
-        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Tests &amp; procedures advised · {checkout.length}</span>
-        {checkout.map((v) => { const open = (v.recommendations ?? []).filter((r: any) => r.status === 'open'); const t = open.filter((r: any) => r.kind === 'investigation'); const pr = open.filter((r: any) => r.kind === 'procedure'); return (
-          <button key={v.id} type="button" className={`btn btn-sm !h-auto !justify-start !py-1.5 text-left ${selV?.id === v.id ? '!bg-surface-2' : ''}`} onClick={() => setPickV(v.id)}>
-            <span className="fd-warn">!</span><span className="min-w-0"><span className="block truncate font-semibold">{v.patient.fullName}</span>
-              <span className="block truncate text-[12px] font-medium text-muted">{[t.length && `Tests: ${t.map((r: any) => r.notes).filter(Boolean).join(', ') || t.length}`, pr.length && `Procedure: ${pr.map((r: any) => r.procedure ?? 'procedure').join(', ')}`, open.some((r: any) => r.kind === 'followup') && 'Review to book'].filter(Boolean).join(' · ')}</span></span></button>); })}
-      </section>}
-      {reportsIn.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
-        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Reports in · {reportsIn.length}</span>
-        {reportsIn.map((o) => (
-          <div key={o.encounterId} className="flex items-center gap-2"><span className="min-w-0 flex-1"><span className="block truncate text-[13.5px] font-semibold">{o.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{o.tests.map((t: any) => t.name).join(', ')}</span></span>
-            <button type="button" className="btn btn-sm shrink-0" disabled={backIn.isPending} title="The patient is back with the reports" onClick={() => reportsBack({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free: Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / 86400000) <= freeDays, since: o.orderedAt } })}>Check in</button></div>))}
-      </section>}
-      {withDue.length > 0 && <section className="fd-sheet flex flex-col gap-2 p-3.5">
-        <span className="text-[11.5px] font-bold uppercase tracking-wider text-muted">To collect · {withDue.length}</span>
-        {withDue.map((v) => (
-          <div key={v.id} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{v.patient.fullName}</span>
-            <button type="button" className="btn btn-sm shrink-0" onClick={() => setCollecting(v)}>Collect {money(dueOf(v))}</button></div>))}
-      </section>}
+      {procOpen && <ProcedureDrawer key={procOpen} id={procOpen} canAct={can(perms, 'worklist.write')} onClose={() => { setProcOpen(null); refresh(); }} />}
     </aside>);
   const render = (r: Row) => {
     if (r.type === 'waiting') { const v = r.v; const i = r.i!; const withJr = v.status === 'intake'; const needsJr = screening === 'required' && v.status === 'waiting';
@@ -258,7 +271,7 @@ export function FrontDesk() {
   return (
     <div className="fd flex min-h-0 flex-1 flex-col">
       <h1 className="sr-only">Dashboard</h1>
-      {tab !== 'history' && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
+      {tab !== 'history' && !onSchedule && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
         {canDesk && <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} />}
         <span className="ml-auto" />
         <PageSearchBox placeholder="Find a patient: name, phone, token or P-number" className="!h-9 w-[280px] max-w-full" />
@@ -290,7 +303,11 @@ export function FrontDesk() {
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                list={view === 'table'} onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')} />
+                list={view === 'table'} onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
+                tools={<>{/* Calendar | List swaps only this section; the Action panel beside it stays */}
+                  <PageSearchBox placeholder="Find a patient" className="!h-8 w-[200px] max-w-full" />
+                  <button type="button" className="btn btn-sm" title="Past days: who came, who left, who did not come" onClick={() => setTab('history')}><Icon name="clock" className="h-3.5 w-3.5" />History</button>
+                  <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} /></>} />
               {waitingPanel}</div>
             : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/dashboard?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/dashboard?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>

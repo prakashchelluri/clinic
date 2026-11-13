@@ -162,3 +162,28 @@
 .fd-pc:not(:has(.tk)) { padding-left: 8px; }
 .fd-pc[draggable="true"] { cursor: grab; }
 .fd-hc.drop { box-shadow: inset 0 0 0 2px var(--color-clay); background: color-mix(in srgb, var(--color-clay) 8%, transparent); }
+
+/* ---------- Calm calendar (v62): three colours, procedures by a teal edge, no stripes, "+ Book" only on hover ---------- */
+:root { --fd-proc: #0D9488; }
+html[data-theme="dark"] { --fd-proc: #2DD4BF; }
+.fd-k-booked, .fd-k-proc { background: var(--color-surface); color: var(--color-ink); }
+.fd-k-waiting, .fd-k-intake, .fd-k-next { background: var(--color-clay-soft); color: var(--color-clay-ink); }
+.fd-k-next { font-weight: 600; }
+.fd-k-doctor { background: var(--color-clay); color: #fff; }
+.fd-k-done, .fd-k-tests, .fd-k-late, .fd-k-noshow { background: var(--color-surface); color: var(--color-muted); }
+.fd-k-cancelled { color: color-mix(in srgb, var(--color-muted) 70%, transparent); }
+.fd-hkey i.fd-k-booked { box-shadow: inset 0 0 0 1px var(--color-line-2); }
+.fd-hkey i.fd-k-procsw { box-shadow: inset 3px 0 0 var(--fd-proc), inset 0 0 0 1px var(--color-line-2); margin-right: -2px; }
+.fd-pc.proc { box-shadow: inset 3px 0 0 var(--fd-proc); }
+.fd-pc.proc.sel { box-shadow: inset 3px 0 0 var(--fd-proc), 0 0 0 2px var(--color-ink); }
+.fd-proc-ic { color: var(--fd-proc); }
+.fd-sub { font-weight: 400; color: var(--fd-proc); }
+.fd-k-doctor .fd-proc-ic, .fd-k-doctor .fd-sub { color: #CCFBF1; }
+.fd-hc.off { background: var(--color-surface-2); }
+.fd-hchips { background: none; }
+.fd-free { color: transparent; }
+.fd-free:hover, .fd-free:focus-visible { color: var(--color-clay); }
+.fd-fold { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-top: 1px solid var(--color-line-2); background: var(--color-surface-2); font-size: 13px; color: var(--color-ink-2); text-align: left; }
+.fd-fold:hover { background: var(--color-paper-2); }
+.fd-later { padding: 8px 12px; border-top: 1px solid var(--color-line-2); border-left: 1px solid var(--color-line-2); font-size: 13px; color: var(--color-muted); text-align: left; }
+.fd-later:hover { background: var(--color-surface-2); color: var(--color-ink); }

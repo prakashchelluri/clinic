@@ -19,18 +19,19 @@ const dayName = (day: string) => new Date(day + 'T00:00:00').toLocaleDateString(
 const hourLabel = (a: string, b: string) => { const f = (m: number) => { const h = Math.floor(m / 60) % 12 || 12; const mm = m % 60; return mm ? `${h}:${String(mm).padStart(2, '0')}` : `${h}`; }; const s = toMin(a), e = toMin(b); return `${f(s)}–${f(e)} ${e > 12 * 60 ? 'pm' : 'am'}`; };
 
 /** Which calendars this computer shows: picked once, kept. Rooms are off unless asked for. */
-function useShown(): [Record<string, boolean>, (k: string, on: boolean) => void] {
-  const [s, setS] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('fd.cals') ?? '{}'); } catch { return {}; } });
+function useShown(): [Record<string, any>, (k: string, on: boolean | string) => void] {
+  const [s, setS] = useState<Record<string, any>>(() => { try { return JSON.parse(localStorage.getItem('fd.cals') ?? '{}'); } catch { return {}; } });
   return [s, (k, on) => { const n = { ...s, [k]: on }; setS(n); try { localStorage.setItem('fd.cals', JSON.stringify(n)); } catch { /* storage blocked */ } }];
 }
 
-type ChipP = { id: string; k: Kind; next?: boolean; tok?: string; name: string; tag: string; who: string; warn?: boolean; sel?: boolean; proc?: boolean; onClick: () => void; drag?: (e: DragEvent) => void };
+type ChipP = { id: string; k: Kind; next?: boolean; tok?: string; name: string; tag: string; who: string; warn?: boolean; sel?: boolean; proc?: boolean; /** the procedure's name, after the patient */ sub?: string; /** more for the tooltip: the service, the time and room */ info?: string; onClick: () => void; drag?: (e: DragEvent) => void };
 type Col = { key: string; head: React.ReactNode; day: string; ws: any[]; /** null: that day's check-ins are not loaded, the bookings carry the status */ visits: any[] | null; sits: any[]; room?: boolean };
 
 /** The one calendar on the Dashboard, for the desk and for doctors. Today is a column per doctor (and per room when asked for), Week is a column
  *  per day; both are the same grid, a row per booking hour, and `list` shows the same people as table rows under the same bar.
  *  Patients are booked into an hour, not a minute, and seen in the order they arrive. A name opens the side drawer, "+ Book" books that hour.
- *  Colours stay calm: booked is a thin outline, here is warm grey, next is light teal, with the doctor is slate, done is grey text. */
+ *  Calm (v62): three colours only. Booked is white, here is light indigo, with the doctor is solid indigo; done, didn't come and cancelled are grey text.
+ *  A procedure keeps its state's colour and adds a teal edge and a syringe. Hours already over fold into one line; later hours are one line each until opened. */
 export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, kindOf, nextIds, onVisit, onOpenAppt, onBook, canOverbook = false, tools, procsInDoc = false, list = false }: {
   today: string; visitsToday: any[]; doctors: any[]; rooms: any[]; selectedId: string | null; kindOf: (v: any) => Kind; nextIds: Set<string>;
   onVisit: (id: string) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void; canOverbook?: boolean; tools?: React.ReactNode;
@@ -42,6 +43,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const [day, setDay] = useState(today);
   const [mode, setMode] = useState<'day' | 'week'>('day'); const week = mode === 'week'; const step = week ? 7 : 1;
   const [shown, setShown] = useShown();
+  const kindF = (shown.kind as unknown as 'all' | 'consult' | 'proc') || 'all'; // All / Consults / Procedures, kept on this computer
+  const [showPast, setShowPast] = useState(false); const [opened, setOpened] = useState<Set<string>>(new Set());
   const isToday = day === today; const from = monday(day);
   const showFree = shown.free !== false; // empty places in each hour, on unless switched off below the calendar
   const cal = useQuery({ queryKey: ['calendar', day, 'all'], queryFn: () => get(`/calendar?day=${day}`), refetchInterval: isToday ? 15000 : false, enabled: !week });
@@ -81,6 +84,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <Segmented<'day' | 'week'> size="sm" value={mode} onChange={(m) => { setMode(m); if (m === 'day') setDay(today); }} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }]} />
       {!week && !isToday && <button type="button" className="btn btn-sm" onClick={() => setDay(today)}>Back to today</button>}
       <span className="ml-auto" />
+      <select aria-label="Show consultations, procedures or both" className="input !h-8 !min-h-8 !w-auto !py-0 !text-[13px]" value={kindF} onChange={(e) => setShown('kind', e.target.value)}>
+        <option value="all">All visits</option><option value="consult">Consults</option><option value="proc">Procedures</option></select>
       {docList.length + roomList.length > 1 && <><button ref={pickBtn} type="button" className="fd-cal on max-w-[300px]" aria-haspopup="true" aria-expanded={pickOpen} onClick={() => setPickOpen(!pickOpen)}><Icon name="filter" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="text-muted">Show</span><span className="min-w-0 truncate">{summary}</span></button>
         <Floating anchor={pickBtn} open={pickOpen} onClose={() => setPickOpen(false)} width={260}>
           <div className="max-h-[60vh] overflow-y-auto p-1.5">
@@ -92,8 +97,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </div>);
   const keyRow = (
     <div className="fd-hkey">
-      <span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-waiting" />Here, waiting</span><span><i className="fd-k-next" />Next</span><span><i className="fd-k-doctor" />With doctor</span>
-      <span><i className="fd-k-done" />Done</span><span><i className="fd-k-proc" />Procedure</span><span><i className="fd-k-noshow" />Didn't come</span><span className="line-through">Cancelled</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
+      <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span>
+      <span><i className="fd-k-booked fd-k-procsw" /><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
   const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{keyRow}{inner}
@@ -136,23 +141,24 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const homeOf = (v: any, ws: any[]) => ws.find((w) => w.appointments?.some((a: any) => a.id === v.appointmentId)) ?? ws.find((w) => w.startTime === rowOf(hhmm(v.arrivedAt))?.start);
   const visitChip = (v: any, d: string): ChipP => {
     const k = kindOf(v); const next = d === today && nextIds.has(v.id);
-    const tag = k === 'intake' ? 'with junior' : k === 'doctor' || k === 'tests' ? '' : next ? 'next' : v.details?.reportsEncounterId ? 'reports' : !v.appointmentId && k !== 'done' ? 'walk-in' : '';
+    const tag = k === 'intake' ? 'with junior' : v.details?.reportsEncounterId && !['done', 'noshow'].includes(k) ? 'reports' : ''; // the colour says the rest
     return { id: v.id, k, next, name: v.patient.fullName, tag, who: docNameOf(v.practitionerId), warn: k === 'tests', sel: selectedId === v.id, onClick: () => (d === today ? onVisit(v.id) : nav(`/patients/${v.patient.id}`)) };
   };
   const apptChip = (a: any, w: any, d: string): ChipP => {
     // 'arrived' only reaches here on days whose check-ins are not loaded: the booking's own visit status stands in
     const k: Kind = a.status === 'cancelled' ? 'cancelled' : a.status === 'no_show' || a.visitStatus === 'left' ? 'noshow' : a.status === 'arrived' ? (a.visitStatus === 'done' ? 'done' : a.visitStatus === 'in_consult' ? 'doctor' : 'waiting') : gone(d, w.endTime) ? 'late' : 'booked';
     const canDrag = !!onBook && k === 'booked' && ['booked', 'confirmed'].includes(a.status);
-    return { id: a.id, k, name: a.name, tag: k === 'late' || k === 'noshow' ? "didn't come" : k === 'cancelled' ? 'cancelled' : a.service ?? '', who: docNameOf(w.practitionerId), onClick: () => onOpenAppt(a.id),
+    return { id: a.id, k, name: a.name, tag: '', info: a.service ?? undefined, who: docNameOf(w.practitionerId), onClick: () => onOpenAppt(a.id),
       drag: canDrag ? (e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: a.id, sessionId: w.id, name: a.name })); e.dataTransfer.effectAllowed = 'move'; } : undefined };
   };
-  const sitChip = (p: any, c: Col): ChipP => { const k = SITTING[p.state] ?? 'booked'; return { id: p.id, k, proc: true, name: `${p.procedure ?? 'Procedure'} · ${p.patient}`, tag: `${p.startTime}${p.room && !c.room && !week ? ` · ${p.room}` : ''}`, who: p.room ?? p.doctor ?? '', onClick: () => setProcId(p.id) }; };
+  const sitChip = (p: any, _c: Col): ChipP => { const k = SITTING[p.state] ?? 'booked'; return { id: p.id, k, proc: true, name: p.patient, sub: p.procedure ?? 'Procedure', tag: '', info: [p.startTime, p.room].filter(Boolean).join(' · '), who: p.doctor ?? '', onClick: () => setProcId(p.id) }; };
   /** who is in a column's hour: here first, then sittings, then booked */
   const cell = (c: Col, r: { start: string }) => {
     const wsAt = c.ws.filter((w) => w.startTime === r.start);
     const here = (c.visits ?? []).filter((v) => { const h = homeOf(v, c.ws.filter((w) => w.practitionerId === v.practitionerId)); return !!h && wsAt.includes(h); });
     const booked: ChipP[] = wsAt.flatMap((w) => (w.appointments ?? []).filter((a: any) => !c.visits || (a.status !== 'arrived' && !c.visits.some((v) => v.appointmentId === a.id))).map((a: any) => apptChip(a, w, c.day))).sort((x, y) => Number(x.k === 'cancelled') - Number(y.k === 'cancelled'));
-    return { wsAt, chips: [...here.map((v) => visitChip(v, c.day)), ...c.sits.filter((p) => rowOf(p.startTime) === r).map((p) => sitChip(p, c)), ...booked] };
+    const chips = [...here.map((v) => visitChip(v, c.day)), ...c.sits.filter((p) => rowOf(p.startTime) === r).map((p) => sitChip(p, c)), ...booked];
+    return { wsAt, chips: kindF === 'all' ? chips : chips.filter((x) => (kindF === 'proc') === !!x.proc) };
   };
 
   if (list) {
@@ -173,11 +179,28 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   }
 
   const nowRow = cols.some((c) => c.day === today) ? rows.findIndex((r) => toMin(r.start) <= nowM && nowM < toMin(r.end)) : -1;
+  // Today only: an hour that is over and has nobody still here folds into one line; from two hours after now, an hour is one line until opened
+  const calm = !week && isToday;
+  const ACTIVE: Kind[] = ['waiting', 'intake', 'doctor', 'tests'];
+  const chipsAt = (r: { start: string }) => cols.flatMap((c) => cell(c, r).chips);
+  const folded = new Set(calm && !showPast ? rows.filter((r) => gone(day, r.end) && !chipsAt(r).some((x) => ACTIVE.includes(x.k))) : []);
+  const pastSum = (() => { if (!calm) return ''; const all = rows.filter((r) => gone(day, r.end)).flatMap(chipsAt); const k = (...ks: Kind[]) => all.filter((x) => ks.includes(x.k)).length;
+    return [k('done', 'tests') && `${k('done', 'tests')} seen`, k('late', 'noshow') && `${k('late', 'noshow')} didn't come`, k('cancelled') && `${k('cancelled')} cancelled`].filter(Boolean).join(' · ') || 'nobody'; })();
+  const anchor = nowRow >= 0 ? nowRow : rows.findIndex((r) => toMin(r.start) > nowM);
+  const compact = (i: number, r: { start: string }) => calm && anchor >= 0 && i > anchor + 2 && !opened.has(r.start);
+  const freeAt = (r: { start: string }) => cols.reduce((n, c) => { const ws = c.ws.filter((w) => w.startTime === r.start); return n + (ws.length === 1 && !(ws[0].effectiveCapacity === 0 && ws[0].reductions?.length) ? Math.max(0, ws[0].free) : 0); }, 0);
+  const lineOf = (r: { start: string }) => { const x = chipsAt(r).filter((y) => y.k !== 'cancelled'); const pr = x.filter((y) => y.proc).length; const b = x.length - pr; const f = kindF === 'proc' ? 0 : freeAt(r);
+    return [b && `${b} booked`, pr && `${pr} procedure${pr === 1 ? '' : 's'}`, f && `${f} free`].filter(Boolean).join(' · ') || 'nothing booked'; };
   return sheet(<>
       <div>
         <div className="fd-hgrid" style={{ gridTemplateColumns: `88px repeat(${cols.length}, minmax(0, 1fr))` }}>
           {(week || cols.length > 1) && <><span className="fd-hh" />{cols.map((c) => <span key={c.key} className="fd-hh">{c.head}</span>)}</>}
-          {rows.map((r, i) => [
+          {calm && folded.size > 0 && <button type="button" className="fd-fold" style={{ gridColumn: '1 / -1' }} onClick={() => setShowPast(true)}><span>Earlier today · {pastSum}</span><span className="text-clay">Show <Icon name="chevR" className="inline h-3.5 w-3.5" /></span></button>}
+          {calm && showPast && <button type="button" className="fd-fold" style={{ gridColumn: '1 / -1' }} onClick={() => setShowPast(false)}><span>Earlier today · {pastSum}</span><span className="text-clay">Hide</span></button>}
+          {rows.map((r, i) => folded.has(r) ? null : compact(i, r) ? [
+            <span key={`t${r.start}`} className="fd-ht">{hourLabel(r.start, r.end)}</span>,
+            <button key={`c${r.start}`} type="button" className="fd-later" style={{ gridColumn: `2 / span ${cols.length}` }} title="Open this hour" onClick={() => setOpened(new Set(opened).add(r.start))}>{lineOf(r)}</button>,
+          ] : [
             <span key={`t${r.start}`} className={`fd-ht ${i === nowRow ? 'now' : ''} ${!week && gone(day, r.end) ? 'past' : ''}`}>{hourLabel(r.start, r.end)}{i === nowRow && <small>now</small>}</span>,
             ...cols.map((c) => {
               const { wsAt, chips } = cell(c, r); const nowC = i === nowRow && c.day === today ? 'now' : ''; const key = c.key + r.start;
@@ -189,8 +212,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               const canDrop = !!onBook && !!one && !past && !shut;
               // the doctor's own procedure in this hour sits in the grid like any booking
               const red = shut ? wsAt[0].reductions[0] : null;
-              const all: ChipP[] = red?.kind === 'procedure' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: 'Procedure', who: docNameOf(wsAt[0].practitionerId), onClick: () => { const sit = (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r); if (sit) setProcId(sit.id); else nav(`/worklist?day=${c.day}`); } }, ...chips] : chips;
-              const free = showFree && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
+              const all: ChipP[] = red?.kind === 'procedure' && kindF !== 'consult' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => { const sit = (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r); if (sit) setProcId(sit.id); else nav(`/worklist?day=${c.day}`); } }, ...chips] : chips;
+              const free = showFree && kindF !== 'proc' && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
               return (
                 <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''}`}
                   onDragOver={canDrop ? (e) => { if (e.dataTransfer.types.includes('application/x-appt')) { e.preventDefault(); setOver(one!.id); } } : undefined}
@@ -198,7 +221,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
                   {red && red.kind !== 'procedure' && <span className="fd-hcap">{red.note ?? 'Closed'}</span>}
                   {all.length + free > 0 && <div className="fd-hchips">
                     {all.map((p) => <Chip key={p.id} {...p} />)}
-                    {Array.from({ length: free }, (_, j) => <button key={j} type="button" className="fd-pc fd-free" onClick={() => onBook!({ ...one, day: c.day })}>+ Book</button>)}
+                    {Array.from({ length: free }, (_, j) => <button key={j} type="button" className="fd-pc fd-free" aria-label={`Book ${hourLabel(r.start, r.end)}`} onClick={() => onBook!({ ...one, day: c.day })}>+ Book</button>)}
                   </div>}
                 </div>);
             }),
@@ -209,7 +232,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </>);
 }
 
-function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false }: ChipP) {
-  return <button type="button" className={`fd-pc fd-k-${proc && k === 'booked' ? 'proc' : k} ${next ? 'fd-k-next' : ''} ${sel ? 'sel' : ''}`} title={`${name} · ${next ? 'Next' : LABEL[k]}${who ? ` · ${who}` : ''}${drag ? ' · drag to move' : ''}`} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
-    {tok && <span className="tk">{tok}</span>}<span className="truncate">{name}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{tag}</span>}</button>;
+function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info }: ChipP) {
+  return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${sel ? 'sel' : ''}`} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
+    {tok && <span className="tk">{tok}</span>}{proc && <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5 shrink-0" />}<span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{tag}</span>}</button>;
 }
