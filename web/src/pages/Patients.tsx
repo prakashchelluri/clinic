@@ -14,7 +14,7 @@ import { LabHistoryDrawer, ReportList } from '../labHistory';
 import { PhotoTimeline } from '../photos';
 import { TakePayment } from '../takePayment';
 import { BillingHistory } from '../billing';
-import { CoursesCard } from '../courses';
+import { CourseDialog, useCourses } from '../courses';
 import { FlagChips, FlagEditor, GuardianPick, FlagPick, NO_FLAGS, flagBody, flagDraftBad } from '../flags';
 import { DataTable, filterValue, pageOf, type FilterDef } from '../table';
 
@@ -80,6 +80,7 @@ function Timeline({ id }: { id: string }) {
   const [flagging, setFlagging] = useState(false); const [sec, setSec] = useState<Sec>('visits');
   const [vi, setVi] = useState(0); // the visit shown, newest first
   const [paying, setPaying] = useState(false);
+  const courses = useCourses(id); const [courseOf, setCourseOf] = useState<any>(null); // the course popup of one procedure
   const isOwner = (me?.roles ?? []).includes('owner'); const [merging, setMerging] = useState(false);
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); }, onError: (e: any) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
@@ -209,19 +210,24 @@ function Timeline({ id }: { id: string }) {
             {labHist && <LabHistoryDrawer patientId={id} docs={reports} onClose={() => setLabHist(false)} />}
           </section>}
 
-          {sec === 'plans' && <>
-            <Section title="Procedures">
-              {procPlans.length === 0 ? <div className="p-4 text-sm text-muted">No procedures prescribed.</div> :
-                procPlans.map((r: any) => { const sits = sessions.filter((x: any) => x.recommendationId === r.id); const done = sits.filter((x: any) => x.state === 'completed').length;
-                  const next = sits.filter((x: any) => x.state === 'confirmed').sort((a: any, b: any) => String(a.day).localeCompare(String(b.day)))[0];
-                  const finished = !!r.sittings && done >= r.sittings; const closed = !finished && r.status === 'done'; // closed early, before every sitting was done
-                  return <div key={r.id} className="row"><Icon name="stetho" className="h-4 w-4 shrink-0 text-clay" /><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{procName(r)}</div>
-                    <div className="text-xs text-muted">{done} of {r.sittings ?? '?'} sittings done · {finished ? 'course finished' : closed ? 'closed before the last sitting' : next ? `next on ${fmtDate(next.day)} ${next.startTime}` : 'next sitting not booked'}</div></div>
-                    <Chip tone={finished ? 'sage' : closed ? '' : done || next ? 'sky' : 'amber'}>{finished ? 'Finished' : closed ? 'Closed' : done || next ? 'In progress' : 'Not started'}</Chip></div>; })}
-            </Section>
-            <CoursesCard patientId={id} patientName={p.fullName} />
-            {sessions.length > 0 && <Section title="Sittings">{sessions.map((x: any) => <div key={x.id} className="row"><div className="min-w-0 flex-1 text-sm"><b>{x.procedure ?? 'Procedure'}</b> · sitting {x.sittingNo}<div className="text-xs text-muted">{fmtDate(x.day)} {x.startTime}{x.doctor ? ` · ${x.doctor}` : ''}</div></div><Chip tone={x.state === 'completed' ? 'sage' : x.state === 'missed' ? 'rose' : ''}>{({ completed: 'Done', missed: 'Missed', confirmed: 'Booked', in_progress: 'In progress', cancelled: 'Cancelled' } as Record<string, string>)[x.state] ?? x.state}</Chip></div>)}</Section>}
-          </>}
+          {/* one card per procedure: how far it is, the money, and its sittings; Open has the course (price, advance, booking) */}
+          {sec === 'plans' && (procPlans.length === 0 ? <Section title="Procedures"><div className="p-4 text-sm text-muted">No procedures prescribed.</div></Section>
+            : procPlans.map((r: any) => { const sits = sessions.filter((x: any) => x.recommendationId === r.id).sort((a: any, b: any) => a.sittingNo - b.sittingNo || String(a.day).localeCompare(String(b.day)));
+              const done = sits.filter((x: any) => x.state === 'completed').length; const c = (courses.data ?? []).find((x: any) => x.recommendationId === r.id);
+              const next = sits.filter((x: any) => x.state === 'confirmed').sort((a: any, b: any) => String(a.day).localeCompare(String(b.day)))[0];
+              const finished = !!r.sittings && done >= r.sittings; const closed = !finished && r.status === 'done'; // closed early, before every sitting was done
+              return <section key={r.id} className="card-flat overflow-hidden anim-fade-up">
+                <div className="flex flex-wrap items-center gap-3 border-b border-line/70 px-5 py-3">
+                  <div className="min-w-0 flex-1"><b className="text-[15px]">{procName(r)}</b>
+                    <div className="text-[13px] text-muted">{done} of {r.sittings ?? '?'} sittings done · {finished ? 'course finished' : closed ? 'closed before the last sitting' : next ? `next on ${fmtDate(next.day)} ${next.startTime}` : 'next sitting not booked'}
+                      {c && <> · {c.unusedSittings > 0 ? `${c.unusedSittings} paid ahead · ` : ''}{c.stillToPayPaise > 0 ? `${money(c.stillToPayPaise)} still to pay` : 'fully paid'}</>}</div></div>
+                  <Chip tone={finished ? 'sage' : closed ? '' : done || next ? 'sky' : 'amber'}>{finished ? 'Finished' : closed ? 'Closed' : done || next ? 'In progress' : 'Not started'}</Chip>
+                  <button className="btn btn-sm" onClick={() => setCourseOf({ id: r.id, procedureId: r.procedureId, procedure: procName(r), sittings: r.sittings, amountPaise: r.amountPaise })}>Open</button>
+                </div>
+                {sits.length === 0 ? <div className="px-5 py-3 text-sm text-muted">No sitting booked yet.</div>
+                  : sits.map((x: any) => <div key={x.id} className="row"><div className="min-w-0 flex-1 text-sm">Sitting {x.sittingNo} <span className="text-muted">· {fmtDate(x.day)} {x.startTime}{x.doctor ? ` · ${x.doctor}` : ''}</span></div><Chip tone={x.state === 'completed' ? 'sage' : x.state === 'missed' ? 'rose' : ''}>{({ completed: 'Done', missed: 'Missed', confirmed: 'Booked', in_progress: 'In progress', cancelled: 'Cancelled' } as Record<string, string>)[x.state] ?? x.state}</Chip></div>)}
+              </section>; }))}
+          {courseOf && <CourseDialog rec={courseOf} patientId={id} patientName={p.fullName} onClose={() => setCourseOf(null)} />}
 
           {sec === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}
           {sec === 'messages' && <PatientMessages id={id} />}
