@@ -98,17 +98,19 @@
 .fd-hh:first-child { border-left: 0; }
 .fd-hh b { font-weight: 700; }
 .fd-hh span { font-size: 12px; color: var(--color-muted); }
-.fd-ht { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 10px; font-size: 12px; font-weight: 500; color: var(--color-muted); border-top: 1px solid var(--color-line); white-space: nowrap; }
+.fd-ht { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 10px; font-size: 12px; font-weight: 500; color: var(--color-muted); border-top: 1px solid var(--color-line-2); white-space: nowrap; }
 .fd-ht.past { color: var(--color-muted); }
 .fd-ht small { font-size: 11.5px; font-weight: 700; color: var(--color-rose); }
 /* the hour it is now: a red line across the grid, as on any calendar */
 .fd-ht.now, .fd-hc.now { border-top: 2px solid var(--color-rose); }
 
-.fd-hc { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px 10px; border-top: 1px solid var(--color-line); border-left: 1px solid var(--color-line); }
+.fd-hc { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px 10px; border-top: 1px solid var(--color-line-2); border-left: 1px solid var(--color-line-2); }
 .fd-hc.off { color: var(--color-muted); font-size: 12px; background: repeating-linear-gradient(45deg, rgba(0,0,0,.03) 0 6px, transparent 6px 12px); }
 .fd-hcap { font-size: 11.5px; font-weight: 500; color: var(--color-muted); }
 /* up to four patients side by side; a narrow column (week, many doctors) falls back to fewer */
-.fd-hchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(150px, calc((100% - 12px) / 4)), 1fr)); gap: 4px; }
+/* the places in an hour are cells of a small table: lines between every slot, stronger lines between hours */
+.fd-hchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(150px, 25%), 1fr)); border-top: 1px solid var(--color-line); border-left: 1px solid var(--color-line); }
+.fd-hchips > .fd-pc { height: 32px; border-radius: 0; border-right: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line); }
 .fd-sch-free { align-self: flex-start; display: inline-flex; align-items: center; height: 24px; padding: 0 6px; border-radius: 4px; font-size: 12px; font-weight: 600; color: var(--color-clay); white-space: nowrap; }
 .fd-sch-free:hover { background: var(--color-clay-soft); }
 .fd-hkey { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 9px 14px; border-bottom: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); }
@@ -134,7 +136,7 @@
 
 .fd-k-done { background: color-mix(in srgb, var(--color-sage-soft) 70%, var(--color-surface)); color: var(--color-sage); }
 /* an empty place in the hour: a dashed box that books it */
-.fd-free { justify-content: center; color: var(--color-muted); font-weight: 500; border: 1px dashed var(--color-line); background: transparent; }
+.fd-free { justify-content: center; color: var(--color-muted); font-weight: 500; background: var(--color-surface); }
 .fd-free:hover { color: var(--color-clay); background: var(--color-clay-soft); filter: none; }
 .fd-hfoot { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--color-line); font-size: 12.5px; color: var(--color-muted); cursor: pointer; }
 
