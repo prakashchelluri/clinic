@@ -13,6 +13,7 @@ import { ProcReview, useApprovals } from '../procReview';
 import { DiscountAsks, useDiscountAsks } from '../takePayment';
 import { DaySchedule } from './frontDeskSchedule';
 import { AppointmentDrawer } from '../apptDrawer';
+import { ArrivalSheet } from './FrontDesk';
 import '../frontdesk.css';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -55,6 +56,7 @@ export function Today() {
   const discountAsks = useDiscountAsks(can(perms, 'discount.approve')); const asksN: number = discountAsks.data?.length ?? 0; // discounts above the limit wait for whoever approves them
   const [picked, setPicked] = useState<Item | null>(null);
   const [apptId, setApptId] = useState<string | null>(null); // a booking opened from the calendar
+  const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null); // the doctor checks a booked patient in themself
   const seeAll = (me.roles ?? []).includes('owner') || !doc; // a doctor sees their own calendar; the owner sees everyone's
 
   const d = fd.data; const c = cal.data;
@@ -174,7 +176,11 @@ export function Today() {
         </div>
       </div>
       {picked && <DayDrawer item={picked} cfg={cfg} canOpen={can(perms, 'encounter.intake')} busy={open.isPending} onStart={(id) => open.mutate(id)} onClose={() => setPicked(null)} />}
-      {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onClose={() => setApptId(null)} />}
+      {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onClose={() => setApptId(null)}
+        onArrive={can(perms, 'visit.write') ? (a) => { setApptId(null); setArrive({ patientId: a.patient.id ?? a.patientId, appointmentId: a.id, name: a.patient.fullName }); } : undefined} />}
+      {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} todayAppts={(d.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status))}
+        waitingByDoctor={Object.fromEntries((d.doctors ?? []).map((x: any) => [x.id, (d.visits ?? []).filter((v: any) => ['waiting', 'intake', 'screened'].includes(v.status) && v.practitionerId === x.id).length]))}
+        onClose={() => { setArrive(null); ['frontdesk', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />}
       {reviewing && <ProcReview onClose={() => setReviewing(false)} />}
       {change && doc && <ChangeMyDay practitionerId={doc} name={docName} initialKind={change.kind} initialDay={change.day} onClose={() => setChange(null)} />}
     </div>

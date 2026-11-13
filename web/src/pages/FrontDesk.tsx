@@ -457,7 +457,7 @@ function Tags({ id, label, options, value, onChange }: { id: string; label: stri
 }
 
 /** Arrival: who they are, what the doctor should know, vitals and complaints on the left; doctor, fee and the one button on the right. */
-function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
+export function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, onClose }: { init: { patientId?: string; appointmentId?: string; name?: string; reports?: { encounterId: string; tests: string; free: boolean; since: string } }; cfg: any; perms: string[]; todayAppts: any[]; waitingByDoctor: Record<string, number>; onClose: () => void }) {
   const [q, setQ] = useState('');
   const [patientId, setPatientId] = useState(init.patientId);
   const [newP, setNewP] = useState<null | { fullName: string; phone: string }>(null);
