@@ -10,6 +10,16 @@ import { told } from '../apptDrawer';
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow' | 'cancelled';
 const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Completed · tests & procedures pending', done: 'Completed', noshow: "Didn't come", cancelled: 'Cancelled' };
 const SITTING: Record<string, Kind> = { confirmed: 'booked', in_progress: 'doctor', completed: 'done', missed: 'noshow' };
+/** The key doubles as a filter: each entry and the cards it stands for. Pick one or more; none picked shows everyone. */
+const KEY: { id: string; label: string; sw?: string; match: (c: { k: Kind; proc?: boolean; warn?: boolean; next?: boolean }) => boolean }[] = [
+  { id: 'here', label: 'Here', sw: 'fd-k-waiting', match: (c) => ['waiting', 'intake'].includes(c.k) || !!c.next },
+  { id: 'doctor', label: 'With doctor', sw: 'fd-k-doctor', match: (c) => c.k === 'doctor' },
+  { id: 'booked', label: 'Booked', sw: 'fd-k-booked', match: (c) => c.k === 'booked' },
+  { id: 'done', label: 'Completed', sw: 'fd-k-done', match: (c) => c.k === 'done' || c.k === 'tests' },
+  { id: 'missed', label: "Didn't come", sw: 'fd-k-noshow', match: (c) => c.k === 'late' || c.k === 'noshow' },
+  { id: 'proc', label: 'Procedure', match: (c) => !!c.proc },
+  { id: 'pending', label: 'Tests or procedures pending', match: (c) => !!c.warn },
+];
 const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const shift = (day: string, n: number) => { const d = new Date(day + 'T00:00:00'); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -44,6 +54,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const [mode, setMode] = useState<'day' | 'week'>('day'); const week = mode === 'week'; const step = week ? 7 : 1;
   const [shown, setShown] = useShown();
   const kindF = (shown.kind as unknown as 'all' | 'consult' | 'proc') || 'all'; // All / Consults / Procedures, kept on this computer
+  const [keyF, setKeyF] = useState<Set<string>>(new Set()); // the key as a filter (this screen only)
   const [showPast, setShowPast] = useState(false); const [opened, setOpened] = useState<Set<string>>(new Set());
   const isToday = day === today; const from = monday(day);
   const showFree = shown.free !== false; // empty places in each hour, on unless switched off below the calendar
@@ -100,9 +111,11 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       {tools}
     </div>);
   const keyRow = (
-    <div className="fd-hkey">
-      <span><i className="fd-k-waiting" />Here</span><span><i className="fd-k-doctor" />With doctor</span><span><i className="fd-k-booked" />Booked</span><span><i className="fd-k-done" />Completed</span><span><i className="fd-k-noshow" />Didn't come</span>
-      <span><Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" />Procedure</span><span><span className="fd-warn">!</span> Tests or procedures pending</span>
+    <div className="fd-hkey" role="group" aria-label="Show only">
+      {KEY.map((x) => { const on = keyF.has(x.id); return <button key={x.id} type="button" aria-pressed={on} className={`fd-key ${on ? 'on' : keyF.size ? 'off' : ''}`} title={on ? 'Showing these · tap to stop' : 'Show only these'}
+        onClick={() => { const n = new Set(keyF); if (on) n.delete(x.id); else n.add(x.id); setKeyF(n); }}>
+        {x.sw ? <i className={x.sw} /> : x.id === 'proc' ? <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5" /> : <span className="fd-warn">!</span>}{x.label}</button>; })}
+      {keyF.size > 0 && <button type="button" className="fd-key clear" onClick={() => setKeyF(new Set())}>Show all</button>}
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
   const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{inner}{!list && keyRow}
@@ -157,14 +170,18 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     return { id: a.id, k, name: a.name, tag: '', info: a.service ?? undefined, who: docNameOf(w.practitionerId), onClick: () => onOpenAppt(a.id),
       drag: canDrag ? (e) => { e.dataTransfer.setData('application/x-appt', JSON.stringify({ id: a.id, sessionId: w.id, name: a.name })); e.dataTransfer.effectAllowed = 'move'; } : undefined };
   };
-  const sitChip = (p: any, _c: Col): ChipP => { const k = SITTING[p.state] ?? 'booked'; return { id: p.id, k, proc: true, name: p.patient, sub: p.procedure ?? 'Procedure', tag: '', info: [p.startTime, p.room].filter(Boolean).join(' · '), who: p.doctor ?? '', onClick: () => setProcId(p.id) }; };
+  // a sitting whose hour has gone by without starting counts as didn't come
+  const sitChip = (p: any, c: Col): ChipP => { const base = SITTING[p.state] ?? 'booked'; const k: Kind = base === 'booked' && gone(c.day, rowOf(p.startTime)?.end ?? p.startTime) ? 'late' : base; return { id: p.id, k, proc: true, name: p.patient, sub: p.procedure ?? 'Procedure', tag: '', info: [p.startTime, p.room].filter(Boolean).join(' · '), who: p.doctor ?? '', onClick: () => setProcId(p.id) }; };
+  // the key as a filter: Procedure narrows to procedures; the statuses add up (Completed + Didn't come shows both)
+  const keyOk = (x: ChipP) => { if (!keyF.size) return true; const st = KEY.filter((y) => y.id !== 'proc' && keyF.has(y.id)); return (!keyF.has('proc') || !!x.proc) && (!st.length || st.some((y) => y.match(x))); };
   /** who is in a column's hour: here first, then sittings, then booked */
   const cell = (c: Col, r: { start: string }) => {
     const wsAt = c.ws.filter((w) => w.startTime === r.start);
     const here = (c.visits ?? []).filter((v) => { const h = homeOf(v, c.ws.filter((w) => w.practitionerId === v.practitionerId)); return !!h && wsAt.includes(h); });
     const booked: ChipP[] = wsAt.flatMap((w) => (w.appointments ?? []).filter((a: any) => !c.visits || (a.status !== 'arrived' && !c.visits.some((v) => v.appointmentId === a.id))).map((a: any) => apptChip(a, w, c.day))).sort((x, y) => Number(x.k === 'cancelled') - Number(y.k === 'cancelled'));
     const chips = [...here.map((v) => visitChip(v, c.day)), ...c.sits.filter((p) => rowOf(p.startTime) === r).map((p) => sitChip(p, c)), ...booked];
-    return { wsAt, chips: kindF === 'all' ? chips : chips.filter((x) => (kindF === 'proc') === !!x.proc) };
+    const keyed = chips.filter(keyOk);
+    return { wsAt, chips: kindF === 'all' ? keyed : keyed.filter((x) => (kindF === 'proc') === !!x.proc) };
   };
 
   if (list) {
@@ -218,7 +235,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               const canDrop = !!onBook && !!one && !past && !shut;
               // the doctor's own procedure in this hour sits in the grid like any booking
               const red = shut ? wsAt[0].reductions[0] : null;
-              const all: ChipP[] = red?.kind === 'procedure' && kindF !== 'consult' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => { const sit = (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r); if (sit) setProcId(sit.id); else nav(`/worklist?day=${c.day}`); } }, ...chips] : chips;
+              const all: ChipP[] = red?.kind === 'procedure' && kindF !== 'consult' ? [{ id: `proc${key}`, k: 'booked', proc: true, name: red.note ?? 'Procedure', tag: '', who: docNameOf(wsAt[0].practitionerId), onClick: () => { const sit = (days!.find((D: any) => D.day === c.day)?.procedures ?? []).find((p: any) => p.practitionerId === wsAt[0].practitionerId && rowOf(p.startTime) === r); if (sit) setProcId(sit.id); else nav(`/worklist?day=${c.day}`); } } as ChipP].filter(keyOk).concat(chips) : chips;
               const free = showFree && kindF !== 'proc' && !shut && !past && one && onBook ? Math.max(0, one.free) : 0;
               return (
                 <div key={key} className={`fd-hc ${nowC} ${one && over === one.id ? 'drop' : ''}`}
