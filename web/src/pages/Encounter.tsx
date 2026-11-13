@@ -78,7 +78,7 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
   const mine = sets.filter((t) => t.kind === kind); const list = mine.filter((t) => !q || t.name.toLowerCase().includes(q.toLowerCase()));
   return (
     <>
-      {compact ? <button ref={btn} type="button" data-act="templates" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" aria-label={`${what} templates`} title={`${what[0].toUpperCase()}${what.slice(1)} templates (${sub})`} aria-expanded={open} onClick={() => setOpen(!open)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden />Templates</button>
+      {compact ? <button ref={btn} type="button" data-act="templates" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-ink" aria-label={`${what} templates`} title={`${what[0].toUpperCase()}${what.slice(1)} templates (${sub})`} aria-expanded={open} onClick={() => setOpen(!open)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden /><span className="tpl-word">Templates</span><span className="tpl-tag" aria-hidden><b>T</b><sub>{sub}</sub></span></button>
         : <button ref={btn} id={id} type="button" className="btn btn-sm" aria-label={`${what} templates`} title={`${what[0].toUpperCase()}${what.slice(1)} templates (Alt+T)`} aria-expanded={open} onClick={() => setOpen(!open)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden />Templates</button>}
       <Floating anchor={btn} open={open} onClose={() => setOpen(false)} width={320}>
         <div className="p-1.5">
@@ -848,11 +848,11 @@ export function Encounter() {
         {<div className="flex flex-wrap items-center gap-2 py-1.5">
           {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
           {!readOnly && isDoctor && !calm && <button type="button" className="btn btn-ghost btn-sm text-muted hover:text-rose" onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
-          {!readOnly && isDoctor && calm && <MoreMenu items={[{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }]} />}
           {!readOnly && !canFinish && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
           {!readOnly && canFinish && <>
-            <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
-            <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button>
+            {calm ? <MoreMenu items={[{ label: 'Save', onClick: () => save.mutate({ complete: false }) }, { label: 'Preview', onClick: () => { void preview(); } }, ...(isDoctor ? [{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }] : [])]} />
+              : <><button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
+            <button type="button" className="btn btn-sm" onClick={() => { void preview(); }}>Preview</button></>}
             {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
             <button type="button" className={`btn btn-sm ${held && testsOpen ? '' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
           </>}

@@ -437,8 +437,11 @@ html[data-theme="dark"] .side-dark { --color-paper: #09090B; --color-surface: #1
 
 /* ---------- Consultation pad, Calm layout (v65): a second design beside Classic; only what sits under .pad-calm changes ---------- */
 /* one header bar: the patient and the tabs/actions in one box */
-.pad-calm .pad-head-calm { background: var(--color-surface); border-radius: 10px; box-shadow: var(--shadow-soft); padding: 4px 12px 0; margin: 0; }
-.pad-calm .pad-head-calm > .card { background: transparent; box-shadow: none; padding: 6px 0 !important; border-radius: 0; border-bottom: 1px solid var(--color-line); }
+/* v66: the header is one fixed bar across the whole page (edge to edge, like the app's top bar), not a rounded box */
+.pad-calm .pad-head-calm { background: var(--color-surface); border-radius: 0; box-shadow: inset 0 -1px 0 var(--color-line); margin: -1rem -1rem 0; padding: 4px 1rem 0; backdrop-filter: none; }
+@media (min-width: 768px) { .pad-calm .pad-head-calm { margin: -1.25rem -1.75rem 0; padding: 6px 1.75rem 0; } }
+.pad-calm .pad-head-calm > .card { background: transparent; box-shadow: none; padding: 6px 0 !important; border-radius: 0; border-bottom: 1px solid var(--color-line); animation: none; }
+.pad-calm .pad-head-calm .tabs { border-bottom: 0; }
 /* one sheet: sections lose their own boxes and sit under each other with a line between */
 .pad-calm .pad-sheet > section { border-radius: 0; box-shadow: none; background: transparent; border-top: 1px solid var(--color-line); animation: none; }
 .pad-calm .pad-sheet > section:first-child { border-top: 0; }
@@ -451,3 +454,11 @@ html[data-theme="dark"] .side-dark { --color-paper: #09090B; --color-surface: #1
 .pad-calm [data-act="save"], .pad-calm [data-act="clear"] { font-size: 0; gap: 0; width: 30px; justify-content: center; padding: 0 !important; color: var(--color-muted); }
 .pad-calm [data-act="save"] svg, .pad-calm [data-act="clear"] svg { width: 17px; height: 17px; }
 .pad-calm [data-act="clear"]:hover { color: var(--color-rose); }
+
+/* the section's templates as the earlier T-with-a-subscript mark (T·Sx, T·Dx, T·Rx): Calm only */
+.tpl-tag { display: none; }
+.pad-calm [data-act="templates"] .tpl-word { display: none; }
+.pad-calm [data-act="templates"] .tpl-tag { display: inline-flex; align-items: baseline; font-size: 14.5px; color: var(--color-ink-2); }
+.pad-calm [data-act="templates"] .tpl-tag b { font-weight: 700; }
+.pad-calm [data-act="templates"] .tpl-tag sub { margin-left: 1px; font-size: 10.5px; font-weight: 600; bottom: -0.15em; }
+.pad-calm [data-act="templates"]:hover .tpl-tag { color: var(--color-clay); }
