@@ -12,13 +12,21 @@ const REFUND_MODES: ['cash' | 'upi' | 'card' | 'bank', string][] = [['cash', 'Ca
 const refresh = () => ['courses', 'timeline', 'frontdesk', 'daily', 'payments-awaiting', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 export const useCourses = (patientId: string) => useQuery({ queryKey: ['courses', patientId], queryFn: () => get(`/courses?patientId=${patientId}`) });
 
-/** Where the course stands, in sittings first: how many are done, how many are already paid for, what is left to pay. */
-function Standing({ c }: { c: any }) {
+/** Where the course stands, as labelled rows: the price and where it came from, who agreed it, the money, the sittings.
+ *  `action` is the next step (Book sitting N), shown on the Sittings row. */
+function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | null; action?: React.ReactNode }) {
+  const day = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const paid = c.advancePaise - c.refundedPaise + c.paidOnDayPaise;
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line py-2.5 first:border-t-0"><span className="text-muted">{label}</span><div>{children}</div></div>);
   return (
-    <div className="space-y-1 text-sm">
-      <div><b>{c.sittings} sittings at {money(c.perSittingPaise)}</b> = {money(c.totalPaise)}{c.listPaise > c.totalPaise ? <span className="text-muted"> (list {money(c.listPaise)})</span> : ''} {c.lockedAt ? <Chip tone="sage">Price fixed</Chip> : <Chip>not paid yet</Chip>}</div>
-      <div className="text-muted">Agreed by the patient on {new Date(c.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}{c.agreedBy ? ` · recorded by ${c.agreedBy}` : ''}{c.priceSource === 'doctor' ? ` · doctor's price${c.priceBy ? ` (${c.priceBy})` : ''}${c.standardPaise ? `, standard ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? ' · package price' : ''}</div>
-      <div>{c.doneSittings} of {c.sittings} done · Prepaid <b>{c.unusedSittings}</b> sitting{c.unusedSittings === 1 ? '' : 's'} ({money(c.unusedPaise)}) · {money(c.stillToPayPaise)} to pay over next visits</div>
+    <div className="rounded-[10px] border border-line px-4 py-1 text-[14px]">
+      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sittings <span className="text-muted">· {money(c.perSittingPaise)} each</span>
+        <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Doctor's price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? 'Clinic package price' : 'Standard price'}</div></Row>
+      <Row label="Agreed">By the patient on {day(c.createdAt)}<div className="text-[13px] text-muted">{c.agreedBy ? `Recorded by ${c.agreedBy}` : ''}</div></Row>
+      <Row label="Paid">{paid > 0 ? <b>{money(paid)}</b> : 'Nothing yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span>
+        {c.unusedPaise > 0 && <div className="text-[13px] text-muted">{money(c.unusedPaise)} in advance, covers {c.unusedSittings} sitting{c.unusedSittings === 1 ? '' : 's'}</div>}</Row>
+      <Row label="Sittings"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `next on ${day(booked.day)}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
     </div>
   );
 }
@@ -85,8 +93,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
         </div>
       ) : (
         <div className="space-y-4">
-          <Standing c={c} />
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line p-3 text-sm"><b>Sittings</b><span className="text-muted">{c.doneSittings} of {c.sittings} done{booked?.day ? ` · next booked ${booked.day}` : ' · next not booked yet'}</span><span className="ml-auto" />{c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book sitting {c.doneSittings + 1}</button>}</div>
+          <Standing c={c} booked={booked} action={c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book sitting {c.doneSittings + 1}</button>} />
           {rf && <div className="rounded-xl border border-line p-3 space-y-3 anim-fade-up">
             <div className="label !mb-0">Refund unused sittings · up to {money(c.refundablePaise)}</div>
             <div><label className="label" htmlFor="rf-amt">Amount</label><MoneyInput id="rf-amt" value={rf.amount} onChange={(v) => setRf({ ...rf, amount: v })} /></div>
