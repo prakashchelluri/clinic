@@ -822,6 +822,24 @@ export function Encounter() {
           {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
           {pregnant && <span className="chip chip-rose shrink-0 !py-1">{pregnant}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}
+            {/* Finish and ⋯ (Save, Preview, Clear the whole pad) sit with the patient, always in reach */}
+          {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
+          {!readOnly && !canFinish && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
+          {!readOnly && canFinish && <>
+            {<MoreMenu items={[{ label: 'Save', onClick: () => save.mutate({ complete: false }) }, { label: 'Preview', onClick: () => { void preview(); } }, ...(isDoctor ? [{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }] : [])]} />}
+            {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
+            <button type="button" className={`btn btn-sm ${held && testsOpen ? '' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
+          </>}
+          {readOnly && canFinish && e.status === 'completed' && <button type="button" className="btn btn-sm" onClick={() => { void amend(); }}>Amend</button>}
+          {readOnly && <button type="button" className="btn btn-sm btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
+          </span>
+        </div>);
+        return <div className="card !px-4 !py-2.5">{who}</div>; })()}
+      {/* tabs (an underline, not pills): the Rxpad, and the patient's past visits, photos and reports beside it */}
+      {<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {isDoctor ? <Tabs<'pad' | 'visits' | 'photos' | 'docs'> className="tabs-lg min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'pad', label: 'Rxpad' }, { value: 'visits', label: 'Past visits', count: previous.length || undefined }, { value: 'photos', label: 'Photos', count: ph.length || undefined }]} /> : <span className="flex-1" />}
+        {/* the whole-pad templates and the pad's settings sit with the tabs */}
+        <div className="flex flex-wrap items-center gap-2 py-1.5">
             {isDoctor && !readOnly && <><button ref={tplBtn} type="button" className="btn btn-sm" aria-expanded={tplOpen} onClick={() => setTplOpen(!tplOpen)}><LayoutTemplate className="h-3.5 w-3.5" aria-hidden />Templates</button>
               <Floating anchor={tplBtn} open={tplOpen} onClose={() => setTplOpen(false)} width={540}>
                 <div className="grid grid-cols-[200px_minmax(0,1fr)] gap-2 p-1.5">
@@ -841,24 +859,7 @@ export function Encounter() {
                 </div>
               </Floating></>}
             {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm btn-icon" aria-label="Configure pad: sections, required, printing" title="Configure pad: sections, required, printing" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" /></button>}
-          </span>
-        </div>);
-        return <div className="card !px-4 !py-2.5">{who}</div>; })()}
-      {/* tabs (an underline, not pills): the Rxpad, and the patient's past visits, photos and reports beside it */}
-      {<div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        {isDoctor ? <Tabs<'pad' | 'visits' | 'photos' | 'docs'> className="tabs-lg min-w-0 flex-1" value={tab} onChange={setTab} options={[{ value: 'pad', label: 'Rxpad' }, { value: 'visits', label: 'Past visits', count: previous.length || undefined }, { value: 'photos', label: 'Photos', count: ph.length || undefined }]} /> : <span className="flex-1" />}
-        {/* Stacked: save, preview and finish at the top, always in reach (Tatva's End visit) */}
-        {<div className="flex flex-wrap items-center gap-2 py-1.5">
-          {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
-          {!readOnly && !canFinish && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
-          {!readOnly && canFinish && <>
-            {<MoreMenu items={[{ label: 'Save', onClick: () => save.mutate({ complete: false }) }, { label: 'Preview', onClick: () => { void preview(); } }, ...(isDoctor ? [{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }] : [])]} />}
-            {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
-            <button type="button" className={`btn btn-sm ${held && testsOpen ? '' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
-          </>}
-          {readOnly && canFinish && e.status === 'completed' && <button type="button" className="btn btn-sm" onClick={() => { void amend(); }}>Amend</button>}
-          {readOnly && <button type="button" className="btn btn-sm btn-primary" onClick={() => openPrint({ title: 'Prescription', rx: id })}><Icon name="print" className="h-4 w-4" />Print Rx</button>}
-        </div>}
+        </div>
         {missingList.length > 0 && <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5 pb-2 text-xs" role="alert"><span className="font-semibold text-rose">Cannot finish yet:</span>
           {missingList.map((x) => <button key={x.path} type="button" className="rounded-[7px] bg-rose-soft px-2 py-0.5 font-semibold text-rose hover:bg-rose/15" onClick={() => goTo(secOf(x.path))}>{x.message.replace(/ is required$/, '')}</button>)}</div>}
       </div>}
