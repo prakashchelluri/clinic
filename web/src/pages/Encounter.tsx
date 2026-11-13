@@ -4,7 +4,7 @@ import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon, CalendarDays, HeartPulse, ClipboardList, Activity, Stethoscope, ScanSearch, Pill, MessageSquareText, FlaskConical, TestTubes, CalendarClock, Syringe, NotebookPen, ArrowRightLeft, Camera, FolderOpen, PenLine, FileText, type LucideIcon } from 'lucide-react';
-import { BackButton, Chip, Drawer, Floating, Icon, Modal, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
+import { BackButton, Chip, Drawer, Floating, Icon, Modal, MoreMenu, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
 import { openPrint } from '../printPreview';
 import { EncounterModal, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
@@ -52,7 +52,7 @@ const PH = 'placeholder:italic placeholder:opacity-60'; // a placeholder that ca
 const withQty = (i: RxItem): RxItem => (i._qtyTouched || i.qty ? i : { ...i, qty: qtyFor(i) ?? undefined });
 /** Each section's icon and colour (an icon, not letters). */
 const ICON: Record<string, [LucideIcon, string]> = { records: [FolderOpen, '#6F8F78'], canvas: [PenLine, '#C53B14'], vitals: [HeartPulse, '#5B8DB8'], symptoms: [Activity, '#C53B14'], diagnosis: [Stethoscope, '#8A2E10'], exam: [ScanSearch, '#6F8F78'], medicines: [Pill, '#4F7396'], advice: [MessageSquareText, '#B98B6E'], tests: [FlaskConical, '#7A6FB0'], results: [TestTubes, '#B8860B'], followup: [CalendarClock, '#6F8F78'], procedures: [Syringe, '#285C9C'], notes: [NotebookPen, '#8B929C'], addnotes: [FileText, '#8B929C'], referral: [ArrowRightLeft, '#5B8DB8'], history: [ClipboardList, '#8A2E10'], photos: [Camera, '#6F8F78'] };
-const SecIcon = ({ id, big }: { id: string; big?: boolean }) => { const [I, color] = ICON[id] ?? [FileText, '#8B929C']; return <span className={`grid shrink-0 place-items-center rounded-[8px] ${big ? 'h-8 w-8' : 'h-7 w-7'}`} style={{ background: `color-mix(in srgb, ${color} 14%, var(--color-surface))`, color: `color-mix(in srgb, ${color} 75%, var(--color-ink))` }} aria-hidden><I className="h-4 w-4" strokeWidth={2} /></span>; };
+const SecIcon = ({ id, big }: { id: string; big?: boolean }) => { const [I, color] = ICON[id] ?? [FileText, '#8B929C']; return <span className={`sec-ic grid shrink-0 place-items-center rounded-[8px] ${big ? 'h-8 w-8' : 'h-7 w-7'}`} style={{ background: `color-mix(in srgb, ${color} 14%, var(--color-surface))`, color: `color-mix(in srgb, ${color} 75%, var(--color-ink))` }} aria-hidden><I className="h-4 w-4" strokeWidth={2} /></span>; };
 
 /** One section of the pad as its own card: icon tile, title, the header actions on the right, rows inside, the search line last. */
 function Card({ id, title, meta, actions, children, required, invalid }: { id: string; title: string; meta?: ReactNode; actions?: ReactNode; children: ReactNode; required?: boolean; invalid?: boolean }) {
@@ -296,6 +296,10 @@ export function Encounter() {
   useEffect(() => { if (!setNote) return; const t = setTimeout(() => setSetNote(''), 30_000); return () => clearTimeout(t); }, [setNote]); // the "Loaded from …" note closes by itself after 30 s
   // opened from Review on the doctor's Today (?review): the Rxpad at Lab investigations, where the values and reports are
   const [sp, setSp] = useSearchParams(); const wantReview = useRef(!!sp.get('review'));
+  // two pad designs: Classic (as it was) and Calm (v65: one sheet, quiet section tools, one summary card); each computer keeps its choice
+  const [calm, setCalmS] = useState(() => { try { return localStorage.getItem('pad.layout') === 'calm'; } catch { return false; } });
+  const setCalm = (v: boolean) => { setCalmS(v); try { localStorage.setItem('pad.layout', v ? 'calm' : 'classic'); } catch { /* storage blocked */ } };
+  const [addedSecs, setAddedSecs] = useState<Set<string>>(new Set()); // Calm: optional sections opened from 'Add a section'
   const [tab, setTab] = useState<'pad' | 'visits' | 'photos' | 'docs'>('pad'); // the pad, or one of the patient's collections beside it
   useEffect(() => { if (sp.get('review')) { const n = new URLSearchParams(sp); n.delete('review'); setSp(n, { replace: true }); } }, []);
   const keys = useRef<(ev: KeyboardEvent) => void>(() => {}); // the pad's keys; the handler is set each render below
@@ -609,7 +613,7 @@ export function Encounter() {
   const legacyExam = Object.entries(data.exam ?? {}).filter(([k, v]) => k !== 'items' && (Array.isArray(v) ? v.length : v)).map(([, v]: any) => (Array.isArray(v) ? v.join(', ') : String(v))).join(' · ');
   const addFinding = (t: string) => { const name = examNames.find((o) => o.toLowerCase() === t.trim().toLowerCase()) ?? t.trim(); if (name) addExam([{ name }]); };
   const cardActs = (k: string): ReactNode => { if (readOnly || !isDoctor) return undefined; const t = SECTION_TPL[k]; if (!t) return undefined;
-    return <>{LOAD_PREV.has(k) && <LoadPrevious compact part={PART[k]} previous={previous} onLoad={loadPrevious} />}{<SectionTemplates compact kind={t[0]} sub={t[1]} what={t[2]} sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={t[3]} />}<SaveTemplate what={t[2]} onSave={() => saveSection(t[0])} />{t[3] && <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" title={`Clear the ${t[2]}`} onClick={t[3]}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}</>; };
+    return <>{LOAD_PREV.has(k) && <LoadPrevious compact part={PART[k]} previous={previous} onLoad={loadPrevious} />}{<SectionTemplates compact kind={t[0]} sub={t[1]} what={t[2]} sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={t[3]} />}<SaveTemplate what={t[2]} onSave={() => saveSection(t[0])} />{t[3] && <button type="button" data-act="clear" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" title={`Clear the ${t[2]}`} aria-label={`Clear the ${t[2]}`} onClick={t[3]}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}</>; };
   const cards: Record<string, ReactNode> = {
     vitals: <Card key="vitals" id="vitals" title="Vitals" meta="from check-in · tap a value to change it"><VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} settings={cfg?.tenant?.settings} /></Card>,
     history: <Card key="history" id="history" title="Medical history"><HistoryChips patientId={p.id} history={p.history ?? {}} categories={cfg?.historyCategories ?? []} readOnly={readOnly} /></Card>,
@@ -697,7 +701,7 @@ export function Encounter() {
         {!readOnly && isDoctor && <span className="ml-auto flex items-center gap-0.5"><SectionTemplates compact kind="notes" sub="N" what="notes" sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={null} /><SaveTemplate what="notes" onSave={() => saveSection('notes')} /></span>}</div>
         <textarea aria-label="Additional notes" className="input min-h-[72px]" maxLength={2000} placeholder="Enter any specific note here · printed on the prescription" value={data.plan?.notes ?? ''} disabled={readOnly} onChange={(ev) => set('plan', 'notes', ev.target.value)} /></div>
     </div></section> : null,
-    procedures: isDoctor ? <Card key="procedures" id="procedures" title="Surgeries / Procedures" actions={!readOnly && recs.some((r) => r.kind === 'procedure') ? <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" onClick={() => clearSection('the procedures', () => setRecs(recs.filter((r) => r.kind !== 'procedure')))}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button> : undefined}>
+    procedures: isDoctor ? <Card key="procedures" id="procedures" title="Surgeries / Procedures" actions={!readOnly && recs.some((r) => r.kind === 'procedure') ? <button type="button" data-act="clear" title="Clear the procedures" aria-label="Clear the procedures" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" onClick={() => clearSection('the procedures', () => setRecs(recs.filter((r) => r.kind !== 'procedure')))}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button> : undefined}>
       {recs.map((r, k) => r.kind !== 'procedure' ? null : (
         <Row key={k} label={procName(r.procedureId)} onRemove={readOnly ? null : () => setRecs(recs.filter((_, j) => j !== k))}>
           <b className="rx-name">{procName(r.procedureId)}</b>
@@ -787,8 +791,12 @@ export function Encounter() {
     canvas: { title: 'Canvas', brief: canvases.length ? canvases.map((c) => c.name).join(', ') : null, width: 'max-w-2xl', body: () => <Suspense fallback={<Skeleton rows={3} />}><CanvasDrawer canvases={canvases} onChange={(xs) => setData((d) => ({ ...d, canvases: xs }))} patientId={p.id} encounterId={id!} readOnly={readOnly} /></Suspense> },
   };
   // the clinic's pad settings still say which show; records and canvas are the doctor's, always there
-  const vitalCells: [string, string][] = vitalFields(cfg?.tenant?.settings).filter((x) => vd[x.key] !== undefined && vd[x.key] !== null && vd[x.key] !== '').map((x) => [x.label, `${vd[x.key]}${x.unit && x.key !== 'bp' ? ` ${x.unit}` : ''}`]);
-  { const b = bmiOf(Number(vd.weight_kg) || null, Number(vd.height_cm ?? p.history?.heightCm) || null); if (b) vitalCells.push(['BMI', String(b)]); }
+  // ponytail: adult reference ranges, fixed here; per-clinic or per-age ranges are the upgrade path
+  const vFlag = (k: string, raw: any): '' | 'high' | 'low' => { const n = Number(raw);
+    if (k === 'temp_f') return n >= 99.5 ? 'high' : n && n < 96.5 ? 'low' : ''; if (k === 'spo2') return n && n < 95 ? 'low' : ''; if (k === 'pulse') return n > 100 ? 'high' : n && n < 50 ? 'low' : '';
+    if (k === 'bmi') return n >= 30 ? 'high' : n && n < 18.5 ? 'low' : ''; if (k === 'bp') { const m = /^(\d+)\/(\d+)$/.exec(String(raw)); return m ? (+m[1] >= 140 || +m[2] >= 90 ? 'high' : +m[1] < 90 ? 'low' : '') : ''; } return ''; };
+  const vitalCells: [string, string, string][] = vitalFields(cfg?.tenant?.settings).filter((x) => vd[x.key] !== undefined && vd[x.key] !== null && vd[x.key] !== '').map((x) => [x.label, `${vd[x.key]}${x.unit && x.key !== 'bp' ? ` ${x.unit}` : ''}`, vFlag(x.key, vd[x.key])]);
+  { const b = bmiOf(Number(vd.weight_kg) || null, Number(vd.height_cm ?? p.history?.heightCm) || null); if (b) vitalCells.push(['BMI', String(b), vFlag('bmi', b)]); }
   const leftKeys = ['vitals', 'history', 'notes', 'records', 'results', 'canvas'].filter((k) => (['records', 'canvas', 'notes', 'results'].includes(k) ? isDoctor : true) && (['records', 'canvas'].includes(k) || order.includes(k)));
   const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">{saveFailed === 'kept' ? 'Not saved — kept on this computer, will send when the internet is back' : 'Not saved — your notes are still here. Try Save again.'}</span>;
   const restoreAt = restore ? new Date(restore.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -798,10 +806,10 @@ export function Encounter() {
   const patientLine = [age ? `${age} ${p.sex ?? ''}` : null, p.patientNo, p.phone, visitNo === 1 ? 'first visit' : `visit ${visitNo}`, isReview ? `review of ${joinList(lastDone.data?.assessment?.diagnosis) || 'last visit'}` : null, arrivalText ? `screened: ${arrivalText}` : null].filter(Boolean).join(' · ');
 
   return (
-    <div className="space-y-3 pb-4">
+    <div className={`space-y-3 pb-4 ${calm ? 'pad-calm' : ''}`}>
       {/* who: the patient in the app's top bar (more room for the pad), with the layout, the whole-pad templates and the pad's settings; History, Photos and Reports as tabs under it */}
       {/* the record's header: the patient, then the pad's tabs with Save and Finish, stuck to the top (the app's top bar steps aside on a record) */}
-      <div className="sticky top-[64px] z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0">
+      <div className={`pad-head sticky top-[64px] z-20 -mx-1 bg-paper/95 px-1 pt-1 backdrop-blur-xl md:top-0 ${calm ? 'pad-head-calm' : ''}`}>
       {(() => { const who = (
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <BackButton to="/dashboard" />
@@ -828,6 +836,7 @@ export function Encounter() {
                   {applied && <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={() => { clearLoaded(); setTplOpen(false); }}>Clear loaded ({applied})</button>}
                 </div>
               </Floating></>}
+            {isDoctor && <button type="button" className="btn btn-sm" aria-pressed={calm} title={calm ? 'Back to the Classic pad layout' : 'Try the Calm pad layout: one sheet, quieter section tools'} onClick={() => setCalm(!calm)}>{calm ? 'Classic layout' : 'Calm layout'}</button>}
             {isDoctor && can(perms, 'config.write') && <button type="button" className="btn btn-sm btn-icon" aria-label="Configure pad: sections, required, printing" title="Configure pad: sections, required, printing" onClick={() => nav('/settings?tab=pad')}><Icon name="gear" className="h-3.5 w-3.5" /></button>}
           </span>
         </div>);
@@ -838,7 +847,8 @@ export function Encounter() {
         {/* Stacked: save, preview and finish at the top, always in reach (Tatva's End visit) */}
         {<div className="flex flex-wrap items-center gap-2 py-1.5">
           {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
-          {!readOnly && isDoctor && <button type="button" className="btn btn-ghost btn-sm text-muted hover:text-rose" onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
+          {!readOnly && isDoctor && !calm && <button type="button" className="btn btn-ghost btn-sm text-muted hover:text-rose" onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}>Clear</button>}
+          {!readOnly && isDoctor && calm && <MoreMenu items={[{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }]} />}
           {!readOnly && !canFinish && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
           {!readOnly && canFinish && <>
             <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}>Save</button>
@@ -869,22 +879,28 @@ export function Encounter() {
 
         <div className="grid items-start gap-3 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)]">
           {/* Tatva's left column: the patient's basic info, each opening its own drawer */}
-          <aside className="space-y-2 lg:sticky lg:top-[124px]" aria-label="Basic info">
+          <aside className={calm ? 'card !p-0 overflow-hidden lg:sticky lg:top-[124px]' : 'space-y-2 lg:sticky lg:top-[124px]'} aria-label="Basic info">
             {leftKeys.map((k) => { const v = LEFT[k].brief; const tiles = k === 'vitals' && vitalCells.length > 0; return (
-              <button key={k} type="button" className="card block w-full !px-3.5 !py-3 text-left transition-colors hover:bg-surface-2" onClick={() => setSide(k)} aria-haspopup="dialog">
+              <button key={k} type="button" className={`${calm ? 'border-t border-line first:border-t-0' : 'card'} block w-full !px-3.5 !py-3 text-left transition-colors hover:bg-surface-2`} onClick={() => setSide(k)} aria-haspopup="dialog">
                 <span className="flex items-center gap-2.5">
                   <SecIcon id={k} />
                   <span className="min-w-0 flex-1"><span className="block text-[15.5px] font-bold">{LEFT[k].title}</span>{!tiles && v && <span className="block truncate text-xs text-muted" title={v}>{v}</span>}</span>
                   <span className="shrink-0 text-[12.5px] font-semibold text-clay">{v ? 'Edit' : readOnly ? 'View' : '+ Add'}</span>
                 </span>
                 {/* vitals: only the ones taken, each in its own small tile */}
-                {tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val]) => <span key={l} className="min-w-0 rounded-[8px] bg-field px-2 py-1.5 ring-1 ring-line"><span className="block truncate text-[10.5px] font-medium uppercase tracking-wide text-muted">{l}</span><span className="block truncate text-[13.5px] font-bold">{val}</span></span>)}</span>}
+                {tiles && <span className="mt-2.5 grid grid-cols-3 gap-1.5">{vitalCells.map(([l, val, fl]) => { const red = calm && fl; return <span key={l} className={`min-w-0 rounded-[8px] px-2 py-1.5 ring-1 ${red ? 'bg-rose-soft ring-rose/30' : 'bg-field ring-line'}`} title={red ? `${l} ${fl}` : undefined}><span className={`block truncate text-[10.5px] font-medium uppercase tracking-wide ${red ? 'text-rose' : 'text-muted'}`}>{l}{red ? ` · ${fl}` : ''}</span><span className={`block truncate text-[13.5px] font-bold ${red ? 'text-rose' : ''}`}>{val}</span></span>; })}</span>}
               </button>); })}
           </aside>
-          <div className="min-w-0 space-y-3">
-            {order.filter((k) => !LEFT[k]).map((k) => cards[k] ?? null)}
-            {customSections.map(custom)}
-          </div>
+          {(() => {
+            const used: Record<string, boolean> = { tests: tests.length > 0, procedures: recs.some((r) => r.kind === 'procedure'), referral: !!(data.referral?.to || data.referral?.reason) };
+            const OPT_TITLE: Record<string, string> = { tests: 'Investigations', procedures: 'Procedures', referral: 'Referral' };
+            const waiting = calm && !readOnly ? order.filter((k) => !LEFT[k] && k in OPT_TITLE && !used[k] && !addedSecs.has(k) && !padOf(k).required) : [];
+            const secs = order.filter((k) => !LEFT[k] && !waiting.includes(k));
+            return <div className={`min-w-0 ${calm ? 'pad-sheet card !p-0 overflow-hidden' : 'space-y-3'}`}>
+              {secs.map((k) => cards[k] ?? null)}
+              {customSections.map(custom)}
+              {waiting.length > 0 && <div className="border-t border-line px-4 py-3 text-[14.5px]"><span className="text-muted">Add a section:</span> {waiting.map((k, n) => <span key={k}>{n > 0 && <span className="text-muted"> · </span>}<button type="button" className="font-medium text-clay hover:underline" onClick={() => { setAddedSecs(new Set(addedSecs).add(k)); setTimeout(() => document.getElementById(`sec-${k}`)?.scrollIntoView({ block: 'center' }), 50); }}>+ {OPT_TITLE[k]}</button></span>)}</div>}
+            </div>; })()}
         </div>
       </>}
 

@@ -434,3 +434,20 @@ html[data-theme="dark"] .side-dark { --color-paper: #09090B; --color-surface: #1
 .side-slim .side-group { height: 1px; padding: 0; margin: 8px 6px; font-size: 0; background: #232328; }
 .side-slim .side-foot { flex-direction: column; padding-left: 0; padding-right: 0; gap: 6px; }
 .side-slim > a:first-child { justify-content: center; padding: 0; }
+
+/* ---------- Consultation pad, Calm layout (v65): a second design beside Classic; only what sits under .pad-calm changes ---------- */
+/* one header bar: the patient and the tabs/actions in one box */
+.pad-calm .pad-head-calm { background: var(--color-surface); border-radius: 10px; box-shadow: var(--shadow-soft); padding: 4px 12px 0; margin: 0; }
+.pad-calm .pad-head-calm > .card { background: transparent; box-shadow: none; padding: 6px 0 !important; border-radius: 0; border-bottom: 1px solid var(--color-line); }
+/* one sheet: sections lose their own boxes and sit under each other with a line between */
+.pad-calm .pad-sheet > section { border-radius: 0; box-shadow: none; background: transparent; border-top: 1px solid var(--color-line); animation: none; }
+.pad-calm .pad-sheet > section:first-child { border-top: 0; }
+.pad-calm .pad-sheet > section > div:first-child { border-bottom: 0; padding-top: 14px; padding-bottom: 4px; }
+/* grey section icons, no coloured tile */
+.pad-calm .sec-ic { background: transparent !important; color: var(--color-muted) !important; width: 20px !important; }
+/* section tools: Load previous and Templates as text links; Save and Clear as small icons with their tooltip */
+.pad-calm [data-act="loadprev"], .pad-calm [data-act="templates"] { font-size: 13.5px; color: var(--color-ink-2); }
+.pad-calm [data-act="loadprev"] svg, .pad-calm [data-act="templates"] svg { display: none; }
+.pad-calm [data-act="save"], .pad-calm [data-act="clear"] { font-size: 0; gap: 0; width: 30px; justify-content: center; padding: 0 !important; color: var(--color-muted); }
+.pad-calm [data-act="save"] svg, .pad-calm [data-act="clear"] svg { width: 17px; height: 17px; }
+.pad-calm [data-act="clear"]:hover { color: var(--color-rose); }
