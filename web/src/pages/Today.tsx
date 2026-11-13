@@ -5,7 +5,7 @@ import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
 import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
-import { Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
+import { Avatar, Chip, Icon, Skeleton, toast, fmtDate } from '../ui';
 import { ChangeMyDay, type ChangeKind } from '../dayChange';
 import { joinList } from '../encounterDetail';
 import { ageText } from '../rxLine';
@@ -17,6 +17,8 @@ import { ArrivalSheet } from './FrontDesk';
 import '../frontdesk.css';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+/** a wait as people say it: 12m, 3h 51m */
+const dur = (m: number) => (m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`);
 const hhmm = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 const nowHHMM = () => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 const addDay = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -125,26 +127,35 @@ export function Today() {
         </div>
 
         <div className="order-1 flex min-w-0 flex-col gap-4 xl:order-2">
-          {/* who is in the room, then the one who is next: complaint, last visit, allergies and conditions; nothing else */}
-          <section className="fd-sheet p-4 sm:p-5 anim-fade-up">
-            {inRoom.map((v, i) => { const fresh = notOpened(v); return (
-              <div key={v.id} className={`flex items-center gap-3 ${i ? 'mt-2 border-t border-line pt-2' : ''}`} role={fresh ? 'alert' : undefined}>
-                <div className="min-w-0 flex-1"><div className="text-[11px] font-bold uppercase tracking-wider text-muted">{i === 0 ? 'With you' : 'Inside'}</div>
-                  <div className="truncate text-[16px] font-semibold">{v.patient.fullName} {fresh && <Chip tone="amber">sent in {minsSince(v.details.calledAt)} min ago</Chip>}</div></div>
+          {/* the room and the line (option B): who is with you on a tinted band, then everyone waiting as numbered rows,
+              the first with its last visit and the one Start button; a long wait turns amber */}
+          <section className="card !p-0 overflow-hidden anim-fade-up">
+            {inRoom.map((v, i) => { const fresh = notOpened(v); const since = v.details?.calledAt ?? v.arrivedAt; return (
+              <div key={v.id} className={`flex items-center gap-3 px-4 py-3 ${i === 0 ? 'bg-clay-soft' : 'border-t border-line'}`} role={fresh ? 'alert' : undefined}>
+                <Avatar name={v.patient.fullName} size={`h-9 w-9 text-[12px] ${i === 0 ? '!bg-clay !text-white' : ''}`} />
+                <div className="min-w-0 flex-1">
+                  <div className={`text-[12px] font-medium ${i === 0 ? 'text-clay-ink' : 'text-muted'}`}>{i === 0 ? 'With you' : 'Inside'}{since ? ` · ${dur(minsSince(since))}` : ''}</div>
+                  <div className="flex items-center gap-2 truncate text-[15px] font-semibold">{v.patient.fullName}{fresh && <Chip tone="amber">sent in {dur(minsSince(v.details.calledAt))} ago</Chip>}</div>
+                </div>
                 {can(perms, 'encounter.intake') && <button className={`btn btn-sm ${fresh || i === 0 ? 'btn-primary' : ''}`} disabled={open.isPending} onClick={() => open.mutate(v.id)}>{fresh ? 'Open' : 'Continue'}</button>}
               </div>); })}
-            {inRoom.length > 0 && <div className="my-3 border-t border-line" />}
-            {next ? <>
-              <div className="flex items-center gap-2"><span className="text-[11px] font-bold uppercase tracking-wider text-muted">Next</span><Chip>token {next.opNumber} · waiting {minsSince(next.arrivedAt)} min</Chip></div>
-              <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3"><span className="text-[22px] font-bold">{next.patient.fullName}</span><span className="text-[14px] text-muted">{[ageText(next.patient) ? `${ageText(next.patient)} ${next.patient.sex ?? ''}`.trim() : null, next.category].filter(Boolean).join(' · ')}</span></div>
-              {nextMed && <div className="mt-1.5 font-semibold text-rose">{nextMed}</div>}
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">Complaint</div><div className="mt-1 font-semibold">{complaintOf(next) || '—'}</div></div>
-                <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">Last visit</div><div className="mt-1 font-semibold">{nextTl.isLoading ? '…' : lastVisitOf(nextTl.data) || 'First visit'}</div></div>
-              </div>
-              {can(perms, 'encounter.intake') && <button className="btn btn-primary mt-4" disabled={open.isPending} onClick={() => open.mutate(next.id)}>Start consultation</button>}
-              <div className="mt-3 text-[12.5px] text-muted">{waiting[1] ? `Then ${waiting[1].patient.fullName}. ` : ''}{withJunior.length ? `${withJunior.length} with the junior doctor.` : ''}</div>
-            </> : !inRoom.length && <div className="py-2 text-sm text-muted">{withJunior.length ? `${withJunior.length} with the junior doctor. ` : ''}{screening === 'required' && unscreened.length ? `${unscreened.length} waiting for screening.` : 'Nobody waiting for you.'}</div>}
+            <div className="flex items-center gap-2 px-4 pb-1.5 pt-3 text-[12.5px] font-semibold text-muted">Waiting{waiting.length ? ` · ${waiting.length}` : ''}
+              {withJunior.length > 0 && <span className="ml-auto font-normal">{withJunior.length} with the junior doctor</span>}</div>
+            {waiting.length === 0 && <div className="px-4 pb-4 text-sm text-muted">{screening === 'required' && unscreened.length ? `${unscreened.length} waiting for screening.` : 'Nobody waiting for you.'}</div>}
+            {waiting.slice(0, 6).map((v, i) => { const m = minsSince(v.arrivedAt); const first = i === 0;
+              const sub = [v.opNumber, complaintOf(v) || (first ? (nextTl.isLoading ? '…' : lastVisitOf(nextTl.data) ? `Last: ${lastVisitOf(nextTl.data)}` : 'First visit') : v.category)].filter(Boolean).join(' · ');
+              return (
+              <div key={v.id} className="flex items-center gap-3 border-t border-line px-4 py-2.5">
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] bg-paper-2 text-[12px] font-semibold text-ink-2">{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[14px] font-semibold">{v.patient.fullName} <span className="font-normal text-muted">{ageText(v.patient) ? `${ageText(v.patient)} ${v.patient.sex ?? ''}`.trim() : ''}</span></div>
+                  <div className="truncate text-[12.5px] text-muted" title={sub}>{sub}</div>
+                  {first && nextMed && <div className="truncate text-[12.5px] font-medium text-rose">{nextMed}</div>}
+                </div>
+                <Chip tone={m >= 30 ? 'amber' : ''}>{dur(m)}</Chip>
+                {first && can(perms, 'encounter.intake') && <button className={`btn btn-sm ${inRoom.length ? '' : 'btn-primary'}`} disabled={open.isPending} onClick={() => open.mutate(v.id)}>Start</button>}
+              </div>); })}
+            {waiting.length > 6 && <div className="border-t border-line px-4 py-2 text-[12.5px] text-muted">+{waiting.length - 6} more waiting</div>}
           </section>
 
           <section className="fd-sheet overflow-hidden anim-fade-up">
