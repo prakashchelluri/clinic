@@ -71,7 +71,7 @@ const STEPS: [string, string, string, string][] = [
   ['lg-rR', ROLE.reception.line, '01 · Reception', 'Checks in, collects the fee, gives a token'],
   ['lg-rD', ROLE.doctor.line, '02 · Doctor', 'Writes the prescription in minutes'],
   ['lg-rP', ROLE.pharmacy.line, '03 · Pharmacy', 'Finds it waiting, bills it, hands it over'],
-  ['', ROLE.admin.line, 'All day · Admin', 'Sees every step, every rupee, every record'],
+  ['', ROLE.admin.line, 'All day · Admin', 'Sees every step, every rupee, every patient'],
 ];
 
 export function Login() {

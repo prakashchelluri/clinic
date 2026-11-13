@@ -168,7 +168,7 @@ function Reception() {
     <P>To put a second doctor on a sitting as supervisor, open Schedule, choose the sitting, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
 
     <H2 id="payments">Add bill / payment</H2>
-    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sittings paid ahead. It opens from the patient&rsquo;s record, from Collect on the Calendar, and from a procedure course.</P>
+    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sittings paid ahead. It opens from the patient&rsquo;s profile, from Collect on the Calendar, and from a procedure course.</P>
     <Steps>{[
       <>Open <b>Patients</b>, find the patient, and tap <Btn>Add bill / payment</Btn>. Everything due is listed and ticked.</>,
       <>To bill something new, pick it from <b>+ Add an item from the price list</b>.</>,
@@ -193,17 +193,17 @@ function Reception() {
       <>Tap <Btn>Outcome</Btn> on the row and choose what happened: <b>Will come · book</b>, <b>No answer</b>, <b>Call later</b> (choose a date), or <b>Close with a reason</b> (Declined, Done elsewhere, Moved away, Wrong number). A sitting's confirm call also has <b>Confirmed</b>, <b>Wants another day</b> and <b>Not coming</b>.</>,
       <>On <b>No answer</b> you can tick &ldquo;Send a short message with the clinic number&rdquo;. A Sunday date asks you to confirm.</>,
     ]}</Steps>
-    <Tip>Booking and closing with a reason take the patient off the list; the reason stays on the patient's record. Call later puts them at the bottom until that day.</Tip>
+    <Tip>Booking and closing with a reason take the patient off the list; the reason stays in the patient's history. Call later puts them at the bottom until that day.</Tip>
 
-    <H2 id="patients">Patients and the record</H2>
+    <H2 id="patients">Patients and their profile</H2>
     <P>Search by name, phone digits or ID. Each result shows age, last visit and the main problem, so two people with the same name can be told apart. Families may share one phone number: pick the right person.</P>
-    <Table head={['On the record', 'What it is for']} rows={[
+    <Table head={['On the profile', 'What it is for']} rows={[
       ['Chips beside the name', 'VIP, Family and friends, and amber Handle carefully. Hover (or read the banner) for the reason.'],
-      ['Guardian', 'A child has a link to the parent’s own record. “Contact is mother” says who answers the phone.'],
+      ['Guardian', 'A child has a link to the parent’s own profile. “Contact is mother” says who answers the phone.'],
       ['Filter tabs', 'All, Visits, Procedures, Payments, Reports and Missed. Missed lists missed visits and sittings with every call made, in case the patient later says nobody told them.'],
       ['Courses and Bills', 'Each course, what is paid ahead, and every bill with its totals.'],
     ]} />
-    <P>Only the doctor or owner can set a flag. You can see all flags. To change who answers a phone or add a guardian, tap the pencil on the record.</P>
+    <P>Only the doctor or owner can set a flag. You can see all flags. To change who answers a phone or add a guardian, tap the pencil on the profile.</P>
 
     <H2 id="booking">Calendar and bookings</H2>
     <P>The <b>Calendar</b> shows each doctor&rsquo;s booking windows. Tap <Btn>Book</Btn>, find or register the patient, and pick a window. A colour key at the top shows what each colour means. <b>Bookings</b> lists every booking: upcoming, not yet confirmed, past, no-shows and cancelled.</P>

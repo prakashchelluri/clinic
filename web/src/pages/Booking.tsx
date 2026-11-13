@@ -122,7 +122,7 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
       repeat: repeat ? { everyWeeks, count: countN } : undefined, notify, overbook, idempotencyKey: uuid() }),
     onSuccess: (r: any) => {
       const extra = r.series ? ` · ${r.series.created.length} repeat${r.series.created.length === 1 ? '' : 's'} booked${r.series.skipped.length ? `, ${r.series.skipped.length} not booked (${r.series.skipped.map((s: any) => dayLabel(s.day)).join(', ')})` : ''}` : '';
-      toast(`Booked ${r.window.startTime}–${r.window.endTime} · arrive by ${minus(r.window.startTime, r.arriveEarlyMinutes)}${extra}${r.reusedPatient ? ' · on the existing record' : ''}. ${told(r.whatsapp)}`);
+      toast(`Booked ${r.window.startTime}–${r.window.endTime} · arrive by ${minus(r.window.startTime, r.arriveEarlyMinutes)}${extra}${r.reusedPatient ? ' · on the existing profile' : ''}. ${told(r.whatsapp)}`);
       setErr(null); setQ(''); setName(''); setPhone(''); setNote(''); setPatientId(undefined); setRepeat(false); setNewOk(false); onDone();
     },
     onError: (e: any) => setErr(e instanceof ApiError ? e.body : { code: e.message }),

@@ -196,7 +196,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           )}
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
-            {extra}<button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${p.id}`); }}><Icon name="user" />Open full record</button>
+            {extra}<button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${p.id}`); }}><Icon name="user" />View full profile</button>
           </div>
         </>)}
         {shoot && s && <PhotoCapture patient={{ id: p.id, fullName: p.fullName }} sitting={{ id, label: `${label} · ${shoot}` }} phase={shoot} onClose={() => { setShoot(null); qc.invalidateQueries({ queryKey: ['photos', p.id] }); }} />}

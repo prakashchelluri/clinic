@@ -85,7 +85,7 @@ export function ReportDialog({ order, testId, onClose, inVisit }: { order: Order
           </div>
         </div>
         <div><label className="label" htmlFor="rep-note">Note (optional)</label><input id="rep-note" className="input" maxLength={200} placeholder="Anything the doctor should know" value={note} onChange={(e) => setNote(e.target.value)} /></div>
-        <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker || (late ? 'Kept with this test on the patient’s record' : inVisit ? 'The doctor goes over it in the consultation' : rest.length ? 'The doctor sees the order when every result is in' : 'The last result: the order goes to the doctor for review')}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+        <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{blocker || (late ? 'Kept with this test in the patient’s history' : inVisit ? 'The doctor goes over it in the consultation' : rest.length ? 'The doctor sees the order when every result is in' : 'The last result: the order goes to the doctor for review')}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" disabled={save.isPending || !!blocker} onClick={() => save.mutate()}><Icon name="check" />{save.isPending ? 'Saving…' : late ? 'Save' : rest.length || inVisit ? 'Save result' : 'Save and send to the doctor'}</button></div>
       </div>
     </Drawer>
@@ -166,7 +166,7 @@ function OrderDrawer({ o, perms, isDoctor, onAdd, onClose }: { o: Order; perms: 
             : <div className="flex flex-wrap items-center gap-2 border-t border-line/60 pt-4 text-xs text-muted"><span className="min-w-0 flex-1">The consultation is already closed. Mark these results as reviewed.</span><button className="btn btn-primary" disabled={review.isPending} onClick={() => review.mutate()}><Icon name="check" />Mark reviewed</button></div>)
           : <div className="text-sm text-muted">With the doctor for review.</div>)}
 
-        <div className="flex flex-wrap gap-2 border-t border-line/60 pt-4"><button className="btn btn-sm" onClick={() => nav(`/patients/${o.patient.id}`)}>Open record</button></div>
+        <div className="flex flex-wrap gap-2 border-t border-line/60 pt-4"><button className="btn btn-sm" onClick={() => nav(`/patients/${o.patient.id}`)}>View profile</button></div>
       </div>
     </Drawer>
   );

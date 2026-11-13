@@ -128,7 +128,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
       </ol>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3.5">
-        <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Record</button>
+        <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Profile</button>
         {v.encounterId && !left && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
         {v.due?.length > 0 && <Chip tone="rose">{money(v.due.reduce((x: number, c: any) => x + c.amountPaise - (c.paidPaise ?? 0), 0))} due</Chip>}
       </div>

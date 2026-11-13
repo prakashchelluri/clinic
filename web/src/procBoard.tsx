@@ -124,7 +124,7 @@ function CourseSide({ p, canBook, onClose, onSchedule, onCourse, onRecord }: { p
         {p.stage === 'advised' ? <button className="btn btn-sm btn-primary" onClick={onCourse}>Quote and payment</button>
           : open && canBook ? <button className="btn btn-sm btn-primary" onClick={onSchedule}>{p.next ? 'Move sitting' : `Schedule sitting ${p.doneSittings + 1}`}</button> : null}
         {p.stage !== 'advised' && (p.totalPaise == null ? open && p.listPaise != null : p.stillToPayPaise > 0) && <button className="btn btn-sm" onClick={onCourse}>{p.totalPaise == null ? 'Pay for sittings' : 'Take payment'}</button>}
-        <button className="btn btn-sm" onClick={onRecord}>Open record</button>
+        <button className="btn btn-sm" onClick={onRecord}>View profile</button>
       </div>
     </aside>
   );

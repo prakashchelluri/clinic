@@ -37,8 +37,8 @@ function ConsentStep({ patientId, name, onDone, dark = false }: { patientId: str
   return (
     <div className={`mx-auto max-w-md space-y-4 rounded-[10px] p-6 ${dark ? 'bg-white/10 text-white' : 'card'}`}>
       <div className="text-lg font-semibold">Photo consent for {name}</div>
-      <p className={`text-sm ${dark ? 'text-white/80' : 'text-ink-2'}`}>Ask the patient: “We take photos of the treated area to track how the treatment is working. They stay in your record at this clinic and are not shared. Is that all right?”</p>
-      <p className={`text-xs ${dark ? 'text-white/60' : 'text-muted'}`}>Recording consent once covers all later photos. It can be withdrawn from the patient's record at any time.</p>
+      <p className={`text-sm ${dark ? 'text-white/80' : 'text-ink-2'}`}>Ask the patient: “We take photos of the treated area to track how the treatment is working. They stay in your profile at this clinic and are not shared. Is that all right?”</p>
+      <p className={`text-xs ${dark ? 'text-white/60' : 'text-muted'}`}>Recording consent once covers all later photos. It can be withdrawn from the patient’s profile at any time.</p>
       <button className="btn btn-accent w-full justify-center" disabled={m.isPending} onClick={() => m.mutate()}><Icon name="check" />Patient agrees, record consent</button>
     </div>
   );
@@ -180,7 +180,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
       <div className="space-y-3 p-4">
         {q.isLoading ? <Skeleton rows={2} /> : (<>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the record. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>Withdraw</button>}</>
+            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the patient’s history. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>Withdraw</button>}</>
               : <><Chip tone="amber">no photo consent yet</Chip><span>Asked when you first take photos.</span></>}
             {photos.length > 1 && <span className="ml-auto">Pick two photos to compare</span>}
           </div>
@@ -225,7 +225,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
 export function RemovePhoto({ photo, patientId, className = '' }: { photo: any; patientId: string; className?: string }) {
   const del = useMutation({ mutationFn: () => api('DELETE', `/documents/${photo.id}`), onSuccess: () => { refresh(patientId); toast('Photo removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
   return <button type="button" className={`grid h-7 w-7 place-items-center rounded-full bg-black/60 text-white transition-colors hover:bg-rose disabled:opacity-50 ${className}`} aria-label={`Remove photo: ${photo.area ?? 'untagged'}, ${viewLabel(photo.view)}`} title="Remove photo" disabled={del.isPending}
-    onClick={async (e) => { e.stopPropagation(); const r = await ask({ title: 'Remove this photo?', body: `${photo.area ?? 'Photo'}, ${viewLabel(photo.view).toLowerCase()}, taken ${dayLabel(photo.takenAt)}. It is deleted for good: it leaves the patient's record and any comparison.`, confirmLabel: 'Remove photo', tone: 'danger' }); if (r) del.mutate(); }}><Icon name="x" className="h-3.5 w-3.5" /></button>;
+    onClick={async (e) => { e.stopPropagation(); const r = await ask({ title: 'Remove this photo?', body: `${photo.area ?? 'Photo'}, ${viewLabel(photo.view).toLowerCase()}, taken ${dayLabel(photo.takenAt)}. It is deleted for good: it leaves the patient’s history and any comparison.`, confirmLabel: 'Remove photo', tone: 'danger' }); if (r) del.mutate(); }}><Icon name="x" className="h-3.5 w-3.5" /></button>;
 }
 
 /* ---------------- Compare ---------------- */
@@ -254,7 +254,7 @@ export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b:
           <input type="range" min={0} max={100} value={x} onChange={(e) => setX(Number(e.target.value))} aria-label="Slide between before and after" className="absolute inset-x-6 bottom-5 accent-white" />
         </div>
       )}
-      <div className="text-center text-xs text-white/60">{mode === 'slider' ? 'Drag the slider or use the arrow keys · ' : ''}Photos stay inside the clinic record</div>
+      <div className="text-center text-xs text-white/60">{mode === 'slider' ? 'Drag the slider or use the arrow keys · ' : ''}Photos stay inside the clinic</div>
     </div>
   , document.body);
 }
@@ -283,7 +283,7 @@ function PhotoViewer({ photo, list, areas, canWrite, patientId, onClose, onMove 
           <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60" htmlFor="pv-area">Area</label><input id="pv-area" list="pv-areas" maxLength={40} className="w-full rounded-xl bg-white/10 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-white/40" value={area} onChange={(e) => setArea(e.target.value)} /><datalist id="pv-areas">{areas.map((a) => <option key={a} value={a} />)}</datalist></div>
           <div><span className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60">View</span><div className="flex flex-wrap gap-1.5">{VIEWS.map(([k, l]) => <button key={k} onClick={() => setView(k)} className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${view === k ? 'bg-white text-ink' : 'bg-white/10'}`}>{l}</button>)}</div></div>
           <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60" htmlFor="pv-note">Note</label><textarea id="pv-note" maxLength={500} className="min-h-[72px] w-full rounded-xl bg-white/10 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-white/40" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. mild redness after the session" /></div>
-          <div className="flex flex-wrap gap-2"><button className="btn btn-accent" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button><button className="btn !border-white/20 !bg-white/10 !text-white" onClick={async () => { const r = await ask({ title: 'Remove this photo?', body: 'It is deleted from the patient record and cannot be brought back.', confirmLabel: 'Remove photo', tone: 'danger' }); if (r) del.mutate(); }}>Remove</button></div>
+          <div className="flex flex-wrap gap-2"><button className="btn btn-accent" disabled={!dirty || save.isPending} onClick={() => save.mutate()}><Icon name="check" />Save</button><button className="btn !border-white/20 !bg-white/10 !text-white" onClick={async () => { const r = await ask({ title: 'Remove this photo?', body: 'It is deleted from the patient’s history and cannot be brought back.', confirmLabel: 'Remove photo', tone: 'danger' }); if (r) del.mutate(); }}>Remove</button></div>
         </>) : <div className="text-sm text-white/80">{photo.area ?? 'Untagged'} · {viewLabel(photo.view)}{photo.note ? <div className="mt-2">{photo.note}</div> : null}</div>}
       </div>
     </div>

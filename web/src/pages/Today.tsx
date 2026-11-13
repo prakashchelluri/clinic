@@ -206,7 +206,7 @@ function DayDrawer({ item, cfg, canOpen, busy, onStart, onClose }: { item: Item;
         {canOpen && v && v.status === 'in_consult' && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Back to the prescription</button>}
         {canOpen && v && v.status === 'done' && v.encounterStatus === 'draft' && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Finish the note</button>}
         {item.proc && <button className="btn" onClick={() => nav(`/worklist?tab=today&day=${today()}`)}>Open procedures</button>}
-        {item.patientId && <button className="btn" onClick={() => nav(`/patients/${item.patientId}`)}>Open record</button>}
+        {item.patientId && <button className="btn" onClick={() => nav(`/patients/${item.patientId}`)}>View profile</button>}
       </div>
     </aside>, document.body);
 }

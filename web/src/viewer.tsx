@@ -55,7 +55,7 @@ function Viewer({ v }: { v: View }) {
     f.srcdoc = `<img src="${url}" style="max-width:100%">`; f.onload = () => { f.contentWindow?.focus(); f.contentWindow?.print(); setTimeout(() => f.remove(), 3000); }; document.body.appendChild(f);
   };
   const remove = async () => {
-    const a = await ask({ title: 'Delete this document?', body: `${d.title} is removed from the patient record. This cannot be undone.`, confirmLabel: 'Delete', cancelLabel: 'Keep', tone: 'danger' });
+    const a = await ask({ title: 'Delete this document?', body: `${d.title} is removed from the patient's history. This cannot be undone.`, confirmLabel: 'Delete', cancelLabel: 'Keep', tone: 'danger' });
     if (!a) return;
     try { await api('DELETE', `/documents/${d.id}`); } catch (e) { toast(errText(e), 'err'); return; }
     ['documents', 'results', 'photos', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
