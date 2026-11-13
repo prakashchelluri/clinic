@@ -105,7 +105,7 @@ export function Today() {
 
   return (
     <div className="fd-doc space-y-4">
-      <h1 className="sr-only">Dashboard</h1>
+      <h1 className="sr-only">Calendar</h1>
 
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
         {/* the calendar: my own, or every doctor's for the owner; Today by the hour or the Week */}

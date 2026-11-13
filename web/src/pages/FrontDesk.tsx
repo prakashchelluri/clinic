@@ -270,7 +270,7 @@ export function FrontDesk() {
 
   return (
     <div className="fd flex min-h-0 flex-1 flex-col">
-      <h1 className="sr-only">Dashboard</h1>
+      <h1 className="sr-only">Calendar</h1>
       {tab !== 'history' && !onSchedule && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
         {canDesk && <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} />}
         <span className="ml-auto" />

@@ -22,7 +22,7 @@ type Badge = { n: number; warn?: boolean; hint: string };
 type Badges = Record<string, Badge | undefined>;
 export const NAV: NavItem[] = [
   // one home for doctors, the junior doctor and the desk: the calendar and what needs you (it replaced Today, Front desk and Appointments)
-  { to: '/dashboard', label: 'Dashboard', icon: 'calendar', show: (c) => c('encounter.complete') || c('visit.write') || c('encounter.intake') },
+  { to: '/dashboard', label: 'Calendar', icon: 'calendar', show: (c) => c('encounter.complete') || c('visit.write') || c('encounter.intake') },
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', icon: 'syringe', show: (c) => c('worklist.read') },
   { to: '/calls', label: 'Calls', icon: 'phone', show: (c) => c('worklist.read') },
