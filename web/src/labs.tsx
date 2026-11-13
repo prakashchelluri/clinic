@@ -5,6 +5,7 @@ import { FileText } from 'lucide-react';
 import { Drawer, Chip, Icon, fmtDate, toast } from './ui';
 import { openViewer } from './viewer';
 import { LabHistoryDrawer, dedupe } from './labHistory';
+import { UploadButton } from './encounterDetail';
 
 /** The report file behind a result or an ordered test: the one the value was typed from, else one uploaded against that test. */
 export const reportFor = (docs: any[], documentId: string | null | undefined, recommendationId: string | null | undefined) =>
@@ -67,24 +68,44 @@ export async function saveLabValues(b: { patientId: string; encounterId?: string
 
 
 /** The pad's Lab results card body: this consultation's values first, else the latest of each test; earlier values beside; history on tap; the doctor can correct a value or add more. */
-export function LabResultsCard({ patientId, encounterId, recIds, params, readOnly, printOut, onPrintOut, docs = [] }: { patientId: string; encounterId: string; recIds: string[]; params: LabParam[]; readOnly: boolean; printOut: boolean; onPrintOut: (v: boolean) => void; docs?: any[] }) {
+export type OrderedTest = { id?: string; name: string; done: boolean; note?: string };
+export function LabResultsCard({ patientId, encounterId, recIds, params, readOnly, printOut, onPrintOut, docs = [], ordered }: { /** the tests ordered on this consultation: listed first with their status, values added inside each row */ ordered?: OrderedTest[]; patientId: string; encounterId: string; recIds: string[]; params: LabParam[]; readOnly: boolean; printOut: boolean; onPrintOut: (v: boolean) => void; docs?: any[] }) {
   const q = useLabResults(patientId);
   const [adding, setAdding] = useState(false); const [draft, setDraft] = useState<LabDraft[]>([]); const [history, setHistory] = useState<string | null>(null); // '' the whole table, a name that test's trend
   const [editing, setEditing] = useState<{ id: string; value: string } | null>(null);
+  const [inlineFor, setInlineFor] = useState<string | null>(null); // the ordered test whose values are being typed in its own row
   const all = q.data ?? [];
   const mine = all.filter((r) => r.encounterId === encounterId || (r.recommendationId && recIds.includes(r.recommendationId)));
   const shown = (mine.length ? mine : Object.values(all.reduce((m, r) => (m[r.test] && m[r.test].takenOn >= r.takenOn ? m : { ...m, [r.test]: r }), {} as Record<string, LabRow>))).sort((a, b) => Number(out(b.flag)) - Number(out(a.flag)) || a.test.localeCompare(b.test));
   const earlier = (r: LabRow) => dedupe(all).filter((x) => x.test === r.test && x.takenOn < r.takenOn).sort((a, b) => a.takenOn.localeCompare(b.takenOn)).slice(-3);
   const fix = useMutation({ mutationFn: (x: { id: string; value: string }) => patch(`/lab-results/${x.id}`, { value: x.value }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['labs', patientId] }); setEditing(null); }, onError: (e) => toast(errText(e), 'err') });
-  const add = useMutation({ mutationFn: () => saveLabValues({ patientId, encounterId, rows: draft }), onSuccess: (rows) => { toast(rows.length ? `${rows.length} value${rows.length === 1 ? '' : 's'} saved` : 'Nothing to save', rows.length ? 'ok' : 'info'); setAdding(false); setDraft([]); }, onError: (e) => toast(errText(e), 'err') });
+  const add = useMutation({ mutationFn: () => saveLabValues({ patientId, encounterId, rows: draft }), onSuccess: (rows) => { toast(rows.length ? `${rows.length} value${rows.length === 1 ? '' : 's'} saved` : 'Nothing to save', rows.length ? 'ok' : 'info'); setAdding(false); setInlineFor(null); setDraft([]); }, onError: (e) => toast(errText(e), 'err') });
+  const editor = (onCancel: () => void) => <>
+    <LabValuesEditor rows={draft} onChange={setDraft} params={params} />
+    <div className="mt-2 flex justify-end gap-2"><button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button><button type="button" className="btn btn-primary btn-sm" disabled={add.isPending || !draft.some((r) => r.test.trim() && r.value.trim())} onClick={() => add.mutate()}>Save values</button></div></>;
+  const orderedList = ordered && ordered.length > 0 && <div className="mb-4 space-y-2">
+    {ordered.map((t) => { const doc = t.id ? reportFor(docs, null, t.id) : null; return (
+      <div key={t.id ?? t.name} className="rounded-[8px] border border-line p-3">
+        <div className="flex items-center gap-2"><b className="min-w-0 flex-1 truncate text-[14.5px] font-semibold">{t.name}</b>
+          <Chip tone={t.done ? 'sage' : 'amber'}>{t.done ? 'Received' : 'Pending'}</Chip></div>
+        {t.note && <div className="mt-1 text-[13px] text-muted">{t.note}</div>}
+        {inlineFor === t.name ? <div className="mt-3">{editor(() => { setInlineFor(null); setDraft([]); })}</div>
+          : <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            {!readOnly && <button type="button" className="btn btn-sm" onClick={() => { setAdding(false); setDraft([{ test: t.name, value: '', note: '' }]); setInlineFor(t.name); }}>Add values</button>}
+            {!readOnly && t.id && <UploadButton patientId={patientId} encounterId={encounterId} recommendationId={t.id} label="Upload report" onDone={() => qc.invalidateQueries({ queryKey: ['documents', patientId] })} />}
+            {doc && <ReportLink doc={doc} patientId={patientId} encounterId={readOnly ? undefined : encounterId} />}
+          </div>}
+      </div>); })}
+  </div>;
   return (
     <div>
+      {orderedList}
       <div className="mb-1.5 flex flex-wrap items-center gap-3 text-xs text-muted">
         {shown.length > 0 && <span>{mine.length ? 'Values for this consultation' : 'Latest values on record'}</span>}
         {shown.length === 0 && <span>{q.isLoading ? 'Loading…' : 'No values yet.'}</span>}
         {shown.length > 0 && <label className="ml-auto inline-flex items-center gap-1.5 font-medium text-ink-2"><input type="checkbox" className="accent-ink" checked={printOut} disabled={readOnly} onChange={(e) => onPrintOut(e.target.checked)} />Print only out-of-range</label>}
         {all.length > 0 && <button type="button" className={`btn btn-sm ${shown.length ? '' : 'ml-auto'}`} onClick={() => setHistory('')}><Icon name="chart" className="h-3.5 w-3.5" />See history</button>}
-        {!readOnly && <button type="button" className={`btn btn-sm ${shown.length || all.length ? "" : "ml-auto"}`} onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add values</button>}
+        {!readOnly && <button type="button" className={`btn btn-sm ${shown.length || all.length ? "" : "ml-auto"}`} onClick={() => { setInlineFor(null); setDraft([]); setAdding(true); }}><Icon name="plus" className="h-3.5 w-3.5" />{ordered?.length ? 'Add other values' : 'Add values'}</button>}
       </div>
       {q.isLoading || shown.length === 0 ? null : (
         <div className="grid grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_96px_28px] items-center gap-x-2 text-[13px]">
@@ -102,7 +123,8 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
             </div>); })}
         </div>)}
       {history !== null && <LabHistoryDrawer patientId={patientId} docs={docs} test={history || undefined} onClose={() => setHistory(null)} />}
-      {adding && <Drawer title="Add lab values" subtitle="Typed from the report in hand. Units and ranges come from the clinic's list." onClose={() => setAdding(false)} width="max-w-2xl">
+      {adding && ordered && <div className="mt-3 rounded-[8px] border border-line p-3">{editor(() => setAdding(false))}</div>}
+      {adding && !ordered && <Drawer title="Add lab values" subtitle="Typed from the report in hand. Units and ranges come from the clinic's list." onClose={() => setAdding(false)} width="max-w-2xl">
         <LabValuesEditor rows={draft} onChange={setDraft} params={params} />
         <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setAdding(false)}>Cancel</button><button className="btn btn-primary" disabled={add.isPending || !draft.some((r) => r.test.trim() && r.value.trim())} onClick={() => add.mutate()}>Save values</button></div>
       </Drawer>}

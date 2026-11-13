@@ -463,3 +463,11 @@ html[data-theme="dark"] .side-dark { --color-paper: #09090B; --color-surface: #1
 .pad-calm [data-act="templates"] .tpl-tag b { font-weight: 700; }
 .pad-calm [data-act="templates"] .tpl-tag sub { margin-left: 1px; font-size: 10.5px; font-weight: 600; bottom: -0.15em; }
 .pad-calm [data-act="templates"]:hover .tpl-tag { color: var(--color-clay); }
+
+/* A drawer from the left (the pad's summary drawers, v69): it opens beside the rows that open it, so the sections on the right stay in view.
+   On a record the side menu is the 64px rail, so the drawer starts after it. */
+@keyframes slide-in-left { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+.modal-back.is-drawer.from-left { justify-content: flex-start; }
+.modal-back.is-drawer.from-left .modal-panel { border-left: 0; border-right: 1px solid var(--color-line); box-shadow: 16px 0 40px -24px rgba(16, 24, 40, .25); animation: slide-in-left 0.2s var(--ease) both; }
+@media (min-width: 768px) { .modal-back.is-drawer.from-left { padding-left: 64px; } }
+@media (prefers-reduced-motion: reduce) { .modal-back.is-drawer.from-left .modal-panel { animation: none; } }

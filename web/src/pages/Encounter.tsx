@@ -15,7 +15,7 @@ import { FlagChips, CarefulBanner } from '../flags';
 import { useTemplates, suggests, norm, uniq, type Tmpl, type TmplKind } from '../templates';
 import { ScreenBlock, ScreeningCard, checklists, complaintTexts, type Answers, type History } from '../screening';
 import { HistoryChips, HistorySheet } from '../historyChips';
-import { VitalsCard, vitalFields, vitalsText, bmiOf } from '../vitals';
+import { VitalsCard, vitalFields, vitalsText, bmiOf, vitalFlag } from '../vitals';
 import { LabResultsCard, ReportLink, reportFor } from '../labs';
 import { ReportList } from '../labHistory';
 import type { PadCanvas } from '../padCanvas';
@@ -288,7 +288,8 @@ export function Encounter() {
   const [errors, setErrors] = useState<{ path: string; message: string }[]>([]);
   const [showMissing, setShowMissing] = useState(false); // Finish was tried: list what is still missing until it is complete
   const [savedAt, setSavedAt] = useState<string>('');
-  const [side, setSide] = useState<string | null>(null); // Stacked: the left column's open drawer (vitals, history, notes, records, results, canvas)
+  const [side, setSideS] = useState<string | null>(null); const [sideDirty, setSideDirty] = useState(0); // the open summary drawer, and how much in it is not saved
+  const setSide = (k: string | null) => { setSideDirty(0); setSideS(k); }; // Stacked: the left column's open drawer (vitals, history, notes, records, results, canvas)
   const [viewing, setViewing] = useState<string | null>(null);
   const [testDraft, setTestDraft] = useState('');
   const [applied, setApplied] = useState<string | null>(null); const undo = useRef<{ data: any; rx: RxItem[]; recs: Rec[] } | null>(null);
@@ -785,22 +786,18 @@ export function Encounter() {
   const records = myDocs.filter((d: any) => d.kind !== 'photo' && d.kind !== 'canvas');
   const canvases: PadCanvas[] = Array.isArray(data.canvases) ? data.canvases : [];
   const LEFT: Record<string, { title: string; brief: string | null; body: () => ReactNode; width?: string }> = {
-    vitals: { title: 'Vitals & body composition', brief: brief.vitals, body: () => <VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} settings={cfg?.tenant?.settings} /> },
-    history: { title: 'Medical history', brief: brief.history, width: 'max-w-3xl', body: () => <HistorySheet patientId={p.id} history={p.history ?? {}} categories={cfg?.historyCategories ?? []} readOnly={readOnly} onDone={() => setSide(null)} /> },
-    notes: { title: 'Private notes', brief: brief.notes, body: () => <div><div className="mb-2 text-[12.5px] text-muted">Only for you and the clinic: never printed or sent.</div><textarea autoFocus aria-label="Private notes" className="input min-h-40" maxLength={2000} placeholder="Write your notes" value={data.notes?.private ?? ''} disabled={readOnly} onChange={(ev) => set('notes', 'private', ev.target.value)} /><div className="mt-3 flex justify-end"><button type="button" className="btn btn-primary" onClick={() => setSide(null)}>Done</button></div></div> },
-    records: { title: 'Medical records', brief: records.length ? `${records.length} file${records.length === 1 ? '' : 's'}` : null, width: 'max-w-3xl', body: () => <div>
+    vitals: { title: 'Vitals & body composition', brief: brief.vitals, width: 'max-w-xl', body: () => <><VitalsCard encounterId={id!} patientId={p.id} details={e.visit?.details ?? {}} heightCm={p.history?.heightCm} readOnly={readOnly} settings={cfg?.tenant?.settings} /><div className="modal-foot"><span className="mr-auto text-[13px] text-muted">Each value saves as you change it</span><button type="button" className="btn btn-primary" onClick={() => setSide(null)}>Done</button></div></> },
+    history: { title: 'Medical history', brief: brief.history, width: 'max-w-2xl', body: () => <HistorySheet onDirty={setSideDirty} patientId={p.id} history={p.history ?? {}} categories={cfg?.historyCategories ?? []} readOnly={readOnly} onDone={() => setSide(null)} /> },
+    notes: { title: 'Private notes', brief: brief.notes, width: 'max-w-xl', body: () => <div><textarea autoFocus aria-label="Private notes" className="input min-h-40" maxLength={2000} placeholder="Write your notes" value={data.notes?.private ?? ''} disabled={readOnly} onChange={(ev) => set('notes', 'private', ev.target.value)} /><div className="modal-foot"><span className="mr-auto text-[13px] text-muted">Saves with the pad; never printed or sent</span><button type="button" className="btn btn-primary" onClick={() => setSide(null)}>Done</button></div></div> },
+    records: { title: 'Medical records', brief: records.length ? `${records.length} file${records.length === 1 ? '' : 's'}` : null, width: 'max-w-2xl', body: () => <div>
       <div className="mb-2 flex items-center gap-2"><span className="text-xs text-muted">Lab reports, scans and letters</span><span className="ml-auto" />{can(perms, 'document.write') && <UploadButton patientId={p.id} encounterId={id} label="Upload" onDone={() => qc.invalidateQueries({ queryKey: ['documents', p.id] })} />}</div>
-      {records.length ? <ReportList docs={records} patientId={p.id} encounterId={readOnly ? undefined : id} who={p.fullName} /> : <div className="text-xs text-muted">No records yet.</div>}</div> },
-    results: { title: 'Investigation results', brief: brief.results, width: 'max-w-4xl', body: () => <LabResultsCard patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} docs={myDocs} /> },
-    canvas: { title: 'Canvas', brief: canvases.length ? canvases.map((c) => c.name).join(', ') : null, width: 'max-w-2xl', body: () => <Suspense fallback={<Skeleton rows={3} />}><CanvasDrawer canvases={canvases} onChange={(xs) => setData((d) => ({ ...d, canvases: xs }))} patientId={p.id} encounterId={id!} readOnly={readOnly} /></Suspense> },
+      {records.length ? <ReportList docs={records} patientId={p.id} encounterId={readOnly ? undefined : id} who={p.fullName} /> : <div className="text-xs text-muted">No records yet.</div>}<div className="modal-foot"><span className="mr-auto text-[13px] text-muted">Uploads save straight away</span><button type="button" className="btn btn-primary" onClick={() => setSide(null)}>Done</button></div></div> },
+    results: { title: 'Investigation results', brief: brief.results, width: 'max-w-2xl', body: () => <><LabResultsCard ordered={testRecs.map((r: any) => ({ id: r.id, name: r.notes ?? 'Test', done: r.status === 'done', note: data.plan?.testNotes?.[r.notes] }))} patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} docs={myDocs} /><div className="modal-foot"><span className="mr-auto text-[13px] text-muted">Values and reports save straight away</span><button type="button" className="btn btn-primary" onClick={() => setSide(null)}>Done</button></div></> },
+    canvas: { title: 'Canvas', brief: canvases.length ? canvases.map((c) => c.name).join(', ') : null, width: 'max-w-2xl', body: () => <><Suspense fallback={<Skeleton rows={3} />}><CanvasDrawer canvases={canvases} onChange={(xs) => setData((d) => ({ ...d, canvases: xs }))} patientId={p.id} encounterId={id!} readOnly={readOnly} /></Suspense><div className="modal-foot"><span className="mr-auto text-[13px] text-muted">Saves with the pad</span><button type="button" className="btn btn-primary" onClick={() => setSide(null)}>Done</button></div></> },
   };
   // the clinic's pad settings still say which show; records and canvas are the doctor's, always there
-  // ponytail: adult reference ranges, fixed here; per-clinic or per-age ranges are the upgrade path
-  const vFlag = (k: string, raw: any): '' | 'high' | 'low' => { const n = Number(raw);
-    if (k === 'temp_f') return n >= 99.5 ? 'high' : n && n < 96.5 ? 'low' : ''; if (k === 'spo2') return n && n < 95 ? 'low' : ''; if (k === 'pulse') return n > 100 ? 'high' : n && n < 50 ? 'low' : '';
-    if (k === 'bmi') return n >= 30 ? 'high' : n && n < 18.5 ? 'low' : ''; if (k === 'bp') { const m = /^(\d+)\/(\d+)$/.exec(String(raw)); return m ? (+m[1] >= 140 || +m[2] >= 90 ? 'high' : +m[1] < 90 ? 'low' : '') : ''; } return ''; };
-  const vitalCells: [string, string, string][] = vitalFields(cfg?.tenant?.settings).filter((x) => vd[x.key] !== undefined && vd[x.key] !== null && vd[x.key] !== '').map((x) => [x.label, `${vd[x.key]}${x.unit && x.key !== 'bp' ? ` ${x.unit}` : ''}`, vFlag(x.key, vd[x.key])]);
-  { const b = bmiOf(Number(vd.weight_kg) || null, Number(vd.height_cm ?? p.history?.heightCm) || null); if (b) vitalCells.push(['BMI', String(b), vFlag('bmi', b)]); }
+  const vitalCells: [string, string, string][] = vitalFields(cfg?.tenant?.settings).filter((x) => vd[x.key] !== undefined && vd[x.key] !== null && vd[x.key] !== '').map((x) => [x.label, `${vd[x.key]}${x.unit && x.key !== 'bp' ? ` ${x.unit}` : ''}`, vitalFlag(x.key, vd[x.key])]);
+  { const b = bmiOf(Number(vd.weight_kg) || null, Number(vd.height_cm ?? p.history?.heightCm) || null); if (b) vitalCells.push(['BMI', String(b), vitalFlag('bmi', b)]); }
   const leftKeys = ['vitals', 'history', 'notes', 'records', 'results', 'canvas'].filter((k) => (['records', 'canvas', 'notes', 'results'].includes(k) ? isDoctor : true) && (['records', 'canvas'].includes(k) || order.includes(k)));
   const notSaved = <span className="rounded-[7px] bg-amber-soft px-2 py-0.5 text-xs font-semibold text-amber" role="alert">{saveFailed === 'kept' ? 'Not saved — kept on this computer, will send when the internet is back' : 'Not saved — your notes are still here. Try Save again.'}</span>;
   const restoreAt = restore ? new Date(restore.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -924,7 +921,7 @@ export function Encounter() {
         {can(perms, 'document.write') && !readOnly && <button className="btn btn-sm" onClick={() => setCapture(true)}><Icon name="spark" className="h-3.5 w-3.5" />Take photo</button>}
       </div>}
 
-      {side && LEFT[side] && <Drawer title={LEFT[side].title} subtitle={p.fullName} width={LEFT[side].width ?? 'max-w-xl'} onClose={() => setSide(null)}>{LEFT[side].body()}</Drawer>}
+      {side && LEFT[side] && <Drawer from="left" dirty={sideDirty > 0} title={LEFT[side].title} subtitle={p.fullName} width={LEFT[side].width ?? 'max-w-xl'} onClose={() => setSide(null)}>{LEFT[side].body()}</Drawer>}
       {viewing && <EncounterModal id={viewing} onClose={() => setViewing(null)} />}
       {checking && <ReasonSheet warnings={checking} onCancel={() => { setChecking(null); goTo('medicines'); }} onDone={giveReasons} />}
       {signing && <Modal title={amended ? 'Sign the amended prescription' : 'Sign the prescription'} subtitle={p.fullName} width="max-w-2xl" onClose={() => setSigning(false)}>

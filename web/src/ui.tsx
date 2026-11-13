@@ -323,7 +323,7 @@ export const Drawer = (p: Omit<Parameters<typeof Modal>[0], 'side'>) => <Modal {
 
 /** A dialog. A click on the dim area does nothing (a stray click must not lose a form); Esc and × close it.
  *  With `dirty`, Esc and × first ask "Discard changes?". */
-export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false, dirty = false, side = false }: { title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean; dirty?: boolean; side?: boolean }) {
+export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl', submitOnEnter = false, dirty = false, side = false, from = 'right' }: { /** a drawer that slides in from the left (the pad's summary drawers) */ from?: 'left' | 'right'; title: ReactNode; subtitle?: ReactNode; onClose: () => void; children: ReactNode; width?: string; submitOnEnter?: boolean; dirty?: boolean; side?: boolean }) {
   const panel = useRef<HTMLDivElement>(null); const close = useRef(onClose); close.current = onClose; const id = useId();
   const isDirty = useRef(dirty); isDirty.current = dirty;
   const tryClose = useRef(async () => {
@@ -344,7 +344,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k);
   }, [submitOnEnter]);
   return createPortal(
-    <div className={`modal-back ${side ? 'is-drawer' : ''}`} role="dialog" aria-modal={!side} aria-labelledby={id}>
+    <div className={`modal-back ${side ? 'is-drawer' : ''} ${side && from === 'left' ? 'from-left' : ''}`} role="dialog" aria-modal={!side} aria-labelledby={id}>
       <div ref={panel} tabIndex={-1} className={`modal-panel ${side ? '' : SIZE[width] ?? 'sm:max-w-[720px]'}`} style={side ? { width: DRAWER[width] ?? 640 } : undefined}>
         <span className="modal-grab" aria-hidden />
         <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={tryClose} aria-label="Close"><Icon name="x" /></button></div>

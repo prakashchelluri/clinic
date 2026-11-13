@@ -29,6 +29,12 @@ export const enabledVitals = (settings: any): VitalField[] => { const on: string
 export const vitalsText = (details: Record<string, any>, fields: VitalField[]) => fields.filter((v) => details?.[v.key] !== undefined && details[v.key] !== null && details[v.key] !== '')
   .map((v) => (['weight_kg', 'height_cm', 'temp_f'].includes(v.key) ? `${details[v.key]} ${v.unit}` : `${v.label} ${details[v.key]}${v.unit && v.key !== 'bp' ? ` ${v.unit}` : ''}`)).join(' · ');
 export const bmiOf = (w?: number | null, h?: number | null) => (w && h ? Math.round((w / ((h / 100) ** 2)) * 10) / 10 : null);
+// ponytail: adult reference ranges, fixed here; per-clinic or per-age ranges are the upgrade path
+/** A reading outside the usual adult range: 'high', 'low' or ''. The pad's summary and the Vitals drawer both use it. */
+export const vitalFlag = (k: string, raw: any): '' | 'high' | 'low' => { const n = Number(raw);
+  if (raw === undefined || raw === null || raw === '') return '';
+  if (k === 'temp_f') return n >= 99.5 ? 'high' : n < 96.5 ? 'low' : ''; if (k === 'spo2') return n < 95 ? 'low' : ''; if (k === 'pulse') return n > 100 ? 'high' : n < 50 ? 'low' : '';
+  if (k === 'bmi') return n >= 30 ? 'high' : n < 18.5 ? 'low' : ''; if (k === 'bp') { const m = /^(\d+)\/(\d+)$/.exec(String(raw)); return m ? (+m[1] >= 140 || +m[2] >= 90 ? 'high' : +m[1] < 90 ? 'low' : '') : ''; } return ''; };
 const bmiWord = (b: number) => (b < 18.5 ? 'low' : b < 25 ? 'normal' : b < 30 ? 'high' : 'obese');
 
 /** Vitals on the pad: tiles the doctor taps to change, BMI worked out, past values per visit on tap. The front desk fills them at check-in.
@@ -47,16 +53,16 @@ export function VitalsCard({ encounterId, patientId, details, heightCm, readOnly
   return (
     <div>
       <div className="flex flex-wrap items-stretch gap-1.5">
-        {VITALS.map((v) => { const cur = d[v.key]; const on = edit === v.key; return (
+        {VITALS.map((v) => { const cur = d[v.key]; const on = edit === v.key; const fl = on ? '' : vitalFlag(v.key, cur); return (
           <button key={v.key} type="button" disabled={readOnly} onClick={() => { if (!on) { setEdit(v.key); setVal(cur === undefined || cur === null ? '' : String(cur)); } }}
-            className={`flex min-w-[112px] items-baseline gap-1.5 rounded-lg border bg-surface px-3 py-2 text-left ${on ? 'border-ink shadow-[0_0_0_3px_rgba(21,24,27,.08)]' : 'border-line hover:border-muted'} ${readOnly ? 'cursor-default' : ''}`} aria-label={`${v.label}${cur !== undefined && cur !== null ? ` ${cur} ${v.unit}` : ', not recorded'}`}>
-            <span className="text-[11px] font-semibold uppercase tracking-[.06em] text-muted">{v.label}</span>
+            title={fl ? `${v.label} ${fl}` : undefined} className={`flex min-w-[112px] items-baseline gap-1.5 rounded-lg border px-3 py-2 text-left ${fl ? 'border-rose/40 bg-rose-soft text-rose' : 'bg-surface'} ${on ? 'border-ink shadow-[0_0_0_3px_rgba(21,24,27,.08)]' : fl ? '' : 'border-line hover:border-muted'} ${readOnly ? 'cursor-default' : ''}`} aria-label={`${v.label}${cur !== undefined && cur !== null ? ` ${cur} ${v.unit}` : ', not recorded'}`}>
+            <span className={`text-[11px] font-semibold uppercase tracking-[.06em] ${fl ? 'text-rose' : 'text-muted'}`}>{v.label}{fl ? ` · ${fl}` : ''}</span>
             {on ? (v.type === 'number' ? <NumInput autoFocus decimal={v.decimal} max={v.max} aria-label={v.label} className="w-14 bg-transparent text-[15px] font-semibold outline-none" value={val} onChange={(e) => setVal(e.target.value)} onBlur={() => commit(v.key)} onKeyDown={(e) => { if (e.key === 'Enter') commit(v.key); if (e.key === 'Escape') setEdit(null); }} />
               : <input autoFocus aria-label={v.label} className="w-16 bg-transparent text-[15px] font-semibold outline-none" maxLength={v.key === 'bp' ? 9 : 20} placeholder={v.ph ?? ''} value={val} onChange={(e) => setVal(v.key === 'bp' ? e.target.value.replace(/[^\d/]/g, '') : e.target.value)} onBlur={() => commit(v.key)} onKeyDown={(e) => { if (e.key === 'Enter') commit(v.key); if (e.key === 'Escape') setEdit(null); }} />)
               : <b className={`text-[15px] ${cur === undefined || cur === null || cur === '' ? 'font-normal text-muted' : ''}`}>{cur === undefined || cur === null || cur === '' ? '—' : cur}</b>}
             {cur !== undefined && cur !== null && cur !== '' && !on && v.unit && <span className="text-xs text-muted">{v.unit}</span>}
           </button>); })}
-        {bmi !== null && <div className="flex min-w-[112px] items-baseline gap-1.5 rounded-lg border border-line bg-surface-2 px-3 py-2"><span className="text-[11px] font-semibold uppercase tracking-[.06em] text-muted">BMI</span><b className="text-[15px]">{bmi}</b><span className={`chip ${bmi >= 25 || bmi < 18.5 ? 'chip-amber' : 'chip-sage'}`}>{bmiWord(bmi)}</span></div>}
+        {bmi !== null && <div className={`flex min-w-[112px] items-baseline gap-1.5 rounded-lg border px-3 py-2 ${vitalFlag('bmi', bmi) ? 'border-rose/40 bg-rose-soft text-rose' : 'border-line bg-surface-2'}`}><span className={`text-[11px] font-semibold uppercase tracking-[.06em] ${vitalFlag('bmi', bmi) ? 'text-rose' : 'text-muted'}`}>BMI{vitalFlag('bmi', bmi) ? ` · ${vitalFlag('bmi', bmi)}` : ''}</span><b className="text-[15px]">{bmi}</b><span className={`chip ${bmi >= 25 || bmi < 18.5 ? 'chip-amber' : 'chip-sage'}`}>{bmiWord(bmi)}</span></div>}
         <button ref={anchor} type="button" className="btn btn-ghost btn-sm self-center" aria-expanded={past} onClick={() => setPast(!past)}>Past values</button>
       </div>
       <Floating anchor={anchor} open={past} onClose={() => setPast(false)} width={Math.min(140 + (VITALS.length + 1) * 92, 900)}>
