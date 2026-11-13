@@ -73,8 +73,8 @@ function Step({ i = 0, state, title, meta, last, children }: { i?: number; state
 }
 
 /** One patient's day, top to bottom; the open tasks sit inside the step they belong to. */
-export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk, onSendIn, onToJunior, canSend, onClose }: {
-  v: any; order?: any; screening: 'off' | 'first' | 'required'; inLine: number; arrangeSlot: React.ReactNode; canDesk: boolean;
+export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk, onSendIn, onToJunior, canSend, onClose, action }: {
+  v: any; order?: any; screening: 'off' | 'first' | 'required'; inLine: number; arrangeSlot: React.ReactNode; canDesk: boolean; /** the doctor's one button (Start consultation…) */ action?: React.ReactNode;
   onSendIn: (id: string) => void; onToJunior?: (id: string) => void; canSend: (v: any) => { ok: boolean; why: string }; onClose: () => void;
 }) {
   const nav = useNavigate(); const { cfg } = useOutletContext<any>() ?? {};
@@ -105,6 +105,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
         <button className="btn btn-icon" aria-label="Close" title="Close" onClick={onClose}><Icon name="x" className="h-4 w-4" /></button>
       </div>
 
+      {action}
       <PatientActions patientId={v.patient.id} name={v.patient.fullName} />
       <ol className="m-0 list-none p-0">
         <Step i={0} state="done" title="Checked in" meta={`${hhmm(v.arrivedAt)} · ${v.category}`}>{d.complaint && <div className="mt-0.5 text-[12.5px] text-muted">{d.complaint}</div>}</Step>
@@ -114,8 +115,8 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
           {canDesk && waiting && (() => { const s = canSend(v); return <div className="mt-2"><SendIn ok={s.ok} why={s.why} onClick={() => onSendIn(v.id)} /></div>; })()}
         </Step>
         <Step i={3} state={arr[0]} title="Tests & procedures" meta={arr[1]}>
-          {seen && recs.length > 0 && (open.length ? <div className="mt-2">{arrangeSlot}</div>
-            : <ul className="mt-1 space-y-0.5 text-[12.5px] text-muted">{recs.map((r: any) => <li key={r.id} className="flex items-center gap-1.5"><Icon name="check" className="h-3.5 w-3.5 text-clay" />{recName(r)}</li>)}</ul>)}
+          {seen && recs.length > 0 && (open.length && arrangeSlot ? <div className="mt-2">{arrangeSlot}</div>
+            : <ul className="mt-1 space-y-0.5 text-[12.5px] text-muted">{recs.map((r: any) => <li key={r.id} className="flex items-center gap-1.5">{open.includes(r) ? <i className="mx-[3px] h-2 w-2 rounded-full bg-amber" /> : <Icon name="check" className="h-3.5 w-3.5 text-clay" />}{recName(r)}{open.includes(r) ? ' · pending' : ''}</li>)}</ul>)}
         </Step>
         <Step i={4} state={rep[0]} title="Reports" meta={rep[1]}>
           {order && held && <div className="mt-1.5 space-y-1.5 text-[12.5px] text-muted">{order.tests.map((t: any) => (

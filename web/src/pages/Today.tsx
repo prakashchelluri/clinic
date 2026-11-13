@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
@@ -14,6 +13,7 @@ import { DiscountAsks, useDiscountAsks } from '../takePayment';
 import { DaySchedule } from './frontDeskSchedule';
 import { AppointmentDrawer } from '../apptDrawer';
 import { ArrivalSheet } from './FrontDesk';
+import { JourneyPanel } from './frontDeskJourney';
 import '../frontdesk.css';
 
 const minsSince = (iso: string) => Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -167,7 +167,11 @@ export function Today() {
           </section>
         </div>
       </div>
-      {picked && <DayDrawer item={picked} cfg={cfg} canOpen={can(perms, 'encounter.intake')} busy={open.isPending} onStart={(id) => open.mutate(id)} onClose={() => setPicked(null)} />}
+      {/* a patient of the day: the same journey drawer reception sees, with the doctor's one button on top */}
+      {picked?.visit && (() => { const v = (d.visits ?? []).find((x: any) => x.id === picked.visit.id) ?? picked.visit; const busy = open.isPending; const go = () => open.mutate(v.id); const ok = can(perms, 'encounter.intake');
+        const btn = !ok ? null : ['waiting', 'screened'].includes(v.status) ? 'Start consultation' : v.status === 'in_consult' ? 'Back to the prescription' : v.status === 'done' && v.encounterStatus === 'draft' ? 'Finish the note' : null;
+        return <JourneyPanel key={v.id} v={v} screening={screening} inLine={waiting.findIndex((x) => x.id === v.id) + 1} canDesk={false} arrangeSlot={null} canSend={() => ({ ok: false, why: '' })} onSendIn={() => {}} onClose={() => setPicked(null)}
+          action={btn && <button className="btn btn-primary justify-center" disabled={busy} onClick={go}>{btn}</button>} />; })()}
       {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onClose={() => setApptId(null)}
         onArrive={can(perms, 'visit.write') ? (a) => { setApptId(null); setArrive({ patientId: a.patient.id ?? a.patientId, appointmentId: a.id, name: a.patient.fullName }); } : undefined} />}
       {arrive && <ArrivalSheet init={arrive} cfg={cfg} perms={perms} todayAppts={(d.appointments ?? []).filter((a: any) => ['booked', 'confirmed'].includes(a.status))}
@@ -179,37 +183,6 @@ export function Today() {
   );
 }
 
-/** The side drawer for anyone in the day: allergies and conditions, the complaint, the last visit, and the one action. The day stays where it is. */
-function DayDrawer({ item, cfg, canOpen, busy, onStart, onClose }: { item: Item; cfg: any; canOpen: boolean; busy: boolean; onStart: (visitId: string) => void; onClose: () => void }) {
-  const nav = useNavigate();
-  const tl = useQuery({ queryKey: ['timeline', item.patientId], queryFn: () => get(`/patients/${item.patientId}/timeline`), enabled: !!item.patientId });
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
-  const p = tl.data?.patient; const v = item.visit; const med = medical(p, cfg);
-  const status = item.proc ? `${item.proc.procedure ?? 'Procedure'} · sitting ${item.proc.sittingNo}${item.proc.of ? ` of ${item.proc.of}` : ''}${item.proc.room ? ` · ${item.proc.room}` : ''} · ${item.proc.startTime}`
-    : !v ? 'Booked'
-    : v.status === 'in_consult' ? 'With the doctor' : v.status === 'intake' ? 'With the junior doctor' : ['waiting', 'screened'].includes(v.status) ? `Waiting · token ${v.opNumber} · ${minsSince(v.arrivedAt)} min${v.status === 'screened' ? ' · screened' : ''}`
-    : v.status === 'left' ? 'Left without seeing you' : `Seen${v.completedAt ? ` ${hhmm(v.completedAt)}` : ''}`;
-  return createPortal(
-    <aside aria-label={`About ${item.label}`} className="fixed inset-y-0 right-0 z-30 flex w-[min(440px,100vw)] flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-5 anim-slide-in" style={{ boxShadow: '-24px 0 48px -32px rgba(16,32,24,.45)' }}>
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1"><b className="block truncate text-[18px]">{p?.fullName ?? item.label}</b><div className="text-[12.5px] text-muted">{p ? [ageText(p) ? `${ageText(p)} ${p.sex ?? ''}`.trim() : null, p.patientNo].filter(Boolean).join(' · ') : ' '}</div></div>
-        <button className="btn btn-icon" aria-label="Close" onClick={onClose}><Icon name="x" className="h-4 w-4" /></button>
-      </div>
-      {med && <div className="font-semibold text-rose">{med}</div>}
-      <div className="rounded-[14px] bg-paper-2 px-3.5 py-3 text-[14px] font-semibold">{status}</div>
-      {tl.isLoading ? <Skeleton rows={2} /> : <>
-        {v && <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">Complaint</div><div className="mt-1 font-semibold">{complaintOf(v) || '—'}</div></div>}
-        <div><div className="text-[11px] font-bold uppercase tracking-wider text-muted">Last visit</div><div className="mt-1 font-semibold">{lastVisitOf(tl.data) || 'First visit'}</div></div>
-      </>}
-      <div className="flex flex-wrap gap-2 border-t border-line pt-3.5">
-        {canOpen && v && ['waiting', 'screened'].includes(v.status) && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Start consultation</button>}
-        {canOpen && v && v.status === 'in_consult' && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Back to the prescription</button>}
-        {canOpen && v && v.status === 'done' && v.encounterStatus === 'draft' && <button className="btn btn-primary" disabled={busy} onClick={() => onStart(v.id)}>Finish the note</button>}
-        {item.proc && <button className="btn" onClick={() => nav(`/worklist?tab=today&day=${today()}`)}>Open procedures</button>}
-        {item.patientId && <button className="btn" onClick={() => nav(`/patients/${item.patientId}`)}>View profile</button>}
-      </div>
-    </aside>, document.body);
-}
 
 function Attn({ title, sub, action, onClick }: { title: string; sub: string; action: string; onClick: () => void }) {
   return (
