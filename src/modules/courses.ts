@@ -147,7 +147,10 @@ export function courseRoutes(app: FastifyInstance) {
     if (!can(req.perms, 'fees.see')) return [];
     const pid = String((req.query as any).patientId ?? ''); const t = req.ctx.tenantId;
     const rows = await tx.select().from(course).where(pid ? and(eq(course.tenantId, t), eq(course.patientId, pid)) : eq(course.tenantId, t)).orderBy(course.createdAt).limit(50);
-    return Promise.all(rows.map((c) => standing(tx, t, c)));
+    // each course with its next booked sitting, so the course popup and the patient's Procedures tab say the same thing
+    return Promise.all(rows.map(async (c) => ({ ...(await standing(tx, t, c)),
+      nextSitting: (await tx.select({ day: procedureSession.day, startTime: procedureSession.startTime, sittingNo: procedureSession.sittingNo }).from(procedureSession)
+        .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'confirmed'))).orderBy(procedureSession.day, procedureSession.startTime).limit(1))[0] ?? null })));
   });
 
   /** Pay for some sittings now. The price is locked from the first payment; EMI needs the lender and approval code. */

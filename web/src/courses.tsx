@@ -25,8 +25,9 @@ function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | n
         <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Doctor's price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? 'Clinic package price' : 'Standard price'}</div></Row>
       <Row label="Agreed">By the patient on {day(c.createdAt)}<div className="text-[13px] text-muted">{c.agreedBy ? `Recorded by ${c.agreedBy}` : ''}</div></Row>
       <Row label="Paid">{paid > 0 ? <b>{money(paid)}</b> : 'Nothing yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span>
+        {(c.creditPaise ?? 0) > 0 && <div className="text-[13px] text-muted">plus {money(c.creditPaise)} approved discount</div>}
         {c.unusedPaise > 0 && <div className="text-[13px] text-muted">{money(c.unusedPaise)} in advance, covers {c.unusedSittings} sitting{c.unusedSittings === 1 ? '' : 's'}</div>}</Row>
-      <Row label="Sittings"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `next on ${day(booked.day)}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
+      <Row label="Sittings"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `sitting ${(booked as any).sittingNo ?? c.doneSittings + 1} booked on ${day(booked.day)}${(booked as any).startTime ? ` ${(booked as any).startTime}` : ''}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
     </div>
   );
 }
@@ -70,7 +71,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   const rfPaise = rf ? toPaise(rf.amount) : 0;
   const refund = useMutation({ mutationFn: () => post(`/courses/${c.id}/refund`, { amountPaise: rfPaise, method: rf!.mode, reason: rf!.why.trim() }),
     onSuccess: () => { refresh(); toast(`Refund of ${money(rfPaise)} recorded · ${REFUND_MODES.find(([m]) => m === rf!.mode)?.[1]}`); setRf(null); }, onError: (e) => toast(errText(e), 'err') });
-  const ledger: any[] = c?.ledger ?? []; const booked = ledger.find((l: any) => l.state && !['done', 'planned'].includes(l.state));
+  const ledger: any[] = c?.ledger ?? []; const booked = c?.nextSitting ?? ledger.find((l: any) => l.state && !['done', 'planned'].includes(l.state)); // the next sitting already booked
   const canPay = can(perms, 'payment.record'); const leftToPay = c ? c.stillToPayPaise > 0 && c.sittings - c.doneSittings - c.unusedSittings > 0 : true;
   if (booking) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} onClose={() => { setBooking(false); refresh(); }} />;
   if (paying) return <TakePayment patientId={patientId} patientName={patientName} ahead={{ recommendationId: rec.id }} onClose={() => { setPaying(false); refresh(); }} />;

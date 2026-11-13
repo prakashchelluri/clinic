@@ -10,8 +10,10 @@ import { assertDayOpen, dayFigures } from './dayclose.js';
 /** [start,end) in UTC for a local day in the tenant timezone. */
 export function dayBounds(day: string, tz: string) {
   const probe = new Date(day + 'T12:00:00Z');
-  const local = new Date(probe.toLocaleString('en-US', { timeZone: tz }));
-  const offsetMs = local.getTime() - probe.getTime();
+  // the clock in tz at the probe, read as parts (parsing a locale string would use the server's own time zone and shift the day)
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    .formatToParts(probe).map((x) => [x.type, x.value]));
+  const offsetMs = Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - probe.getTime();
   const start = new Date(Date.parse(day + 'T00:00:00Z') - offsetMs);
   return { start: start.toISOString(), end: new Date(start.getTime() + 86400000).toISOString() };
 }
