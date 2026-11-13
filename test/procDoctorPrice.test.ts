@@ -42,18 +42,23 @@ test("the doctor's amount is the course price; a sitting done before a course is
   assert.equal(a.rec.amountPaise, 2400000, 'kept on the plan');
   const c = (await reception('POST', '/courses', { recommendationId: a.rec.id })).json();
   assert.equal(c.totalPaise, 2400000); assert.equal(c.listPaise, 2400000); assert.equal(c.perSittingPaise, 600000);
+  // for the accounts: the price came from the doctor, next to the standard price, and the doctor is named
+  assert.equal(c.priceSource, 'doctor'); assert.equal(c.standardPaise, a.peel.pricePaise * 4); assert.equal(c.priceBy, 'Dr. Main Doctor');
+  const fin = (await owner('GET', `/finance?from=${today()}&to=${today()}`)).json();
+  const row = fin.doctorPrices.find((x: any) => x.id === c.id);
+  assert.ok(row, "listed under Doctor's prices"); assert.equal(row.totalPaise, 2400000); assert.equal(row.doctor, 'Dr. Main Doctor'); assert.ok(row.recordedBy);
 
   // custom, no course agreed: the done sitting is billed a quarter
   const b = await plan(owner, reception, 'Price Share', '9848066602', 2400000);
   const ps = (await reception('POST', '/procedure-sessions', { recommendationId: b.rec.id, day: today(), startTime: '10:00', minutes: 30, force: true })).json();
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).statusCode, 200);
   const ch = (await owner('GET', `/patients/${b.p.id}/timeline`)).json().charges.filter((x: any) => /Chemical peel sitting/.test(x.description));
-  assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 600000);
+  assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 600000); assert.match(ch[0].description, /doctor's price/);
 
   // empty: the standard price
   const s = await plan(owner, reception, 'Price Standard', '9848066603', null);
   const cs = (await reception('POST', '/courses', { recommendationId: s.rec.id })).json();
-  assert.equal(cs.totalPaise, s.peel.pricePaise * 4);
+  assert.equal(cs.totalPaise, s.peel.pricePaise * 4); assert.equal(cs.priceSource, 'standard');
 });
 
 test('a doctor moves their own sitting (approved as it lands), never another doctor’s', async () => {
@@ -67,4 +72,16 @@ test('a doctor moves their own sitting (approved as it lands), never another doc
   assert.equal(moved.json().approval, 'approved');
   const theirs = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: plusDays(10), startTime: '11:00', minutes: 30, practitionerId: drA.id, force: true })).json();
   assert.equal((await doc2('POST', `/procedure-sessions/${theirs.id}/reschedule`, { day: plusDays(11), startTime: '12:00', minutes: 30, practitionerId: drA.id, force: true })).statusCode, 403);
+});
+
+test('the doctor sends a whole set back with one note: they stay booked, flagged for the coordinator', async () => {
+  const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
+  const drA = (await owner('GET', '/config')).json().practitioners.find((x: any) => x.name === 'Dr. Main Doctor');
+  const { rec } = await plan(owner, reception, 'Send Back All', '9848066605', null);
+  const ids: string[] = [];
+  for (const at of ['15:00', '16:00']) ids.push((await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: at, minutes: 30, practitionerId: drA.id, force: true })).json().id);
+  const r = await owner('POST', '/procedure-approvals', { ids, action: 'change', note: 'At a conference' });
+  assert.equal(r.json().updated, 2);
+  const wk = (await reception('GET', `/procedure-sessions?from=${today()}&to=${today()}&active=1`)).json().filter((x: any) => ids.includes(x.id));
+  assert.equal(wk.length, 2); for (const x of wk) { assert.equal(x.state, 'confirmed'); assert.equal(x.approval, 'change'); assert.equal(x.approvalNote, 'At a conference'); }
 });

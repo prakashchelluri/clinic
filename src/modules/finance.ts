@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
-import { appUser, charge, dayClose, expense, patient, payment, pharmacySale, stockBatch } from '../db/schema.js';
+import { appUser, charge, course, dayClose, expense, patient, payment, pharmacySale, procedureCatalog, stockBatch } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { addDays, daysBetween, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
@@ -77,6 +77,11 @@ export function financeRoutes(app: FastifyInstance) {
       .map((r) => ({ kind: 'waived', name: r.name, what: r.c.description + (r.c.adjustmentReason ? ` · ${r.c.adjustmentReason}` : ''), method: null, day: todayIn(tz, new Date(r.c.createdAt)), amountPaise: r.c.amountPaise }));
 
     const outPaise = exRows.reduce((s, r) => s + r.e.amountPaise, 0);
+    // courses priced by the doctor in the period: so the accounts see a price above or below the standard came from the doctor, agreed by the patient
+    const dp = await tx.select({ c: course, patient: patient.fullName, patientNo: patient.patientNo, procedure: procedureCatalog.name }).from(course).innerJoin(patient, eq(patient.id, course.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, course.procedureId))
+      .where(and(eq(course.tenantId, t), eq(course.priceSource, 'doctor'), gte(course.createdAt, dayBounds(from, tz).start), lt(course.createdAt, dayBounds(to, tz).end))).orderBy(desc(course.createdAt));
+    const doctorPrices = dp.map((x) => ({ id: x.c.id, day: new Date(x.c.createdAt).toLocaleDateString('en-CA', { timeZone: tz }), patient: x.patient, patientNo: x.patientNo, procedure: x.procedure, sittings: x.c.sittings,
+      totalPaise: x.c.totalPaise, standardPaise: x.c.standardPaise, doctor: x.c.priceBy, recordedBy: x.c.agreedBy }));
     return {
       from, to, prevFrom, prevTo, today,
       income: cur.total, prevIncome: prev.total, outPaise, prevOutPaise: prevOut,
@@ -87,6 +92,7 @@ export function financeRoutes(app: FastifyInstance) {
       owed: { totalPaise: [...owed.values()].reduce((s, o) => s + o.totalPaise, 0), patients: [...owed.values()] },
       emi: { n: emi?.n ?? 0, totalPaise: emi?.total ?? 0 },
       givenBack: [...refunds, ...pharmacyBack, ...waived].sort((a, b) => a.day.localeCompare(b.day)),
+      doctorPrices,
     };
   });
 }

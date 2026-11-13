@@ -253,6 +253,17 @@ function NotIn({ d, perms }: { d: any; perms: string[] }) {
       </section>
       <div className="space-y-4">
         {can(perms, 'payment.record') ? <div className="[&>section]:!mt-0"><EmiAwaiting /></div> : null}
+        {(d.doctorPrices ?? []).length > 0 && <section className="card overflow-hidden !p-0 xl:col-span-2">
+          <div className="px-5 py-4"><b className="text-[15px]">Doctor's prices · {d.doctorPrices.length}</b><span className="ml-2 text-[12.5px] text-muted">procedure courses the doctor priced instead of the standard price, each agreed by the patient</span></div>
+          <div className="overflow-x-auto"><table className="table min-w-[760px]">
+            <thead><tr><th className="pl-5">Agreed</th><th>Patient</th><th>Procedure</th><th>Doctor</th><th className="text-right">Standard</th><th className="text-right">Doctor's price</th><th className="pr-5 text-right">Difference</th></tr></thead>
+            <tbody>{d.doctorPrices.map((x: any) => { const diff = x.standardPaise ? x.totalPaise - x.standardPaise : null; return (
+              <tr key={x.id}><td className="pl-5 whitespace-nowrap">{new Date(x.day + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}<div className="text-[12px] text-muted">recorded by {x.recordedBy ?? '—'}</div></td>
+                <td><b>{x.patient}</b><div className="text-[12px] text-muted">{x.patientNo}</div></td><td>{x.procedure ?? 'Procedure'}<div className="text-[12px] text-muted">{x.sittings} sittings</div></td><td>{x.doctor ?? '—'}</td>
+                <td className="text-right tabular-nums text-muted">{x.standardPaise ? money(x.standardPaise) : '—'}</td><td className="text-right font-semibold tabular-nums">{money(x.totalPaise)}</td>
+                <td className={`pr-5 text-right tabular-nums ${diff === null ? 'text-muted' : diff < 0 ? 'text-rose' : diff > 0 ? 'text-sage' : 'text-muted'}`}>{diff === null ? '—' : `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${money(Math.abs(diff))}`}</td></tr>); })}</tbody>
+          </table></div>
+        </section>}
         {d.emi.n === 0 && <section className="card !p-5 text-[14px]"><b className="text-[15px]">EMI</b><div className="mt-1 text-muted">No EMI is waiting for the lender.</div></section>}
         <section className="card overflow-hidden !p-0">
           <div className="px-5 py-4"><b className="text-[15px]">Given back or let go in this period</b></div>

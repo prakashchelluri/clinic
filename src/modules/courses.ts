@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, sql, inArray, notInArray } from 'drizzle-orm';
-import { course, charge, payment, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
+import { course, charge, encounter, payment, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn } from '../lib/core.js';
@@ -58,9 +58,12 @@ export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, p
   }
   if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
   const list = custom ? total : Math.max(total, (proc?.pricePaise ?? 0) * sittings);
-  const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name }).returning();
+  // for the accounts: where the price came from, the standard price for the same sittings, and the doctor who set their own
+  const standardPaise = (proc?.pricePaise ?? 0) * sittings || null;
+  const priceBy = custom ? await tx.select({ n: practitioner.name }).from(encounter).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId)).where(eq(encounter.id, rec.encounterId)).then((x) => x[0]?.n ?? null) : null;
+  const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name, priceSource: custom ? 'doctor' : packageId ? 'package' : 'standard', standardPaise, priceBy }).returning();
   await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
-  await emit(tx, ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings, packageId: packageId ?? null });
+  await emit(tx, ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings, packageId: packageId ?? null, priceSource: row.priceSource, standardPaise, priceBy });
   return row;
 }
 
@@ -75,7 +78,7 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
     const rec = await tx.select({ amountPaise: recommendation.amountPaise, sittings: recommendation.sittings }).from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
     const price = rec?.amountPaise ? Math.round(rec.amountPaise / Math.max(1, rec.sittings ?? 1)) : proc?.pricePaise;
     if (!price) return; // no price anywhere: nothing to bill
-    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} sitting ${ps.sittingNo ?? 1}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} sitting ${ps.sittingNo ?? 1}${rec?.amountPaise ? " · doctor's price" : ''}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
     await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: price, listPrice: !rec?.amountPaise });
     return;
   }
@@ -85,7 +88,7 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   const amount = isLast ? Math.max(0, c.totalPaise - (before[0]?.s ?? 0)) : st.perSittingPaise; // the last sitting takes the rounding
   if (amount <= 0) return;
   const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.name) : null;
-  const what = `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}`;
+  const what = `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}${c.priceSource === 'doctor' ? " · doctor's price" : ''}`;
   // the advance pays what it can; a partly covered sitting gets two charges: the part from the advance (paid) and the balance (due)
   const fromAdvance = Math.min(amount, st.unusedPaise); let billId: string | undefined; // both parts of one sitting are one invoice
   if (fromAdvance > 0) {

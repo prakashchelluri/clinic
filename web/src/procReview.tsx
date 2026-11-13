@@ -20,6 +20,7 @@ export function ProcReview({ onClose }: { onClose: () => void }) {
   const q = useApprovals(true);
   const [back, setBack] = useState<string | null>(null); const [note, setNote] = useState('');
   const [moving, setMoving] = useState<any>(null);
+  const [allBack, setAllBack] = useState(false); // Send back all: one note for every sitting waiting
   const decide = useMutation({ mutationFn: (b: { ids: string[]; action: 'approve' | 'change'; note?: string }) => post('/procedure-approvals', b),
     onSuccess: (r: any, b) => { refreshProcedures(); setBack(null); setNote(''); toast(b.action === 'approve' ? `Approved ${r.updated}. The patient${r.updated === 1 ? ' gets' : 's get'} a reminder the day before.` : 'Sent back to the coordinator with your note.'); },
     onError: (e) => toast(errText(e), 'err') });
@@ -35,8 +36,15 @@ export function ProcReview({ onClose }: { onClose: () => void }) {
     <Modal title="Procedures to approve" subtitle={data ? `${data.pending} sitting${data.pending === 1 ? '' : 's'} from the coordinator` : undefined} onClose={onClose} width="max-w-3xl">
       {q.isLoading ? <Skeleton rows={6} /> : !waiting.length ? <div className="py-8 text-center text-muted">Nothing waiting for you. Everything is approved.</div> : (
         <div className="space-y-3">
-          <div className="flex items-center gap-2"><span className="text-[13.5px] text-muted">Check the dates, then approve. Move or send back only what needs it.</span><span className="flex-1" />
+          <div className="flex flex-wrap items-center gap-2"><span className="text-[13.5px] text-muted">Check the dates, then approve. Move or send back only what needs it.</span><span className="flex-1" />
+            <button type="button" className="btn text-rose" aria-expanded={allBack} onClick={() => { setAllBack(!allBack); setBack(null); setNote(''); }}>Send back all</button>
             <button type="button" className="btn btn-primary" disabled={decide.isPending} onClick={() => decide.mutate({ ids: waiting.map((x) => x.id), action: 'approve' })}><Icon name="check" />Approve all {waiting.length}</button></div>
+          {allBack && <div className="flex flex-wrap items-center gap-2 rounded-[10px] bg-rose-soft px-3 py-2.5">
+            <span className="text-[13.5px] font-medium text-rose">Send all {waiting.length} back to the coordinator. They stay booked; the coordinator decides what to do with them.</span>
+            <input autoFocus aria-label="Note for the coordinator" className="input !w-auto min-w-[260px] flex-1" maxLength={200} placeholder="Why, e.g. I am at a conference that week" value={note} onChange={(e) => setNote(e.target.value)} />
+            <button className="btn btn-sm" onClick={() => setAllBack(false)}>Cancel</button>
+            <button className="btn btn-sm btn-primary" disabled={!note.trim() || decide.isPending} onClick={() => decide.mutate({ ids: waiting.map((x) => x.id), action: 'change', note: note.trim() }, { onSuccess: () => setAllBack(false) })}>Send back all {waiting.length}</button>
+          </div>}
           <div className="overflow-hidden rounded-[10px] border border-line">
             {days.map((d) => (
               <div key={d}>

@@ -17,6 +17,7 @@ function Standing({ c }: { c: any }) {
   return (
     <div className="space-y-1 text-sm">
       <div><b>{c.sittings} sittings at {money(c.perSittingPaise)}</b> = {money(c.totalPaise)}{c.listPaise > c.totalPaise ? <span className="text-muted"> (list {money(c.listPaise)})</span> : ''} {c.lockedAt ? <Chip tone="sage">Price fixed</Chip> : <Chip>not paid yet</Chip>}</div>
+      <div className="text-muted">Agreed by the patient on {new Date(c.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}{c.agreedBy ? ` · recorded by ${c.agreedBy}` : ''}{c.priceSource === 'doctor' ? ` · doctor's price${c.priceBy ? ` (${c.priceBy})` : ''}${c.standardPaise ? `, standard ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? ' · package price' : ''}</div>
       <div>{c.doneSittings} of {c.sittings} done · Prepaid <b>{c.unusedSittings}</b> sitting{c.unusedSittings === 1 ? '' : 's'} ({money(c.unusedPaise)}) · {money(c.stillToPayPaise)} to pay over next visits</div>
     </div>
   );
@@ -50,6 +51,8 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   const [pkg, setPkg] = useState(''); const [days, setDays] = useState(15);
   const pkgs: Pkg[] = custom ? [] : ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.procedureId === rec.procedureId && k.pricePaise > 0);
   const qs = useQuery({ queryKey: ['quotes', rec.id], queryFn: () => get(`/quotes?recommendationId=${rec.id}`) }); const quotes: any[] = qs.data ?? [];
+  // the patient agrees the price (reception records it): this fixes the course at that price, before the first sitting is booked
+  const agree = useMutation({ mutationFn: () => post('/courses', { recommendationId: rec.id, ...(pkg ? { packageId: pkg } : {}) }), onSuccess: () => { refresh(); toast(`Recorded: the patient agreed ${money(pkg ? pkgs.find((k) => k.id === pkg)?.pricePaise ?? list : list)}. Book the first sitting.`); }, onError: (e) => toast(errText(e), 'err') });
   const makeQuote = useMutation({ mutationFn: (send: 'whatsapp' | 'print') => post('/quotes', { recommendationId: rec.id, validDays: days, send, ...(pkg ? { packageId: pkg } : {}) }),
     onSuccess: (r: any, send) => { qc.invalidateQueries({ queryKey: ['quotes', rec.id] }); if (r.whatsapp === 'opted_out') { toast(`Quote ${r.number} saved. ${NO_WHATSAPP}`, 'info', { label: 'Print', run: () => printQuote(r.id) }); return; }
       toast(send === 'whatsapp' ? `Quote ${r.number} is on its way` : `Quote ${r.number} ready`); if (send === 'print') printQuote(r.id); },
@@ -78,7 +81,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
             <div className="flex flex-wrap gap-2"><button className="btn btn-sm" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate('whatsapp')}>Send on WhatsApp</button><button className="btn btn-sm" disabled={makeQuote.isPending} onClick={() => makeQuote.mutate('print')}>Print</button></div>
             <div className="text-xs text-muted">The quote never shows consultation or pharmacy prices. A discount is given on the bill, not on the quote.</div>
           </div>
-          <div className="modal-foot"><button className="btn btn-ghost mr-auto" onClick={onClose}>Close</button>{canPay && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Take advance</button>}<button className="btn btn-primary" onClick={() => setBooking(true)}>Book first sitting</button></div>
+          <div className="modal-foot"><button className="btn btn-ghost mr-auto" onClick={onClose}>Close</button><button className="btn btn-primary" disabled={agree.isPending} onClick={() => agree.mutate()}><Icon name="check" />Patient agrees to {money(pkg ? pkgs.find((k) => k.id === pkg)?.pricePaise ?? list : list)}</button></div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -91,7 +94,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
             <div><label className="label" htmlFor="rf-why">Why</label><input id="rf-why" className="input" maxLength={200} value={rf.why} onChange={(e) => setRf({ ...rf, why: e.target.value })} /></div>
             <div className="flex gap-2"><button className="btn btn-ghost btn-sm" onClick={() => setRf(null)}>Cancel</button><button className="btn btn-primary btn-sm" disabled={refund.isPending || rfPaise <= 0 || rfPaise > c.refundablePaise || rf.why.trim().length < 3} onClick={() => refund.mutate()}>Give back {money(rfPaise)}</button></div>
           </div>}
-          <div className="modal-foot">{can(perms, 'refund.course') && c.refundablePaise > 0 && !rf && <button className="btn btn-sm mr-auto" onClick={() => setRf({ amount: String(c.refundablePaise / 100), mode: 'upi', why: '' })}>Refund unused sittings</button>}<button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && leftToPay && <button className="btn btn-primary" onClick={() => setPaying(true)}><Icon name="plus" />Pay for sittings</button>}</div>
+          <div className="modal-foot">{can(perms, 'refund.course') && c.refundablePaise > 0 && !rf && <button className="btn btn-sm mr-auto" onClick={() => setRf({ amount: String(c.refundablePaise / 100), mode: 'upi', why: '' })}>Refund unused sittings</button>}<button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && leftToPay && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Take advance</button>}</div>
         </div>
       )}
     </Drawer>

@@ -369,7 +369,10 @@ export const course = pgTable('course', {
   listPaise: integer('list_paise').notNull(),
   totalPaise: integer('total_paise').notNull(),
   lockedAt: ts('locked_at'),
-  agreedBy: text('agreed_by'),
+  agreedBy: text('agreed_by'),                 // who recorded that the patient agreed the price (the agreement date is createdAt)
+  priceSource: text('price_source').notNull().default('standard'), // doctor | package | standard: where the price came from, for the accounts
+  standardPaise: integer('standard_paise'),    // the standard price for the same sittings, to compare a doctor's or package price with
+  priceBy: text('price_by'),                   // the doctor who set their own price
   creditPaise: integer('credit_paise').notNull().default(0), // an approved discount on sittings paid ahead: pays for sittings like the advance, but is not money in
 }, (t) => [uniqueIndex('course_rec').on(t.tenantId, t.recommendationId), index('course_patient').on(t.tenantId, t.patientId)]);
 
