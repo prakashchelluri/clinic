@@ -237,6 +237,15 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const freeAt = (r: { start: string }, only?: Col) => (only ? [only] : cols).reduce((n, c) => { const ws = c.ws.filter((w) => w.startTime === r.start); return n + (ws.length === 1 && !(ws[0].effectiveCapacity === 0 && ws[0].reductions?.length) ? Math.max(0, ws[0].free) : 0); }, 0);
   const lineOf = (r: { start: string; end: string }, c: Col) => { const x = cell(c, r).chips.filter((y) => y.k !== 'cancelled'); const pr = x.filter((y) => y.proc).length; const b = x.length - pr; const f = kindF === 'proc' || c.room ? 0 : freeAt(r, c);
     return [b && `${b} booked`, pr && `${pr} procedure${pr === 1 ? '' : 's'}`, f && `${f} free`].filter(Boolean).join(' · ') || (c.room ? 'Free' : c.ws.some((w) => w.startTime === r.start) ? 'Full' : 'Not in'); };
+  /** a room's hour: a line of time, each booking as wide as its time, the free time between them one + each; an overlap drops to a second line */
+  const roomCell = (c: Col, r: { start: string; end: string }, key: string, nowC: string, chips: ChipP[]) => { const rid = week ? weekRoom : c.key; const canBook = !!onBook && cfg && rid !== '__none' && !gone(c.day, r.end);
+                const a0 = toMin(r.start), L = toMin(r.end) - a0 || 60; const lanes: number[] = [];
+                const placed = [...chips].sort((x, y) => (x.at?.[0] ?? 0) - (y.at?.[0] ?? 0)).map((x) => { const [st, n] = x.at ?? [0, 1]; let l = lanes.findIndex((e) => e <= st + 1e-6); if (l < 0) { l = lanes.length; lanes.push(0); } lanes[l] = st + n; return { x, l, st, n }; });
+                const gaps: [number, number][] = []; let cur = 0; for (const q of placed) { if (q.st - cur > 0.04) gaps.push([cur, q.st]); cur = Math.max(cur, q.st + q.n); } if (1 - cur > 0.04) gaps.push([cur, 1]);
+                const at = (f: number) => fmtM(Math.min(a0 + L, a0 + Math.round((f * L) / 5) * 5)); const nl = Math.max(1, lanes.length); const pos = (st: number, n: number, l = 0, all = false): React.CSSProperties => ({ left: `${st * 100}%`, width: `${n * 100}%`, top: all ? 0 : `${(l / nl) * 100}%`, height: all ? '100%' : `${100 / nl}%` });
+                return <div key={key} className={`fd-hc fd-room ${canBook ? 'open' : ''} ${nowC}`} style={{ minHeight: nl * 36 }}>
+                  {canBook && gaps.map(([g0, g1]) => <button key={g0} type="button" className="fd-pc fd-free" style={pos(g0, g1 - g0, 0, true)} aria-label={`Book ${at(g0)}–${at(g1)}`} onClick={() => setRoomAt({ at: { roomId: rid!, day: c.day, startTime: at(g0), endTime: at(g1) } })}><span aria-hidden>+</span><span className="fd-bk">Book</span></button>)}
+                  {placed.map(({ x, l, st, n }) => <div key={x.id} style={pos(st, n, l)}><Chip {...x} at={undefined} /></div>)}</div>; }
   return sheet(<>
       <div>
         <div className="fd-hgrid" style={{ gridTemplateColumns: `88px repeat(${cols.length}, minmax(0, 1fr))` }}>
@@ -245,21 +254,13 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
           {calm && showPast && <button type="button" className="fd-fold" style={{ gridColumn: '1 / -1' }} onClick={() => setShowPast(false)}><span>Earlier today · {pastSum}</span><span className="text-clay">Hide</span></button>}
           {rows.map((r, i) => folded.has(r) ? null : compact(i, r) ? [
             <span key={`t${r.start}`} className="fd-ht">{hourLabel(r.start, r.end)}</span>,
-            ...cols.map((c) => <button key={`c${c.key}${r.start}`} type="button" className="fd-later" title="Open this hour" onClick={() => setOpened(new Set(opened).add(r.start))}>{lineOf(r, c)}</button>),
+            ...cols.map((c) => c.room ? roomCell(c, r, `c${c.key}${r.start}`, '', cell(c, r).chips) : <button key={`c${c.key}${r.start}`} type="button" className="fd-later" title="Open this hour" onClick={() => setOpened(new Set(opened).add(r.start))}>{lineOf(r, c)}</button>),
           ] : [
             <span key={`t${r.start}`} className={`fd-ht ${i === nowRow ? 'now' : ''} ${!week && gone(day, r.end) ? 'past' : ''}`}>{hourLabel(r.start, r.end)}{i === nowRow && <small>now</small>}{showFree && onBook && kindF !== 'proc' && !gone(day, r.end) && freeAt(r) > 0 && <em className="fd-htfree">{freeAt(r)} free</em>}</span>,
             ...cols.map((c) => {
               const { wsAt, chips } = cell(c, r); const nowC = i === nowRow && c.day === today ? 'now' : ''; const key = c.key + r.start;
               const names = chips.length > 0 && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}</div>;
-              if (c.room) { const rid = week ? weekRoom : c.key; const canBook = !!onBook && cfg && rid !== '__none' && !gone(c.day, r.end);
-                // a room's hour is a line of time: each booking as wide as its time, the free time between them one + each; an overlap drops to a second line
-                const a0 = toMin(r.start), L = toMin(r.end) - a0 || 60; const lanes: number[] = [];
-                const placed = [...chips].sort((x, y) => (x.at?.[0] ?? 0) - (y.at?.[0] ?? 0)).map((x) => { const [st, n] = x.at ?? [0, 1]; let l = lanes.findIndex((e) => e <= st + 1e-6); if (l < 0) { l = lanes.length; lanes.push(0); } lanes[l] = st + n; return { x, l, st, n }; });
-                const gaps: [number, number][] = []; let cur = 0; for (const q of placed) { if (q.st - cur > 0.04) gaps.push([cur, q.st]); cur = Math.max(cur, q.st + q.n); } if (1 - cur > 0.04) gaps.push([cur, 1]);
-                const at = (f: number) => fmtM(Math.min(a0 + L, a0 + Math.round((f * L) / 5) * 5)); const nl = Math.max(1, lanes.length); const pos = (st: number, n: number, l = 0, all = false): React.CSSProperties => ({ left: `${st * 100}%`, width: `${n * 100}%`, top: all ? 0 : `${(l / nl) * 100}%`, height: all ? '100%' : `${100 / nl}%` });
-                return <div key={key} className={`fd-hc fd-room ${canBook ? 'open' : ''} ${nowC}`} style={{ minHeight: nl * 36 }}>
-                  {canBook && gaps.map(([g0, g1]) => <button key={g0} type="button" className="fd-pc fd-free" style={pos(g0, g1 - g0, 0, true)} aria-label={`Book ${at(g0)}–${at(g1)}`} onClick={() => setRoomAt({ at: { roomId: rid!, day: c.day, startTime: at(g0), endTime: at(g1) } })}><span aria-hidden>+</span><span className="fd-bk">Book</span></button>)}
-                  {placed.map(({ x, l, st, n }) => <div key={x.id} style={pos(st, n, l)}><Chip {...x} at={undefined} /></div>)}</div>; }
+              if (c.room) return roomCell(c, r, key, nowC, chips);
               if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'Not in')}</div>;
               const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
