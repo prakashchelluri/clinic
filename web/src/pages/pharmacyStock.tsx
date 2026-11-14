@@ -53,7 +53,7 @@ export function Inventory({ tab, sp, go }: { tab: InvTab; sp: URLSearchParams; g
           {d.reviews.length > 0 && <Stat icon="bell" value={d.reviews.length} label="Deliveries for the owner to check" onClick={() => go({ tab: 'stock' })} />}
         </div>}
         <div className="anim-fade-up flex flex-wrap items-center gap-2" style={{ animationDelay: '60ms' }}>
-          <Tabs<InvTab> className="w-full" value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Medicines' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
+          <Tabs<InvTab> className="w-full" value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Stock' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
         </div>
       </>}
       {tab === 'stock' && <StockTab sp={sp} go={go} />}
@@ -224,7 +224,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Medicines</button><h2 className="text-[18px] font-semibold">{m.name}</h2>
+        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Stock</button><h2 className="text-[18px] font-semibold">{m.name}</h2>
           <div className="text-sm text-muted">{[['tab', 'cap'].includes(m.form) ? `strip of ${m.packSize}` : m.form, m.scheduleClass && m.scheduleClass !== 'OTC' ? `Schedule ${m.scheduleClass}` : 'OTC', m.hsn ? `HSN ${m.hsn}` : null, `GST ${m.gstBp / 100}%`, `MRP ${money(m.mrpPaise)}`].filter(Boolean).join(' · ')}</div></div>
         {(can(perms, 'stock.write') || can(perms, 'config.write')) && <button className="btn" onClick={() => setEditing(true)}><Icon name="edit" className="h-3.5 w-3.5" />Edit details</button>}
         {can(perms, 'stock.write') && <><button className="btn" onClick={() => setReturning(true)}>Return to vendor</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}>Order more</button></>}

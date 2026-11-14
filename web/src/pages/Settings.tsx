@@ -97,7 +97,7 @@ export function Settings() {
       {groups.length === 0 && <div className="px-2.5 py-3 text-[13px] text-muted">No setting matches “{find}”.</div>}
       {groups.map(([g, ts]) => <div key={g}><div className="settings-nav-group">{g}</div>
         {ts.map(([k, label]) => <button key={k} type="button" aria-current={tab === k ? 'page' : undefined} className={`settings-nav-item ${tab === k ? 'on' : ''}`} onClick={() => { setTab(k); setFind(''); }}>{label}{k === 'labtests' && !cfg.tenant.settings?.labTests && <span className="settings-new">New</span>}</button>)}</div>)}
-      <button type="button" className="settings-moved" onClick={() => nav('/inventory?tab=stock')}><Icon name="pill" className="h-4 w-4 shrink-0" /><span>Medicines are in <b>Inventory › Medicines</b></span></button>
+      <button type="button" className="settings-moved" onClick={() => nav('/inventory?tab=stock')}><Icon name="pill" className="h-4 w-4 shrink-0" /><span>Medicines are in <b>Inventory › Stock</b></span></button>
     </nav>
   );
   return (
