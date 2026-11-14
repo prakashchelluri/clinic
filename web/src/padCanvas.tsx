@@ -4,7 +4,7 @@ import { Excalidraw, exportToBlob, convertToExcalidrawElements } from '@excalidr
 import '@excalidraw/excalidraw/index.css';
 import { ArrowLeft, LayoutTemplate, Save, Printer, Plus, Trash2 } from 'lucide-react';
 import { api, post, qc, errText } from './api';
-import { Floating, ask, toast } from './ui';
+import { Floating, Icon, ask, toast } from './ui';
 import { useTemplates } from './templates';
 
 /** One drawing on the pad: the drawing tool's elements and image files (to open it again), and its picture as a document (what prints). */
@@ -56,7 +56,7 @@ export function CanvasDrawer({ canvases, onChange, patientId, encounterId, readO
             <button type="button" className="h-16 w-24 shrink-0 overflow-hidden rounded-md border border-line bg-white" onClick={() => setEditing(c)} aria-label={`Open ${c.name}`}>{c.docId && <img src={`/api/documents/${c.docId}/file`} alt="" className="h-full w-full object-contain" />}</button>
             <div className="min-w-0 flex-1"><div className="truncate text-[13.5px] font-semibold">{c.name}</div><div className="text-xs text-muted">{c.showInRx ? 'Prints on the prescription' : 'Not printed'}</div></div>
             <label className="inline-flex items-center gap-1.5 text-[12.5px]"><input type="checkbox" className="accent-ink" disabled={readOnly} checked={c.showInRx} onChange={(e) => onChange(canvases.map((x) => (x.id === c.id ? { ...x, showInRx: e.target.checked } : x)))} />Show in Rx</label>
-            <button type="button" className="btn btn-sm" onClick={() => setEditing(c)}>{readOnly ? 'View' : 'Open'}</button>
+            <button type="button" className="btn btn-sm" onClick={() => setEditing(c)}>{readOnly && <Icon name="eye" />}{readOnly ? 'View' : 'Open'}</button>
             {!readOnly && <button type="button" className="btn btn-ghost btn-icon" aria-label={`Delete ${c.name}`} onClick={() => { void remove(c); }}><Trash2 className="h-4 w-4" aria-hidden /></button>}
           </div>)}
         </div>}

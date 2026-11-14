@@ -98,7 +98,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
           </div>
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
-            <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${a.patient.id}`); }}><Icon name="user" />View profile</button>
+            <button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${a.patient.id}`); }}><Icon name="eye" />View profile</button>
           </div>
         </>)}
         {q.isError && <div className="text-sm text-rose">{errText(q.error)}</div>}

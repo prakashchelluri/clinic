@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, qc, today, errText } from './api';
-import { FileText } from 'lucide-react';
 import { Drawer, Chip, Icon, fmtDate, toast } from './ui';
 import { openViewer } from './viewer';
 import { LabHistoryDrawer, dedupe } from './labHistory';
@@ -11,7 +10,7 @@ import { UploadButton } from './encounterDetail';
 export const reportFor = (docs: any[], documentId: string | null | undefined, recommendationId: string | null | undefined) =>
   (documentId ? docs.find((d) => d.id === documentId) : null) ?? (recommendationId ? docs.find((d) => d.kind !== 'photo' && (d.recommendationId === recommendationId || (d.recommendationIds ?? []).includes(recommendationId))) : null) ?? null;
 /** Opens the report (PDF or image) over the page, in the app's own viewer: the Rxpad stays where it was. */
-export const ReportLink = ({ doc, label = 'View PDF', patientId, encounterId }: { doc: any; label?: string; patientId?: string; encounterId?: string }) => <button type="button" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px]" title={doc.title ?? 'Report'} onClick={() => openViewer({ docs: [doc], patientId, encounterId })}><FileText className="h-3.5 w-3.5" aria-hidden />{/pdf/i.test(doc.mime ?? '') ? label : 'View report'}</button>;
+export const ReportLink = ({ doc, patientId, encounterId }: { doc: any; patientId?: string; encounterId?: string }) => <button type="button" className="btn btn-ghost !min-h-7 gap-1 whitespace-nowrap !px-2 text-[12px]" title={doc.title ?? 'Report'} onClick={() => openViewer({ docs: [doc], patientId, encounterId })}><Icon name="eye" className="h-3.5 w-3.5" />View</button>;
 
 /** Lab values typed from a report: the editor the receptionist uses, the card the doctor sees, and the per-test history. */
 export type LabParam = { name: string; unit?: string; low?: number; high?: number; expect?: string; aliases?: string[] };
@@ -97,6 +96,8 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
           </div>}
       </div>); })}
   </div>;
+  /** the ordered tests above already open their reports: no second link per value */
+  const repCol = !ordered?.length;
   return (
     <div>
       {orderedList}
@@ -108,8 +109,8 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
         {!readOnly && <button type="button" className={`btn btn-sm ${shown.length || all.length ? "" : "ml-auto"}`} onClick={() => { setInlineFor(null); setDraft([]); setAdding(true); }}><Icon name="plus" className="h-3.5 w-3.5" />{ordered?.length ? 'Add other values' : 'Add values'}</button>}
       </div>
       {q.isLoading || shown.length === 0 ? null : (
-        <div className="grid grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_96px_28px] items-center gap-x-2 text-[13px]">
-          <span className="text-[11.5px] font-semibold text-muted">Investigation</span><span className="text-[11.5px] font-semibold text-muted">Value</span><span className="text-[11.5px] font-semibold text-muted">Unit</span><span className="text-[11.5px] font-semibold text-muted">Range</span><span className="text-[11.5px] font-semibold text-muted">Earlier</span><span className="text-[11.5px] font-semibold text-muted">Report</span><span />
+        <div className={`grid ${repCol ? 'grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_80px_28px]' : 'grid-cols-[minmax(0,1.5fr)_110px_60px_110px_minmax(0,1.4fr)_28px]'} items-center gap-x-2 text-[13px]`}>
+          <span className="text-[11.5px] font-semibold text-muted">Investigation</span><span className="text-[11.5px] font-semibold text-muted">Value</span><span className="text-[11.5px] font-semibold text-muted">Unit</span><span className="text-[11.5px] font-semibold text-muted">Range</span><span className="text-[11.5px] font-semibold text-muted">Earlier</span>{repCol && <span className="text-[11.5px] font-semibold text-muted">Report</span>}<span />
           {shown.map((r) => { const e = earlier(r); return (
             <div key={r.id} className={`contents ${out(r.flag) ? '' : 'text-ink-2'}`}>
               <span className={`truncate border-t border-line py-2 ${out(r.flag) ? 'font-semibold' : ''}`} title={r.note ?? ''}>{r.test}</span>
@@ -118,7 +119,7 @@ export function LabResultsCard({ patientId, encounterId, recIds, params, readOnl
               <span className="truncate border-t border-line py-2 text-xs text-muted">{r.unit ?? ''}</span>
               <span className="truncate border-t border-line py-2 text-xs text-muted">{rangeText(r)}</span>
               <span className="truncate border-t border-line py-2 text-xs text-muted">{e.length ? e.map((x) => `${x.value} (${fmtDate(x.takenOn)})`).join(' → ') + ' → ' : 'first time'}{e.length ? <b className={out(r.flag) ? 'text-rose' : 'text-ink'}>{r.value}</b> : ''}</span>
-              <span className="border-t border-line py-1">{(() => { const d = reportFor(docs, r.documentId, r.recommendationId); return d ? <ReportLink doc={d} patientId={patientId} encounterId={readOnly ? undefined : encounterId} /> : <span className="text-xs text-muted">—</span>; })()}</span>
+              {repCol && <span className="border-t border-line py-1">{(() => { const d = reportFor(docs, r.documentId, r.recommendationId); return d ? <ReportLink doc={d} patientId={patientId} encounterId={readOnly ? undefined : encounterId} /> : <span className="text-xs text-muted">—</span>; })()}</span>}
               <span className="border-t border-line py-2"><button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Trend of ${r.test}`} title="All results of this test" onClick={() => setHistory(r.test)}><Icon name="chart" className="h-3.5 w-3.5" /></button></span>
             </div>); })}
         </div>)}

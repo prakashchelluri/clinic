@@ -75,7 +75,7 @@ export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, 
           <td><Chip tone={tone as any}>{label}</Chip>{b.excluded && <span> <Chip>Not in tax reports</Chip></span>}</td>
           <td className="pr-4" onClick={(e) => e.stopPropagation()}><span className="flex items-center justify-end gap-1">
             <button type="button" className="btn btn-ghost btn-sm !px-2" title="Print" aria-label={`Print ${b.invoiceNo}`} onClick={() => printInvoice(b.id)}><Icon name="print" className="h-4 w-4" /></button>
-            <button type="button" className="btn btn-ghost btn-sm !px-2" title="View" aria-label={`View ${b.invoiceNo}`} onClick={() => onView(b)}><Icon name="search" className="h-4 w-4" /></button>
+            <button type="button" className="btn btn-ghost btn-sm !px-2" title="View" aria-label={`View ${b.invoiceNo}`} onClick={() => onView(b)}><Icon name="eye" className="h-4 w-4" /></button>
             <MoreMenu items={[
               { label: `Collect ${money(b.duePaise)}`, hidden: !(mayCollect && onCollect && b.duePaise > 0), onClick: () => onCollect!(b) },
               { label: 'Refund', hidden: !(mayRefund && onRefund && b.paidPaise - b.refundedPaise > 0), danger: true, onClick: () => onRefund!(b) },

@@ -388,7 +388,7 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
     { key: 'action', label: '', fixed: true, align: 'right', cell: (r) => { const paid = paidOf(r);
       return <span className="inline-flex items-center gap-1 whitespace-nowrap">
         {r.kind === 'noshow' ? <button className="btn btn-sm btn-primary" onClick={() => onBook(r.patient)}>Rebook</button> : r.outcome === 'left' && paid && can(perms, 'payment.refund') ? <button className="btn btn-sm btn-primary" disabled={refund.isPending} onClick={() => setRefunding({ c: paid, name: r.patient.fullName })}>Refund</button> : null}
-        <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}>View profile</button></span>; } },
+        <button className="btn btn-sm" onClick={() => nav(`/patients/${r.patient.id}`)}><Icon name="eye" />View profile</button></span>; } },
   ];
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 anim-fade-up">

@@ -166,7 +166,7 @@ function OrderDrawer({ o, perms, isDoctor, onAdd, onClose }: { o: Order; perms: 
             : <div className="flex flex-wrap items-center gap-2 border-t border-line/60 pt-4 text-xs text-muted"><span className="min-w-0 flex-1">The consultation is already closed. Mark these results as reviewed.</span><button className="btn btn-primary" disabled={review.isPending} onClick={() => review.mutate()}><Icon name="check" />Mark reviewed</button></div>)
           : <div className="text-sm text-muted">With the doctor for review.</div>)}
 
-        <div className="flex flex-wrap gap-2 border-t border-line/60 pt-4"><button className="btn btn-sm" onClick={() => nav(`/patients/${o.patient.id}`)}>View profile</button></div>
+        <div className="flex flex-wrap gap-2 border-t border-line/60 pt-4"><button className="btn btn-sm" onClick={() => nav(`/patients/${o.patient.id}`)}><Icon name="eye" />View profile</button></div>
       </div>
     </Drawer>
   );
