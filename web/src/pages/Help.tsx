@@ -77,7 +77,7 @@ function Overview() {
       ['Checkout', 'The list of patients the doctor has finished with, who still need something from reception.'],
       ['Hand-off', 'A line on Checkout that only tells you where the patient pays next. It never stops you closing the visit.'],
       ['Advised / Started / Paid', 'A procedure plan moves through these. Advised: the doctor suggested it. Started: sessions were paid ahead or done. Paid: every session is paid for.'],
-      ['Course', 'A procedure over several sessions, for example 6 chemical peels, at the list price or a clinic package price.'],
+      ['Course', 'A procedure over several sessions, for example 6 chemical peels, at the standard price, a custom price the doctor sets on the Rx pad, or a clinic package price.'],
       ['Advance', 'Money paid ahead for some sessions of a course. The price is locked from the first payment.'],
       ['Test order', 'The tests the doctor asked for in one visit. The doctor reviews the order once, when every report is in.'],
       ['Completed', 'The doctor has reviewed the results, in the consultation or from Test reports. The desk can still add a report to it afterwards.'],
