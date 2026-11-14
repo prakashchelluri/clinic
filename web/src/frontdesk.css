@@ -216,3 +216,8 @@ html[data-theme="dark"] { --fd-proc: #2DD4BF; }
 
 /* a room booked for something other than a procedure (meeting, cleaning …): quiet grey, a door icon */
 .fd-k-room { background: var(--fd-nobook); color: var(--color-ink); box-shadow: inset 0 0 0 1px var(--color-line); }
+/* a room's hour: a line of time, bookings placed by their time, free time a + (white); past or not bookable is grey */
+.fd-hc.fd-room { position: relative; padding: 0; gap: 0; background: var(--fd-nobook); }
+.fd-hc.fd-room.open { background: var(--color-surface); }
+.fd-room > * { position: absolute; }
+.fd-room .fd-pc { height: 100%; border-radius: 0; border-right: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line); }
