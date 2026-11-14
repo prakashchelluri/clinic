@@ -31,7 +31,7 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
   const [reason, setReason] = useState('');
   const toM = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
   const [minutes, setMinutes] = useState<number>(sitting ? Math.max(5, toM(sitting.endTime) - toM(sitting.startTime) - (proc?.bufferMinutes ?? 0)) : proc?.typicalMinutes ?? 30);
-  const [doc, setDoc] = useState<string>(sitting ? sitting.practitionerId ?? '' : proc?.requiresMainDoctor ? cfg.practitioners[0]?.id ?? '' : '');
+  const [doc, setDoc] = useState<string>(sitting ? sitting.practitionerId ?? '' : (rec as any).practitionerId ?? (proc?.requiresMainDoctor ? cfg.practitioners[0]?.id ?? '' : ''));
   const [pick, setPick] = useState<{ roomId: string; startTime: string } | null>(at ? { roomId: at.roomId, startTime: at.startTime } : null); // a free room-hour tapped on the schedule
   const [manual, setManual] = useState({ startTime: '', roomId: '' });
   const [conf, setConf] = useState<any[] | null>(null);

@@ -356,6 +356,9 @@ export const recommendation = pgTable('recommendation', {
   gapDays: integer('gap_days'),            // procedures: days between sittings; the next falls due this long after the last one done
   amountPaise: integer('amount_paise'),     // procedures: the doctor's own price, total for all sittings; null = the clinic's standard price
   package: jsonb('package').$type<PlanPackage>(), // procedures: the package this plan is part of (its share of the package price is amountPaise)
+  practitionerId: uuid('practitioner_id'),   // procedures added from the patient record: the doctor who conducts them (else the consultation's doctor)
+  validUntil: date('valid_until'),           // procedures: valid till this day (a package fills it from its months when empty)
+  noExpiry: boolean('no_expiry').notNull().default(false),
   notes: text('notes'),
   status: text('status').notNull().default('open'), // open | contacted | scheduled | done | cancelled (for a test: open = pending, done = report received)
   contactLog: jsonb('contact_log').$type<{ at: string; by: string; outcome: string; note?: string }[]>().notNull().default([]),

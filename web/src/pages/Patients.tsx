@@ -221,7 +221,7 @@ function Timeline({ id }: { id: string }) {
           </section>}
 
           {/* every session of every procedure, a package's procedures together; Price & payments has the course (price, advance, booking) */}
-          {sec === 'plans' && <ProcedurePlans plans={allPlans} sessions={sessions} courses={courses.data ?? []} procName={procName} onOpen={(r) => setCourseOf({ id: r.id, procedureId: r.procedureId, procedure: procName(r), sittings: r.sittings, amountPaise: r.amountPaise, package: r.package })} />}
+          {sec === 'plans' && <ProcedurePlans patientId={id} patientName={p.fullName} plans={allPlans} sessions={sessions} courses={courses.data ?? []} procName={procName} onOpen={(r) => setCourseOf({ id: r.id, procedureId: r.procedureId, procedure: procName(r), sittings: r.sittings, amountPaise: r.amountPaise, package: r.package })} />}
           {courseOf && <CourseDialog rec={courseOf} patientId={id} patientName={p.fullName} onClose={() => setCourseOf(null)} />}
 
           {sec === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}

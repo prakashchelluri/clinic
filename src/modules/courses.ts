@@ -48,7 +48,8 @@ export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, s
   // for the accounts: where the price came from, the standard price for the same sittings, and the doctor who set their own
   const standardPaise = (proc?.pricePaise ?? 0) * sittings || null;
   const priceBy = custom && !pkg ? await tx.select({ n: practitioner.name }).from(encounter).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId)).where(eq(encounter.id, rec.encounterId)).then((x) => x[0]?.n ?? null) : null;
-  const validUntil = pkg ? addMonths(todayIn(ctx.timezone), pkg.validMonths) : null;
+  // valid till: the date set on the plan, or none when it has no expiry, or a package's months from today
+  const validUntil = rec.noExpiry ? null : rec.validUntil ?? (pkg ? addMonths(todayIn(ctx.timezone), pkg.validMonths) : null);
   const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name,
     priceSource: pkg ? 'package' : custom ? 'doctor' : 'standard', standardPaise, priceBy, packageName: pkg?.name ?? null, packageGroup: pkg?.group ?? null, validUntil }).returning();
   await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));

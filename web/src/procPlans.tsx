@@ -6,6 +6,7 @@ import { valuesLine } from './procForm';
 import { can } from './App';
 import { Chip, Icon, fmtDate, money } from './ui';
 import { ProcedureDrawer } from './procDrawer';
+import { AddPlanDialog, CancelPlanDialog, EditPlanDrawer } from './planEdit';
 
 type Stage = 'ongoing' | 'completed' | 'expired' | 'cancelled';
 const LIVE = (s: any) => !['cancelled', 'postponed'].includes(s.state);
@@ -13,10 +14,12 @@ const STATE: Record<string, [string, string]> = { completed: ['Completed', 'sage
 
 /** The patient's procedures, as the clinic follows them: one card per procedure (or per package, its procedures together),
  *  every session listed 1…N with its date and state, and the next one to book; once every session is done the list folds to its header. Filter chips split ongoing, completed, expired and cancelled. */
-export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: { plans: any[]; sessions: any[]; courses: any[]; procName: (r: any) => string; onOpen: (r: any) => void }) {
+export function ProcedurePlans({ patientId, patientName, plans, sessions, courses, procName, onOpen }: { patientId: string; patientName: string; plans: any[]; sessions: any[]; courses: any[]; procName: (r: any) => string; onOpen: (r: any) => void }) {
   const { perms } = useOutletContext<any>(); const nav = useNavigate();
   const [open, setOpen] = useState<string | null>(null); // a session's drawer
-  const [shownIds, setShownIds] = useState<string[]>([]); // finished procedures opened by hand; a finished one is folded to its header
+  const [foldMap, setFoldMap] = useState<Record<string, boolean>>({}); // opened or folded by hand; by default a finished procedure is folded to its header
+  const [adding, setAdding] = useState(false); const [editing, setEditing] = useState<any[] | null>(null); const [cancelling, setCancelling] = useState<any[] | null>(null);
+  const manage = can(perms, 'worklist.write') && can(perms, 'fees.see');
   const sitsOf = (r: any) => sessions.filter((x) => x.recommendationId === r.id && LIVE(x));
   const doneOf = (r: any) => sitsOf(r).filter((x) => x.state === 'completed').length;
   const courseOf = (r: any) => courses.find((c) => c.recommendationId === r.id);
@@ -51,6 +54,7 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
                 <div className="min-w-0 flex-1"><div className="text-[14px] font-medium">Session {k}</div>
                   {s?.state === 'completed' && <SessionValues planId={r.id} sessionId={s.id} />}
                   <div className="text-xs text-muted">{s ? `${fmtDate(s.day)}${s.startTime ? `, ${s.startTime}` : ''}${s.doctor ? ` · ${s.doctor}` : ''}${s.autoBooked && s.state === 'confirmed' && !s.patientConfirmedAt ? ' · booked by the plan, not confirmed yet' : ''}` : r.status === 'cancelled' ? 'Not done' : 'Not booked yet'}</div></div>
+                {s?.notes && <span title={s.notes} aria-label={`Note: ${s.notes}`} className="text-muted"><Icon name="edit" className="h-3.5 w-3.5" /></span>}
                 {s && <Chip tone={tone as any}>{label}</Chip>}
                 {s && ['confirmed', 'in_progress', 'completed'].includes(s.state) && <button type="button" className={`btn btn-sm ${s.state === 'in_progress' ? 'btn-primary' : ''}`} onClick={() => nav(`/procedure-sessions/${s.id}`)}><Icon name="list" className="h-3.5 w-3.5" />Open form</button>}
                 {s ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => setOpen(s.id)}>Go to appointment</button>
@@ -60,22 +64,28 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
         })}
       </ol>);
   };
-  const folded = (r: any) => stageOf(r) === 'completed' && !shownIds.includes(r.id);
-  const fold = (r: any) => stageOf(r) === 'completed' && <button type="button" className="btn btn-sm btn-ghost" aria-expanded={!folded(r)} onClick={() => setShownIds((x) => (x.includes(r.id) ? x.filter((y) => y !== r.id) : [...x, r.id]))}>
+  const folded = (r: any) => foldMap[r.id] ?? stageOf(r) === 'completed';
+  const fold = (r: any) => (stageOf(r) === 'completed' || r.package) && <button type="button" className="btn btn-sm btn-ghost" aria-expanded={!folded(r)} onClick={() => setFoldMap((x) => ({ ...x, [r.id]: !folded(r) }))}>
     <Icon name="up" className={`h-3.5 w-3.5 transition-transform ${folded(r) ? 'rotate-180' : ''}`} />{folded(r) ? 'Show sessions' : 'Hide sessions'}</button>;
+  // valid till: the course's date once agreed, else what the plan says (a package counts its months from the day it is agreed)
+  const validText = (r: any) => { const c = courseOf(r); if (c) return c.validUntil ? ` · ${c.expired ? 'expired' : 'valid till'} ${fmtDate(c.validUntil)}` : r.package || r.validUntil || r.noExpiry ? ' · no expiry' : '';
+    return r.noExpiry ? ' · no expiry' : r.validUntil ? ` · valid till ${fmtDate(r.validUntil)}` : r.package ? ` · valid ${r.package.validMonths} months from agreeing` : ''; };
   const money1 = (r: any) => { const c = courseOf(r); return c ? `${c.unusedSittings > 0 ? `${c.unusedSittings} paid ahead · ` : ''}${c.stillToPayPaise > 0 ? `${money(c.stillToPayPaise)} still to pay` : 'Fully paid'}` : 'Price not agreed yet'; };
+  const acts = (g: any[]) => { const st = stageOfGroup(g); if (!manage || st === 'cancelled') return null; const what = g[0].package ? 'package' : 'procedure';
+    return <span className="flex items-center gap-1">{st !== 'completed' && <button type="button" className="btn btn-sm btn-ghost text-rose" onClick={() => setCancelling(g)}>Cancel {what}</button>}<button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(g)}><Icon name="edit" className="h-3.5 w-3.5" />Edit {what}</button></span>; };
   const head = (r: any, sub?: boolean) => (
     <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${sub ? 'pt-2' : ''}`}>
       <span className={`h-2 w-2 rounded-full ${({ ongoing: 'bg-sage', completed: 'bg-sky', expired: 'bg-amber', cancelled: 'bg-rose' } as const)[stageOf(r)]}`} aria-hidden />
-      <b className={sub ? 'text-[14px]' : 'text-[15px]'}>{procName(r)}</b>
-      <span className="text-[13px] text-muted">{doneOf(r)}/{r.sittings ?? '?'} sessions completed · {money1(r)}{courseOf(r)?.validUntil ? ` · ${courseOf(r).expired ? 'expired' : 'valid till'} ${fmtDate(courseOf(r).validUntil)}` : ''}</span>
-      <span className="ml-auto flex items-center gap-1">{fold(r)}<button type="button" className="btn btn-sm btn-ghost" onClick={() => onOpen(r)}>Price & payments</button></span>
+      <b className={sub ? 'text-[14px]' : 'text-[15px]'}>{procName(r)}</b>{!sub && <span className="rounded bg-paper-2 px-1.5 text-[11px] font-semibold text-ink-2">Procedure</span>}
+      <span className="text-[13px] text-muted">{doneOf(r)}/{r.sittings ?? '?'} sessions completed · {money1(r)}{sub ? '' : validText(r)}</span>
+      <span className="ml-auto flex flex-wrap items-center gap-1">{fold(r)}<button type="button" className="btn btn-sm btn-ghost" onClick={() => onOpen(r)}>Price & payments</button>{!sub && acts([r])}</span>
     </div>);
 
   return (
     <section className="card-flat overflow-hidden anim-fade-up">
-      <div className="flex flex-wrap gap-1.5 border-b border-line/70 px-5 py-3" role="group" aria-label="Show">
-        {([['ongoing', 'Ongoing'], ['completed', 'Completed'], ['expired', 'Expired'], ['cancelled', 'Cancelled']] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={tab === k} className={`toggle-opt ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l} · {count(k)}</button>)}
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-line/70 px-5 py-3">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">{([['ongoing', 'Ongoing'], ['completed', 'Completed'], ['expired', 'Expired'], ['cancelled', 'Cancelled']] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={tab === k} className={`toggle-opt ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l} · {count(k)}</button>)}</div>
+        {manage && <button type="button" className="btn btn-primary btn-sm ml-auto" onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add procedure or package</button>}
       </div>
       {shown.length === 0 ? <div className="px-5 py-6 text-sm text-muted">{plans.length ? `Nothing ${tab}.` : 'No procedures prescribed.'}</div>
         : shown.map((g) => { const pk = g[0].package;
@@ -83,11 +93,14 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
           const done = g.reduce((s, r) => s + doneOf(r), 0); const total = g.reduce((s, r) => s + (r.sittings ?? 0), 0);
           return (
             <div key={pk.group} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">
-              <div className="flex flex-wrap items-center gap-2"><Icon name="box" className="h-4 w-4 text-clay-ink" /><b className="text-[15px]">{pk.name}</b><span className="rounded bg-clay-soft px-1.5 text-[11px] font-semibold text-clay-ink">Package</span><span className="text-[13px] text-muted">{done}/{total} sessions completed{pk.pricePaise ? ` · ${money(pk.pricePaise)}` : ''}</span></div>
+              <div className="flex flex-wrap items-center gap-2"><Icon name="box" className="h-4 w-4 text-clay-ink" /><b className="text-[15px]">{pk.name}</b><span className="rounded bg-clay-soft px-1.5 text-[11px] font-semibold text-clay-ink">Package</span><span className="text-[13px] text-muted">{g.length} procedure{g.length === 1 ? '' : 's'} · {done}/{total} sessions completed{pk.pricePaise ? ` · ${money(pk.pricePaise)}` : ''}{validText(g[0])}</span><span className="ml-auto">{acts(g)}</span></div>
               {g.map((r) => <div key={r.id} className="ml-2 border-l-2 border-clay-line pl-4">{head(r, true)}{!folded(r) && timeline(r)}<CompareSessions planId={r.id} /></div>)}
             </div>);
         })}
       {open && <ProcedureDrawer key={open} id={open} canAct={can(perms, 'worklist.write')} onClose={() => setOpen(null)} />}
+      {adding && <AddPlanDialog patientId={patientId} patientName={patientName} onClose={() => setAdding(false)} />}
+      {editing && <EditPlanDrawer key={editing[0].id} plans={editing} sessions={sessions} courses={courses} procName={procName} onClose={() => setEditing(null)} />}
+      {cancelling && <CancelPlanDialog plans={cancelling} sessions={sessions} courses={courses} procName={procName} onClose={() => setCancelling(null)} />}
     </section>
   );
 }
