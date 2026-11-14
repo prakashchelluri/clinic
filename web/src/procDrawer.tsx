@@ -94,7 +94,7 @@ export async function confirmDone(s: { procedure?: string | null; sittingNo: num
 
 const STATE: Record<string, { label: string; tone: '' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
   confirmed: { label: 'Booked', tone: 'sky' }, in_progress: { label: 'In progress', tone: 'amber' }, completed: { label: 'Completed', tone: 'sage' },
-  missed: { label: 'Missed', tone: 'rose' }, cancelled: { label: 'Cancelled', tone: 'rose' }, postponed: { label: 'Postponed', tone: 'amber' },
+  missed: { label: 'No show', tone: 'rose' }, cancelled: { label: 'Cancelled', tone: 'rose' }, postponed: { label: 'Postponed', tone: 'amber' },
 };
 const dayLabel = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 const Head = ({ children }: { children: string }) => <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-muted">{children}</div>;
@@ -136,7 +136,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           {/* the sitting's state and money as one row of tags (who it is sits in the drawer's title) */}
           <div>
             <div className="flex flex-wrap items-center gap-1.5 [&_.chip]:whitespace-nowrap">
-              {overdue ? <Chip tone="rose">Didn't come</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
+              {overdue ? <Chip tone="rose">No show</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
               {s.patientConfirmedAt && <Chip tone="sage">Patient confirmed</Chip>}
               <MoneyChip m={s.money} />
             </div>
@@ -151,7 +151,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           </div>
           {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => s.consentNeeded ? setSigning(true) : setState.mutate({ state: 'in_progress' })}><Icon name="check" />Start session</button>}
           {canAct && (overdue || ['missed', 'postponed'].includes(s.state)) && <div className="rounded-[10px] border border-rose/25 bg-rose-soft/50 p-4">
-            <div className="font-semibold">{overdue ? 'The patient did not come for this session' : s.state === 'missed' ? 'This session was missed' : 'This session was postponed'}</div>
+            <div className="font-semibold">{overdue ? 'The patient did not come for this session' : s.state === 'missed' ? 'No show for this session' : 'This session was postponed'}</div>
             <div className="mt-0.5 text-sm text-muted">Pick a new date and time with the patient. The course and its session number stay the same.</div>
             <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-primary" onClick={() => setMoving(true)}><Icon name="calendar" />Reschedule</button>
               {overdue && <button className="btn" disabled={markMissed.isPending} onClick={() => markMissed.mutate()}>Mark as missed</button>}</div>

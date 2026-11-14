@@ -46,7 +46,7 @@ const Dots = ({ p }: { p: any }) => (
     {Array.from({ length: p.sittings }, (_, i) => <i key={i} className={`inline-block h-2.5 w-2.5 rounded-full ${i < p.doneSittings ? 'bg-sage' : i === p.doneSittings && p.next ? 'ring-2 ring-inset ring-sage' : 'ring-[1.5px] ring-inset ring-line'}`} />)}
   </span>
 );
-const SIT: Record<string, [string, string]> = { done: ['Done', 'bg-sage text-white'], confirmed: ['Booked', 'ring-2 ring-inset ring-sage text-sage'], in_progress: ['In the room', 'ring-2 ring-inset ring-sage text-sage'], missed: ['Missed', 'ring-2 ring-inset ring-rose text-rose'], planned: ['Not booked', 'ring-[1.5px] ring-inset ring-line text-muted'], cancelled: ['Not booked', 'ring-[1.5px] ring-inset ring-line text-muted'], postponed: ['Postponed', 'ring-[1.5px] ring-inset ring-line text-muted'] };
+const SIT: Record<string, [string, string]> = { done: ['Done', 'bg-sage text-white'], confirmed: ['Booked', 'ring-2 ring-inset ring-sage text-sage'], in_progress: ['In the room', 'ring-2 ring-inset ring-sage text-sage'], missed: ['No show', 'ring-2 ring-inset ring-rose text-rose'], planned: ['Not booked', 'ring-[1.5px] ring-inset ring-line text-muted'], cancelled: ['Not booked', 'ring-[1.5px] ring-inset ring-line text-muted'], postponed: ['Postponed', 'ring-[1.5px] ring-inset ring-line text-muted'] };
 
 /** Every procedure course in one list: filter by where it stands, a row opens the course on the right. */
 export function CourseList() {

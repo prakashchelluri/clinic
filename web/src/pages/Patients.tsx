@@ -64,7 +64,7 @@ export function Patients() {
 }
 
 type Sec = 'visits' | 'reports' | 'photos' | 'plans' | 'bills' | 'messages' | 'missed';
-const SEC_TITLE: Record<Sec, string> = { visits: 'Visit summary', reports: 'Test reports', photos: 'Photos', plans: 'Procedures', bills: 'Bills & payments', messages: 'Messages', missed: 'Missed' };
+const SEC_TITLE: Record<Sec, string> = { visits: 'Visit summary', reports: 'Test reports', photos: 'Photos', plans: 'Procedures', bills: 'Bills & payments', messages: 'Messages', missed: 'No show' };
 
 /** One patient: who they are on top, the record's parts as tabs below; a part's own actions sit beside the tabs. Visit summary =
  *  vitals by date and the history beside one visit at a time. */
@@ -223,7 +223,7 @@ function Timeline({ id }: { id: string }) {
 
           {sec === 'bills' && <BillingHistory patientId={id} patientName={p.fullName} />}
           {sec === 'messages' && <PatientMessages id={id} />}
-          {sec === 'missed' && <Section title={<>Missed <span className="font-normal text-muted">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
+          {sec === 'missed' && <Section title={<>No show <span className="font-normal text-muted">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">No show</Chip></div>)}</Section>}
         </div>
 
       {paying && <TakePayment patientId={id} patientName={p.fullName} onClose={() => setPaying(false)} />}

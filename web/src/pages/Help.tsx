@@ -184,7 +184,7 @@ function Reception() {
     <P>Open <b>Follow-ups</b> each morning. It has four lists. Every row shows how many calls have been made and what happened last.</P>
     <Table head={['List', 'Who is in it']} rows={[
       ['Reviews due', 'The doctor asked to see them again.'],
-      ['Missed visits', 'Booked and did not come, and missed procedure sessions. A booking whose day has passed with no check-in is marked "did not come" by itself the next day.'],
+      ['No show', 'Booked and did not come, for a visit or a procedure session. A booking whose day has passed with no check-in is marked "No show" by itself the next day.'],
       ['Procedures to schedule', 'Sessions are paid for, but none is booked.'],
       ['Advised, not started', 'The doctor advised a procedure and nothing is paid or booked yet.'],
     ]} />

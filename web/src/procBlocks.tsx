@@ -25,7 +25,7 @@ export const procHours = (sittings: { startTime: string }[]) => {
 export function sitStatus(s: any, week = false, doctor = false): { word: string; cls: string } {
   if (s.state === 'completed') return { word: 'Done', cls: 'done' };
   if (s.state === 'in_progress') return { word: 'In the room', cls: 'room' };
-  if (s.state === 'missed') return { word: 'Missed', cls: 'done warn' };
+  if (s.state === 'missed') return { word: 'No show', cls: 'done warn' };
   if (s.approval === 'draft') return { word: 'Not sent', cls: 'draft' };
   if (s.approval === 'sent') return { word: doctor ? (s.changed ? 'Changed · to approve' : 'To approve') : s.changed ? 'Changed · with doctor' : 'With doctor', cls: 'sent amber' };
   if (s.approval === 'change') return { word: 'Change asked', cls: 'change' };

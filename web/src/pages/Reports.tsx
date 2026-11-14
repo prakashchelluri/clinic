@@ -114,7 +114,7 @@ export function Reports() {
 
 // [key, label, money?, lower is better?]
 const FIGS: [string, string, boolean, boolean][] = [['patients', 'Patients completed', false, false], ['newPatients', 'New patients', false, false], ['returning', 'Returning patients', false, false], ['collectedPaise', 'Collected', true, false],
-  ['duePaise', 'Still due', true, true], ['sittings', 'Procedure sessions done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'Booked, did not come', false, true]];
+  ['duePaise', 'Still due', true, true], ['sittings', 'Procedure sessions done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'No show', false, true]];
 
 function Overview({ d }: { d: any }) {
   const span = d.overview.trend.length;
@@ -143,7 +143,7 @@ function Visits({ d }: { d: any }) {
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {tile('Visits', d.now.visits, <span className="text-xs"><Change now={d.now.visits} before={d.before.visits} /></span>)}
       {tile('Booked · walk-in', `${d.visits.booked} · ${d.visits.walkIn}`, d.now.visits ? <span className="text-xs text-muted">{Math.round((d.visits.walkIn / d.now.visits) * 100)}% walked in</span> : undefined)}
-      {tile('Booked, did not come', d.now.noShows, <span className="text-xs">{d.now.cancelled} cancelled · <Change now={d.now.noShows} before={d.before.noShows} lowerIsBetter /></span>)}
+      {tile('No show', d.now.noShows, <span className="text-xs">{d.now.cancelled} cancelled · <Change now={d.now.noShows} before={d.before.noShows} lowerIsBetter /></span>)}
       {tile('Time with the doctor', d.now.withDoctorMin === null ? '–' : `${d.now.withDoctorMin} min`, <span className="text-xs">wait before {d.now.waitMin ?? '–'} min</span>)}
     </div>
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

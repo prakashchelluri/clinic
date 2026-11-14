@@ -7,7 +7,7 @@ import { Chip, Drawer, Icon, Skeleton, toast } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
   booked: { label: 'Booked', tone: '' }, confirmed: { label: 'Confirmed', tone: 'sage' },
-  arrived: { label: 'Arrived', tone: 'sky' }, cancelled: { label: 'Cancelled', tone: 'rose' }, no_show: { label: 'Did not come', tone: 'rose' },
+  arrived: { label: 'Arrived', tone: 'sky' }, cancelled: { label: 'Cancelled', tone: 'rose' }, no_show: { label: 'No show', tone: 'rose' },
 };
 export const StatusChip = ({ s }: { s: string }) => <Chip tone={STATUS[s]?.tone ?? ''}>{STATUS[s]?.label ?? s}</Chip>;
 const MSG: Record<string, string> = { confirmation: 'Confirmation', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', late: 'Doctor running late', reschedule: 'Asked to pick a new time' };
@@ -35,7 +35,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
   const [seriesToo, setSeriesToo] = useState(false);
   const done = (msg: string) => { refreshBookings(); toast(msg); setMode(null); setReason(''); };
   const fail = (e: any) => toast(errText(e), 'err');
-  const update = useMutation({ mutationFn: (b: any) => patch(`/appointments/${id}`, b), onSuccess: (r: any, b: any) => done(b.status === 'cancelled' ? `Cancelled${r.alsoCancelled ? ` with ${r.alsoCancelled} later visit${r.alsoCancelled === 1 ? '' : 's'}` : ''}. ${told(r.whatsapp)}` : b.status === 'confirmed' ? 'Marked confirmed' : b.status === 'no_show' ? 'Marked as did not come' : b.sessionId ? `Moved. ${told(r.whatsapp)}` : 'Updated'), onError: fail });
+  const update = useMutation({ mutationFn: (b: any) => patch(`/appointments/${id}`, b), onSuccess: (r: any, b: any) => done(b.status === 'cancelled' ? `Cancelled${r.alsoCancelled ? ` with ${r.alsoCancelled} later visit${r.alsoCancelled === 1 ? '' : 's'}` : ''}. ${told(r.whatsapp)}` : b.status === 'confirmed' ? 'Marked confirmed' : b.status === 'no_show' ? 'Marked as no show' : b.sessionId ? `Moved. ${told(r.whatsapp)}` : 'Updated'), onError: fail });
   const remind = useMutation({ mutationFn: () => post(`/appointments/${id}/remind`), onSuccess: (r: any) => done(r?.whatsapp === 'queued' ? 'Reminder will go on WhatsApp' : r?.whatsapp === 'opted_out' ? 'Reminder not sent: the patient asked for no WhatsApp. Tell the patient yourself.' : `Reminder not sent. ${told(r?.whatsapp)}`), onError: fail });
   const a = q.data;
   const open = a && ['booked', 'confirmed'].includes(a.status);
@@ -53,7 +53,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
           <div>
             <div className="flex flex-wrap gap-1.5 text-xs">
               <Chip>{a.history.total} booking{a.history.total === 1 ? '' : 's'}</Chip>
-              {a.history.noShows > 0 && <Chip tone={a.history.noShows >= warnAt ? 'rose' : 'amber'}>did not come {a.history.noShows} time{a.history.noShows === 1 ? '' : 's'}</Chip>}
+              {a.history.noShows > 0 && <Chip tone={a.history.noShows >= warnAt ? 'rose' : 'amber'}>No show {a.history.noShows} time{a.history.noShows === 1 ? '' : 's'}</Chip>}
             </div>
           </div>
           <div className="glass !rounded-[10px] p-4">
@@ -68,9 +68,9 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
           {mode === null && <PatientActions patientId={a.patient.id} name={a.patient.fullName} more={!canWrite ? [] : open ? [
             { label: 'Send reminder', icon: 'message', onClick: () => remind.mutate() },
             { label: 'Move to another time', icon: 'calendar', onClick: () => setMode('move') },
-            ...(a.window.day <= today() ? [{ label: 'Did not come', icon: 'user', gapBefore: true, onClick: () => update.mutate({ status: 'no_show' }) }] : []),
+            ...(a.window.day <= today() ? [{ label: 'Mark no show', icon: 'user', gapBefore: true, onClick: () => update.mutate({ status: 'no_show' }) }] : []),
             { label: 'Cancel booking', icon: 'x', danger: true, gapBefore: a.window.day > today(), onClick: () => setMode('cancel') },
-          ] : a.status === 'no_show' ? [{ label: 'Undo “did not come”', icon: 'undo', onClick: () => update.mutate({ status: 'booked' }) }] : []} />}
+          ] : a.status === 'no_show' ? [{ label: 'Undo no show', icon: 'undo', onClick: () => update.mutate({ status: 'booked' }) }] : []} />}
 
           {mode === 'cancel' && (
             <div className="card space-y-3 anim-fade-up">

@@ -9,7 +9,7 @@ import { told } from '../apptDrawer';
 import { RoomBooking } from '../roomBooking';
 
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow' | 'cancelled';
-const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Completed · tests & procedures pending', done: 'Completed', noshow: "Didn't come", cancelled: 'Cancelled' };
+const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'No show', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Completed · tests & procedures pending', done: 'Completed', noshow: 'No show', cancelled: 'Cancelled' };
 const SITTING: Record<string, Kind> = { confirmed: 'booked', in_progress: 'doctor', completed: 'done', missed: 'noshow' };
 /** The key doubles as a filter: each entry and the cards it stands for. Pick one or more; none picked shows everyone. */
 const KEY: { id: string; label: string; sw?: string; match: (c: { k: Kind; proc?: boolean; warn?: boolean; next?: boolean }) => boolean }[] = [
@@ -17,7 +17,7 @@ const KEY: { id: string; label: string; sw?: string; match: (c: { k: Kind; proc?
   { id: 'doctor', label: 'With doctor', sw: 'fd-k-doctor', match: (c) => c.k === 'doctor' },
   { id: 'booked', label: 'Booked', sw: 'fd-k-booked', match: (c) => c.k === 'booked' },
   { id: 'done', label: 'Completed', sw: 'fd-k-done', match: (c) => c.k === 'done' || c.k === 'tests' },
-  { id: 'missed', label: "Didn't come", sw: 'fd-k-noshow', match: (c) => c.k === 'late' || c.k === 'noshow' },
+  { id: 'missed', label: 'No show', sw: 'fd-k-noshow', match: (c) => c.k === 'late' || c.k === 'noshow' },
   { id: 'proc', label: 'Procedure', match: (c) => !!c.proc },
   { id: 'pending', label: 'Tests or procedures pending', match: (c) => !!c.warn },
 ];

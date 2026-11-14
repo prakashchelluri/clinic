@@ -242,7 +242,7 @@ function DeskTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       </div>
       <div className="card space-y-3">
         <div className="card-title">Patients who miss visits</div>
-        <div className="flex flex-wrap items-center gap-2 text-sm"><span>Warn reception after</span><NumInput aria-label="No-shows before a warning" max={20} className={`input !w-20 ${warnBad ? '!border-rose' : ''}`} value={f.noShowWarnAt} onChange={(e: any) => setF((p) => ({ ...p, noShowWarnAt: e.target.value }))} /><span>missed visits</span></div>
+        <div className="flex flex-wrap items-center gap-2 text-sm"><span>Warn reception after</span><NumInput aria-label="No-shows before a warning" max={20} className={`input !w-20 ${warnBad ? '!border-rose' : ''}`} value={f.noShowWarnAt} onChange={(e: any) => setF((p) => ({ ...p, noShowWarnAt: e.target.value }))} /><span>no shows</span></div>
         <div className={`text-xs ${warnBad ? 'text-rose' : 'text-muted'}`}>{warnBad ? 'From 1 to 20.' : 'Booking such a patient shows a warning with how many visits they missed.'}</div>
       </div>
       <div className="card space-y-3">
@@ -389,7 +389,7 @@ function TestDataCard() {
     <div className="card space-y-3">
       <div className="card-title">Test data</div>
       <div className="text-sm text-ink-2">Clears everything this clinic has done and starts fresh with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, repeat visits, patient messages and two procedure courses with before/after photos. Staff, doctors, rooms, prices, forms and templates are kept. Use it on a test clinic, not one with real patients.</div>
-      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.series} repeat visits, {result.sittings} procedure sessions, {result.photos} photos.</div>}
+      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no show, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.series} repeat visits, {result.sittings} procedure sessions, {result.photos} photos.</div>}
       <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : 'Clear everything and load test data'}</button>
     </div>
   );

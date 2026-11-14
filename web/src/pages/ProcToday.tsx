@@ -56,7 +56,7 @@ export function ProcToday() {
     {s.approval === 'approved' && act(s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }))}
     {act(s.practitionerId ? 'Change doctor' : 'Pick doctor', () => { setOpenId(null); setAssigning(s); })}
     {act('Reschedule', () => { setOpenId(null); setMoving(s); })}
-    {act('Mark as missed', async () => { if (await ask({ title: 'Mark this session as missed?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark missed', cancelLabel: 'Keep it' })) { setOpenId(null); setState.mutate({ id: s.id, state: 'missed' }); } })}
+    {act('Mark no show', async () => { if (await ask({ title: 'Mark this session as no show?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark no show', cancelLabel: 'Keep it' })) { setOpenId(null); setState.mutate({ id: s.id, state: 'missed' }); } })}
     {act('Cancel session', async () => { const a = await ask({ title: 'Cancel this session?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and the course goes back to Pending schedules.`, confirmLabel: 'Cancel session', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { setOpenId(null); setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } })}
   </> : canWrite && s.state === 'missed' ? act('Reschedule', () => { setOpenId(null); setMoving(s); }, true) : null;
 

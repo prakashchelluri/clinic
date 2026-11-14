@@ -213,8 +213,8 @@ export function patientRoutes(app: FastifyInstance) {
     const noShows = await tx.select({ a: appointment, day: session.day, start: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.patientId, id), eq(appointment.tenantId, t), eq(appointment.status, 'no_show'))).orderBy(desc(session.day));
     const calls = await tx.select().from(callback).where(and(eq(callback.patientId, id), eq(callback.tenantId, t))).orderBy(desc(callback.createdAt));
     const missed = [
-      ...noShows.map((x) => ({ kind: 'visit' as const, refId: x.a.id, day: x.day, time: x.start, what: 'Missed visit', calls: calls.filter((c) => c.refId === x.a.id) })),
-      ...sessions.filter((s) => s.ps.state === 'missed').map((s) => ({ kind: 'sitting' as const, refId: s.ps.id, day: s.ps.day, time: s.ps.startTime, what: `Missed ${s.proc ?? 'procedure'} session ${s.ps.sittingNo}`, calls: calls.filter((c) => c.refId === s.ps.id) })),
+      ...noShows.map((x) => ({ kind: 'visit' as const, refId: x.a.id, day: x.day, time: x.start, what: 'Visit', calls: calls.filter((c) => c.refId === x.a.id) })),
+      ...sessions.filter((s) => s.ps.state === 'missed').map((s) => ({ kind: 'sitting' as const, refId: s.ps.id, day: s.ps.day, time: s.ps.startTime, what: `${s.proc ?? 'Procedure'} session ${s.ps.sittingNo}`, calls: calls.filter((c) => c.refId === s.ps.id) })),
     ].sort((a, b) => b.day.localeCompare(a.day));
     // what is still owed: a part-paid invoice counts only its balance
     const paidOn = (cid: string) => payments.filter((x) => x.chargeId === cid).reduce((s, x) => s + x.amountPaise, 0);

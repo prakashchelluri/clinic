@@ -72,18 +72,18 @@ export function FrontDesk() {
   const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: refresh, onError: (e) => toast(errText(e), 'err') });
   // one tap, then a few seconds to take it back: the status simply goes back to what it was
   const markLeft = (v: any) => upVisit.mutate({ id: v.id, status: 'left' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) marked as left`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }, { onError: (e) => toast(errText(e), 'err') }) }), onError: (e) => toast(errText(e), 'err') });
-  const markNoShow = (a: any) => upAppt.mutate({ id: a.id, status: 'no_show' }, { onSuccess: () => toast(`${a.patient.fullName} marked no-show`, 'info', { label: 'Undo', run: () => upAppt.mutate({ id: a.id, status: a.status }) }) });
+  const markNoShow = (a: any) => upAppt.mutate({ id: a.id, status: 'no_show' }, { onSuccess: () => toast(`${a.patient.fullName} marked no show`, 'info', { label: 'Undo', run: () => upAppt.mutate({ id: a.id, status: a.status }) }) });
   // end of the day: everyone who did not turn up, or walked out, in one go; each one can still be undone on its own
   const bulk = useMutation({
     mutationFn: async ({ ids, kind }: { ids: string[]; kind: 'noshow' | 'left' }) => { for (const id of ids) await (kind === 'noshow' ? patch(`/appointments/${id}`, { status: 'no_show' }) : patch(`/visits/${id}`, { status: 'left' })); return ids.length; },
-    onSuccess: (n, { kind }) => { refresh(); setSel(null); toast(kind === 'noshow' ? `${n} marked no-show` : `${n} marked as left`); },
+    onSuccess: (n, { kind }) => { refresh(); setSel(null); toast(kind === 'noshow' ? `${n} marked no show` : `${n} marked as left`); },
     onError: (e) => { refresh(); toast(errText(e), 'err'); },
   });
   const toggleSel = (id: string) => setSel((cur) => { const n = new Set(cur); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pick = (id: string) => sel && <input type="checkbox" className="h-4 w-4 accent-ink" aria-label="Select" checked={sel.has(id)} onChange={() => toggleSel(id)} />;
   const bulkAsk = async () => {
     if (!sel?.size) return; const n = sel.size; const kind = tab === 'scheduled' ? 'noshow' : 'left';
-    const r = await ask({ title: kind === 'noshow' ? `Mark ${n} as no-show?` : `Mark ${n} as left?`, body: kind === 'noshow' ? 'They did not arrive for the booking today. Each one can be undone from the booking, and rebooked from Completed.' : 'They left before seeing the doctor. Any fee paid shows under Completed for a refund.', confirmLabel: kind === 'noshow' ? 'Mark no-show' : 'Mark as left', tone: 'danger' });
+    const r = await ask({ title: kind === 'noshow' ? `Mark ${n} as no show?` : `Mark ${n} as left?`, body: kind === 'noshow' ? 'They did not arrive for the booking today. Each one can be undone from the booking, and rebooked from Completed.' : 'They left before seeing the doctor. Any fee paid shows under Completed for a refund.', confirmLabel: kind === 'noshow' ? 'Mark no show' : 'Mark as left', tone: 'danger' });
     if (r) bulk.mutate({ ids: [...sel], kind });
   };
   // Back with reports within the clinic's free days: no form, no fee. Check in and send straight in; the doctor sees "back with reports" and opens the same consultation.
@@ -244,10 +244,10 @@ export function FrontDesk() {
       <Row key={a.id} token={<span className="flex items-center gap-2">{pick(a.id)}{a.window.startTime}</span>} tokenCls={`${isLate ? 'text-rose' : ''} ${sel ? '!w-[108px]' : ''}`} cls={isLate ? 'bg-rose-soft/30' : ''}
         top={<>{who(a.patient)}{isLate ? <Chip tone="rose">not arrived</Chip> : a.status === 'confirmed' ? <Chip tone="sage">confirmed</Chip> : <Chip>booked</Chip>}<Chip>{docName(a.window.practitionerId)}</Chip></>}
         sub={meta([a.patient.patientNo, a.patient.phone, a.patient.locality, a.service, a.note])}
-        actions={<>{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>}{canDesk && <MoreMenu items={[{ label: 'Mark no-show', danger: true, onClick: () => markNoShow(a) }]} />}</>} />); }
+        actions={<>{canDesk && isToday && <button className="btn btn-sm btn-primary" onClick={() => setArrive({ patientId: a.patientId, appointmentId: a.id, name: a.patient.fullName })}>Check in</button>}{canDesk && <MoreMenu items={[{ label: 'Mark no show', danger: true, onClick: () => markNoShow(a) }]} />}</>} />); }
     if (r.type === 'noshow') { const a = r.a; return (
       <Row key={a.id} token={a.window.startTime} cls="opacity-70"
-        top={<>{who(a.patient)}<Chip tone="rose">no-show</Chip><Chip>{docName(a.window.practitionerId)}</Chip></>}
+        top={<>{who(a.patient)}<Chip tone="rose">No show</Chip><Chip>{docName(a.window.practitionerId)}</Chip></>}
         sub={meta([a.patient.phone, 'did not arrive'])}
         actions={canDesk && <button className="btn btn-sm" onClick={() => nav(`/dashboard?book=1&patient=${a.patientId}&pname=${encodeURIComponent(a.patient.fullName)}`)}>Rebook</button>} />); }
     const v = r.v; const due = dueOf(v); const handled = !!v.details?.explainedAt; const left = v.status === 'left';
@@ -298,7 +298,7 @@ export function FrontDesk() {
               {tab === 'scheduled' && late.length > 0 && <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set(late.map((a) => a.id)))}>Late only</button>}
               <button type="button" className="rounded-[8px] px-2.5 py-1 font-semibold text-paper/80 hover:bg-paper/10" onClick={() => setSel(new Set())}>None</button>
               <span className="ml-auto" />
-              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-paper px-3 font-semibold text-ink hover:bg-paper-2 disabled:opacity-50" disabled={!sel.size || bulk.isPending} onClick={bulkAsk}>{tab === 'scheduled' ? 'Mark no-show' : 'Mark as left'}{sel.size ? ` · ${sel.size}` : ''}</button>
+              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-paper px-3 font-semibold text-ink hover:bg-paper-2 disabled:opacity-50" disabled={!sel.size || bulk.isPending} onClick={bulkAsk}>{tab === 'scheduled' ? 'Mark no show' : 'Mark as left'}{sel.size ? ` · ${sel.size}` : ''}</button>
             </div>}
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
@@ -348,7 +348,7 @@ const weekdayOf = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateStrin
 
 /** History across days. The controls sit on the tab row (search, one Filters dropdown, print, export); the date is a column. */
 const PERIODS: [string, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['custom', 'Pick dates']];
-const SHOWS: [string, string][] = [['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No-shows'], ['adjusted', 'Fees waived or refunded']];
+const SHOWS: [string, string][] = [['all', 'Everything'], ['left', 'Left without consult'], ['noshow', 'No show'], ['adjusted', 'Fees waived or refunded']];
 function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook: (p?: any) => void; slot: HTMLElement | null }) {
   const { perms, cfg } = useOutletContext<Ctx & { cfg: any }>();
   const nav = useNavigate();
@@ -372,7 +372,7 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
   // the same reason picker as every other refund
   const [refunding, setRefunding] = useState<null | { c: any; name: string }>(null);
   const rows: any[] = h.data?.rows ?? []; const s = h.data?.summary;
-  const outcomeChip = (r: any) => r.outcome === 'completed' ? <Chip tone="sage">completed</Chip> : r.outcome === 'left' ? <Chip>left</Chip> : r.outcome === 'noshow' ? <Chip tone="rose">no-show</Chip> : <Chip tone="amber">{r.outcome.replace('_', ' ')}</Chip>;
+  const outcomeChip = (r: any) => r.outcome === 'completed' ? <Chip tone="sage">completed</Chip> : r.outcome === 'left' ? <Chip>left</Chip> : r.outcome === 'noshow' ? <Chip tone="rose">No show</Chip> : <Chip tone="amber">{r.outcome.replace('_', ' ')}</Chip>;
   const happened = (r: any) => r.kind === 'noshow' ? 'Did not arrive' : r.outcome === 'left' ? 'Left without seeing the doctor' : (r.recommendations ?? []).map((x: any) => x.kind === 'procedure' ? x.procedure : x.kind === 'investigation' ? `Test ${x.notes}` : `Review ${x.dueOn ?? ''}`).join('; ') || 'Medicines only';
   const paidOf = (r: any) => r.charges.find((c: any) => c.status === 'paid' && c.amountPaise > 0);
   const columns: Col<any>[] = [
@@ -392,7 +392,7 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
   ];
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 anim-fade-up">
-      <div className="text-sm text-muted">{s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no-shows · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : badDates ? 'Check the dates' : 'Loading…'}</div>
+      <div className="text-sm text-muted">{s ? <span>{dayOf(from)}{from !== to ? ` – ${dayOf(to)}` : ''} · <b className="text-ink">{s.visits}</b> visits · <b className="text-ink">{s.left}</b> left without consult · <b className="text-ink">{s.noShows}</b> no show · <b className="text-ink">{money(s.collectedPaise)}</b> collected</span> : badDates ? 'Check the dates' : 'Loading…'}</div>
       <DataTable id="fd-history" exportName={`front-desk-history-${from}-to-${to}`} rows={rows} rowKey={(r) => r.key} columns={columns}
         loading={h.isLoading && !badDates} error={h.error} onRetry={() => h.refetch()} onRow={(r) => nav(`/patients/${r.patient.id}`)}
         search={{ placeholder: 'Search all days: name, phone or token' }} sort={{ key: 'date', dir: -1 }}
