@@ -118,7 +118,7 @@ export function Today() {
           <DaySchedule today={today()} visitsToday={seeAll ? d.visits ?? [] : visits} doctors={(d.doctors ?? []).filter((x: any) => seeAll || x.id === doc)} rooms={seeAll ? (cfg?.rooms ?? []).filter((r: any) => r.active !== false) : []}
             selectedId={picked?.visit?.id ?? null} nextIds={new Set(next ? [next.id] : [])} procsInDoc
             kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? 'done' : 'waiting'}
-            onVisit={(id) => { const v = (d.visits ?? []).find((x: any) => x.id === id); if (v) setPicked({ key: v.id, label: v.patient.fullName, patientId: v.patient.id, visit: v, hour: '' }); }} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
+            onVisit={(id, tapped) => { const v = (d.visits ?? []).find((x: any) => x.id === id) ?? tapped; if (v) setPicked({ key: v.id, label: v.patient.fullName, patientId: v.patient.id, visit: v, hour: '' }); }} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
             tools={canChange && <>{[late, breakNow, away].filter(Boolean).map((b: any) => <Chip key={b.id} tone="amber">{b.note}</Chip>)}
               <span className="relative"><button type="button" className="btn btn-sm" aria-haspopup="menu" aria-expanded={dayMenu} onClick={() => setDayMenu(!dayMenu)}><Icon name="clock" className="h-3.5 w-3.5" />My day<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 text-muted" /></button>
                 {dayMenu && <><div className="fixed inset-0 z-30" onClick={() => setDayMenu(false)} />

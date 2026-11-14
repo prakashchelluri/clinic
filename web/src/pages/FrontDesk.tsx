@@ -50,6 +50,7 @@ export function FrontDesk() {
   const calq = useQuery({ queryKey: ['calendar', day, 'all'], queryFn: () => get(`/calendar?day=${day}`), refetchInterval: 15000 }); // the same as the calendar's: this hour's procedures for the Action panel
   const [procOpen, setProcOpen] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>(can(perms, 'visit.write') ? 'now' : 'waiting');
+  const [pastV, setPastV] = useState<any>(null); // a patient tapped on another day: not in today's list, so kept as tapped
   const [pickV, setPickV] = useState<string | null>(null); // the patient whose journey is open; null = the first that needs the desk, '' = closed
   const [sel, setSel] = useState<Set<string> | null>(null); // bulk: the ticked rows on Waiting or Not here yet; null when not selecting
   useEffect(() => setSel(null), [tab]);
@@ -141,7 +142,7 @@ export function FrontDesk() {
   /** 8 min, 1 h 20 m: how long someone has waited */
   const waitText = (m: number) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} m`);
   const nowCount =sendable.length + checkout.length + reportsIn.length + reportsLate.length + late.length + withDue.length;
-  const selV = canDesk && tab !== 'history' ? visitsAll.find((v) => v.id === pickV) ?? null : null; // the journey drawer opens on a tap, never by itself
+  const selV = canDesk && tab !== 'history' ? visitsAll.find((v) => v.id === pickV) ?? (pastV?.id === pickV ? pastV : null) : null; // the journey drawer opens on a tap, never by itself
   const longest = waiting.length ? Math.max(...waiting.map((v) => minsSince(v.arrivedAt))) : 0;
   const dayLabel = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
   const active = (v: any) => ['waiting', 'intake', 'screened', 'in_consult'].includes(v.status);
@@ -303,7 +304,7 @@ export function FrontDesk() {
             {onSchedule ? <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
               <DaySchedule today={day} visitsToday={visitsAll} doctors={d?.doctors ?? []} rooms={(cfg?.rooms ?? []).filter((r: any) => r.active !== false)} selectedId={selV?.id ?? null} nextIds={nextIds}
                 kindOf={(v) => v.status === 'left' ? 'noshow' : v.status === 'in_consult' ? 'doctor' : v.status === 'intake' ? 'intake' : v.status === 'done' ? (!visitClosed(v) && (v.recommendations ?? []).some((r: any) => r.status === 'open') ? 'tests' : 'done') : 'waiting'}
-                list={view === 'table'} onVisit={setPickV} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
+                list={view === 'table'} onVisit={(id, v) => { setPickV(id); setPastV(v); }} onOpenAppt={setApptId} onBook={can(perms, 'appointment.write') ? setBooking : undefined} canOverbook={can(perms, 'appointment.overbook')}
                 tools={<>{/* Calendar | List swaps only this section; the Action panel beside it stays */}
                   <PageSearchBox placeholder="Find a patient" className="!h-8 w-[180px] max-w-full" />
                   <button type="button" className="btn btn-sm btn-icon !h-8 !w-8" aria-label="History: past days" title="History: past days, who came, who left, who did not come" onClick={() => setTab('history')}><Icon name="clock" className="h-4 w-4" /></button>

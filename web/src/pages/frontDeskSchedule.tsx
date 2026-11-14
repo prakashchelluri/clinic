@@ -45,7 +45,7 @@ type Col = { key: string; head: React.ReactNode; day: string; ws: any[]; /** nul
  *  A procedure keeps its state's colour and adds a teal edge and a syringe. Hours already over fold into one line; later hours are one line each until opened. */
 export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, kindOf, nextIds, onVisit, onOpenAppt, onBook, canOverbook = false, tools, procsInDoc = false, list = false }: {
   today: string; visitsToday: any[]; doctors: any[]; rooms: any[]; selectedId: string | null; kindOf: (v: any) => Kind; nextIds: Set<string>;
-  onVisit: (id: string) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void; canOverbook?: boolean; tools?: React.ReactNode;
+  onVisit: (id: string, v: any) => void; onOpenAppt: (id: string) => void; onBook?: (w: any) => void; canOverbook?: boolean; tools?: React.ReactNode;
   /** a doctor's own calendar: their sittings sit in their column when the room's column is not shown */ procsInDoc?: boolean;
   /** the same people as rows of a table instead of the grid */ list?: boolean;
 }) {
@@ -177,7 +177,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const visitChip = (v: any, d: string): ChipP => {
     const k = kindOf(v); const next = d === today && nextIds.has(v.id);
     const tag = k === 'intake' ? 'with junior' : v.details?.reportsEncounterId && !['done', 'noshow'].includes(k) ? 'reports' : ''; // the colour says the rest
-    return { id: v.id, k, next, name: v.patient.fullName, tag, who: docNameOf(v.practitionerId), warn: k === 'tests', sel: selectedId === v.id, onClick: () => (d === today ? onVisit(v.id) : nav(`/patients/${v.patient.id}`)) };
+    return { id: v.id, k, next, name: v.patient.fullName, tag, who: docNameOf(v.practitionerId), warn: k === 'tests', sel: selectedId === v.id, onClick: () => onVisit(v.id, v) }; // any day: the side drawer, never straight to the profile
   };
   const apptChip = (a: any, w: any, d: string): ChipP => {
     // 'arrived' only reaches here on days whose check-ins are not loaded: the booking's own visit status stands in
