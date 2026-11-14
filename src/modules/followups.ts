@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
-import { appointment, callback, course, encounter, message, patient, procedureCatalog, procedureSession, recommendation, session, tenant } from '../db/schema.js';
+import { appointment, callback, course, encounter, message, patient, practitioner, procedureCatalog, procedureSession, recommendation, session, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
@@ -20,6 +20,8 @@ type Tab = keyof typeof TABS;
 const P = { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags };
 /** recId/procedureId: the plan a Book button books a sitting for; order: the report a "Told" button closes. */
 type Row = { key: string; kind: Kind; refId: string; patient: any; what: string; dueOn: string | null; recId?: string | null; procedureId?: string | null; sittings?: number | null; order?: { encounterId: string; orderNo: number; needsVisit: boolean }; lastCall?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null; attempts: number } | null; waiting?: boolean;
+  /** for the drawer: when and by whom it was advised, a course's price and gap; every call so far, newest first */
+  detail?: { advisedOn: string; by: string | null; amountPaise?: number | null; gapDays?: number | null }; history?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null }[];
   /** confirm rows: the booked sitting, so Move can reschedule it and Not coming can postpone it */
   sitting?: { id: string; day: string; startTime: string; endTime: string; practitionerId: string | null; sittingNo: number; of: number | null; weekConfirmedAt: string | null } };
 
@@ -33,11 +35,11 @@ const dayLabel = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('e
 async function build(tx: Tx, t: string, tz: string, dx = true) {
   const today = todayIn(tz);
   const open = sql`${recommendation.status} in ('open','contacted')`;
-  const recs = (kind: string) => tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId))
+  const recs = (kind: string) => tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data, doc: practitioner.name }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
     .leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, kind), open));
   const followups = await recs('followup');
   // a course between sittings is 'scheduled' with nothing booked ahead: it comes back to book the next one (rows with a booked sitting drop out below)
-  const procs = await tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId))
+  const procs = await tx.select({ r: recommendation, p: P, proc: procedureCatalog.name, enc: encounter.data, doc: practitioner.name }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(encounter, eq(encounter.id, recommendation.encounterId)).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId))
     .leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId)).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'), sql`${recommendation.status} in ('open','contacted','scheduled')`));
   // per course: sittings done, and the last day a sitting ended (done, missed or called off); calls before it were about an earlier sitting
   const course0 = new Map<string, { done: number; lastDay: string | null; live: boolean }>();
@@ -54,13 +56,13 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   const recIds = [...procs.map((x) => x.r.id), ...missed.map((x) => x.ps.recommendationId).filter((x): x is string => !!x)];
   const booked = recIds.length ? new Set((await tx.select({ id: procedureSession.recommendationId }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, recIds), eq(procedureSession.state, 'confirmed')))).map((x) => x.id)) : new Set<string>();
   const rows: Row[] = [];
-  for (const x of followups) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: dx ? x.r.notes?.trim() || dxOf(x.enc) || 'Review' : 'Follow-up visit', dueOn: x.r.dueOn });
+  for (const x of followups) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: dx ? x.r.notes?.trim() || dxOf(x.enc) || 'Review' : 'Follow-up visit', dueOn: x.r.dueOn, detail: { advisedOn: x.r.createdAt, by: x.doc } });
   for (const x of procs) {
     const c = course0.get(x.r.id);
     if (booked.has(x.r.id) || c?.live) continue;
     if (x.r.status === 'scheduled' && !c?.done && !c?.lastDay) continue; // booked once and nothing has happened to it since (old data)
     const what = `${x.proc ?? 'Procedure'}${c?.done ? ` · session ${c.done + 1}${x.r.sittings ? ` of ${x.r.sittings}` : ''} to book` : x.r.sittings ? ` · ${x.r.sittings} sessions` : ''}`;
-    rows.push({ key: x.r.id, kind: agreed.has(x.r.id) ? 'schedule' : 'advised', refId: x.r.id, patient: x.p, what, dueOn: x.r.dueOn, recId: x.r.id, procedureId: x.r.procedureId, sittings: x.r.sittings });
+    rows.push({ key: x.r.id, kind: agreed.has(x.r.id) ? 'schedule' : 'advised', refId: x.r.id, patient: x.p, what, dueOn: x.r.dueOn, recId: x.r.id, procedureId: x.r.procedureId, sittings: x.r.sittings, detail: { advisedOn: x.r.createdAt, by: x.doc, amountPaise: x.r.amountPaise, gapDays: x.r.gapDays } });
   }
   const from = addDays(today, -30);
   const noShows = await tx.select({ a: appointment, p: P, day: session.day, start: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).innerJoin(patient, eq(patient.id, appointment.patientId))
@@ -95,6 +97,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     const last = mine[0];
     if (last && ['booked', 'not_interested'].includes(last.outcome)) continue;
     r.lastCall = last ? { outcome: last.outcome, note: last.note, at: last.createdAt, by: last.byName, callbackOn: last.callbackOn, attempts: mine.length } : null;
+    r.history = mine.map((c) => ({ outcome: c.outcome, note: c.note, at: c.createdAt, by: c.byName, callbackOn: c.callbackOn }));
     r.waiting = !!last?.callbackOn && last.callbackOn > today;
     out.push(r);
   }
@@ -123,12 +126,13 @@ export function followupRoutes(app: FastifyInstance) {
     return { counts, rows: all.filter((r) => (TABS[tab] as readonly string[]).includes(r.kind)) };
   });
 
-  /** The side menu's badges. Calls: what the Calls page lists by default (overdue, due today, or no date; not waiting for a call-back).
+  /** The side menu's badges. Calls: what the Calls page lists for today.
    *  Procedures: today's sittings still to happen, and how many of them nobody has confirmed with the patient. */
   route(app, 'get', '/followups/menu-counts', 'worklist.read', async (req, tx) => {
     await markMissed(tx, req.ctx);
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
-    const calls = (await build(tx, t, req.ctx.timezone, false)).filter((r) => !r.waiting && (!r.dueOn || r.dueOn <= today || (!!r.lastCall?.callbackOn && r.lastCall.callbackOn <= today))).length;
+    // what the Calls page shows for today: due today, or late by up to 30 days (older ones sit behind a link); a call-back day replaces the due day
+    const calls = (await build(tx, t, req.ctx.timezone, false)).filter((r) => { const d = r.lastCall?.callbackOn ?? r.dueOn ?? today; return d <= today && d >= addDays(today, -30); }).length;
     const [s] = await tx.select({ n: sql<number>`count(*)::int`, unconfirmed: sql<number>`count(*) filter (where ${procedureSession.state} = 'confirmed' and ${procedureSession.patientConfirmedAt} is null)::int` })
       .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, today), inArray(procedureSession.state, ['confirmed', 'in_progress'])));
     return { calls, sittings: s.n, unconfirmed: s.unconfirmed };
@@ -172,6 +176,7 @@ export function followupRoutes(app: FastifyInstance) {
       await tx.insert(message).values({ tenantId: t, patientId: p.id, kind: 'followup_call', channel: 'whatsapp', toPhone: p.phone, params: { name: p.fullName, lang: patientLang(p, ten?.settings) },
         body: MSG[patientLang(p, ten?.settings)].triedToCall(p.fullName.split(' ')[0], ten?.name ?? 'the clinic', phone) });
       messaged = true;
+      await tx.update(callback).set({ note: [row.note, 'WhatsApp sent'].filter(Boolean).join(' · ') }).where(eq(callback.id, row.id)); // the call history says a message went
     }
     await emit(tx, req.ctx, 'followup.logged', 'callback', row.id, { kind: b.kind, outcome: b.outcome, callbackOn: b.callbackOn });
     return { ...row, messaged };

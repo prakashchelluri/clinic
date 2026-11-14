@@ -164,7 +164,7 @@ export function Today() {
               {toApprove > 0 && <Attn title={`${toApprove} procedure session${toApprove === 1 ? '' : 's'} to approve`} sub={`From the coordinator${approvals.data?.weeks?.length ? ` · week of ${new Date(approvals.data.weeks[0] + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : ''}`} action="Review" onClick={() => setReviewing(true)} />}
               {drafts.map((v: any) => <Attn key={v.id} title={v.patient.fullName} sub={`Arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=today&day=${today()}`)} />)}
-              {overdue.length > 0 && <Attn title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="On the desk's Calls list" action="See" onClick={() => nav('/calls?tab=reviews')} />}
+              {overdue.length > 0 && <Attn title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="On the desk's Calls list" action="See" onClick={() => nav('/calls')} />}
               {stopped.map((x: any) => <Attn key={x.id} title={`${x.name} was stopped`} sub={`New internet address ${x.ip}: at the clinic? allow it`} action="Open" onClick={() => nav('/settings?tab=privacy')} />)}</>}
           </section>
         </div>
