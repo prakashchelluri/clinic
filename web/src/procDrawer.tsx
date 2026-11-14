@@ -22,7 +22,7 @@ export function ConsentChip({ s }: { s: Consent }) {
 }
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
 /** How the consent was given, next to the chip: a signature on the tablet is a link that opens the signed image. */
-function ConsentNote({ c }: { c: NonNullable<Consent['consent']> }) {
+export function ConsentNote({ c }: { c: NonNullable<Consent['consent']> }) {
   if (c.documentId) return <a className="text-xs font-semibold text-clay underline" href={`/api/documents/${c.documentId}/file`} target="_blank" rel="noreferrer">Signed {shortDay(c.grantedAt)}{c.by ? ` · ${c.by}` : ''}</a>;
   return <span className="text-xs text-muted">{c.grantedAt ? `${c.how ?? 'recorded'} · ${c.by} · ${new Date(c.grantedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : c.how}</span>;
 }
@@ -48,7 +48,7 @@ function SignaturePad({ pad, onInk }: { pad: React.RefObject<HTMLCanvasElement |
 }
 
 /** Before the first sitting of a procedure: the patient signs on the tablet (saved as the patient's document), or staff confirm the paper form is filed. */
-function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string }) => void }) {
+export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string }) => void }) {
   const [how, setHow] = useState<'sign' | 'paper'>('sign'); const [ink, setInk] = useState(false); const [saving, setSaving] = useState(false);
   const pad = useRef<HTMLCanvasElement>(null);
   const what = s.procedure ?? 'this procedure';
@@ -108,7 +108,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const [signing, setSigning] = useState(false);
   const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false); const [moving, setMoving] = useState(false);
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
-    onSuccess: (_r, b) => { setSigning(false); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
+    onSuccess: (_r, b) => { setSigning(false); if (b.state === 'in_progress' && s?.form) nav(`/procedure-sessions/${id}`); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
     onError: (e) => toast(errText(e), 'err') });
   const s = q.data;
   const p = s?.patient;
@@ -159,7 +159,8 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           {/* any booked sitting can move, the same as a consultation; a missed one gets the red box above */}
           {canAct && s.state === 'confirmed' && !overdue && <button className="btn justify-center" onClick={() => setMoving(true)}><Icon name="calendar" />Reschedule</button>}
           {signing && <ConsentDialog s={s} onClose={() => setSigning(false)} onStart={(b) => setState.mutate(b)} />}
-          {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
+          {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (s.form && s.missing?.length) { toast(`Fill these first: ${s.missing.join(', ')}.`, 'err'); nav(`/procedure-sessions/${id}`); return; } if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
+          {['confirmed', 'in_progress', 'completed'].includes(s.state) && <button type="button" className="btn justify-center" onClick={() => { onClose(); nav(`/procedure-sessions/${id}`); }}><Icon name="list" />{s.form ? (s.state === 'completed' ? 'Open procedure form' : `Open procedure form${s.missing?.length ? ` · ${s.missing.length} required left` : ''}`) : 'Open procedure page'}</button>}
 
           {canAct && ['confirmed', 'in_progress', 'completed'].includes(s.state) && <div>
             <Head>Photos of this session</Head>

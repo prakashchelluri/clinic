@@ -300,6 +300,10 @@ export const calendarBlock = pgTable('calendar_block', {
   patientId: uuid('patient_id'),
 }, (t) => [index('block_day').on(t.tenantId, t.day)]);
 
+/** One ask to the pharmacy from a procedure session. Issued items come off stock as 'procedure', with no bill (the procedure price covers them). */
+export type SupplyAsk = { id: string; at: string; by: string; lines: { medicineId: string; name: string; qty: number }[];
+  status: 'asked' | 'issued' | 'none'; doneAt?: string; doneBy?: string; note?: string;
+  issued?: { medicineId: string; name: string; batchId: string; batchNo: string; expiry: string; qty: number }[] };
 // One sitting of a procedure course, scheduled against a room and a practitioner.
 export const procedureSession = pgTable('procedure_session', {
   ...tenantCols,
@@ -327,6 +331,8 @@ export const procedureSession = pgTable('procedure_session', {
   changed: boolean('changed').notNull().default(false), // moved or added after its week was sent
   bookedBy: uuid('booked_by'),                          // the user who booked or last moved it
   autoBooked: boolean('auto_booked').notNull().default(false), // booked by the plan when the sitting before was done; cleared when someone moves it
+  formDefinitionId: uuid('form_definition_id'), // the procedure form version this session was filled with (values in outcome)
+  supplies: jsonb('supplies').$type<SupplyAsk[]>().notNull().default([]), // what the session asked the pharmacy for; issued with no bill
 }, (t) => [index('psession_day').on(t.tenantId, t.day)]);
 
 // doctor's plan → worklists. One table serves both follow-up and procedure recommendations.
@@ -727,8 +733,10 @@ export const TENANT_TABLES = [
 ];
 
 export type FormField = {
-  key: string; label: string; type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'tags' | 'diagnoses' | 'duration' | 'date';
+  key: string; label: string; type: 'text' | 'textarea' | 'number' | 'select' | 'multiselect' | 'tags' | 'diagnoses' | 'duration' | 'date' | 'checkbox' | 'chips';
   required?: boolean; options?: string[]; unit?: string; placeholder?: string;
+  help?: string; width?: 1 | 2 | 3 | 4; carry?: boolean; // procedure forms: help under the field, quarters of the row, start with last session's value
 };
-export type FormSchema = { sections: { key: string; title: string; fields: FormField[] }[] };
+/** products: a procedure form's usual pharmacy items, asked for when a session starts. */
+export type FormSchema = { sections: { key: string; title: string; fields: FormField[] }[]; products?: { medicineId: string; name: string; qty: number }[] };
 

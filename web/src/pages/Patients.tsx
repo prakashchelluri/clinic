@@ -77,7 +77,7 @@ function Timeline({ id }: { id: string }) {
   const pendingTests: any[] = (waitingTests.data ?? []).filter((r: any) => r.patient.id === id);
   const [forTest, setForTest] = useState(''); const [labHist, setLabHist] = useState(false);
   const [edit, setEdit] = useState<any>(null);
-  const [flagging, setFlagging] = useState(false); const [sec, setSec] = useState<Sec>('visits');
+  const [flagging, setFlagging] = useState(false); const [sec, setSec] = useState<Sec>(() => (SEC_TITLE as any)[new URLSearchParams(window.location.search).get('sec') ?? ''] ? new URLSearchParams(window.location.search).get('sec') as Sec : 'visits');
   const [vi, setVi] = useState(0); // the visit shown, newest first
   const [view, setView] = useVisitView(); const canNotes = can(perms, 'encounter.intake'); // Full notes reads the visit itself, which needs this
   const [paying, setPaying] = useState(false);

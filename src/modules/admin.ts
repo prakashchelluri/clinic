@@ -341,10 +341,24 @@ export function adminRoutes(app: FastifyInstance) {
   });
 
   // --- forms: saving creates a new version; completed encounters keep theirs ---
-  const Field = z.object({ key: z.string().regex(/^[a-z0-9_]+$/), label: z.string().min(1), type: z.enum(['text', 'textarea', 'number', 'select', 'multiselect', 'tags', 'diagnoses', 'duration', 'date']), required: z.boolean().optional(), options: z.array(z.string()).optional(), unit: z.string().optional(), placeholder: z.string().optional() });
-  const Schema = z.object({ sections: z.array(z.object({ key: z.string().regex(/^[a-z0-9_]+$/), title: z.string().min(1), fields: z.array(Field) })).min(1) });
+  const Field = z.object({ key: z.string().regex(/^[a-z0-9_]+$/), label: z.string().trim().min(1).max(80), type: z.enum(['text', 'textarea', 'number', 'select', 'multiselect', 'tags', 'diagnoses', 'duration', 'date', 'checkbox', 'chips']), required: z.boolean().optional(), options: z.array(z.string().trim().min(1).max(80)).max(40).optional(), unit: z.string().max(20).optional(), placeholder: z.string().max(120).optional(),
+    help: z.string().max(200).optional(), width: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).optional(), carry: z.boolean().optional() });
+  const Schema = z.object({ sections: z.array(z.object({ key: z.string().regex(/^[a-z0-9_]+$/), title: z.string().trim().min(1).max(60), fields: z.array(Field).max(60) })).min(1).max(12),
+    products: z.array(z.object({ medicineId: z.string().uuid(), name: z.string().min(1), qty: z.number().int().min(1).max(999) })).max(20).optional() })
+    .refine((s) => new Set(s.sections.flatMap((x) => x.fields.map((f) => f.key))).size === s.sections.reduce((n, x) => n + x.fields.length, 0), { message: 'Two fields have the same key' });
+  /** A procedure's own form (Before / During / After and its usual products), latest version; null when it has none yet. */
+  route(app, 'get', '/admin/procedures/:id/form', 'config.write', async (req, tx) => {
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const row = await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, `procedure:${id}`), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
+    return row ? { id: row.id, version: row.version, schema: row.schema, savedAt: row.createdAt } : { id: null, version: 0, schema: null, savedAt: null };
+  });
   route(app, 'post', '/admin/forms/:key', 'config.write', async (req, tx) => {
     const key = (req.params as any).key as string; const schema = Schema.parse(req.body) as FormSchema; const t = req.ctx.tenantId;
+    if (key.startsWith('procedure:')) {
+      const pid = key.slice('procedure:'.length);
+      const ok = z.string().uuid().safeParse(pid).success && await tx.select({ id: procedureCatalog.id }).from(procedureCatalog).where(and(eq(procedureCatalog.id, pid), eq(procedureCatalog.tenantId, t))).then((r) => !!r[0]);
+      if (!ok) throw new HttpError(404, 'NOT_FOUND');
+    } else if (!['encounter', 'intake'].includes(key)) throw new HttpError(400, 'UNKNOWN_FORM');
     const cur = await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, key))).orderBy(desc(formDefinition.version)).then((r) => r[0]);
     if (cur) await tx.update(formDefinition).set({ active: false }).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, key)));
     const [row] = await tx.insert(formDefinition).values({ tenantId: t, key, specialtyId: cur?.specialtyId ?? null, version: (cur?.version ?? 0) + 1, schema }).returning();

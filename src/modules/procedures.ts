@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, asc, gte, lte, inArray } from 'drizzle-orm';
-import { procedureSession, procedureWeek, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant } from '../db/schema.js';
+import { and, eq, sql, asc, gte, lte, inArray, desc } from 'drizzle-orm';
+import { procedureSession, procedureWeek, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant, formDefinition, medicine, type FormSchema, type SupplyAsk } from '../db/schema.js';
+import { randomUUID } from 'node:crypto';
+import { missingRequired, cleanValues } from '../lib/procForm.js';
 import { bookingSettings, localToUtc } from '../lib/booking.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { auditView } from '../lib/audit.js';
@@ -26,6 +28,16 @@ export async function procedureConsent(tx: Tx, t: string, ps: { id: string; pati
     sql`${procedureSession.state} in ('in_progress','completed')`, sql`${procedureSession.id} <> ${ps.id}`));
   return n ? { consentNeeded: false, consent: { grantedAt: '', by: '', how: 'given at an earlier session' } } : { consentNeeded: true, consent: null };
 }
+
+/** A procedure's form: the version this session was filled with, else the procedure's latest. */
+export async function procForm(tx: Tx, t: string, procedureId: string | null, formId?: string | null): Promise<{ id: string; version: number; schema: FormSchema } | null> {
+  const pick = (r: any) => (r ? { id: r.id as string, version: r.version as number, schema: r.schema as FormSchema } : null);
+  if (formId) { const r = await tx.select().from(formDefinition).where(and(eq(formDefinition.id, formId), eq(formDefinition.tenantId, t))).then((x) => x[0]); if (r) return pick(r); }
+  if (!procedureId) return null;
+  return pick(await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, `procedure:${procedureId}`), eq(formDefinition.active, true))).orderBy(desc(formDefinition.version)).then((x) => x[0]));
+}
+/** The doctor or the desk: who may fill a session's form and ask the pharmacy. */
+const canFill = (perms: string[]) => { if (!can(perms, 'worklist.write') && !can(perms, 'encounter.complete')) throw new HttpError(403, 'FORBIDDEN:worklist.write'); };
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
@@ -264,7 +276,12 @@ export function procedureRoutes(app: FastifyInstance) {
       .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, r.ps.recommendationId))).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
     const supervisor = r.ps.supervisorId ? await tx.select({ name: practitioner.name }).from(practitioner).where(eq(practitioner.id, r.ps.supervisorId)).then((x) => x[0]?.name ?? null) : null;
     const money = can(req.perms, 'fees.see') && !['cancelled', 'postponed'].includes(r.ps.state) ? await sittingMoney(tx, t, r.ps) : null;
-    return { ...r.ps, patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor, money, ...(await procedureConsent(tx, t, r.ps)),
+    const form = await procForm(tx, t, r.ps.procedureId, r.ps.formDefinitionId);
+    // the same procedure's earlier sessions for this patient, newest first: "Last time" beside each field
+    const earlier = r.ps.procedureId ? await tx.select({ id: procedureSession.id, day: procedureSession.day, sittingNo: procedureSession.sittingNo, outcome: procedureSession.outcome }).from(procedureSession)
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, r.p.id), eq(procedureSession.procedureId, r.ps.procedureId), eq(procedureSession.state, 'completed'), sql`${procedureSession.id} <> ${id}`, lte(procedureSession.day, r.ps.day)))
+      .orderBy(desc(procedureSession.day), desc(procedureSession.startTime)).limit(6) : [];
+    return { ...r.ps, form, earlier, missing: form ? missingRequired(form.schema, r.ps.outcome) : [], patient: { ...r.p, history: normHistory(r.p.history) }, procedure: r.procedure, minutes: r.minutes, room: r.room, doctor: r.doctor, supervisor, money, ...(await procedureConsent(tx, t, r.ps)),
       plan: r.rec ? { notes: r.rec.notes, sittings: r.rec.sittings, plannedOn: enc?.at ?? null, diagnosis: names((enc?.data as any)?.assessment?.diagnosis) } : null, sittings };
   });
 
@@ -433,7 +450,15 @@ export function procedureRoutes(app: FastifyInstance) {
         await emit(tx, req.ctx, 'consent.granted', 'patient', cur.patientId, { key, procedureSessionId: id, ...(body.consentDocumentId ? { documentId: body.consentDocumentId } : {}) });
       }
     }
-    const [ps] = await tx.update(procedureSession).set({ state: body.state, stateReason: body.reason, ...(body.outcome ? { outcome: body.outcome } : {}) }).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).returning();
+    const form = ['in_progress', 'completed'].includes(body.state) ? await procForm(tx, t, cur.procedureId, cur.formDefinitionId) : null;
+    if (body.state === 'completed' && cur.state !== 'completed' && form) {
+      const missing = missingRequired(form.schema, body.outcome ?? cur.outcome);
+      if (missing.length) throw new HttpError(409, 'FORM_INCOMPLETE', { missing });
+    }
+    // starting: the session keeps this form version, and the usual products go to the pharmacy once
+    const ask: SupplyAsk[] | undefined = body.state === 'in_progress' && form?.schema.products?.length && !cur.supplies.length
+      ? [{ id: randomUUID(), at: new Date().toISOString(), by: req.ctx.name, lines: form.schema.products, status: 'asked' }] : undefined;
+    const [ps] = await tx.update(procedureSession).set({ state: body.state, stateReason: body.reason, ...(body.outcome ? { outcome: body.outcome } : {}), ...(form && !cur.formDefinitionId ? { formDefinitionId: form.id } : {}), ...(ask ? { supplies: ask } : {}) }).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).returning();
     if (!ps) throw new HttpError(404, 'NOT_FOUND');
     if (['cancelled', 'postponed', 'missed'].includes(body.state)) await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
     const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
@@ -456,5 +481,54 @@ export function procedureRoutes(app: FastifyInstance) {
     else if (cur.state === 'completed') await reverseSitting(tx, req.ctx, id, body.state === 'cancelled' ? 'Session cancelled' : `Session moved back to ${body.state.replace('_', ' ')}`);
     await emit(tx, req.ctx, `procedure_session.${body.state}`, 'procedure_session', id, { reason: body.reason, ...(body.state === 'in_progress' && body.consent !== undefined ? { consent: body.consent } : {}) });
     return ps;
+  });
+
+  /** Save the session form. Allowed from booking until done (Before can be filled early) and after, to correct a value. */
+  route(app, 'put', '/procedure-sessions/:id/form', null, async (req, tx) => {
+    canFill(req.perms);
+    const body = z.object({ values: z.record(z.string(), z.any()) }).parse(req.body);
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const cur = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    if (['cancelled', 'postponed', 'missed'].includes(cur.state)) throw new HttpError(409, 'NOT_CHANGEABLE', { state: cur.state });
+    const form = await procForm(tx, t, cur.procedureId, cur.formDefinitionId);
+    if (!form) throw new HttpError(409, 'NO_FORM');
+    const values = cleanValues(form.schema, body.values);
+    await tx.update(procedureSession).set({ outcome: values, formDefinitionId: form.id }).where(eq(procedureSession.id, id));
+    await emit(tx, req.ctx, 'procedure_session.form_saved', 'procedure_session', id, { version: form.version, fields: Object.keys(values).length });
+    return { outcome: values, missing: missingRequired(form.schema, values) };
+  });
+
+  /** Ask the pharmacy for more products for this session (the usual ones are asked for on Start). */
+  route(app, 'post', '/procedure-sessions/:id/supplies', null, async (req, tx) => {
+    canFill(req.perms);
+    const body = z.object({ lines: z.array(z.object({ medicineId: z.string().uuid(), qty: z.number().int().min(1).max(999) })).min(1).max(20) }).parse(req.body);
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const cur = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    if (['cancelled', 'postponed', 'missed'].includes(cur.state)) throw new HttpError(409, 'NOT_CHANGEABLE', { state: cur.state });
+    const meds = await tx.select({ id: medicine.id, name: medicine.name }).from(medicine).where(and(eq(medicine.tenantId, t), inArray(medicine.id, body.lines.map((l) => l.medicineId))));
+    const name = new Map(meds.map((m) => [m.id, m.name]));
+    if (body.lines.some((l) => !name.has(l.medicineId))) throw new HttpError(404, 'NOT_FOUND');
+    const ask: SupplyAsk = { id: randomUUID(), at: new Date().toISOString(), by: req.ctx.name, lines: body.lines.map((l) => ({ ...l, name: name.get(l.medicineId)! })), status: 'asked' };
+    await tx.update(procedureSession).set({ supplies: [...cur.supplies, ask] }).where(eq(procedureSession.id, id));
+    await emit(tx, req.ctx, 'procedure_session.supplies_asked', 'procedure_session', id, { items: ask.lines.length });
+    return ask;
+  });
+
+  /** A plan's sessions with what each recorded, and the fields to show them by: the latest form first, then any field only older versions had. */
+  route(app, 'get', '/procedure-plans/:id/form-history', 'worklist.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const id = (req.params as any).id;
+    if (!z.string().uuid().safeParse(id).success) throw new HttpError(404, 'NOT_FOUND');
+    const rec = await tx.select({ id: recommendation.id, procedureId: recommendation.procedureId }).from(recommendation).where(and(eq(recommendation.id, id), eq(recommendation.tenantId, t))).then((r) => r[0]);
+    if (!rec) throw new HttpError(404, 'NOT_FOUND');
+    const sessions = await tx.select({ id: procedureSession.id, sittingNo: procedureSession.sittingNo, day: procedureSession.day, state: procedureSession.state, outcome: procedureSession.outcome, formDefinitionId: procedureSession.formDefinitionId, supplies: procedureSession.supplies })
+      .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, id), sql`${procedureSession.state} not in ('cancelled','postponed')`)).orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
+    const latest = await procForm(tx, t, rec.procedureId);
+    const olderIds = [...new Set(sessions.map((s) => s.formDefinitionId).filter((x): x is string => !!x && x !== latest?.id))];
+    const older = olderIds.length ? await tx.select({ schema: formDefinition.schema }).from(formDefinition).where(and(eq(formDefinition.tenantId, t), inArray(formDefinition.id, olderIds))) : [];
+    const fields: any[] = []; const seen = new Set<string>();
+    for (const s of [latest?.schema, ...older.map((o) => o.schema)]) for (const sec of s?.sections ?? []) for (const f of sec.fields) if (sec.key !== 'consult' && !seen.has(f.key)) { seen.add(f.key); fields.push(f); }
+    return { hasForm: !!latest, fields, sessions: sessions.map((s) => ({ ...s, products: s.supplies.flatMap((a) => a.issued ?? []).map((x) => `${x.name} × ${x.qty}`) })) };
   });
 }

@@ -8,6 +8,7 @@ import { Chip, Empty, Icon, Modal, PageSearchBox, Tabs, Filter, Skeleton, money,
 import { Inventory, type InvTab } from './pharmacyStock';
 import { RegisterTab } from './pharmacyRegister';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
+import { IssueSupplies, ProcAskCard } from '../procIssue';
 
 type Tab = 'counter' | 'bills' | 'register';
 const INV: string[] = ['stock', 'batches', 'orders', 'vendors'];
@@ -97,6 +98,8 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
   const meds = useQuery({ queryKey: ['pharmacy', 'medicines'], queryFn: () => get('/pharmacy/medicines'), staleTime: 30_000 });
   const d = list.data;
   const [find, setFind] = useState(''); const [form, setForm] = useState('all');
+  const [procAsk, setProcAsk] = useState<string | null>(null); // a procedure session's request, open in the Issue popup
+  const procs: any[] = d?.procedures ?? [];
   const [bill, setBill] = useState<{ rx: any | null; who: any; lines: Line[] }>({ rx: null, who: null, lines: [] });
   const [loading, setLoading] = useState(false);
   const [over, setOver] = useState(false); const [dragId, setDragId] = useState<string | null>(null);
@@ -176,7 +179,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
   const medList: any[] = meds.data ?? [];
   const forms = [...new Set(medList.map((m) => m.form).filter(Boolean))] as string[];
   const shown = medList.filter((m) => (form === 'all' || m.form === form) && (!find.trim() || m.name.toLowerCase().includes(find.trim().toLowerCase())));
-  const waiting = (d?.today ?? []).filter((r: any) => r.status === 'none' || r.status === 'part').length;
+  const waiting = (d?.today ?? []).filter((r: any) => r.status === 'none' || r.status === 'part').length + procs.filter((r) => r.status === 'asked').length;
 
   // a plain function, not a component: a component declared here is a new type on every render, and the card being dragged would be replaced mid-drag
   const rxCard = (r: any, sub?: string) => {
@@ -203,6 +206,7 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
         <div className="min-w-0 space-y-4">
+          {procAsk && <IssueSupplies sessionId={procAsk} canIssue={canBill} onClose={() => setProcAsk(null)} />}
           <section className="card anim-fade-up">
             <div className="mb-3 flex flex-wrap items-start gap-3">
               <div className="mr-auto"><div className="card-title">Today's prescriptions</div><div className="text-[12.5px] text-muted">From the doctors. Tap one, or drag it onto the bill.</div></div>
@@ -211,8 +215,8 @@ function Counter({ sel, pick }: { sel: string | null; pick: (rx: string | null) 
               (d?.found ?? []).length === 0 ? <div className="py-4 text-sm text-muted">No prescription in the last 30 days matches.</div>
                 : <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">{d.found.map((r: any) => rxCard(r, `${fmtDate(r.day)} · ${r.opNumber} · ${r.doctor ?? ''}`))}</div>
             ) : (<>
-              {(d?.today ?? []).length === 0 ? <div className="py-4 text-sm text-muted">No prescriptions yet today.</div>
-                : <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">{d.today.map((r: any) => rxCard(r))}</div>}
+              {(d?.today ?? []).length === 0 && !procs.length ? <div className="py-4 text-sm text-muted">No prescriptions yet today.</div>
+                : <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">{(d?.today ?? []).map((r: any) => rxCard(r))}{procs.map((r) => <ProcAskCard key={r.sessionId} r={r} onOpen={() => setProcAsk(r.sessionId)} />)}</div>}
               {(d?.balances ?? []).length > 0 && <div className="mt-4 border-t border-line pt-3">
                 <button type="button" className="flex w-full items-center gap-2 text-left" aria-expanded={earlier} onClick={() => setEarlier(!earlier)}>
                   <b className="text-[13.5px]">Earlier prescriptions</b><span className="text-xs text-muted">{d.balances.length} partly bought here</span><Icon name={earlier ? 'up' : 'chevR'} className="ml-auto h-4 w-4 text-muted" /></button>

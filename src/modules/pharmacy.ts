@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, ilike, gte, lte, lt, or, inArray, gt, isNull } from 'drizzle-orm';
-import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, bill, tenant, practitioner, stockBatch, message, type SaleLine } from '../db/schema.js';
+import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, bill, tenant, practitioner, stockBatch, message, procedureSession, procedureCatalog, room, type SaleLine, type SupplyAsk } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
@@ -68,7 +68,8 @@ export function pharmacyRoutes(app: FastifyInstance) {
       .where(and(eq(encounter.tenantId, t), inArray(encounter.status, ['completed', 'awaiting_reports']), gte(visit.day, from), lte(visit.day, day),
         q ? or(ilike(patient.fullName, `%${q}%`), ilike(patient.phone, `%${q}%`), ilike(visit.opNumber, `%${q}%`), ilike(patient.patientNo, `%${q}%`)) : undefined))
       .orderBy(desc(encounter.completedAt)).limit(300);
-    if (!encs.length) return { today: [], balances: [], found: [] };
+    const procedures = q ? [] : await procedureAsks(tx, t, day);
+    if (!encs.length) return { today: [], balances: [], found: [], procedures };
     const items = await tx.select({ i: prescriptionItem, form: medicine.form, packSize: medicine.packSize }).from(prescriptionItem).leftJoin(medicine, eq(medicine.id, prescriptionItem.medicineId))
       .where(and(eq(prescriptionItem.tenantId, t), inArray(prescriptionItem.encounterId, encs.map((x) => x.e.id))));
     const rows = encs.map((x) => {
@@ -76,8 +77,8 @@ export function pharmacyRoutes(app: FastifyInstance) {
       const balance = its.filter((i) => i.issuedQty > 0 && !settled(i)).map((i) => ({ name: i.name, left: i.prescribed - i.issuedQty }));
       return { encounterId: x.e.id, completedAt: x.e.completedAt, day: x.day, opNumber: x.opNumber, doctor: x.doctor, patient: x.p, items: its.length, status: rxStatus(its), balance };
     }).filter((r) => r.items > 0);
-    if (q) return { today: [], balances: [], found: rows };
-    return { today: rows.filter((r) => r.day === day), balances: rows.filter((r) => r.day !== day && r.balance.length), found: [] };
+    if (q) return { today: [], balances: [], found: rows, procedures: [] };
+    return { today: rows.filter((r) => r.day === day), balances: rows.filter((r) => r.day !== day && r.balance.length), found: [], procedures };
   });
 
   /** One prescription at the counter: each line with the packs it works out to, what was issued, and the stock to issue from. */
@@ -236,6 +237,57 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const lines = s.items.map((l, i) => ({ line: i, qty: l.qty - returnedQty(s, i), restock: b.restock })).filter((l) => l.qty > 0);
     if (!lines.length) throw new HttpError(409, 'NOTHING_TO_RETURN');
     return returnItems(tx, { tenantId: req.ctx.tenantId, userId: req.ctx.userId, name: req.ctx.name }, s.id, { ...b, lines }, req.ctx);
+  });
+
+  /** A procedure session's asks, with the stock each item can be issued from. */
+  route(app, 'get', '/pharmacy/supplies/:sessionId', 'pharmacy.read', async (req, tx) => {
+    const t = req.ctx.tenantId; const day = todayIn(req.ctx.timezone);
+    const r = await askSession(tx, t, (req.params as any).sessionId);
+    const ids = [...new Set(r.ps.supplies.flatMap((a) => a.lines.map((l) => l.medicineId)))];
+    const bs = ids.length ? await tx.select().from(stockBatch).where(and(eq(stockBatch.tenantId, t), inArray(stockBatch.medicineId, ids), gt(stockBatch.qty, 0), gte(stockBatch.expiry, day))).orderBy(asc(stockBatch.expiry), asc(stockBatch.createdAt)) : [];
+    const meds = ids.length ? await tx.select({ id: medicine.id, form: medicine.form }).from(medicine).where(and(eq(medicine.tenantId, t), inArray(medicine.id, ids))) : [];
+    return { sessionId: r.ps.id, sittingNo: r.ps.sittingNo, day: r.ps.day, startTime: r.ps.startTime, state: r.ps.state, patient: r.patient, procedure: r.procedure, room: r.room, asks: r.ps.supplies,
+      stock: Object.fromEntries(ids.map((id) => { const mine = bs.filter((b) => b.medicineId === id); const m = meds.find((x) => x.id === id);
+        return [id, { form: m?.form ?? null, onHand: mine.reduce((n, b) => n + b.qty, 0), batches: mine.map((b) => ({ id: b.id, batchNo: b.batchNo, expiry: b.expiry, qty: b.qty })) }]; })) };
+  });
+
+  /** Issue a procedure ask: stock comes off as 'procedure', linked to the session. No bill, no payment: the procedure price covers it. */
+  route(app, 'post', '/pharmacy/supplies/:sessionId/:askId/issue', 'pharmacy.bill', async (req, tx) => {
+    const t = req.ctx.tenantId; const { sessionId, askId } = req.params as any; const today = todayIn(req.ctx.timezone);
+    const body = z.object({ lines: z.array(z.object({ medicineId: z.string().uuid(), batchId: z.string().uuid().optional(), qty: z.number().int().min(0).max(999) })).min(1).max(20) }).parse(req.body);
+    const r = await askSession(tx, t, sessionId);
+    const ask = r.ps.supplies.find((a) => a.id === askId);
+    if (!ask) throw new HttpError(404, 'NOT_FOUND');
+    if (ask.status !== 'asked') throw new HttpError(409, 'ALREADY_HANDLED');
+    const a: Actor = { tenantId: t, userId: req.ctx.userId, name: req.ctx.name };
+    const issued: NonNullable<SupplyAsk['issued']> = [];
+    for (const l of body.lines.filter((x) => x.qty > 0)) {
+      const line = ask.lines.find((x) => x.medicineId === l.medicineId);
+      if (!line) throw new HttpError(400, 'NOT_ON_THIS_RX');
+      for (const part of await allocate(tx, t, l.medicineId, l.qty, today, l.batchId)) {
+        await moveStock(tx, a, part.batch.id, -part.qty, 'procedure', { id: sessionId, no: `${r.procedure ?? 'Procedure'} · session ${r.ps.sittingNo}`, note: r.patient.fullName });
+        issued.push({ medicineId: l.medicineId, name: line.name, batchId: part.batch.id, batchNo: part.batch.batchNo, expiry: part.batch.expiry, qty: part.qty });
+      }
+    }
+    if (!issued.length) throw new HttpError(400, 'NOTHING_RECEIVED');
+    const asks = r.ps.supplies.map((x) => (x.id === askId ? { ...x, status: 'issued' as const, doneAt: new Date().toISOString(), doneBy: req.ctx.name, issued } : x));
+    await tx.update(procedureSession).set({ supplies: asks }).where(eq(procedureSession.id, sessionId));
+    await emit(tx, req.ctx, 'procedure_session.supplies_issued', 'procedure_session', sessionId, { askId, items: issued.length });
+    return asks.find((x) => x.id === askId);
+  });
+
+  /** Nothing to give, e.g. out of stock: the ask leaves the counter and the doctor sees why. */
+  route(app, 'post', '/pharmacy/supplies/:sessionId/:askId/none', 'pharmacy.bill', async (req, tx) => {
+    const t = req.ctx.tenantId; const { sessionId, askId } = req.params as any;
+    const body = z.object({ note: z.string().trim().max(200).optional() }).parse(req.body ?? {});
+    const r = await askSession(tx, t, sessionId);
+    const ask = r.ps.supplies.find((a) => a.id === askId);
+    if (!ask) throw new HttpError(404, 'NOT_FOUND');
+    if (ask.status !== 'asked') throw new HttpError(409, 'ALREADY_HANDLED');
+    const asks = r.ps.supplies.map((x) => (x.id === askId ? { ...x, status: 'none' as const, doneAt: new Date().toISOString(), doneBy: req.ctx.name, note: body.note || 'Not in stock' } : x));
+    await tx.update(procedureSession).set({ supplies: asks }).where(eq(procedureSession.id, sessionId));
+    await emit(tx, req.ctx, 'procedure_session.supplies_none', 'procedure_session', sessionId, { askId, note: body.note });
+    return asks.find((x) => x.id === askId);
   });
 }
 
@@ -400,4 +452,27 @@ async function returnItems(tx: Tx, a: Actor, saleId: string, b: z.infer<typeof R
   await tx.update(pharmacySale).set({ returns: [...s.returns, ret] }).where(eq(pharmacySale.id, s.id));
   await emit(tx, ctx, 'pharmacy.returned', 'pharmacy_sale', s.id, { creditNoteNo: cn, refundPaise: refund });
   return ret;
+}
+
+/** One procedure session with its patient, procedure and room, for the pharmacy. */
+async function askSession(tx: Tx, t: string, id: string) {
+  if (!z.string().uuid().safeParse(id).success) throw new HttpError(404, 'NOT_FOUND');
+  const r = await tx.select({ ps: procedureSession, patient: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone, allergies: patient.allergies }, procedure: procedureCatalog.name, room: room.name })
+    .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId))
+    .where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((x) => x[0]);
+  if (!r) throw new HttpError(404, 'NOT_FOUND');
+  return r;
+}
+
+/** The counter's procedure cards: any ask still waiting (last 30 days), and today's handled ones, shown quiet. */
+async function procedureAsks(tx: Tx, t: string, day: string) {
+  const rows = await tx.select({ ps: procedureSession, patient: { id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }, procedure: procedureCatalog.name, room: room.name })
+    .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId))
+    .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, addDays(day, -30)), lte(procedureSession.day, day), sql`jsonb_array_length(${procedureSession.supplies}) > 0`))
+    .orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
+  return rows.map((r) => {
+    const open = r.ps.supplies.filter((a) => a.status === 'asked');
+    return { sessionId: r.ps.id, day: r.ps.day, startTime: r.ps.startTime, sittingNo: r.ps.sittingNo, patient: r.patient, procedure: r.procedure, room: r.room,
+      items: (open.length ? open : r.ps.supplies).reduce((n, a) => n + a.lines.length, 0), status: open.length ? 'asked' : r.ps.supplies.every((a) => a.status === 'none') ? 'none' : 'issued' };
+  }).filter((x) => x.status === 'asked' || x.day === day);
 }

@@ -124,6 +124,20 @@
         "PORT": "3080",
         "ALLOW_TEST_RESET": "1"
       }
+    },
+    {
+      "name": "cubott-procform",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3090,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-procform",
+        "PORT": "3090"
+      }
     }
   ]
 }

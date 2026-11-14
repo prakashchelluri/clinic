@@ -38,6 +38,7 @@ function toLogin() {
 export const get = <T = any>(url: string) => api<T>('GET', url);
 export const post = <T = any>(url: string, body?: unknown) => api<T>('POST', url, body);
 export const patch = <T = any>(url: string, body?: unknown) => api<T>('PATCH', url, body);
+export const put = <T = any>(url: string, body?: unknown) => api<T>('PUT', url, body);
 
 export const useConfig = () => useQuery({ queryKey: ['config'], queryFn: () => get('/config'), staleTime: 5 * 60_000 });
 /** Who is signed in. A dropped connection is retried (3 tries, then every 10 s) instead of being read as "signed out"; only a 401/403 stops. */
@@ -97,6 +98,8 @@ const MESSAGES: Record<string, string> = {
   OFFLINE: OFFLINE_MSG,
   CONSENT_NEEDED: 'No consent is on file for this procedure. Have the patient sign first, on the tablet or on the paper form.',
   CONSENT_NOT_FOR_PATIENT: 'That signature belongs to another patient. Ask the patient to sign again.',
+  NO_FORM: 'This procedure has no form yet. Set one up under Settings › Procedures & packages.',
+  ALREADY_HANDLED: 'The pharmacy has already dealt with this request.', UNKNOWN_FORM: 'That form does not exist.',
 };
 const FIELD_NAMES: Record<string, string> = { reason: 'Reason', note: 'Note', cancelReason: 'Reason', minutes: 'Length', color: 'Colour', pricePaise: 'Price', places: 'Places', fullName: 'Name', phone: 'Phone', ageYears: 'Age', amountPaise: 'Amount', description: 'Description', name: 'Name', email: 'Email', password: 'Password', weight_kg: 'Weight', height_cm: 'Height', temp_f: 'Temperature', spo2: 'SpO₂', pulse: 'Pulse', priority: 'Queue priority' };
 /** Turn any API failure into one plain sentence a receptionist can act on. */
@@ -120,6 +123,7 @@ export function errText(e: any): string {
   if (code === 'NO_PRICE') return `${b.name} has no price. Set it under Settings → Medicines.`;
   if (code === 'MORE_THAN_SOLD') return `More ${b.name} than was sold on this bill (or already returned).`;
   if (code === 'BATCH_EXPIRY_DIFFERS') return `Batch ${b.batchNo} is already in stock with a different expiry. Check the batch number.`;
+  if (code === 'FORM_INCOMPLETE') return `Fill these first: ${(b.missing ?? []).join(', ')}.`;
   if (code === 'COUNT_INCOMPLETE') return `${b.left} batch${b.left === 1 ? '' : 'es'} still to count.`;
   if (code === 'VALIDATION' && Array.isArray(b.errors) && b.errors[0]) {
     const x = b.errors[0]; const key = [...(x.path ?? [])].reverse().find((p: any) => typeof p === 'string'); const f = (key && FIELD_NAMES[key]) ?? (key ? key.replace(/([A-Z])/g, ' $1').replace(/^./, (c: string) => c.toUpperCase()) : 'A field');

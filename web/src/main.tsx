@@ -26,6 +26,8 @@ import { AuditLog } from './pages/Privacy';
 import { Expenses } from './pages/Expenses';
 import { Accounts } from './pages/Accounts';
 import { Billing } from './billing';
+import { ProcFormBuilder } from './pages/ProcFormBuilder';
+import { ProcSessionPage } from './pages/ProcSession';
 
 import { PatientLink } from './pages/PatientLink';
 import { Display } from './pages/Display';
@@ -72,6 +74,8 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/pharmacy" element={<Pharmacy />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/settings/procedures/:id/form" element={<ProcFormBuilder />} />
+            <Route path="/procedure-sessions/:id" element={<ProcSessionPage />} />
 
             <Route path="/expenses" element={<Expenses />} />
             <Route path="/accounts" element={<Accounts />} />

@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { useOutletContext } from 'react-router';
+import { useNavigate, useOutletContext } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
+import { get } from './api';
+import { valuesLine } from './procForm';
 import { can } from './App';
 import { Chip, Icon, fmtDate, money } from './ui';
 import { ProcedureDrawer } from './procDrawer';
@@ -11,7 +14,7 @@ const STATE: Record<string, [string, string]> = { completed: ['Completed', 'sage
 /** The patient's procedures, as the clinic follows them: one card per procedure (or per package, its procedures together),
  *  every session listed 1…N with its date and state, and the next one to book; once every session is done the list folds to its header. Filter chips split ongoing, completed, expired and cancelled. */
 export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: { plans: any[]; sessions: any[]; courses: any[]; procName: (r: any) => string; onOpen: (r: any) => void }) {
-  const { perms } = useOutletContext<any>();
+  const { perms } = useOutletContext<any>(); const nav = useNavigate();
   const [open, setOpen] = useState<string | null>(null); // a session's drawer
   const [shownIds, setShownIds] = useState<string[]>([]); // finished procedures opened by hand; a finished one is folded to its header
   const sitsOf = (r: any) => sessions.filter((x) => x.recommendationId === r.id && LIVE(x));
@@ -46,8 +49,10 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
               <span className={`relative z-[1] grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-semibold ${done ? 'bg-sage text-white' : 'border-2 border-sage/60 bg-surface text-sage'}`}>{k}</span>
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-line bg-surface px-4 py-2.5">
                 <div className="min-w-0 flex-1"><div className="text-[14px] font-medium">Session {k}</div>
+                  {s?.state === 'completed' && <SessionValues planId={r.id} sessionId={s.id} />}
                   <div className="text-xs text-muted">{s ? `${fmtDate(s.day)}${s.startTime ? `, ${s.startTime}` : ''}${s.doctor ? ` · ${s.doctor}` : ''}${s.autoBooked && s.state === 'confirmed' && !s.patientConfirmedAt ? ' · booked by the plan, not confirmed yet' : ''}` : r.status === 'cancelled' ? 'Not done' : 'Not booked yet'}</div></div>
                 {s && <Chip tone={tone as any}>{label}</Chip>}
+                {s && ['confirmed', 'in_progress', 'completed'].includes(s.state) && <button type="button" className={`btn btn-sm ${s.state === 'in_progress' ? 'btn-primary' : ''}`} onClick={() => nav(`/procedure-sessions/${s.id}`)}><Icon name="list" className="h-3.5 w-3.5" />Open form</button>}
                 {s ? <button type="button" className="btn btn-sm btn-ghost" onClick={() => setOpen(s.id)}>Go to appointment</button>
                   : k === firstFree && stageOf(r) === 'ongoing' && can(perms, 'worklist.write') ? <button type="button" className="btn btn-sm" onClick={() => onOpen(r)}><Icon name="plus" className="h-3.5 w-3.5" />Book</button> : null}
               </div>
@@ -74,15 +79,49 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
       </div>
       {shown.length === 0 ? <div className="px-5 py-6 text-sm text-muted">{plans.length ? `Nothing ${tab}.` : 'No procedures prescribed.'}</div>
         : shown.map((g) => { const pk = g[0].package;
-          if (!pk) return <div key={g[0].id} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">{head(g[0])}{!folded(g[0]) && timeline(g[0])}</div>;
+          if (!pk) return <div key={g[0].id} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">{head(g[0])}{!folded(g[0]) && timeline(g[0])}<CompareSessions planId={g[0].id} /></div>;
           const done = g.reduce((s, r) => s + doneOf(r), 0); const total = g.reduce((s, r) => s + (r.sittings ?? 0), 0);
           return (
             <div key={pk.group} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">
               <div className="flex flex-wrap items-center gap-2"><Icon name="box" className="h-4 w-4 text-clay-ink" /><b className="text-[15px]">{pk.name}</b><span className="rounded bg-clay-soft px-1.5 text-[11px] font-semibold text-clay-ink">Package</span><span className="text-[13px] text-muted">{done}/{total} sessions completed{pk.pricePaise ? ` · ${money(pk.pricePaise)}` : ''}</span></div>
-              {g.map((r) => <div key={r.id} className="ml-2 border-l-2 border-clay-line pl-4">{head(r, true)}{!folded(r) && timeline(r)}</div>)}
+              {g.map((r) => <div key={r.id} className="ml-2 border-l-2 border-clay-line pl-4">{head(r, true)}{!folded(r) && timeline(r)}<CompareSessions planId={r.id} /></div>)}
             </div>);
         })}
       {open && <ProcedureDrawer key={open} id={open} canAct={can(perms, 'worklist.write')} onClose={() => setOpen(null)} />}
     </section>
   );
+}
+
+/** One plan's sessions with what each recorded, and the fields to read them by. Shared by every row of the plan (one fetch). */
+const usePlanForm = (planId: string) => useQuery({ queryKey: ['plan-form', planId], queryFn: () => get(`/procedure-plans/${planId}/form-history`), staleTime: 30_000 });
+const cell = (v: unknown) => (v === undefined || v === null || v === '' || (Array.isArray(v) && !v.length) ? '' : v === true ? 'Yes' : v === false ? 'No' : Array.isArray(v) ? v.join(', ') : String(v));
+
+/** "Fluence 18 J/cm² · Spot size 12 mm · Erythema Mild" under a done session. */
+function SessionValues({ planId, sessionId }: { planId: string; sessionId: string }) {
+  const h = usePlanForm(planId).data; const x = h?.sessions.find((y: any) => y.id === sessionId);
+  const line = h && x ? valuesLine({ sections: [{ key: 'all', title: '', fields: h.fields }] }, x.outcome, 5) : '';
+  return line ? <div className="truncate text-[12.5px] text-ink-2" title={line}>{line}</div> : null;
+}
+
+/** Sessions side by side, one column each; a value that changed from the session before is bold. */
+function CompareSessions({ planId }: { planId: string }) {
+  const [on, setOn] = useState(false); const h = usePlanForm(planId).data;
+  const done = (h?.sessions ?? []).filter((x: any) => x.outcome && Object.keys(x.outcome).length);
+  if (!h?.hasForm || done.length < 2) return null;
+  const rows = h.fields.filter((f: any) => done.some((x: any) => cell(x.outcome[f.key])));
+  return (
+    <div className="pt-1">
+      <button type="button" className="btn btn-sm" aria-expanded={on} onClick={() => setOn(!on)}><Icon name="list" className="h-3.5 w-3.5" />{on ? 'Hide comparison' : `Compare sessions · ${done.length}`}</button>
+      {on && <div className="mt-2 overflow-x-auto rounded-[10px] border border-line">
+        <table className="w-full min-w-[480px] border-collapse text-[13px]">
+          <thead><tr className="bg-surface-2 text-left text-[12px] text-muted"><th className="px-3 py-2 font-medium">Field</th>{done.map((x: any) => <th key={x.id} className="px-3 py-2 font-medium">{x.sittingNo} · {fmtDate(x.day)}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((f: any) => <tr key={f.key} className="border-t border-line/70"><td className="px-3 py-1.5 text-ink-2">{f.label}{f.unit && f.type === 'number' ? ` (${f.unit})` : ''}</td>
+              {done.map((x: any, i: number) => { const v = cell(x.outcome[f.key]); const changed = i > 0 && v !== '' && v !== cell(done[i - 1].outcome[f.key]);
+                return <td key={x.id} className={`px-3 py-1.5 ${changed ? 'font-semibold' : ''}`}>{v === '' ? <span className="text-muted">—</span> : v}</td>; })}</tr>)}
+            {done.some((x: any) => x.products.length) && <tr className="border-t border-line/70"><td className="px-3 py-1.5 text-ink-2">Products</td>{done.map((x: any) => <td key={x.id} className="px-3 py-1.5">{x.products.join(', ') || <span className="text-muted">—</span>}</td>)}</tr>}
+          </tbody>
+        </table>
+      </div>}
+    </div>);
 }
