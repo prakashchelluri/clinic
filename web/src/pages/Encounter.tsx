@@ -184,7 +184,7 @@ function LoadPrevious({ previous, onLoad, part, compact, id }: { previous: any[]
             {part ? partItems(e, part).map((l, k) => <div key={k}>{l}</div>)
               : (['dx', 'rx', 'advice', 'tests'] as Part[]).filter((k) => parts[k]).map((k) => <div key={k}><b>{PART_LABEL[k]}</b> {partItems(e, k).join('; ') || '—'}</div>)}
           </div>}
-          <div className="mt-2 flex items-center gap-2"><span className="text-xs text-muted">Anything already on the pad is kept once.</span><button type="button" className="btn btn-sm btn-primary ml-auto" disabled={!e || (!part && !Object.values(parts).some(Boolean))} onClick={() => { onLoad(e, part ? { [part]: true } : parts); setOpen(false); }}>Load</button></div>
+          <div className="mt-2 flex items-center gap-2"><span className="text-xs text-muted">Lines already on the pad are not added twice.</span><button type="button" className="btn btn-sm btn-primary ml-auto" disabled={!e || (!part && !Object.values(parts).some(Boolean))} onClick={() => { onLoad(e, part ? { [part]: true } : parts); setOpen(false); }}>Load</button></div>
         </div>
       </Floating>
     </>
@@ -493,7 +493,7 @@ export function Encounter() {
     if (parts.rx) addRxMany((x.prescription ?? []).map(strip));
     if (parts.advice && x.data?.plan?.advice) addAdvice(String(x.data.plan.advice).split('\n'));
     if (parts.tests) for (const r of (x.recommendations ?? []).filter((r: any) => r.kind === 'investigation' && r.notes)) addTestNamed(r.notes);
-    setSetNote(`Loaded from ${fmtDate(x.createdAt)}. Anything already on the pad was kept once.`);
+    setSetNote(`Added from the visit of ${fmtDate(x.createdAt)}. Lines already on the pad were not added twice.`);
   };
   /** The type-anything bar: a line is filed where it belongs by matching the clinic's lists; when nothing matches, the doctor says where. */
   const smartAdd = (raw: string, as?: 'symptom' | 'diagnosis' | 'medicine' | 'test' | 'advice') => {
@@ -924,11 +924,13 @@ export function Encounter() {
           {p.allergies && <span className="chip chip-rose shrink-0 !py-1">Allergy: {p.allergies}</span>}
           {pregnant && <span className="chip chip-rose shrink-0 !py-1">{pregnant}</span>}
           <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted">{me.role === 'assistant' && <Chip tone="sky">Intake · doctor reviews next</Chip>}{e.status === 'completed' && <Chip tone="sage">completed</Chip>}
-            {/* Finish and ⋯ (Save, Preview, Clear the whole pad) sit with the patient, always in reach */}
+            {/* Clear, Save and Finish sit with the patient, always in reach; ⋯ keeps Preview */}
           {saveFailed && !readOnly && notSaved /* only when a save did not reach the server */}
           {!readOnly && !canFinish && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true })}>Save intake &amp; return to queue</button>}
           {!readOnly && canFinish && <>
-            {<MoreMenu items={[{ label: 'Save', onClick: () => save.mutate({ complete: false }) }, { label: 'Preview', onClick: () => { void preview(); } }, ...(isDoctor ? [{ label: 'Clear the whole pad', danger: true, onClick: () => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); }) }] : [])]} />}
+            <MoreMenu items={[{ label: 'Preview', onClick: () => { void preview(); } }]} />
+            {isDoctor && <button type="button" className="btn btn-ghost btn-sm text-muted hover:text-rose" title="Clear the whole pad" onClick={() => clearSection('the whole pad', () => { setSyms([]); setDxs([]); setData((d) => ({ ...d, exam: {}, plan: {}, notes: {}, referral: {} })); setRx([]); setRecs(recs.filter((r) => r.kind === 'investigation' && r.status === 'done')); })}><Eraser className="h-4 w-4" aria-hidden />Clear</button>}
+            <button type="button" className="btn btn-sm" disabled={save.isPending} onClick={() => save.mutate({ complete: false })}><Save className="h-4 w-4" aria-hidden />Save</button>
             {held && testsOpen && <button type="button" className="btn btn-sm btn-primary" disabled={save.isPending} onClick={() => save.mutate({ complete: false, back: true, reviewed: true })}>Keep open for the rest</button>}
             <button type="button" className={`btn btn-sm ${held && testsOpen ? '' : 'btn-primary'}`} disabled={save.isPending} onClick={finish}>{held ? 'Complete' : willHold ? 'Finish · hold for reports' : amended ? 'Finish amendment' : 'Finish prescription'}<Icon name="chevR" className="h-4 w-4" /></button>
           </>}
