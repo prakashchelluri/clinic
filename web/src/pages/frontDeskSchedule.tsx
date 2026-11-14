@@ -6,6 +6,7 @@ import { ProcedureDrawer } from '../procDrawer';
 import { get, patch, qc, errText, ApiError } from '../api';
 import { Floating, cap, Icon, Segmented, Skeleton, Tabs, ask, toast } from '../ui';
 import { told } from '../apptDrawer';
+import { RoomBooking } from '../roomBooking';
 
 export type Kind = 'booked' | 'late' | 'waiting' | 'intake' | 'doctor' | 'tests' | 'done' | 'noshow' | 'cancelled';
 const LABEL: Record<Kind, string> = { booked: 'Booked, not here yet', late: 'Booked, did not come', waiting: 'Waiting', intake: 'With the junior doctor', doctor: 'With the doctor', tests: 'Completed · tests & procedures pending', done: 'Completed', noshow: "Didn't come", cancelled: 'Cancelled' };
@@ -34,8 +35,8 @@ function useShown(): [Record<string, any>, (k: string, on: boolean | string) => 
   return [s, (k, on) => { const n = { ...s, [k]: on }; setS(n); try { localStorage.setItem('fd.cals', JSON.stringify(n)); } catch { /* storage blocked */ } }];
 }
 
-type ChipP = { id: string; k: Kind; next?: boolean; tok?: string; name: string; tag: string; who: string; warn?: boolean; sel?: boolean; proc?: boolean; /** the procedure's name, after the patient */ sub?: string; /** more for the tooltip: the service, the time and room */ info?: string; /** a procedure's part of the hour: where it starts and how much it takes, 0–1 */ at?: [number, number]; onClick: () => void; drag?: (e: DragEvent) => void };
-type Col = { key: string; head: React.ReactNode; day: string; ws: any[]; /** null: that day's check-ins are not loaded, the bookings carry the status */ visits: any[] | null; sits: any[]; room?: boolean };
+type ChipP = { id: string; k: Kind; next?: boolean; tok?: string; name: string; tag: string; who: string; warn?: boolean; sel?: boolean; proc?: boolean; /** the procedure's name, after the patient */ sub?: string; /** more for the tooltip: the service, the time and room */ info?: string; /** a procedure's part of the hour: where it starts and how much it takes, 0–1 */ at?: [number, number]; /** a room booked for something else (meeting, cleaning …) */ book?: boolean; onClick: () => void; drag?: (e: DragEvent) => void };
+type Col = { key: string; head: React.ReactNode; day: string; ws: any[]; /** null: that day's check-ins are not loaded, the bookings carry the status */ visits: any[] | null; sits: any[]; room?: boolean; /** a room column's bookings that are not procedures */ books?: any[] };
 
 /** The one calendar on the Dashboard, for the desk and for doctors. Today is a column per doctor (and per room when asked for), Week is a column
  *  per day; both are the same grid, a row per booking hour, and `list` shows the same people as table rows under the same bar.
@@ -48,7 +49,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   /** a doctor's own calendar: their sittings sit in their column when the room's column is not shown */ procsInDoc?: boolean;
   /** the same people as rows of a table instead of the grid */ list?: boolean;
 }) {
-  const nav = useNavigate(); const { perms } = useOutletContext<any>() ?? {};
+  const nav = useNavigate(); const { perms, cfg } = useOutletContext<any>() ?? {};
+  const [roomAt, setRoomAt] = useState<{ at: { roomId: string; day: string; startTime: string; endTime: string }; booking?: any } | null>(null); // a room's hour or booking, in the side drawer
   const [procId, setProcId] = useState<string | null>(null); // a sitting opened from the calendar, in the side drawer
   const [day, setDay] = useState(today);
   const [mode, setMode] = useState<'day' | 'week'>('day'); const week = mode === 'week'; const step = week ? 7 : 1;
@@ -104,7 +106,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
           <div className="px-2.5 pb-1 pt-1.5 text-[12px] font-medium text-muted">Visits</div>
           {([['all', 'All visits'], ['consult', 'Consults only'], ['proc', 'Procedures only']] as const).map(([v, l]) => <label key={v} className="flex cursor-pointer items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-[13.5px] hover:bg-paper-2"><input type="radio" name="fd-kind" className="accent-ink h-4 w-4" checked={kindF === v} onChange={() => setShown('kind', v)} />{l}</label>)}
           {docList.length > 1 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Doctors</div>{docList.map(tick)}</>}
-          {roomList.length > 0 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Rooms · procedures</div>{roomList.map(tick)}</>}
+          {roomList.length > 0 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Rooms</div>{roomList.map(tick)}</>}
           {onBook && <><div className="mt-1 border-t border-line" />{tick({ key: 'free', label: 'Show free slots', on: showFree })}</>}
         </div>
       </Floating>
@@ -119,7 +121,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
     </div>);
   let docTabs: React.ReactNode = null; // set below once the week is loaded
   const sheet = (inner: React.ReactNode) => <div className="fd-sheet fd-sch overflow-hidden">{bar}{docTabs}{!list && keyRow}{inner}
-    {procId && <ProcedureDrawer key={procId} id={procId} canAct={can(perms ?? [], 'worklist.write')} onClose={() => setProcId(null)} />}</div>;
+    {procId && <ProcedureDrawer key={procId} id={procId} canAct={can(perms ?? [], 'worklist.write')} onClose={() => setProcId(null)} />}
+    {roomAt && cfg && <RoomBooking key={roomAt.booking?.id ?? roomAt.at.roomId + roomAt.at.day + roomAt.at.startTime} cfg={cfg} at={roomAt.at} booking={roomAt.booking} onClose={() => setRoomAt(null)} />}</div>;
   const days: any[] | undefined = week ? range.data : cal.data && [cal.data];
   if (!days || (!week && !isToday && other.isLoading)) return sheet(<div className="p-4"><Skeleton rows={4} /></div>);
 
@@ -127,21 +130,22 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const gone = (d: string, end: string) => d < today || (d === today && toMin(end) <= nowM);
   const onDocs = doctors.filter((d) => docOn(d.id)); const docIds = new Set(onDocs.map((d) => d.id)); const onRooms = rooms.filter((r) => roomOn(r.id));
   const docNameOf = (id: string) => doctors.find((d) => d.id === id)?.name ?? '';
-  let cols: Col[];
+  const roomBooks = (D: any, id: string) => (D.blocks ?? []).filter((b: any) => b.roomId === id && !b.practitionerId);
+  let cols: Col[]; let weekRoom: string | null = null; // Week on a room's tab: that room
   if (week) {
     // one week at a time: a tab per shown doctor, then a tab per shown room
     const tabs = [...onDocs.map((d) => ({ id: d.id, name: d.name as string, room: false })), ...onRooms.map((r) => ({ id: r.id, name: r.name as string, room: true }))];
-    const wt = tabs.find((t) => t.id === weekDoc) ?? tabs[0]; const wIds = new Set(wt && !wt.room ? [wt.id] : []);
+    const wt = tabs.find((t) => t.id === weekDoc) ?? tabs[0]; weekRoom = wt?.room ? wt.id : null; const wIds = new Set(wt && !wt.room ? [wt.id] : []);
     if (tabs.length > 1) docTabs = <Tabs className="fd-wtabs" value={wt.id} onChange={setWeekDoc}
-      options={tabs.map((t) => ({ value: t.id, label: t.name, count: days.reduce((n: number, D: any) => n + (t.room ? D.procedures.filter((p: any) => p.roomId === t.id).length : D.windows.filter((w: any) => w.practitionerId === t.id).reduce((m: number, w: any) => m + w.allocated, 0)), 0) }))} />;
+      options={tabs.map((t) => ({ value: t.id, label: t.name, count: days.reduce((n: number, D: any) => n + (t.room ? D.procedures.filter((p: any) => p.roomId === t.id).length + roomBooks(D, t.id).length : D.windows.filter((w: any) => w.practitionerId === t.id).reduce((m: number, w: any) => m + w.allocated, 0)), 0) }))} />;
     cols = days.filter((D, i) => i < 6 || D.windows.length).map((D) => ({ key: D.day, day: D.day, room: !!wt?.room, // Sunday only when someone works it
       head: <button type="button" className="text-left" title="Open this day" onClick={() => { setDay(D.day); setMode('day'); }}><b className={D.day === today ? 'text-clay' : ''}>{new Date(D.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' })}</b>{D.day === today && <span> Today</span>}</button>,
       ws: D.windows.filter((w: any) => wIds.has(w.practitionerId)), visits: D.day === today ? visitsToday.filter((v) => wIds.has(v.practitionerId)) : null,
-      sits: D.procedures.filter((p: any) => wt?.room ? p.roomId === wt.id : procsInDoc && wIds.has(p.practitionerId)) }));
+      sits: D.procedures.filter((p: any) => wt?.room ? p.roomId === wt.id : procsInDoc && wIds.has(p.practitionerId)), books: wt?.room ? roomBooks(D, wt.id) : [] }));
   } else {
     const D = days[0]; const procs: any[] = D.procedures ?? []; const visits: any[] = isToday ? visitsToday : other.data?.visits ?? [];
     const roomCols: Col[] = [...onRooms, ...(onRooms.length && procs.some((p) => !p.roomId) ? [{ id: '__none', name: 'No room' }] : [])]
-      .map((r) => ({ key: r.id, room: true, day, head: <><b>{r.name}</b> <span>Procedures</span></>, ws: [], visits: [], sits: procs.filter((p) => (p.roomId ?? '__none') === r.id) }));
+      .map((r) => ({ key: r.id, room: true, day, head: <b>{r.name}</b>, ws: [], visits: [], sits: procs.filter((p) => (p.roomId ?? '__none') === r.id), books: roomBooks(D, r.id) }));
     const inRoomCol = new Set(roomCols.map((c) => c.key));
     cols = [...onDocs.map((d): Col => ({ key: d.id, day, head: <b>{d.name}</b>, ws: D.windows.filter((w: any) => w.practitionerId === d.id), visits: visits.filter((v) => v.practitionerId === d.id),
       sits: procsInDoc ? procs.filter((p) => p.practitionerId === d.id && !inRoomCol.has(p.roomId ?? '__none')) : [] })), ...roomCols];
@@ -153,7 +157,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const rows = [...new Set(allWs.map((w) => w.startTime))].sort().map((s) => ({ start: s as string, end: allWs.find((w) => w.startTime === s)!.endTime as string }));
   // a sitting outside the booking hours gets clock-hour rows (9–10 holds both 9:00 and 9:30 sittings), trimmed where a booking hour already starts
   const fmtM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  for (const p of cols.flatMap((c) => c.sits)) {
+  for (const p of cols.flatMap((c) => [...c.sits, ...(c.books ?? [])])) {
     const ps = toMin(p.startTime), pe = toMin(p.endTime);
     for (let h = Math.floor(ps / 60) * 60; h < pe; h += 60) {
       let a = h, b = h + 60;
@@ -185,16 +189,18 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const share = (p: any, r: { start: string; end: string }): [number, number] => { const a = toMin(r.start), len = toMin(r.end) - a || 60; const s = Math.max(toMin(p.startTime), a), e = Math.min(toMin(p.endTime), toMin(r.end));
     return [(s - a) / len, Math.max(0.15, (e - s) / len)]; };
   const sitChip = (p: any, c: Col, r?: { start: string; end: string }): ChipP => { const base = SITTING[p.state] ?? 'booked'; const k: Kind = base === 'booked' && gone(c.day, rowOf(p.startTime)?.end ?? p.startTime) ? 'late' : base; return { id: p.id, k, proc: true, name: p.patient, sub: p.procedure ?? 'Procedure', tag: '', info: [`${p.startTime}–${p.endTime}`, p.room].filter(Boolean).join(' · '), who: p.doctor ?? '', at: r && !list ? share(p, r) : undefined, onClick: () => setProcId(p.id) }; };
+  const bookChip = (b: any, c: Col, r?: { start: string; end: string }): ChipP => ({ id: b.id, k: 'booked', book: true, name: b.purpose ?? b.note ?? 'Booked', sub: b.patient ?? (b.purpose ? b.note : undefined) ?? undefined, tag: '', info: `${b.startTime}–${b.endTime}`, who: '', at: r && !list ? share(b, r) : undefined,
+    onClick: () => setRoomAt({ at: { roomId: b.roomId, day: c.day, startTime: b.startTime, endTime: b.endTime }, booking: b }) });
   // the key as a filter: Procedure narrows to procedures; the statuses add up (Completed + Didn't come shows both)
-  const keyOk = (x: ChipP) => { if (!keyF.size) return true; const st = KEY.filter((y) => y.id !== 'proc' && keyF.has(y.id)); return (!keyF.has('proc') || !!x.proc) && (!st.length || st.some((y) => y.match(x))); };
+  const keyOk = (x: ChipP) => { if (!keyF.size) return true; if (x.book) return false; const st = KEY.filter((y) => y.id !== 'proc' && keyF.has(y.id)); return (!keyF.has('proc') || !!x.proc) && (!st.length || st.some((y) => y.match(x))); };
   /** who is in a column's hour: here first, then sittings, then booked */
   const cell = (c: Col, r: { start: string; end: string }) => {
     const wsAt = c.ws.filter((w) => w.startTime === r.start);
     const here = (c.visits ?? []).filter((v) => { const h = homeOf(v, c.ws.filter((w) => w.practitionerId === v.practitionerId)); return !!h && wsAt.includes(h); });
     const booked: ChipP[] = wsAt.flatMap((w) => (w.appointments ?? []).filter((a: any) => !c.visits || (a.status !== 'arrived' && !c.visits.some((v) => v.appointmentId === a.id))).map((a: any) => apptChip(a, w, c.day))).sort((x, y) => Number(x.k === 'cancelled') - Number(y.k === 'cancelled'));
-    const chips = [...c.sits.filter((p) => inRow(p, r)).map((p) => sitChip(p, c, r)), ...here.map((v) => visitChip(v, c.day)), ...booked];
+    const chips = [...(c.books ?? []).filter((b) => inRow(b, r)).map((b) => bookChip(b, c, r)), ...c.sits.filter((p) => inRow(p, r)).map((p) => sitChip(p, c, r)), ...here.map((v) => visitChip(v, c.day)), ...booked];
     const keyed = chips.filter(keyOk);
-    return { wsAt, chips: kindF === 'all' ? keyed : keyed.filter((x) => (kindF === 'proc') === !!x.proc) };
+    return { wsAt, chips: kindF === 'all' ? keyed : keyed.filter((x) => x.book ? kindF !== 'proc' : (kindF === 'proc') === !!x.proc) };
   };
 
   if (list) {
@@ -241,7 +247,10 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
             ...cols.map((c) => {
               const { wsAt, chips } = cell(c, r); const nowC = i === nowRow && c.day === today ? 'now' : ''; const key = c.key + r.start;
               const names = chips.length > 0 && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}</div>;
-              if (c.room) return <div key={key} className={`fd-hc ${nowC}`}>{!chips.length && <span className="fd-hcap">Free</span>}{names}</div>;
+              if (c.room) { const rid = week ? weekRoom : c.key; const canBook = !!onBook && cfg && rid !== '__none' && !gone(c.day, r.end);
+                return <div key={key} className={`fd-hc ${nowC}`}>{!chips.length && !canBook && <span className="fd-hcap">Free</span>}
+                  {(chips.length > 0 || canBook) && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}
+                    {canBook && <button type="button" className="fd-pc fd-free" aria-label={`Book ${hourLabel(r.start, r.end)}`} onClick={() => setRoomAt({ at: { roomId: rid!, day: c.day, startTime: r.start, endTime: r.end } })}><span aria-hidden>+</span><span className="fd-bk">Book</span></button>}</div>}</div>; }
               if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'Not in')}</div>;
               const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
@@ -275,7 +284,9 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
 const quarters = ([s, n]: [number, number]) => { const qs = Math.min(3, Math.floor(s * 4 + 0.01)); const qn = Math.max(1, Math.min(4 - qs, Math.round(n * 4)));
   return { '--qs': qs + 1, '--qn': qn, '--qo': `${s * 100}%`, '--qw': `${n * 100}%` } as React.CSSProperties; };
 
-function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info, at }: ChipP) {
+function Chip({ k, next = false, tok, name, tag, who, warn = false, sel = false, onClick, drag, proc = false, sub, info, at, book = false }: ChipP) {
+  if (book) return <button type="button" className={`fd-pc fd-k-room ${at ? 'qtr' : ''}`} style={at ? quarters(at) : undefined} title={[name, sub, info, 'Room booking'].filter(Boolean).join(' · ')} onClick={onClick}>
+    <Icon name="door" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span></button>;
   return <button type="button" className={`fd-pc fd-k-${k} ${next ? 'fd-k-next' : ''} ${proc ? 'proc' : ''} ${at ? 'qtr' : ''} ${sel ? 'sel' : ''}`} style={at ? quarters(at) : undefined} title={[name, sub, info, next ? 'Next' : LABEL[k], who, drag && 'drag to move'].filter(Boolean).join(' · ')} aria-pressed={sel} onClick={onClick} draggable={!!drag} onDragStart={drag}>
     {tok && <span className="tk">{tok}</span>}{proc && <Icon name="syringe" className="fd-proc-ic h-3.5 w-3.5 shrink-0" />}<span className="truncate">{name}{sub && <span className="fd-sub"> · {sub}</span>}</span>{warn && <span className="warn" aria-label="Pending">!</span>}{tag && <span className="tg">{cap(tag)}</span>}</button>;
 }

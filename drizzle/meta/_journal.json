@@ -267,6 +267,13 @@
       "when": 1795800000000,
       "tag": "0037_sitting_auto_booked",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795900000000,
+      "tag": "0038_room_booking",
+      "breakpoints": true
     }
   ]
 }

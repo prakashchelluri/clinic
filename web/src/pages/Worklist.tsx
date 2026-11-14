@@ -75,7 +75,7 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
 
 /** + New › Schedule a procedure, from any page: find the patient, pick one of their prescribed procedures, then book the sitting
  *  in the usual drawer. Lists every procedure still to finish, the ones with no sitting booked first. */
-export function ScheduleProcedure({ cfg, onClose }: { cfg: any; onClose: () => void }) {
+export function ScheduleProcedure({ cfg, onClose, at, head }: { cfg: any; onClose: () => void; /** a room's hour picked on the calendar */ at?: { day: string; roomId: string; startTime: string }; /** above the search (the room drawer's switch) */ head?: React.ReactNode }) {
   const [q, setQ] = useState(''); const [pick, setPick] = useState<any>(null);
   const plans = useQuery({ queryKey: ['worklist', 'procedure'], queryFn: () => get('/worklist?kind=procedure') });
   const f = q.trim().toLowerCase(); const digits = f.replace(/\s/g, '');
@@ -83,10 +83,10 @@ export function ScheduleProcedure({ cfg, onClose }: { cfg: any; onClose: () => v
     .filter((r: any) => !f || r.patient.fullName.toLowerCase().includes(f) || (r.patient.phone ?? '').includes(digits) || (r.patient.patientNo ?? '').toLowerCase().includes(f) || (r.procedure ?? '').toLowerCase().includes(f))
     .sort((a: any, b: any) => Number(!!a.next) - Number(!!b.next) || String(a.dueOn ?? '').localeCompare(String(b.dueOn ?? '')));
   const day = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
-  if (pick) return <ScheduleModal cfg={cfg} rec={pick} onClose={() => { setPick(null); ['psessions', 'worklist', 'calendar', 'pcounts'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); onClose(); }} />;
+  if (pick) return <ScheduleModal cfg={cfg} rec={pick} at={at} onClose={() => { setPick(null); ['psessions', 'worklist', 'calendar', 'pcounts'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); onClose(); }} />;
   return (
     <Drawer title="Schedule a procedure" subtitle="Find the patient, then pick the procedure the doctor prescribed" onClose={onClose} width="max-w-lg">
-      <div className="space-y-3">
+      <div className="space-y-3">{head}
         <input autoFocus aria-label="Find the patient" className="input" placeholder="Patient name, phone or P-number" value={q} onChange={(e) => setQ(e.target.value)} />
         {plans.isLoading ? <Skeleton rows={3} /> : open.length === 0 ? <div className="py-6 text-center text-[14px] text-muted">{f ? 'No prescribed procedure for this patient.' : 'No prescribed procedures are waiting.'}<div className="mt-1 text-[13px]">The doctor prescribes procedures on the consultation pad.</div></div>
           : <div className="overflow-hidden rounded-[10px] border border-line">{open.slice(0, 40).map((r: any) => (

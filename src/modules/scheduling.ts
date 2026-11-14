@@ -176,7 +176,8 @@ export function schedulingRoutes(app: FastifyInstance) {
       visitStatus: sql<string | null>`(select v.status from visit v where v.appointment_id = ${appointment.id} order by v.arrived_at desc limit 1)` }) // seen or with the doctor, not just arrived
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(service, eq(service.id, appointment.serviceId))
       .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('booked','confirmed','arrived','no_show','cancelled')`)).orderBy(asc(appointment.createdAt)) : []; // cancelled stay on the calendar, struck through
-    const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : [])));
+    const blocks = (await tx.select({ b: calendarBlock, patient: patient.fullName }).from(calendarBlock).leftJoin(patient, eq(patient.id, calendarBlock.patientId))
+      .where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : [])))).map((r) => ({ ...r.b, patient: r.patient }));
     const procs = await tx.select({ ps: procedureSession, patient: patient.fullName, phone: patient.phone, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, review: procedureCatalog.requiresReview })
       .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
       .leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
@@ -198,11 +199,35 @@ export function schedulingRoutes(app: FastifyInstance) {
     }
     return out;
   });
+  /** A room booked for a time is busy for sittings and other room bookings; nothing else may be in the room then. */
+  async function roomFree(tx: Tx, t: string, b: { roomId: string; day: string; startTime: string; endTime: string }, self?: string) {
+    const s = toMin(b.startTime), e = toMin(b.endTime); const hit = (x: { startTime: string; endTime: string }) => toMin(x.startTime) < e && toMin(x.endTime) > s;
+    const sits = await tx.select({ startTime: procedureSession.startTime, endTime: procedureSession.endTime, who: patient.fullName }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, b.day), eq(procedureSession.roomId, b.roomId), sql`${procedureSession.state} in ('confirmed','in_progress')`));
+    const books = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, b.day), eq(calendarBlock.roomId, b.roomId), sql`${calendarBlock.practitionerId} is null`));
+    const clash = [...sits.filter(hit).map((x) => ({ startTime: x.startTime, endTime: x.endTime, who: x.who })), ...books.filter((x) => x.id !== self && hit(x)).map((x) => ({ startTime: x.startTime, endTime: x.endTime, who: x.purpose ?? x.note ?? 'Booked' }))];
+    if (clash.length) throw new HttpError(409, 'ROOM_BUSY', { clash });
+  }
+  const BlockIn = z.object({ practitionerId: z.string().uuid().nullable().optional(), roomId: z.string().uuid().nullable().optional(), day: DAY, startTime: HHMM, endTime: HHMM, kind: z.enum(['break', 'leave', 'other']), note: z.string().max(200).optional(),
+    purpose: z.string().max(40).nullable().optional(), patientId: z.string().uuid().nullable().optional() });
   route(app, 'post', '/calendar/blocks', 'appointment.write', async (req, tx) => {
-    const body = z.object({ practitionerId: z.string().uuid().nullable().optional(), roomId: z.string().uuid().nullable().optional(), day: DAY, startTime: HHMM, endTime: HHMM, kind: z.enum(['break', 'leave', 'other']), note: z.string().optional() }).parse(req.body);
+    const body = BlockIn.parse(req.body);
     if (toMin(body.endTime) <= toMin(body.startTime)) throw new HttpError(400, 'BAD_RANGE');
+    if (body.roomId && !body.practitionerId) await roomFree(tx, req.ctx.tenantId, body as any);
     const [row] = await tx.insert(calendarBlock).values({ ...body, tenantId: req.ctx.tenantId }).returning();
     await emit(tx, req.ctx, 'calendar.blocked', 'calendar_block', row.id, body);
+    return row;
+  });
+  /** A room booking's time, purpose, note or patient changes. */
+  route(app, 'patch', '/calendar/blocks/:id', 'appointment.write', async (req, tx) => {
+    const t = req.ctx.tenantId; const body = BlockIn.pick({ day: true, startTime: true, endTime: true, note: true, purpose: true, patientId: true }).partial().parse(req.body);
+    const cur = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.id, (req.params as any).id), eq(calendarBlock.tenantId, t), sql`${calendarBlock.kind} <> 'procedure'`)).then((r) => r[0]);
+    if (!cur) throw new HttpError(404, 'NOT_FOUND');
+    const next = { ...cur, ...sent(body, req.body) };
+    if (toMin(next.endTime) <= toMin(next.startTime)) throw new HttpError(400, 'BAD_RANGE');
+    if (next.roomId && !next.practitionerId) await roomFree(tx, t, next as any, cur.id);
+    const [row] = await tx.update(calendarBlock).set(sent(body, req.body)).where(eq(calendarBlock.id, cur.id)).returning();
+    await emit(tx, req.ctx, 'calendar.block_changed', 'calendar_block', cur.id, body);
     return row;
   });
   route(app, 'delete', '/calendar/blocks/:id', null, async (req, tx) => {

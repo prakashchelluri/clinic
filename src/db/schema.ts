@@ -295,6 +295,9 @@ export const calendarBlock = pgTable('calendar_block', {
   kind: text('kind').notNull(), // break | leave | procedure | other | late (zero length: running late, no places lost) | stop (no new bookings)
   note: text('note'),
   procedureSessionId: uuid('procedure_session_id'),
+  /** a room booking (no doctor): what the room is booked for — Consultation, Counselling, Meeting, Cleaning, Maintenance, Other */
+  purpose: text('purpose'),
+  patientId: uuid('patient_id'),
 }, (t) => [index('block_day').on(t.tenantId, t.day)]);
 
 // One sitting of a procedure course, scheduled against a room and a practitioner.

@@ -105,6 +105,8 @@ export function errText(e: any): string {
   const code: string = b.code ?? '';
   if (code.startsWith('FORBIDDEN')) return "You don't have permission to do that.";
   if (code === 'ROOM_FULL') return `${b.inside} patients are already inside with the doctor (the room takes ${b.max}). Send the next one in when someone comes out.`;
+  if (code === 'ROOM_BUSY' && b.clash?.[0]) return `The room is booked ${b.clash[0].startTime}–${b.clash[0].endTime} (${b.clash[0].who}). Pick another time or room.`;
+  if (code === 'BAD_RANGE') return 'The end time must be after the start time.';
   if (code === 'WITH_JUNIOR') return 'With the junior doctor right now; send them in after the screening.';
   if (code === 'ALREADY_BOOKED' && b.day) return `Already booked on ${new Date(b.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}, ${b.startTime}–${b.endTime}${b.doctor ? ` with ${b.doctor}` : ''}. Move that booking instead of booking again.`;
   if (code === 'IN_VISIT') return `This patient is being seen today${b.opNumber ? ` (token ${b.opNumber})` : ''}. Book the next visit after this one is finished.`;
