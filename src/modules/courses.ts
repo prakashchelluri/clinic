@@ -4,7 +4,7 @@ import { and, desc, eq, sql, inArray, notInArray } from 'drizzle-orm';
 import { course, charge, encounter, payment, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit, nextNumber, todayIn } from '../lib/core.js';
+import { emit, nextNumber, todayIn, addMonths } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
 import { nextReceiptNo } from './billing.js';
@@ -30,40 +30,33 @@ export async function standing(tx: Tx, t: string, c: Course) {
     stillToPayPaise: Math.max(0, c.totalPaise - (advancePaise + credit - refundedPaise) - paidOnDayPaise) };
 }
 
-type Pkg = { id: string; name: string; procedureId: string; sittings: number; pricePaise: number };
 /** The course for a procedure plan, made on first need: the doctor's own amount when they set one on the pad (the total for all sittings),
- *  otherwise the standard price (list price × sittings) or a clinic package. The desk never types a price; a reduction is a discount on a bill. */
-export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, packageId?: string) {
+ *  the plan's share of a package the doctor added, or the standard price (list price × sittings). The desk never types a price; a reduction is a discount on a bill.
+ *  A package is agreed as a whole: the other procedures of the same package on that pad get their course at the same time, with the same end date. */
+export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, siblings = true): Promise<Course> {
   const t = ctx.tenantId;
   const have = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, recommendationId))).then((r) => r[0]);
-  if (have) { if (packageId) throw new HttpError(409, 'COURSE_ALREADY_PRICED'); return have; }
+  if (have) return have;
   const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'))).then((r) => r[0]);
   if (!rec || !rec.procedureId) throw new HttpError(404, 'PLAN_NOT_FOUND');
   const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
-  let sittings = rec.sittings ?? 1; let total = (proc?.pricePaise ?? 0) * sittings;
-  const custom = rec.amountPaise != null && rec.amountPaise > 0; // the doctor's price beats the list and any package
-  if (custom && packageId) throw new HttpError(409, 'DOCTOR_SET_THE_PRICE');
-  if (custom) total = rec.amountPaise!;
-  const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
-  const pkgs = (((ten?.settings as any)?.packages ?? []) as Pkg[]).filter((x) => x.procedureId === rec.procedureId);
-  if (!packageId && !custom) { // a quote still open for a package: the patient was told that price
-    const told = await tx.select().from(quote).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open'))).orderBy(desc(quote.createdAt)).limit(1).then((r) => r[0]);
-    if (told && told.validUntil >= todayIn(ctx.timezone)) packageId = pkgs.find((x) => x.pricePaise === told.totalPaise && x.sittings === told.sittings)?.id;
-  }
-  if (packageId) {
-    const k = pkgs.find((x) => x.id === packageId);
-    if (!k) throw new HttpError(404, 'PACKAGE_NOT_FOUND');
-    sittings = k.sittings; total = k.pricePaise;
-    if (rec.sittings !== sittings) await tx.update(recommendation).set({ sittings }).where(eq(recommendation.id, rec.id)); // the package says how many sittings
-  }
+  const sittings = rec.sittings ?? 1; const pkg = rec.package;
+  const custom = rec.amountPaise != null && rec.amountPaise > 0; // the doctor's price (or the package share) beats the list
+  const total = custom ? rec.amountPaise! : (proc?.pricePaise ?? 0) * sittings;
   if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
   const list = custom ? total : Math.max(total, (proc?.pricePaise ?? 0) * sittings);
   // for the accounts: where the price came from, the standard price for the same sittings, and the doctor who set their own
   const standardPaise = (proc?.pricePaise ?? 0) * sittings || null;
-  const priceBy = custom ? await tx.select({ n: practitioner.name }).from(encounter).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId)).where(eq(encounter.id, rec.encounterId)).then((x) => x[0]?.n ?? null) : null;
-  const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name, priceSource: custom ? 'doctor' : packageId ? 'package' : 'standard', standardPaise, priceBy }).returning();
+  const priceBy = custom && !pkg ? await tx.select({ n: practitioner.name }).from(encounter).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId)).where(eq(encounter.id, rec.encounterId)).then((x) => x[0]?.n ?? null) : null;
+  const validUntil = pkg ? addMonths(todayIn(ctx.timezone), pkg.validMonths) : null;
+  const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name,
+    priceSource: pkg ? 'package' : custom ? 'doctor' : 'standard', standardPaise, priceBy, packageName: pkg?.name ?? null, packageGroup: pkg?.group ?? null, validUntil }).returning();
   await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
-  await emit(tx, ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings, packageId: packageId ?? null, priceSource: row.priceSource, standardPaise, priceBy });
+  await emit(tx, ctx, 'course.agreed', 'course', row.id, { totalPaise: total, listPaise: list, sittings, packageId: pkg?.id ?? null, priceSource: row.priceSource, standardPaise, priceBy });
+  if (pkg && siblings) {
+    const rest = await tx.select({ id: recommendation.id }).from(recommendation).where(and(eq(recommendation.tenantId, t), eq(recommendation.encounterId, rec.encounterId), eq(recommendation.kind, 'procedure'), sql`${recommendation.package}->>'group' = ${pkg.group}`, sql`${recommendation.id} <> ${rec.id}`));
+    for (const r of rest) await ensureCourse(tx, ctx, r.id, false);
+  }
   return row;
 }
 
@@ -138,9 +131,9 @@ export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommen
 export function courseRoutes(app: FastifyInstance) {
   /** Start the course at its fixed price: list price × sittings, or a clinic package. There is no price to type: a reduction is a discount on a bill. */
   route(app, 'post', '/courses', 'worklist.write', async (req, tx) => {
-    const b = z.object({ recommendationId: z.string().uuid(), packageId: z.string().min(1).max(40).optional() }).strict().parse(req.body);
+    const b = z.object({ recommendationId: z.string().uuid() }).strict().parse(req.body);
     if (await tx.select({ id: course.id }).from(course).where(and(eq(course.tenantId, req.ctx.tenantId), eq(course.recommendationId, b.recommendationId))).then((r) => r.length)) throw new HttpError(409, 'ALREADY_AGREED');
-    return standing(tx, req.ctx.tenantId, await ensureCourse(tx, req.ctx, b.recommendationId, b.packageId));
+    return standing(tx, req.ctx.tenantId, await ensureCourse(tx, req.ctx, b.recommendationId));
   });
 
   route(app, 'get', '/courses', 'worklist.read', async (req, tx) => {
@@ -148,7 +141,8 @@ export function courseRoutes(app: FastifyInstance) {
     const pid = String((req.query as any).patientId ?? ''); const t = req.ctx.tenantId;
     const rows = await tx.select().from(course).where(pid ? and(eq(course.tenantId, t), eq(course.patientId, pid)) : eq(course.tenantId, t)).orderBy(course.createdAt).limit(50);
     // each course with its next booked sitting, so the course popup and the patient's Procedures tab say the same thing
-    return Promise.all(rows.map(async (c) => ({ ...(await standing(tx, t, c)),
+    const today = todayIn(req.ctx.timezone);
+    return Promise.all(rows.map(async (c) => ({ ...(await standing(tx, t, c)), expired: !!c.validUntil && c.validUntil < today, // a package past its end date: sittings not done are expired, still refundable
       nextSitting: (await tx.select().from(procedureSession)
         .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'confirmed'))).orderBy(procedureSession.day, procedureSession.startTime).limit(1))[0] ?? null })));
   });
@@ -163,6 +157,7 @@ export function courseRoutes(app: FastifyInstance) {
     const c = await tx.select().from(course).where(and(eq(course.id, id), eq(course.tenantId, t))).then((r) => r[0]);
     if (!c) throw new HttpError(404, 'NOT_FOUND');
     if (b.method === 'emi' && (!b.lender || !b.reference)) throw new HttpError(400, 'EMI_NEEDS_LENDER_AND_APPROVAL_CODE');
+    if (c.validUntil && c.validUntil < todayIn(req.ctx.timezone)) throw new HttpError(409, 'PACKAGE_EXPIRED', { validUntil: c.validUntil });
     const st = await standing(tx, t, c);
     if (b.amountPaise > st.stillToPayPaise) throw new HttpError(400, 'MORE_THAN_THE_COURSE_NEEDS', { stillToPayPaise: st.stillToPayPaise });
     const receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone);

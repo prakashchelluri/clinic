@@ -68,15 +68,16 @@ test('follow-ups: four lists, a call outcome takes a row off, call later needs a
 test('quote: priced from the plan, valid for N days, replaced by a newer one, becomes the default when the patient agrees; the board shows Advised, Agreed', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
   const peel = (await owner('GET', '/config')).body.procedures.find((x: any) => x.name === 'Chemical peel');
-  const p = await planFor(owner, 'Quote Wave5b', '9848066622', [{ kind: 'procedure', procedureId: peel.id, sittings: 6 }]);
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'p3', name: 'Peel x6 plus', items: [{ procedureId: peel.id, sittings: 6, intervalDays: 14 }], pricePaise: 1300000, validMonths: 6 }] } })).status, 200);
+  const p = await planFor(owner, 'Quote Wave5b', '9848066622', [{ kind: 'procedure', procedureId: peel.id, sittings: 6, package: { id: 'p3', group: 'q1' } }]);
   const rec = (await owner('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
 
   assert.equal((await owner('POST', '/quotes', { recommendationId: rec.id, totalPaise: 1200000 })).status, 400, 'fixed prices: no typed price on a quote');
-  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'p1', name: 'Peel x6', procedureId: peel.id, sittings: 6, intervalDays: 14, pricePaise: 1200000 }, { id: 'p3', name: 'Peel x6 plus', procedureId: peel.id, sittings: 6, intervalDays: 14, pricePaise: 1300000 }] } })).status, 200);
-  const q1 = await reception('POST', '/quotes', { recommendationId: rec.id, validDays: 15, packageId: 'p1', extras: [{ name: 'Aftercare kit', pricePaise: 115000 }], send: 'whatsapp' });
+  assert.equal((await reception('POST', '/quotes', { recommendationId: rec.id, packageId: 'p3' })).status, 400, 'the desk never picks a package');
+  const q1 = await reception('POST', '/quotes', { recommendationId: rec.id, validDays: 15, extras: [{ name: 'Aftercare kit', pricePaise: 115000 }], send: 'whatsapp' });
   assert.equal(q1.status, 200, JSON.stringify(q1.body)); assert.match(q1.body.number, /^Q-\d{4}$/); assert.equal(q1.body.messaged, true);
   assert.equal(q1.body.validUntil, addDays(today(), 15));
-  const q2 = await owner('POST', '/quotes', { recommendationId: rec.id, validDays: 7, packageId: 'p3' });
+  const q2 = await owner('POST', '/quotes', { recommendationId: rec.id, validDays: 7 });
   const list = (await owner('GET', `/quotes?recommendationId=${rec.id}`)).body;
   assert.equal(list.find((q: any) => q.id === q1.body.id).state, 'declined', 'a new quote replaces the old one');
   const pr = (await owner('GET', `/quotes/${q2.body.id}/print`)).body;
@@ -86,7 +87,7 @@ test('quote: priced from the plan, valid for N days, replaced by a newer one, be
   assert.equal(board.plans.find((x: any) => x.id === rec.id).state, 'advised');
   assert.equal(board.plans.find((x: any) => x.id === rec.id).stage, 'advised', 'Courses list: not started');
   const agreed = await reception('POST', '/courses', { recommendationId: rec.id });
-  assert.equal(agreed.status, 200, JSON.stringify(agreed.body)); assert.equal(agreed.body.totalPaise, 1300000, 'the quoted package');
+  assert.equal(agreed.status, 200, JSON.stringify(agreed.body)); assert.equal(agreed.body.totalPaise, 1300000, 'the package the doctor added'); assert.equal(agreed.body.priceSource, 'package'); assert.ok(agreed.body.validUntil);
   assert.equal((await owner('GET', `/quotes?recommendationId=${rec.id}`)).body.find((q: any) => q.id === q2.body.id).state, 'agreed');
   board = (await owner('GET', '/procedure-plans')).body;
   const plan = board.plans.find((x: any) => x.id === rec.id);
@@ -98,5 +99,5 @@ test('quote: priced from the plan, valid for N days, replaced by a newer one, be
   assert.equal((await as('assistant@demo.clinic').then((j) => j('GET', '/procedure-plans'))).status, 403);
 
   // packages in settings are checked
-  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'p2', name: 'Bad', procedureId: 'nope', sittings: 0, intervalDays: 14, pricePaise: 1 }] } })).status, 400);
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'p2', name: 'Bad', items: [{ procedureId: 'nope', sittings: 0, intervalDays: 14 }], pricePaise: 1, validMonths: 12 }] } })).status, 400);
 });

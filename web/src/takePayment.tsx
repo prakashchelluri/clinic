@@ -13,6 +13,7 @@ export function moneyErr(e: any): string {
   if (c === 'MORE_THAN_FEE') return `That is more than the ${money(b.feePaise)} fee.`;
   if (c === 'DAY_CLOSED') return 'Today has been closed: no money can be taken or given back today.';
   if (c === 'ALREADY_REFUNDED') return 'This was already refunded.';
+  if (c === 'PACKAGE_EXPIRED') return 'This package has expired: its sittings not done can only be refunded.';
   if (c === 'PAY_AHEAD_IN_FULL') return `Sittings paid ahead are paid in full: take at least ${money(b.needPaise)}.`;
   if (c === 'REASON_REQUIRED') return 'Say why there is a discount.';
   if (c === 'NO_DISCOUNT_ON_CONSULTATION') return 'Consultation fees take no discount.';
@@ -32,7 +33,7 @@ const MODE_NAME: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'car
 type Part = { method: 'cash' | 'upi' | 'card' | 'bank' | 'emi' | 'advance'; amount: string; reference: string; lender: string };
 const MODES: [Part['method'], string][] = [['upi', 'UPI'], ['cash', 'Cash'], ['card', 'Card'], ['emi', 'EMI'], ['bank', 'Bank']];
 type Unit = 'pct' | 'rs';
-type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; packageId?: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number };
+type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number };
 /** GST inside a price that includes it. */
 const gstIn = (paise: number, bp: number) => (bp ? paise - Math.round((paise * 10000) / (10000 + bp)) : 0);
 export const BILL_KEYS = ['timeline', 'frontdesk', 'daily', 'payments-awaiting', 'patients', 'courses', 'discount-asks', 'worklist', 'procedure-plans', 'clinic'];
@@ -77,27 +78,33 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const procs: any[] = (cfg?.procedures ?? []).filter((p: any) => p.pricePaise > 0);
   const services: any[] = (cfg?.services ?? []).filter((s: any) => s.pricePaise > 0);
   const taxOf = (procedureId: string) => cfg?.procedures?.find((p: any) => p.id === procedureId)?.taxRateBp ?? 0;
-  const pkgs: any[] = cfg?.tenant?.settings?.packages ?? [];
   const procName = (id: string) => cfg?.procedures?.find((p: any) => p.id === id)?.name ?? 'Procedure';
   const plans: any[] = tl.recommendations.filter((r: any) => r.kind === 'procedure' && r.procedureId && !['done', 'cancelled'].includes(r.status));
 
-  // sittings to pay ahead on a plan: the course's price per sitting, or (no course yet) the list price or a package
-  const aheadLine = (recId: string, packageId?: string): Line | null => {
+  // sittings to pay ahead on a plan: the course's price per sitting, or (no course yet) the doctor's price, the plan's share of a package, or the list price
+  const pkgOf = (r: any) => r?.package?.name ? ` · ${r.package.name} package` : '';
+  const aheadLine = (recId: string): Line | null => {
     const r = plans.find((x) => x.id === recId); if (!r) return null;
     const c = courses.find((x) => x.recommendationId === recId);
     if (c) {
       const left = c.stillToPayPaise - (waiting.get(c.id) ?? 0); const max = Math.max(0, c.sittings - c.doneSittings - c.unusedSittings);
-      if (left <= 0 || !max) return null;
-      return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(c.procedureId)} · paid ahead`, sub: `${c.doneSittings} of ${c.sittings} done, ${c.unusedSittings} paid ahead · ${money(c.perSittingPaise)} a sitting`, unitPaise: c.perSittingPaise, qty: 1, maxQty: max, capPaise: left, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(c.procedureId), noDiscount: waiting.has(c.id) ? 'A discount on this course is waiting for approval' : undefined };
+      if (left <= 0 || !max || c.expired) return null;
+      return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(c.procedureId)}${c.packageName ? ` · ${c.packageName} package` : ''} · paid ahead`, sub: `${c.doneSittings} of ${c.sittings} done, ${c.unusedSittings} paid ahead · ${money(c.perSittingPaise)} a sitting`, unitPaise: c.perSittingPaise, qty: 1, maxQty: max, capPaise: left, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(c.procedureId), noDiscount: waiting.has(c.id) ? 'A discount on this course is waiting for approval' : undefined };
     }
-    const custom = r.amountPaise > 0 ? r.amountPaise as number : 0; // the doctor's own amount, for all sittings: no package then
-    const k = packageId && !custom ? pkgs.find((x) => x.id === packageId) : null; const n = k ? k.sittings : r.sittings ?? 1;
+    const custom = r.amountPaise > 0 ? r.amountPaise as number : 0; // the doctor's own amount (or the package share), for all sittings
+    const n = r.sittings ?? 1;
     const per = custom ? Math.round(custom / n) : procs.find((p) => p.id === r.procedureId)?.pricePaise ?? 0;
-    const total = custom || (k ? k.pricePaise : per * n);
+    const total = custom || per * n;
     if (!total) return null;
-    return { key: `a:${recId}`, kind: 'ahead', id: recId, packageId: k ? packageId : undefined, what: `${procName(r.procedureId)} · paid ahead`, sub: k ? `${k.name} package · ${n} sittings for ${money(total)}` : custom ? `${n} sittings for ${money(total)}, the doctor's price` : `${n} sittings at ${money(per)}`, unitPaise: Math.round(total / n), qty: k ? n : 1, maxQty: n, capPaise: total, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId) };
+    return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(r.procedureId)}${pkgOf(r)} · paid ahead`, sub: r.package ? `${n} sittings for ${money(total)}, its share of the package price` : custom ? `${n} sittings for ${money(total)}, the doctor's price` : `${n} sittings at ${money(per)}`, unitPaise: Math.round(total / n), qty: r.package ? n : 1, maxQty: n, capPaise: total, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId) };
   };
 
+  /** A plan and, when it is part of a package with no course yet, the other procedures of that package: a package is paid ahead as a whole. */
+  const withPackage = (recId: string): Line[] => {
+    const r = plans.find((x) => x.id === recId); const g = r?.package?.group;
+    const ids = g && !courses.some((c) => c.recommendationId === recId) ? plans.filter((x) => x.package?.group === g).map((x) => x.id) : [recId];
+    return ids.map((id) => aheadLine(id)).filter(Boolean) as Line[];
+  };
   const [lines, setLines] = useState<Line[]>(() => {
     const due: Line[] = tl.charges.filter((c: any) => c.status === 'due').map((c: any) => {
       const paid = paidOn(c.id); const owing = c.amountPaise - paid - (waiting.get(c.id) ?? 0);
@@ -105,8 +112,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
       const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 ? 'Part paid: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
       return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
     }).filter(Boolean);
-    const a = ahead ? aheadLine(ahead.recommendationId) : null;
-    return a ? [...due.map((l) => ({ ...l, on: false })), a] : onlyBill ? [...due.filter((l) => l.on), ...due.filter((l) => !l.on)] : due;
+    const a = ahead ? withPackage(ahead.recommendationId) : [];
+    return a.length ? [...due.map((l) => ({ ...l, on: false })), ...a] : onlyBill ? [...due.filter((l) => l.on), ...due.filter((l) => !l.on)] : due;
   });
   const [xv, setXv] = useState(''); const [xUnit, setXUnit] = useState<Unit>('pct'); const [why, setWhy] = useState('');
   const [parts, setParts] = useState<Part[]>([{ method: 'upi', amount: '', reference: '', lender: '' }]);
@@ -150,7 +157,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const go = useMutation({
     mutationFn: () => post('/bills', {
       patientId, idempotencyKey: key, reason: why.trim(), extraDiscountPaise: extra_, keepExtraAsAdvance: keep && total > payable,
-      lines: on.map((l) => ({ ...(l.kind === 'charge' ? { chargeId: l.id } : l.kind === 'proc' ? { procedureId: l.id, qty: l.qty } : l.kind === 'service' ? { serviceId: l.id, qty: l.qty } : { recommendationId: l.id, sittings: l.qty, ...(l.packageId ? { packageId: l.packageId } : {}) }), discountPaise: lineOff(l) })),
+      lines: on.map((l) => ({ ...(l.kind === 'charge' ? { chargeId: l.id } : l.kind === 'proc' ? { procedureId: l.id, qty: l.qty } : l.kind === 'service' ? { serviceId: l.id, qty: l.qty } : { recommendationId: l.id, sittings: l.qty }), discountPaise: lineOff(l) })),
       parts: later ? [] : parts.map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0),
     }),
     onSuccess: (r: any) => {
@@ -169,8 +176,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const hits: Hit[] = [
     ...plans.filter((r) => !lines.some((l) => l.key === `a:${r.id}`)).flatMap((r) => {
       const c = courses.find((x) => x.recommendationId === r.id); const per = procs.find((p) => p.id === r.procedureId)?.pricePaise ?? 0;
-      const opts: Hit[] = [{ v: `a:${r.id}`, l: `${procName(r.procedureId)} · pay ahead`, kind: c ? 'this patient’s course' : `${r.sittings ?? 1} sittings at list price`, p: c ? c.perSittingPaise : per, taxBp: taxOf(r.procedureId) }];
-      return c ? opts : [...opts, ...pkgs.filter((k) => k.procedureId === r.procedureId && k.pricePaise > 0).map((k) => ({ v: `a:${r.id}:${k.id}`, l: `${k.name} · pay ahead`, kind: `package, ${k.sittings} sittings`, p: k.pricePaise, taxBp: taxOf(r.procedureId) }))];
+      return [{ v: `a:${r.id}`, l: `${procName(r.procedureId)}${pkgOf(r)} · pay ahead`, kind: c ? 'this patient’s course' : r.package ? 'package share' : r.amountPaise > 0 ? "the doctor's price" : `${r.sittings ?? 1} sittings at list price`, p: c ? c.perSittingPaise : r.amountPaise > 0 ? r.amountPaise : per, taxBp: taxOf(r.procedureId) }];
     }),
     ...procs.map((p) => ({ v: `p:${p.id}`, l: p.name, kind: 'procedure', p: p.pricePaise, taxBp: p.taxRateBp ?? 0 })),
     ...services.map((s) => ({ v: `s:${s.id}`, l: s.name, kind: 'service', p: s.pricePaise, taxBp: 0 })),
@@ -182,7 +188,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     if (v.startsWith('p:') || v.startsWith('s:')) {
       const svc = v.startsWith('s:'); const x = (svc ? services : procs).find((y) => y.id === v.slice(2)); if (!x) return;
       setLines((ls) => [...ls, { key: `${v}:${ls.length}`, kind: svc ? 'service' : 'proc', id: x.id, what: x.name, sub: svc ? 'service, from the price list' : 'from the price list', unitPaise: x.pricePaise, qty: 1, maxQty: 20, on: true, dv: '', unit: 'pct', prior: 0, taxBp: svc ? 0 : x.taxRateBp ?? 0 }]);
-    } else { const [, rid, pk] = v.split(':'); const l = aheadLine(rid, pk); if (l) setLines((ls) => [...ls, l]); else toast('Every sitting of this course is already paid', 'info'); }
+    } else { const ls0 = withPackage(v.split(':')[1]).filter((l) => !lines.some((x) => x.key === l.key)); if (ls0.length) setLines((ls) => [...ls, ...ls0]); else toast('Nothing left to pay ahead on this course', 'info'); }
   };
   const setPart = (i: number, patch: Partial<Part>) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const modes: [Part['method'], string][] = advPaise > 0 ? [...MODES, ['advance', 'From advance']] : MODES;

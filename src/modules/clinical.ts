@@ -13,11 +13,32 @@ import { clinical } from './patients.js';
 import { emit, addDays, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { expectedDays } from '../lib/tests.js';
+import { packagesOf, shares } from '../lib/packages.js';
+
+/** Procedures added as a package: each gets its share of the package price and the package's sittings.
+ *  A group that no longer matches its package (a procedure taken out, sittings changed) goes back to standard prices. */
+async function pricePackages(tx: any, t: string, recs: z.infer<typeof Rec>[]) {
+  const groups = [...new Set(recs.filter((r) => r.kind === 'procedure' && r.package).map((r) => r.package!.group))];
+  if (!groups.length) return;
+  const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r: any[]) => r[0]);
+  const pkgs = packagesOf(ten?.settings); const procs = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.tenantId, t));
+  for (const g of groups) {
+    const rows = recs.filter((r) => r.kind === 'procedure' && r.package?.group === g);
+    const k = pkgs.find((x) => x.id === rows[0].package!.id);
+    const fits = k && rows.length === k.items.length && k.items.every((it) => rows.filter((r) => r.procedureId === it.procedureId).length === 1);
+    if (!fits) { for (const r of rows) { r.package = null; r.amountPaise = null; } continue; }
+    const lists = k.items.map((it) => (procs.find((p: any) => p.id === it.procedureId)?.pricePaise ?? 0) * it.sittings);
+    const parts = shares(k.pricePaise, lists);
+    k.items.forEach((it, i) => { const r = rows.find((x) => x.procedureId === it.procedureId)!; r.sittings = it.sittings; r.amountPaise = parts[i];
+      r.package = { id: k.id, name: k.name, group: g, pricePaise: k.pricePaise, listPaise: lists.reduce((a, b) => a + b, 0), validMonths: k.validMonths }; });
+  }
+}
 
 const RxItem = z.object({ id: z.string().uuid().optional(), medicineId: z.string().uuid().nullable().optional(), name: z.string().min(1), dose: z.string().nullish(), route: z.string().nullish(),
   frequency: z.string().nullish(), durationDays: z.number().int().nullish(), instructions: z.string().nullish(), timing: z.string().max(40).nullish(), durationNote: z.string().max(40).nullish(), qty: z.number().int().min(0).max(10000).nullish() }); // blank fields come back from the database as null
 const Rec = z.object({ id: z.string().uuid().optional(), kind: z.enum(['followup', 'procedure', 'investigation']), procedureId: z.string().uuid().nullable().optional(), dueOn: z.string().nullish(),
-  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), gapDays: z.number().int().min(1).max(365).nullish(), amountPaise: z.number().int().min(0).max(100_000_000).nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish() });
+  intervalDays: z.number().int().nullish(), sittings: z.number().int().nullish(), gapDays: z.number().int().min(1).max(365).nullish(), amountPaise: z.number().int().min(0).max(100_000_000).nullish(), notes: z.string().nullish(), orderNo: z.number().int().min(1).max(20).nullish(),
+  package: z.object({ id: z.string().min(1).max(40), group: z.string().min(1).max(40) }).passthrough().nullish() });
 const Save = z.object({ data: z.record(z.string(), z.any()).default({}), prescription: z.array(RxItem).default([]), recommendations: z.array(Rec).default([]), complete: z.boolean().default(false), screened: z.boolean().default(false), reviewed: z.boolean().default(false) });
 
 /** Assistant-only users save intake and hand back to the doctor; a doctor who also holds assistant stays in consult. */
@@ -78,6 +99,7 @@ export function clinicalRoutes(app: FastifyInstance) {
   /** Save draft or complete. Completing validates the form, writes Rx items and recommendations (→ worklists), marks the visit done. */
   route(app, 'patch', '/encounters/:id', 'encounter.intake', async (req, tx) => {
     const body = Save.parse(req.body); const t = req.ctx.tenantId; const id = (req.params as any).id;
+    await pricePackages(tx, t, body.recommendations);
     const enc = await tx.select().from(encounter).where(and(eq(encounter.id, id), eq(encounter.tenantId, t))).then((r) => r[0]);
     if (!enc) throw new HttpError(404, 'NOT_FOUND');
     if (enc.status === 'completed') throw new HttpError(409, 'ALREADY_COMPLETED');
@@ -127,7 +149,7 @@ export function clinicalRoutes(app: FastifyInstance) {
         const rows = await tx.insert(recommendation).values(fresh.map((r) => ({
           tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
           dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : r.kind === 'procedure' ? today : null), sittings: r.sittings, notes: r.notes,
-          ...(r.kind === 'procedure' ? { gapDays: r.gapDays ?? null, amountPaise: r.amountPaise ?? null } : {}),
+          ...(r.kind === 'procedure' ? { gapDays: r.gapDays ?? null, amountPaise: r.amountPaise ?? null, package: (r.package as any) ?? null } : {}),
           ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
         }))).returning();
         for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });
@@ -141,7 +163,7 @@ export function clinicalRoutes(app: FastifyInstance) {
         const rows = await tx.insert(recommendation).values(body.recommendations.map((r) => ({
           tenantId: t, encounterId: id, patientId: enc.patientId, kind: r.kind, procedureId: r.procedureId ?? null,
           dueOn: r.dueOn ?? (r.intervalDays ? addDays(today, r.intervalDays) : r.kind === 'procedure' ? today : null), sittings: r.sittings, notes: r.notes,
-          ...(r.kind === 'procedure' ? { gapDays: r.gapDays ?? null, amountPaise: r.amountPaise ?? null } : {}),
+          ...(r.kind === 'procedure' ? { gapDays: r.gapDays ?? null, amountPaise: r.amountPaise ?? null, package: (r.package as any) ?? null } : {}),
           ...(r.kind === 'investigation' ? { orderNo: r.orderNo ?? 1, expectedOn: addDays(today, expectedDays(r.notes ?? '')) } : {}),
         }))).returning();
         if (body.complete) for (const r of rows) await emit(tx, req.ctx, 'recommendation.created', 'recommendation', r.id, { kind: r.kind, patientId: r.patientId, dueOn: r.dueOn, procedureId: r.procedureId });

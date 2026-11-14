@@ -57,12 +57,10 @@ export function AvailabilityTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
 /* ---------------- Booking rules ---------------- */
 export function BookingRulesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
-  const [f, setF] = useState({ arriveEarlyMinutes: s.scheduling?.arriveEarlyMinutes ?? 35, defaultCapacity: s.scheduling?.defaultCapacity ?? 7, windowMinutes: s.scheduling?.windowMinutes ?? 60,
-    cancelWindowHours: s.booking?.cancelWindowHours ?? 4, patientCanReschedule: s.booking?.patientCanReschedule ?? true, cancellationPolicy: s.booking?.cancellationPolicy ?? '', noShowWarnAt: s.booking?.noShowWarnAt ?? 2 });
+  const [f, setF] = useState({ arriveEarlyMinutes: s.scheduling?.arriveEarlyMinutes ?? 35, defaultCapacity: s.scheduling?.defaultCapacity ?? 7, windowMinutes: s.scheduling?.windowMinutes ?? 60 });
   const set = (k: string, v: any) => setF((p: any) => ({ ...p, [k]: v }));
-  const bad = { arrive: !intIn(f.arriveEarlyMinutes, 0, 240), cap: !intIn(f.defaultCapacity, 1, 99), cancel: !intIn(f.cancelWindowHours, 0, 168), warn: !intIn(f.noShowWarnAt, 1, 20) };
-  const m = useMutation({ mutationFn: () => save({ scheduling: { arriveEarlyMinutes: Number(f.arriveEarlyMinutes), defaultCapacity: Number(f.defaultCapacity), windowMinutes: Number(f.windowMinutes) },
-    booking: { cancelWindowHours: Number(f.cancelWindowHours), patientCanReschedule: f.patientCanReschedule, cancellationPolicy: f.cancellationPolicy.trim(), noShowWarnAt: Number(f.noShowWarnAt) } }),
+  const bad = { arrive: !intIn(f.arriveEarlyMinutes, 0, 240), cap: !intIn(f.defaultCapacity, 1, 99) };
+  const m = useMutation({ mutationFn: () => save({ scheduling: { arriveEarlyMinutes: Number(f.arriveEarlyMinutes), defaultCapacity: Number(f.defaultCapacity), windowMinutes: Number(f.windowMinutes) } }),
     onSuccess: () => { toast('Booking rules saved'); onSaved(); }, onError: (e) => toast(errText(e), 'err') });
   return (
     <div className="space-y-4">
@@ -74,16 +72,7 @@ export function BookingRulesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
         </div>
         <div className="text-xs text-muted">Patients are told to arrive this many minutes before their window. Each doctor's own places per hour are set under Staff & doctors › Consulting hours.</div>
       </div>
-      <div className="card space-y-3">
-        <div className="card-title">Cancelling and changing</div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div><label className="label" htmlFor="br-cancel">Patients can cancel or move until (hours before)</label><NumInput id="br-cancel" max={168} className={`input ${bad.cancel ? '!border-rose' : ''}`} value={f.cancelWindowHours} onChange={(e) => set('cancelWindowHours', e.target.value)} /></div>
-          <div><label className="label" htmlFor="br-warn">Warn after this many no-shows</label><NumInput id="br-warn" max={20} className={`input ${bad.warn ? '!border-rose' : ''}`} value={f.noShowWarnAt} onChange={(e) => set('noShowWarnAt', e.target.value)} /></div>
-        </div>
-        <Toggle id="br-resched" on={f.patientCanReschedule} onChange={(v) => set('patientCanReschedule', v)} label="Patients can pick a new time from their link" hint="Otherwise they can only confirm or cancel" />
-        <div><label className="label" htmlFor="br-policy">Cancellation policy shown to patients</label><textarea id="br-policy" className="input min-h-[72px]" maxLength={500} value={f.cancellationPolicy} onChange={(e) => set('cancellationPolicy', e.target.value)} placeholder="e.g. Please cancel at least 4 hours before so another patient can use your place." /><div className="mt-1 text-right text-[11px] text-muted">{f.cancellationPolicy.length}/500</div></div>
-      </div>
-      {Object.values(bad).some(Boolean) && <div className="text-sm text-rose">Check the boxes outlined in red: arrive early 0–240, places 1–99, cancel window 0–168 hours, no-show warning 1–20.</div>}
+      {Object.values(bad).some(Boolean) && <div className="text-sm text-rose">Check the boxes outlined in red: arrive early 0–240, places 1–99.</div>}
       <div className="settings-save"><button className="btn btn-primary" disabled={m.isPending || Object.values(bad).some(Boolean)} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );

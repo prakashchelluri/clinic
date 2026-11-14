@@ -10,6 +10,7 @@ import { originOf } from '../lib/booking.js';
 import { emit, sent } from '../lib/core.js';
 import { writeAudit, feeSummary } from '../lib/audit.js';
 import jsonLogic from 'json-logic-js';
+import { PackagesIn } from '../lib/packages.js';
 import { DEFAULT_ROLES, PERMISSIONS, hashPassword, HttpError, can, rolesFor, isKnownPerm, expandPerms, BUILTIN_NAMES } from '../lib/auth.js';
 
 const DEFAULT_ROLES_FOR = (k: string) => DEFAULT_ROLES[k] ?? [];
@@ -21,7 +22,7 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'patch', '/admin/clinic', 'config.write', async (req, tx) => {
     const body = z.object({ name: Name.optional(), settings: z.record(z.string(), z.any()).optional() }).parse(req.body);
     if (body.settings?.photos?.areas !== undefined) body.settings.photos.areas = z.array(z.string().trim().min(1).max(40)).min(1).max(40).parse(body.settings.photos.areas);
-    if (body.settings?.packages !== undefined) body.settings.packages = z.array(z.object({ id: z.string().min(1).max(40), name: z.string().trim().min(1).max(60), procedureId: z.string().uuid(), sittings: z.number().int().min(1).max(60), intervalDays: z.number().int().min(0).max(365), pricePaise: z.number().int().min(0) })).max(50).parse(body.settings.packages);
+    if (body.settings?.packages !== undefined) body.settings.packages = PackagesIn.parse(body.settings.packages); // bundles of procedures at one price
     if (body.settings?.calendarTextSize !== undefined) body.settings.calendarTextSize = z.enum(['small', 'normal', 'large']).parse(body.settings.calendarTextSize);
     // off: no junior step. first: the junior screens whoever is waiting, the doctor takes screened patients first. required: the doctor sees only screened patients.
     if (body.settings?.screening !== undefined) body.settings.screening = z.enum(['off', 'first', 'required']).parse(body.settings.screening);

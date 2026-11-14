@@ -24,6 +24,11 @@ export async function emit(tx: Tx, ctx: Ctx, type: string, aggregate: string, ag
 export function todayIn(tz: string, d = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
+/** The same day N months on (31 Jan + 1 month = 28/29 Feb). */
+export function addMonths(day: string, n: number) {
+  const [y, m, d] = day.split('-').map(Number); const last = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + n, Math.min(d, last))).toISOString().slice(0, 10);
+}
 export function addDays(day: string, n: number) {
   const d = new Date(day + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10);
 }

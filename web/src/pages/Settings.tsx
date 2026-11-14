@@ -3,13 +3,13 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, patch, qc, errText } from '../api';
 import { can } from '../App';
-import { Drawer, Chip, Icon, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, ask } from '../ui';
+import { Drawer, Chip, Tabs, Icon, PageHeader, Section, Skeleton, money, toast, NumInput, MoneyInput, ask } from '../ui';
 import { RolesTab, DiscountCap } from './Roles';
 import { vitalFields, DEFAULT_VITALS, BUILTIN_VITALS, type VitalField } from '../vitals';
 import { PrivacyTab } from './Privacy';
 import { TemplatesTab } from './SettingsTemplates';
 import { PadTab } from './SettingsPad';
-import { PackagesCard, CalendarLookCard } from '../packages';
+import { PackagesTab, CalendarLookCard } from '../packages';
 import { AvailabilityTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 import { ConsultTypesTab } from '../consultTypes';
 import { StaffTab } from '../staff';
@@ -24,7 +24,7 @@ const GROUPS: [string, TabDef[]][] = [
   ['Clinic', [
     ['clinic', 'Clinic profile', 'Printed at the top of every prescription and bill, and shown on the patient link.', 'name address phone footer language telugu hindi print'],
     ['billing', 'Billing & payments', 'Tax on bills, the payment QR at the counter, and what expenses are for.', 'gst gstin upi qr tax invoice bill of supply expense category'],
-    ['desk', 'Front desk & queue', 'Token numbers, junior screening, free return with reports, the waiting-room screen.', 'token number screening junior free reports waiting room tv display'],
+    ['desk', 'Front desk & queue', 'Token numbers, junior screening, free return with reports, missed visits, the waiting-room screen.', 'token number screening junior free reports no-show missed waiting room tv display'],
   ]],
   ['Team', [
     ['people', 'Staff & doctors', 'Everyone who works here: who signs in, who consults, and each doctor’s hours.', 'staff user password login account doctor registration hours routine availability'],
@@ -37,7 +37,7 @@ const GROUPS: [string, TabDef[]][] = [
     ['photos', 'Photo areas', 'Body areas for before and after photos.', 'photo picture area body'],
   ]],
   ['Appointments', [
-    ['rules', 'Booking rules', 'How early to arrive, cancelling and moving, and how the calendar looks.', 'booking cancel arrive calendar no-show policy'],
+    ['rules', 'Booking rules', 'How early to arrive, places per hour, and how the calendar looks.', 'booking arrive places hour calendar text size'],
     ['messages', 'Patient messages', 'Confirmations, reminders and other WhatsApp messages sent to patients.', 'whatsapp message reminder confirmation sms template'],
   ]],
   ['Clinical', [
@@ -114,7 +114,7 @@ export function Settings() {
           {tab === 'hours' && <AvailabilityTab cfg={cfg} onSaved={refresh} />}
           {tab === 'roles' && <><RolesTab onSaved={refresh} /><DiscountCap cfg={cfg} onSaved={refresh} /></>}
           {tab === 'types' && <ConsultTypesTab cfg={cfg} onSaved={refresh} />}
-          {tab === 'procedures' && <div className="space-y-4"><ProceduresTab cfg={cfg} onSaved={refresh} /><PackagesCard cfg={cfg} onSaved={refresh} /></div>}
+          {tab === 'procedures' && <ProcPackages cfg={cfg} onSaved={refresh} />}
           {tab === 'rooms' && <RoomsTab cfg={cfg} onSaved={refresh} />}
           {tab === 'photos' && <PhotoAreasTab cfg={cfg} onSaved={refresh} />}
           {tab === 'rules' && <><BookingRulesTab cfg={cfg} onSaved={refresh} /><CalendarLookCard cfg={cfg} onSaved={refresh} /></>}
@@ -217,11 +217,12 @@ function BillingTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 /* ---------------- Front desk & queue: token numbers, screening, reports, the waiting-room screen ---------------- */
 function DeskTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const s = cfg.tenant.settings ?? {};
-  const init = { opNumberScope: s.numbering?.opNumberScope ?? 'day+category', screening: s.screening ?? 'off', freeDays: String(s.reports?.freeDays ?? 30) };
+  const init = { opNumberScope: s.numbering?.opNumberScope ?? 'day+category', screening: s.screening ?? 'off', freeDays: String(s.reports?.freeDays ?? 30), noShowWarnAt: String(s.booking?.noShowWarnAt ?? 2) };
   const [f, setF] = useState(init);
   const dirty = JSON.stringify(f) !== JSON.stringify(init);
   const daysBad = f.freeDays === '' || !(Number(f.freeDays) >= 0 && Number(f.freeDays) <= 365);
-  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { numbering: { opNumberScope: f.opNumberScope }, screening: f.screening, reports: { freeDays: Number(f.freeDays) } } }), onSuccess: () => { toast('Saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
+  const warnBad = !(Number(f.noShowWarnAt) >= 1 && Number(f.noShowWarnAt) <= 20);
+  const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { numbering: { opNumberScope: f.opNumberScope }, screening: f.screening, reports: { freeDays: Number(f.freeDays) }, booking: { noShowWarnAt: Number(f.noShowWarnAt) } } }), onSuccess: () => { toast('Saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
@@ -240,10 +241,15 @@ function DeskTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
         <div className={`text-xs ${daysBad ? 'text-rose' : 'text-muted'}`}>{daysBad ? 'From 0 to 365 days.' : 'Within this time, coming back with reports has no fee, and the desk sees it pre-filled at check-in.'}</div>
       </div>
       <div className="card space-y-3">
+        <div className="card-title">Patients who miss visits</div>
+        <div className="flex flex-wrap items-center gap-2 text-sm"><span>Warn reception after</span><NumInput aria-label="No-shows before a warning" max={20} className={`input !w-20 ${warnBad ? '!border-rose' : ''}`} value={f.noShowWarnAt} onChange={(e: any) => setF((p) => ({ ...p, noShowWarnAt: e.target.value }))} /><span>missed visits</span></div>
+        <div className={`text-xs ${warnBad ? 'text-rose' : 'text-muted'}`}>{warnBad ? 'From 1 to 20.' : 'Booking such a patient shows a warning with how many visits they missed.'}</div>
+      </div>
+      <div className="card space-y-3">
         <div className="card-title">Waiting-room screen</div>
         <DisplayLinkCard />
       </div>
-      <div className="settings-save"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setF(init)}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || save.isPending || daysBad} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
+      <div className="settings-save"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setF(init)}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || save.isPending || daysBad || warnBad} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
     </div>
   );
 }
@@ -293,6 +299,19 @@ function VitalsSettings({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
 }
 
 /* ---------------- Procedures ---------------- */
+/** Procedures and packages: one procedure at its price, or a bundle of them at one price. Two tabs, each with its own New button. */
+function ProcPackages({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
+  const [params, setParams] = useSearchParams(); const view = params.get('view') === 'packages' ? 'packages' : 'procedures';
+  const nPk = (cfg.tenant.settings?.packages ?? []).filter((k: any) => k.active !== false).length;
+  return (
+    <div className="space-y-4">
+      <Tabs<'procedures' | 'packages'> value={view} onChange={(v) => setParams((p) => { const n = new URLSearchParams(p); if (v === 'packages') n.set('view', 'packages'); else n.delete('view'); return n; }, { replace: true })}
+        options={[{ value: 'procedures', label: 'Procedures', count: cfg.procedures.length }, { value: 'packages', label: 'Packages', count: nPk }]} />
+      {view === 'procedures' ? <ProceduresTab cfg={cfg} onSaved={onSaved} /> : <PackagesTab cfg={cfg} onSaved={onSaved} />}
+    </div>
+  );
+}
+
 function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [edit, setEdit] = useState<any>(null);
   const add = () => setEdit({ name: '', typicalMinutes: 30, bufferMinutes: 0, typicalSittings: 1, price: '', requiresMainDoctor: false, requiresReview: false, requiredCapability: '', taxRateBp: 0, active: true });

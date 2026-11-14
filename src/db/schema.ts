@@ -337,6 +337,8 @@ export const procedureWeek = pgTable('procedure_week', {
   sentBy: text('sent_by'),
 }, (t) => [uniqueIndex('proc_week_start').on(t.tenantId, t.weekStart)]);
 
+/** A plan that came from a package: which package, the one pad group it was added in, and the package as it was then. */
+export type PlanPackage = { id: string; name: string; group: string; pricePaise: number; listPaise: number; validMonths: number };
 export const recommendation = pgTable('recommendation', {
   ...tenantCols,
   encounterId: uuid('encounter_id').notNull().references(() => encounter.id),
@@ -347,6 +349,7 @@ export const recommendation = pgTable('recommendation', {
   sittings: integer('sittings'),
   gapDays: integer('gap_days'),            // procedures: days between sittings; the next falls due this long after the last one done
   amountPaise: integer('amount_paise'),     // procedures: the doctor's own price, total for all sittings; null = the clinic's standard price
+  package: jsonb('package').$type<PlanPackage>(), // procedures: the package this plan is part of (its share of the package price is amountPaise)
   notes: text('notes'),
   status: text('status').notNull().default('open'), // open | contacted | scheduled | done | cancelled (for a test: open = pending, done = report received)
   contactLog: jsonb('contact_log').$type<{ at: string; by: string; outcome: string; note?: string }[]>().notNull().default([]),
@@ -377,6 +380,9 @@ export const course = pgTable('course', {
   priceSource: text('price_source').notNull().default('standard'), // doctor | package | standard: where the price came from, for the accounts
   standardPaise: integer('standard_paise'),    // the standard price for the same sittings, to compare a doctor's or package price with
   priceBy: text('price_by'),                   // the doctor who set their own price
+  packageName: text('package_name'),           // a package's procedures: the package name and the group its courses share
+  packageGroup: text('package_group'),
+  validUntil: date('valid_until'),             // a package: sittings not done by then are expired (still refundable)
   creditPaise: integer('credit_paise').notNull().default(0), // an approved discount on sittings paid ahead: pays for sittings like the advance, but is not money in
 }, (t) => [uniqueIndex('course_rec').on(t.tenantId, t.recommendationId), index('course_patient').on(t.tenantId, t.patientId)]);
 

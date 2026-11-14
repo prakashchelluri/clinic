@@ -4,7 +4,8 @@ import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon, CalendarDays, HeartPulse, ClipboardList, Activity, Stethoscope, ScanSearch, Pill, MessageSquareText, FlaskConical, TestTubes, CalendarClock, Syringe, NotebookPen, ArrowRightLeft, Camera, FolderOpen, PenLine, FileText, type LucideIcon } from 'lucide-react';
-import { BackButton, Chip, Drawer, Floating, Icon, Modal, MoreMenu, Skeleton, Tabs, fmtDate, toast, NumInput, ask } from '../ui';
+import { BackButton, Chip, Drawer, Floating, Icon, Modal, MoreMenu, Skeleton, Tabs, fmtDate, money, toast, NumInput, ask } from '../ui';
+import { type Pkg, fullPrice } from '../packages';
 import { openPrint } from '../printPreview';
 import { EncounterModal, UploadButton, asList, joinList } from '../encounterDetail';
 import { usePhotos, PhotoCapture, PhotoCompare, RemovePhoto } from '../photos';
@@ -25,7 +26,8 @@ const CanvasDrawer = lazy(() => import('../padCanvas').then((m) => ({ default: m
 
 type Field = { key: string; label: string; type: string; required?: boolean; options?: string[]; unit?: string; placeholder?: string };
 type RxItem = { id?: string; _issued?: boolean; medicineId?: string | null; name: string; dose?: string; route?: string; frequency?: string; durationDays?: number; durationNote?: string | null; instructions?: string; timing?: string | null; qty?: number | null; _qtyTouched?: boolean };
-type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; gapDays?: number; /** procedures: the doctor's own price, total for all sittings; empty = standard */ amountPaise?: number | null; notes?: string; orderNo?: number; status?: string; id?: string };
+type Rec = { kind: 'followup' | 'procedure' | 'investigation'; procedureId?: string | null; intervalDays?: number; dueOn?: string; sittings?: number; gapDays?: number; /** procedures: the doctor's own price, total for all sittings; empty = standard */ amountPaise?: number | null; notes?: string; orderNo?: number; status?: string; id?: string;
+  /** procedures added as a package: which package and the pad group; the server sets the share of the price */ package?: { id: string; group: string; name?: string; pricePaise?: number; listPaise?: number; validMonths?: number } | null };
 type Sym = { name: string; since?: string; severity?: string; note?: string };
 type Dx = { name: string; since?: string; severity?: string; status?: string; note?: string };
 /** An examination finding as a row (Tatva): the finding and a note. */
@@ -272,8 +274,9 @@ function ReasonSheet({ warnings, onCancel, onDone }: { warnings: string[]; onCan
 /** The consultation on one pad: section cards in the clinic's order, templates in every card header, type anything on top, finish and call the next patient. */
 export function Encounter() {
   const { id } = useParams(); const nav = useNavigate(); const { cfg, perms, me } = useOutletContext<any>();
-  /** Days between sittings for a procedure: the clinic's package for it, else four weeks. The doctor can change it on the line. */
-  const gapFor = (pid?: string | null): number => ((cfg?.tenant?.settings?.packages ?? []) as any[]).find((k) => k.procedureId === pid && k.intervalDays > 0)?.intervalDays ?? 28;
+  /** Days between sittings for a procedure: a clinic package's gap for it, else four weeks. The doctor can change it on the line. */
+  const pkgs: Pkg[] = ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.active !== false);
+  const gapFor = (pid?: string | null): number => pkgs.flatMap((k) => k.items).find((it) => it.procedureId === pid && it.intervalDays > 0)?.intervalDays ?? 28;
   const enc = useQuery({ queryKey: ['encounter', id], queryFn: () => get(`/encounters/${id}`) });
   const timeline = useQuery({ queryKey: ['timeline', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/timeline`), enabled: !!enc.data });
   const docs = useQuery({ queryKey: ['documents', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/documents`), enabled: !!enc.data });
@@ -340,7 +343,7 @@ export function Encounter() {
       if (isDoctor && enc.data.status === 'draft' && (isReviewVisit(enc.data.visit, cfg) || (lastDone?.prescription ?? []).length > 0) && !asDx(d.assessment?.diagnosis).length && lastDone?.data?.assessment?.diagnosis) d = { ...d, assessment: { ...(d.assessment ?? {}), diagnosis: lastDone.data.assessment.diagnosis } };
       loaded.current = true; justLoaded.current = true; setData(d); setRx(enc.data.prescription.map(own));
       const opened = new Date(new Date(enc.data.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) + 'T00:00:00Z').getTime();
-      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, gapDays: r.gapDays ?? undefined, amountPaise: r.amountPaise ?? null, notes: r.notes,
+      setRecs(enc.data.recommendations.map((r: any) => ({ id: r.id, status: r.status, orderNo: r.orderNo, kind: r.kind, procedureId: r.procedureId, dueOn: r.dueOn, sittings: r.sittings, gapDays: r.gapDays ?? undefined, amountPaise: r.amountPaise ?? null, package: r.package ?? null, notes: r.notes,
         intervalDays: r.kind === 'followup' && r.dueOn ? Math.round((new Date(r.dueOn + 'T00:00:00Z').getTime() - opened) / 86400000) : undefined })));
       // a copy kept on this computer that is newer than the server's: offer it back; an older one, or one for a signed pad, goes
       let kept: Kept | null = null; try { kept = JSON.parse(localStorage.getItem(localKey) ?? 'null'); } catch { kept = null; }
@@ -709,17 +712,54 @@ export function Encounter() {
         <textarea aria-label="Additional notes" className="input min-h-[72px]" maxLength={2000} placeholder="Enter any specific note here · printed on the prescription" value={data.plan?.notes ?? ''} disabled={readOnly} onChange={(ev) => set('plan', 'notes', ev.target.value)} /></div>
     </div></section> : null,
     procedures: isDoctor ? <Card key="procedures" id="procedures" title="Surgeries / Procedures" actions={!readOnly && recs.some((r) => r.kind === 'procedure') ? <button type="button" data-act="clear" title="Clear the procedures" aria-label="Clear the procedures" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" onClick={() => clearSection('the procedures', () => setRecs(recs.filter((r) => r.kind !== 'procedure')))}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button> : undefined}>
-      {recs.map((r, k) => r.kind !== 'procedure' ? null : (
-        <Row key={k} label={procName(r.procedureId)} onRemove={readOnly ? null : () => setRecs(recs.filter((_, j) => j !== k))}>
-          <b className="rx-name">{procName(r.procedureId)}</b>
-          <label className="flex w-28 items-center pr-2 text-xs text-muted"><NumInput aria-label="Sittings" max={50} className="cell-in !w-12" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, sittings: Number(ev.target.value) } : x)))} />sittings</label>
-          {(r.sittings ?? 0) > 1 ? <label className="flex w-36 items-center px-2 text-xs text-muted">every<NumInput aria-label="Days between sittings" max={365} className="cell-in !w-12" value={r.gapDays ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, gapDays: Number(ev.target.value) || undefined } : x)))} />days</label> : <span className="w-36" />}
-          {(() => { const std = (cfg?.procedures?.find((x: any) => x.id === r.procedureId)?.pricePaise ?? 0) * Math.max(1, r.sittings ?? 1); return (
-            <label className="flex w-48 items-center gap-1 px-2 text-xs text-muted" title="The total for all sittings. Leave empty for the clinic's standard price.">₹<NumInput aria-label="Amount, total for all sittings" max={10000000} className={`cell-in !w-24 ${PH}`} placeholder={std ? (std / 100).toLocaleString('en-IN') : 'Amount'} value={r.amountPaise ? String(r.amountPaise / 100) : ''} disabled={readOnly}
-              onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, amountPaise: ev.target.value ? Math.round(Number(ev.target.value) * 100) : null } : x)))} />{r.amountPaise ? 'total' : 'standard'}</label>); })()}
-          <input aria-label="Notes" className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Notes" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRecs(recs.map((x, j) => (j === k ? { ...x, notes: ev.target.value } : x)))} />
-        </Row>))}
-      {!readOnly && <SearchLine placeholder="Search surgeries / procedures" options={(cfg?.procedures ?? []).map((x: any) => x.name)} onAdd={(t) => { const pr = (cfg?.procedures ?? []).find((x: any) => x.name.toLowerCase() === t.toLowerCase()); if (!pr) return toast(`“${t}” is not in the procedure list. Add it in Settings first.`, 'info'); if (recs.some((r) => r.kind === 'procedure' && r.procedureId === pr.id)) return toast('Already on the pad', 'info'); setRecs([...recs, { kind: 'procedure', procedureId: pr.id, sittings: pr.typicalSittings, gapDays: gapFor(pr.id) }]); }} />}
+      {(() => {
+        const setRec = (k: number, p: Partial<Rec>) => setRecs(recs.map((x, j) => (j === k ? { ...x, ...p } : x)));
+        const procRow = (r: Rec, k: number, inPkg: boolean) => (
+          <Row key={k} label={procName(r.procedureId)} onRemove={readOnly ? null : () => removeProc(k)}>
+            <b className="rx-name">{procName(r.procedureId)}</b>
+            {inPkg ? <span className="flex w-28 items-center pr-2 text-xs text-muted"><b className="mr-1 text-ink">{r.sittings}</b>sittings</span>
+              : <label className="flex w-28 items-center pr-2 text-xs text-muted"><NumInput aria-label="Sittings" max={50} className="cell-in !w-12" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRec(k, { sittings: Number(ev.target.value) })} />sittings</label>}
+            {(r.sittings ?? 0) > 1 ? <label className="flex w-36 items-center px-2 text-xs text-muted">every<NumInput aria-label="Days between sittings" max={365} className="cell-in !w-12" value={r.gapDays ?? ''} disabled={readOnly} onChange={(ev) => setRec(k, { gapDays: Number(ev.target.value) || undefined })} />days</label> : <span className="w-36" />}
+            {inPkg ? <span className="flex w-48 items-center px-2 text-xs text-muted">In the package</span> : (() => { const std = (cfg?.procedures?.find((x: any) => x.id === r.procedureId)?.pricePaise ?? 0) * Math.max(1, r.sittings ?? 1); return (
+              <label className="flex w-48 items-center gap-1 px-2 text-xs text-muted" title="The total for all sittings. Leave empty for the clinic's standard price.">₹<NumInput aria-label="Amount, total for all sittings" max={10000000} className={`cell-in !w-24 ${PH}`} placeholder={std ? (std / 100).toLocaleString('en-IN') : 'Amount'} value={r.amountPaise ? String(r.amountPaise / 100) : ''} disabled={readOnly}
+                onChange={(ev) => setRec(k, { amountPaise: ev.target.value ? Math.round(Number(ev.target.value) * 100) : null })} />{r.amountPaise ? 'total' : 'standard'}</label>); })()}
+            <input aria-label="Notes" className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Notes" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRec(k, { notes: ev.target.value })} />
+          </Row>);
+        // a procedure taken out of a package: the rest of that package go back to their own standard prices (with Undo)
+        const removeProc = (k: number) => {
+          const was = recs; const g = recs[k].package?.group;
+          setRecs(recs.filter((_, j) => j !== k).map((x) => (g && x.package?.group === g ? { ...x, package: null, amountPaise: null } : x)));
+          if (g) toast(`The package price no longer applies: the other procedures are back at their standard prices`, 'info', { label: 'Undo', run: () => setRecs(was) });
+        };
+        const removeGroup = (g: string) => { const was = recs; setRecs(recs.filter((x) => x.package?.group !== g)); toast('Package removed', 'info', { label: 'Undo', run: () => setRecs(was) }); };
+        const groups = [...new Set(recs.filter((r) => r.kind === 'procedure' && r.package).map((r) => r.package!.group))];
+        return <>
+          {groups.map((g) => { const rows = recs.map((r, k) => [r, k] as const).filter(([r]) => r.kind === 'procedure' && r.package?.group === g);
+            const p0 = rows[0][0].package!; const k = pkgs.find((x) => x.id === p0.id); const name = p0.name ?? k?.name ?? 'Package';
+            const price = p0.pricePaise ?? k?.pricePaise; const full = p0.listPaise ?? (k ? fullPrice(k, cfg?.procedures ?? []) : 0); const months = p0.validMonths ?? k?.validMonths;
+            return (
+              <div key={g} className="mb-1.5 overflow-hidden rounded-[8px] border border-clay-line bg-clay-soft/30" role="group" aria-label={`${name} package`}>
+                <div className="flex flex-wrap items-center gap-2 bg-clay-soft px-3 py-2 text-[13px]">
+                  <Icon name="box" className="h-3.5 w-3.5 text-clay-ink" /><b className="text-clay-ink">{name}</b><span className="rounded bg-surface px-1.5 text-[11px] font-semibold text-clay-ink">Package</span>
+                  <span className="ml-auto" />{price != null && full > price && <s className="text-muted">{money(full)}</s>}{price != null && <b>{money(price)}</b>}
+                  {price != null && full > price && <span className="text-xs text-sage">Saves {money(full - price)}</span>}{months && <span className="text-xs text-muted">· valid {months} months</span>}
+                  {!readOnly && <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove the ${name} package`} onClick={() => removeGroup(g)}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+                </div>
+                {rows.map(([r, k]) => procRow(r, k, true))}
+              </div>); })}
+          {recs.map((r, k) => r.kind !== 'procedure' || r.package ? null : procRow(r, k, false))}
+        </>;
+      })()}
+      {!readOnly && <SearchLine placeholder="Search procedures or packages" options={[...pkgs.map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).map((x: any) => x.name)]} onAdd={(t) => {
+        const k = pkgs.find((x) => `${x.name} (package)`.toLowerCase() === t.toLowerCase() || x.name.toLowerCase() === t.toLowerCase());
+        if (k) {
+          if (recs.some((r) => r.package?.id === k.id)) return toast('This package is already on the pad', 'info');
+          const clash = k.items.find((it) => recs.some((r) => r.kind === 'procedure' && r.procedureId === it.procedureId));
+          if (clash) return toast(`${procName(clash.procedureId)} is already on the pad. Remove it first, then add the package.`, 'info');
+          const group = crypto.randomUUID().slice(0, 8);
+          return setRecs([...recs, ...k.items.map((it): Rec => ({ kind: 'procedure', procedureId: it.procedureId, sittings: it.sittings, gapDays: it.intervalDays || undefined, package: { id: k.id, group, name: k.name, pricePaise: k.pricePaise, listPaise: fullPrice(k, cfg?.procedures ?? []), validMonths: k.validMonths } }))]);
+        }
+        const pr = (cfg?.procedures ?? []).find((x: any) => x.name.toLowerCase() === t.toLowerCase()); if (!pr) return toast(`“${t}” is not in the procedure list. Add it in Settings first.`, 'info'); if (recs.some((r) => r.kind === 'procedure' && r.procedureId === pr.id)) return toast('Already on the pad', 'info'); setRecs([...recs, { kind: 'procedure', procedureId: pr.id, sittings: pr.typicalSittings, gapDays: gapFor(pr.id) }]); }} />}
     </Card> : null,
     notes: isDoctor ? <Card key="notes" id="notes" title="Private notes" meta="never printed or sent"><textarea aria-label="Private notes" className="input min-h-14" maxLength={2000} placeholder="For you and the clinic only" value={data.notes?.private ?? ''} disabled={readOnly} onChange={(ev) => set('notes', 'private', ev.target.value)} /></Card> : null,
     referral: isDoctor ? <Card key="referral" id="referral" title="Referral" meta="printed on the prescription">

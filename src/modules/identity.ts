@@ -11,6 +11,7 @@ import { historyCategories } from '../lib/history.js';
 import { verifyPassword, hashPassword, HttpError, can } from '../lib/auth.js';
 import { testDataAllowed } from './sample.js';
 import { labTestsOf, expenseCategoriesOf } from '../lib/lists.js';
+import { packagesOf } from '../lib/packages.js';
 import { route } from '../lib/route.js';
 
 const Login = z.object({ tenant: z.string().optional(), email: z.string().email(), password: z.string() });
@@ -83,7 +84,7 @@ export function identityRoutes(app: FastifyInstance) {
     let settings: any = owner ? ten.settings : { ...ten.settings, security: undefined };
     if (!can(req.perms, 'config.write')) settings = { ...settings, display: undefined };
     // Without 'See fees and payments' (the junior doctor) no prices travel: fee amounts (only "free" stays, the pad uses it to spot reviews), MRP, procedure and package prices.
-    if (!seeFees && Array.isArray(settings.packages)) settings = { ...settings, packages: settings.packages.map(({ pricePaise, ...k }: any) => k) };
+    settings = { ...settings, packages: packagesOf(settings).map((k) => seeFees ? k : { ...k, pricePaise: null }) }; // always bundles; a package saved before bundles reads as a bundle of one
     const priced = seeFees ? { feeCategories: fees, medicines: meds, procedures: procs, services }
       : { feeCategories: fees.map((c) => ({ ...c, amountPaise: c.amountPaise === 0 ? 0 : null })), medicines: meds.map((m) => ({ ...m, mrpPaise: null })), procedures: procs.map((p) => ({ ...p, pricePaise: null })), services: services.map((x) => ({ ...x, pricePaise: null })) };
     return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings },

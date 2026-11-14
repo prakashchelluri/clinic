@@ -115,3 +115,41 @@ test('logo and signature: uploaded, printed, replaced, removed; never typed in a
   assert.equal((await app.inject({ method: 'GET', url: new URL(sig.body.signatureUrl).pathname })).statusCode, 404);
   assert.equal((await app.inject({ method: 'GET', url: '/api/public/brand/not-a-tenant/logo-aaaaaaaaaaaa.png' })).statusCode, 404);
 });
+
+test('packages: a bundle of procedures at one price, added on the pad, split across the procedures, agreed as a whole', async () => {
+  const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
+  const procs = (await owner('GET', '/config')).body.procedures.filter((p: any) => p.pricePaise > 0).slice(0, 3);
+  const items = procs.map((p: any, i: number) => ({ procedureId: p.id, sittings: i + 2, intervalDays: 30 }));
+  const full = items.reduce((s: number, it: any, i: number) => s + procs[i].pricePaise * it.sittings, 0);
+  const price = Math.round(full * 0.8);
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'combo', name: 'Combo', items: [...items, items[0]], pricePaise: price, validMonths: 12 }] } })).status, 400, 'a procedure twice');
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'combo', name: 'Combo', items, pricePaise: price, validMonths: 12 }] } })).status, 200);
+  const cfg = (await owner('GET', '/config')).body;
+  assert.equal(cfg.tenant.settings.packages[0].items.length, 3);
+
+  const patientWith = async (name: string, phone: string, recs: any[]) => {
+    const p = (await owner('POST', '/patients', { fullName: name, phone })).body;
+    const v = (await owner('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
+    const e = (await owner('POST', `/visits/${v.id}/encounter`, {})).body;
+    const r = await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Scars'] }, assessment: { diagnosis: [{ name: 'Acne scars' }] } }, complete: true, recommendations: recs });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    return { p, plans: (await owner('GET', '/worklist?kind=procedure')).body.filter((x: any) => x.patientId === p.id) };
+  };
+  // the whole package: each plan gets its share (adding up to the package price) and the package's sittings, whatever the pad sent
+  const a = await patientWith('Package Bundle', '9848077733', items.map((it: any) => ({ kind: 'procedure', procedureId: it.procedureId, sittings: 99, amountPaise: 1, package: { id: 'combo', group: 'g1' } })));
+  assert.equal(a.plans.length, 3);
+  assert.equal(a.plans.reduce((s: number, r: any) => s + r.amountPaise, 0), price, 'the shares add up to the package price');
+  for (const it of items) assert.equal(a.plans.find((r: any) => r.procedureId === it.procedureId).sittings, it.sittings);
+  assert.equal(a.plans[0].package.name, 'Combo');
+
+  // one procedure taken out: the rest are not the package any more, so they go back to the standard price
+  const b = await patientWith('Package Broken', '9848077744', items.slice(0, 2).map((it: any) => ({ kind: 'procedure', procedureId: it.procedureId, sittings: it.sittings, package: { id: 'combo', group: 'g2' } })));
+  assert.ok(b.plans.every((r: any) => r.package === null && r.amountPaise === null));
+
+  // agreeing one agrees the whole package: a course each, priced from the package, valid 12 months
+  const agreed = await reception('POST', '/courses', { recommendationId: a.plans[0].id });
+  assert.equal(agreed.status, 200, JSON.stringify(agreed.body)); assert.equal(agreed.body.priceSource, 'package'); assert.equal(agreed.body.packageName, 'Combo');
+  const courses = (await owner('GET', `/courses?patientId=${a.p.id}`)).body;
+  assert.equal(courses.length, 3); assert.equal(courses.reduce((s: number, c: any) => s + c.totalPaise, 0), price);
+  assert.ok(courses.every((c: any) => c.validUntil === agreed.body.validUntil && c.packageGroup === 'g1' && c.expired === false));
+});

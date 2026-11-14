@@ -9,7 +9,8 @@ export function bookingSettings(settings: any) {
   const s = settings ?? {};
   return {
     arriveEarlyMinutes: s.scheduling?.arriveEarlyMinutes ?? 35,
-    booking: { cancelWindowHours: 4, patientCanReschedule: true, cancellationPolicy: '', noShowWarnAt: 2, ...(s.booking ?? {}) },
+    // no online booking: the patient's own link (from WhatsApp) cancels or moves on fixed rules; only the no-show warning is the clinic's
+    booking: { cancelWindowHours: 4, patientCanReschedule: true, cancellationPolicy: '', noShowWarnAt: s.booking?.noShowWarnAt ?? 2 },
     messages: {
       enabled: true, channel: 'whatsapp', sendConfirmation: true, reminderHours: [24, 2], language: 'en',
       ...(s.messages ?? {}),

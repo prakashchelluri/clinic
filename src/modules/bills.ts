@@ -4,7 +4,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { charge, course, discountAsk, domainEvent, patient, payment, procedureCatalog, service, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
-import { emit } from '../lib/core.js';
+import { emit, todayIn } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
 import { nextReceiptNo } from './billing.js';
@@ -17,7 +17,6 @@ const Line = z.object({
   qty: z.number().int().min(1).max(20).default(1),
   recommendationId: z.string().uuid().optional(), // sittings paid ahead on a procedure course
   sittings: z.number().int().min(1).max(60).default(1),
-  packageId: z.string().min(1).max(40).optional(), // a clinic package, when the course starts with this bill
   discountPaise: z.number().int().min(0).max(100_000_000).default(0),
 }).refine((l) => [l.chargeId, l.procedureId, l.serviceId, l.recommendationId].filter(Boolean).length === 1, 'One of chargeId, procedureId, serviceId or recommendationId');
 
@@ -96,14 +95,15 @@ export function billRoutes(app: FastifyInstance) {
         if (!s.pricePaise) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
         items.push({ what: l.qty > 1 ? `${s.name} × ${l.qty}` : s.name, gross: s.pricePaise * l.qty, prior: 0, disc: l.discountPaise, canDiscount: true, isNew: true, tax: 0, at: new Date().toISOString() });
       } else {
-        const c = await ensureCourse(tx, ctx, l.recommendationId!, l.packageId);
+        const c = await ensureCourse(tx, ctx, l.recommendationId!);
         if (c.patientId !== b.patientId) throw new HttpError(404, 'PLAN_NOT_FOUND');
         const st = await standing(tx, t, c);
         const left = st.stillToPayPaise - (waiting.get(c.id) ?? 0); const sittingsLeft = c.sittings - st.doneSittings - st.unusedSittings;
         const gross = l.sittings >= sittingsLeft ? left : Math.min(l.sittings * st.perSittingPaise, left); // every sitting left = exactly what is left (the rounding too)
         if (gross <= 0) throw new HttpError(409, 'NOTHING_LEFT_TO_PAY_AHEAD');
+        if (c.validUntil && c.validUntil < todayIn(ctx.timezone)) throw new HttpError(409, 'PACKAGE_EXPIRED', { validUntil: c.validUntil });
         const name = c.procedureId ? await tx.select({ n: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.n) : null;
-        items.push({ what: `${name ?? 'Procedure'} · ${l.sittings} sitting${l.sittings === 1 ? '' : 's'} paid ahead`, gross, prior: 0, disc: l.discountPaise, canDiscount: !waiting.has(c.id), why: waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined, courseId: c.id, ahead: true, at: '' });
+        items.push({ what: `${name ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${l.sittings} sitting${l.sittings === 1 ? '' : 's'} paid ahead`, gross, prior: 0, disc: l.discountPaise, canDiscount: !waiting.has(c.id), why: waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined, courseId: c.id, ahead: true, at: '' });
       }
     }
 

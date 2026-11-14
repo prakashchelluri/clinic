@@ -33,15 +33,16 @@ test('course: agree below list needs the discount permission, advance locks the 
   const p = (await reception('POST', '/patients', { fullName: 'Course Wave5', phone: '9848055511' })).body;
   const v = (await owner('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
   const e = (await owner('POST', `/visits/${v.id}/encounter`, {})).body;
-  assert.equal((await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] }, assessment: { diagnosis: [{ name: 'Melasma' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 6 }] })).status, 200);
+  // a clinic package (a bundle of one here), added by the doctor on the pad
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'peel6', name: 'Peel x6', items: [{ procedureId: peel.id, sittings: 6, intervalDays: 14 }], pricePaise: 1200000, validMonths: 12 }] } })).status, 200);
+  assert.equal((await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] }, assessment: { diagnosis: [{ name: 'Melasma' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 6, package: { id: 'peel6', group: 'g1' } }] })).status, 200);
   const rec = (await owner('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
   const list = peel.pricePaise * 6; // 6 x 2,500 = 15,000
 
   // fixed prices: nobody types a course price; a clinic package is the only other price
   assert.equal((await owner('POST', '/courses', { recommendationId: rec.id, totalPaise: list - 1 })).status, 400, 'no typed price');
-  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { packages: [{ id: 'peel6', name: 'Peel x6', procedureId: peel.id, sittings: 6, intervalDays: 14, pricePaise: 1200000 }] } })).status, 200);
-  assert.equal((await reception('POST', '/courses', { recommendationId: rec.id, packageId: 'nope' })).status, 404);
-  const agreed = await reception('POST', '/courses', { recommendationId: rec.id, packageId: 'peel6' });
+  assert.equal((await reception('POST', '/courses', { recommendationId: rec.id, packageId: 'peel6' })).status, 400, 'the desk never picks a package');
+  const agreed = await reception('POST', '/courses', { recommendationId: rec.id });
   assert.equal(agreed.status, 200, JSON.stringify(agreed.body));
   assert.equal(agreed.body.perSittingPaise, 200000); assert.equal(agreed.body.lockedAt, null);
   assert.equal((await owner('POST', '/courses', { recommendationId: rec.id })).status, 409, 'agreed once');

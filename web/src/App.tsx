@@ -198,7 +198,9 @@ export function App() {
     '/worklist': mc.sittings ? { n: mc.sittings, warn: mc.unconfirmed > 0, hint: mc.unconfirmed ? `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today, ${mc.unconfirmed} not confirmed` : `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today` } : undefined,
   } : {};
   const side = { items, active, clinic, me: me.data, roles, badges, onSignOut: signOut };
-  const slimSide = record || collapsed;
+  // Settings has its own left menu: the main menu slims to icons there, so the settings get the room
+  const onSettings = loc.pathname.startsWith('/settings');
+  const slimSide = record || onSettings || collapsed;
 
   return (
     <div className={fit ? 'min-h-dvh md:h-dvh md:overflow-hidden' : 'min-h-dvh'}>
@@ -206,7 +208,7 @@ export function App() {
       {/* one top row across the whole screen: the Cubott logo over the menu, the clinic, where you are, and the few app actions.
           A page's search lives with its own table, not up here. */}
       <aside className={`no-print fixed inset-y-0 left-0 z-30 hidden transition-[width] duration-200 md:block ${slimSide ? 'w-[64px]' : 'w-[232px]'}`} aria-label="Main">
-        <Sidebar {...side} slim={slimSide} onCollapse={record ? undefined : toggleSide} theme={theme} onTheme={record ? (e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme) : undefined} />
+        <Sidebar {...side} slim={slimSide} onCollapse={record || onSettings ? undefined : toggleSide} theme={theme} onTheme={record ? (e) => revealTheme(e, theme === 'dark' ? 'light' : 'dark', toggleTheme) : undefined} />
       </aside>
       {drawer && (
         <div className="no-print fixed inset-0 z-40 md:hidden anim-fade-in" style={{ background: 'rgba(21,24,27,.4)' }} onClick={() => setDrawer(false)}>
