@@ -230,10 +230,12 @@ export function App() {
           {!onPad && <Link to={`/help?from=${encodeURIComponent(loc.pathname.split('/')[1] ?? '')}`} aria-label="Help: how the clinic runs" title="Help: how the clinic runs" className="grid h-[36px] w-[36px] place-items-center border-l border-line-2 text-muted hover:bg-paper-2 hover:text-ink"><Icon name="help" className="h-4 w-4" /></Link>}
           </span>
           {!platform && !onPad && (() => { const acts = createActions(c, loc.pathname + loc.search); return acts.length > 0 && (
-            <div className="relative shrink-0">
-              <button onClick={() => setPlus((o) => !o)} aria-label="New" title="New: check in, book, register…" aria-expanded={plus} className="btn btn-primary !h-[36px] !min-h-[36px] !rounded-[6px] !px-3 justify-center"><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">New</span></button>
-              {plus && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
-                <div className="menu anim-menu z-40 !w-[270px]" role="menu">{acts.map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
+            // this page's main action, named for what it does; the page's other creates (if any) under ▾
+            <div className="relative flex shrink-0">
+              <button onClick={() => { setPlus(false); nav(acts[0].to, { viewTransition: true }); }} title={acts[0].hint || acts[0].label} className={`btn btn-primary !h-[36px] !min-h-[36px] !px-3 justify-center ${acts.length > 1 ? '!rounded-l-[6px] !rounded-r-none' : '!rounded-[6px]'}`}><Icon name="plus" className="h-4 w-4" /><span className="hidden sm:inline">{acts[0].label}</span><span className="sm:hidden sr-only">{acts[0].label}</span></button>
+              {acts.length > 1 && <button onClick={() => setPlus((o) => !o)} aria-label="More to create on this page" aria-expanded={plus} className="btn btn-primary !h-[36px] !min-h-[36px] !rounded-l-none !rounded-r-[6px] !border-l !border-l-white/25 !px-2"><Icon name="up" className="h-4 w-4 rotate-180" /></button>}
+              {plus && acts.length > 1 && <><div className="fixed inset-0 z-30" onClick={() => setPlus(false)} />
+                <div className="menu anim-menu right-0 top-full z-40 !w-[240px]" role="menu">{acts.slice(1).map((x) => <button key={x.key} role="menuitem" onClick={() => { setPlus(false); nav(x.to, { viewTransition: true }); }}><Icon name={x.icon} className="h-4 w-4" />{x.label}</button>)}</div></>}
             </div>); })()}
           <div className="relative md:hidden">
             <button onClick={() => setUserMenu((o) => !o)} aria-label="Account"><Avatar name={me.data.name} size="h-8 w-8 text-xs" /></button>

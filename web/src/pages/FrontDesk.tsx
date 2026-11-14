@@ -66,7 +66,7 @@ export function FrontDesk() {
   const [moving, setMoving] = useState<any>(null); // the waiting visit whose doctor is being changed
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [sp, setSp] = useSearchParams();
-  useEffect(() => { if (sp.get('arrive')) { setArrive({}); setSp({}, { replace: true }); } }, [sp]);
+  useEffect(() => { if (sp.get('arrive')) { setArrive(sp.get('patient') ? { patientId: sp.get('patient')!, name: sp.get('pname') ?? undefined } : {}); setSp({}, { replace: true }); } }, [sp]); // from a patient's profile: that patient
   const refresh = () => { ['frontdesk', 'queue', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); };
   const upVisit = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/visits/${id}`, b), onSuccess: refresh });
   const upAppt = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/appointments/${id}`, b), onSuccess: refresh, onError: (e) => toast(errText(e), 'err') });

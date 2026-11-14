@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate, useOutletContext } from 'react-router';
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
 import { chime, makeOnceWatcher } from '../chime';
 import { can } from '../App';
@@ -60,6 +60,9 @@ export function Today() {
   const [apptId, setApptId] = useState<string | null>(null); // a booking opened from the calendar
   const [booking, setBooking] = useState<any>(null); // a free place clicked on the calendar
   const [arrive, setArrive] = useState<null | { patientId?: string; appointmentId?: string; name?: string }>(null); // the doctor checks a booked patient in themself
+  // Check in from the header or from a patient's profile (?arrive): the same check-in, on this view
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => { if (sp.get('arrive') && can(perms, 'visit.write')) { setArrive(sp.get('patient') ? { patientId: sp.get('patient')!, name: sp.get('pname') ?? undefined } : {}); setSp({}, { replace: true }); } }, [sp]);
   const seeAll = (me.roles ?? []).includes('owner') || !doc; // a doctor sees their own calendar; the owner sees everyone's
 
   const d = fd.data; const c = cal.data;
