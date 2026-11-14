@@ -39,7 +39,7 @@ export async function printQuote(id: string) {
     const r: any = await get(`/quotes/${id}/print`);
     const w = window.open('', '_blank', 'width=460,height=700'); if (!w) return toast('Allow pop-ups to print the quote', 'err');
     w.document.write(`<!doctype html><title>Quote ${esc(r.number)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:6px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
-      <h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}</div>
+      ${r.clinic.print?.logoUrl ? `<img src="${esc(r.clinic.print?.logoUrl)}" alt="" style="display:block;height:44px;max-width:150px;object-fit:contain;margin-bottom:6px">` : ''}<h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}</div>
       <p><b>Quote ${esc(r.number)}</b><br><span class="s">For ${esc(r.patient.fullName)} · prepared by ${esc(r.preparedBy)}</span></p>
       <table><tr><td>${esc(r.procedure)}: ${esc(r.sittings)} sittings</td><td class="r">${esc(money(r.totalPaise))}</td></tr>${r.extras.map((x: any) => `<tr><td>${esc(x.name)}</td><td class="r">${esc(money(x.pricePaise))}</td></tr>`).join('')}
       <tr><td><b>Total</b></td><td class="r"><b>${esc(money(r.grandTotalPaise))}</b></td></tr></table>

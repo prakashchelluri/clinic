@@ -42,7 +42,9 @@ export function adminRoutes(app: FastifyInstance) {
     if (body.settings?.labTests !== undefined) body.settings.labTests = NameList(200, 60).parse(body.settings.labTests);
     if (body.settings?.expenseCategories !== undefined) body.settings.expenseCategories = NameList(40, 40).parse(body.settings.expenseCategories);
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
-    if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)
+    if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner');
+    // pictures change only by uploading them (/admin/clinic/logo, /admin/practitioners/:id/signature), never as a typed address
+    if (body.settings && ('signatures' in body.settings || (body.settings.print && 'logoUrl' in body.settings.print))) throw new HttpError(400, 'UPLOAD_THE_PICTURE'); // privacy settings change only through /security (owner)
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
     req.auditBefore = { name: cur.name, settings: Object.fromEntries(Object.keys(body.settings ?? {}).map((k) => [k, (cur.settings as any)?.[k]])) };
     const [row] = await tx.update(tenant).set({ ...(body.name ? { name: body.name } : {}), ...(body.settings ? { settings: deepMerge(cur.settings, body.settings) } : {}) }).where(eq(tenant.id, req.ctx.tenantId)).returning();
@@ -187,6 +189,57 @@ export function adminRoutes(app: FastifyInstance) {
     // the audit row names the fee and says old → new in rupees
     await writeAudit(tx, req.ctx, { kind: 'settings', action: 'PATCH /admin/fee-categories/:id', summary: feeSummary(row.name, (req.auditBefore as any)?.amountPaise, b.amountPaise), entity: 'admin', entityId: row.id, before: req.auditBefore, after: b });
     req.audited = true; return row;
+  });
+
+  // --- the clinic's logo and each doctor's signature: small pictures printed on prescriptions and bills ---
+  // Stored like leaflets and served without a login (a patient's PDF or WhatsApp copy shows them); the file name carries a random part,
+  // and a replaced or removed picture stops being served because its address no longer matches the clinic's settings.
+  const PIC_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg' };
+  const PicIn = z.object({ mime: z.enum(['image/png', 'image/jpeg']), dataBase64: z.string().min(1) });
+  async function savePicture(req: any, name: string, b: z.infer<typeof PicIn>) {
+    const bytes = Buffer.from(b.dataBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (bytes.length > 1024 * 1024) throw new HttpError(413, 'TOO_LARGE');
+    const file = `${name}-${randomBytes(6).toString('hex')}.${PIC_EXT[b.mime]}`;
+    await putFile(`${req.ctx.tenantId}/brand/${file}`, bytes, b.mime);
+    return `${originOf(req)}/api/public/brand/${req.ctx.tenantId}/${file}`;
+  }
+  const setSettings = async (tx: any, req: any, fn: (s: any) => any) => {
+    const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any[]) => r[0]);
+    const settings = fn(structuredClone(cur.settings ?? {}));
+    await tx.update(tenant).set({ settings }).where(eq(tenant.id, cur.id));
+    return settings;
+  };
+  route(app, 'post', '/admin/clinic/logo', 'config.write', async (req, tx) => {
+    const url = await savePicture(req, 'logo', PicIn.parse(req.body));
+    await setSettings(tx, req, (s) => ({ ...s, print: { ...(s.print ?? {}), logoUrl: url } }));
+    return { logoUrl: url };
+  });
+  route(app, 'delete', '/admin/clinic/logo', 'config.write', async (req, tx) => {
+    await setSettings(tx, req, (s) => { const print = { ...(s.print ?? {}) }; delete print.logoUrl; return { ...s, print }; });
+    return { logoUrl: null };
+  });
+  route(app, 'post', '/admin/practitioners/:id/signature', 'config.write', async (req, tx) => {
+    const id = (req.params as any).id; const b = PicIn.parse(req.body);
+    const p = await tx.select({ id: practitioner.id }).from(practitioner).where(and(eq(practitioner.id, id), eq(practitioner.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (!p) throw new HttpError(404, 'NOT_FOUND');
+    const url = await savePicture(req, `sig-${id}`, b);
+    await setSettings(tx, req, (s) => ({ ...s, signatures: { ...(s.signatures ?? {}), [id]: url } }));
+    return { signatureUrl: url };
+  });
+  route(app, 'delete', '/admin/practitioners/:id/signature', 'config.write', async (req, tx) => {
+    const id = (req.params as any).id;
+    await setSettings(tx, req, (s) => { const signatures = { ...(s.signatures ?? {}) }; delete signatures[id]; return { ...s, signatures }; });
+    return { signatureUrl: null };
+  });
+  app.get('/public/brand/:tenant/:file', async (req, reply) => {
+    const { tenant: tid, file } = req.params as any;
+    if (!/^[0-9a-f-]{36}$/.test(tid) || !/^(logo|sig-[0-9a-f-]{36})-[0-9a-f]{12}\.(png|jpg)$/.test(file)) throw new HttpError(404, 'NOT_FOUND');
+    const ten = await db.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, tid)).then((r) => r[0]);
+    const s: any = ten?.settings ?? {}; const live = [s.print?.logoUrl, ...Object.values(s.signatures ?? {})].filter(Boolean) as string[];
+    if (!live.some((u) => u.endsWith(`/${tid}/${file}`))) throw new HttpError(404, 'NOT_FOUND');
+    const bytes = await getFile(`${tid}/brand/${file}`);
+    if (!bytes) throw new HttpError(404, 'FILE_MISSING');
+    return reply.type(file.endsWith('.png') ? 'image/png' : 'image/jpeg').header('cache-control', 'public, max-age=86400').send(bytes);
   });
 
   // --- consultation types: the fee charged at check-in and the visit type booked on the calendar, kept as one ---

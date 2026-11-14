@@ -258,7 +258,7 @@ export function clinicalRoutes(app: FastifyInstance) {
     const pr = printSettings(ten.settings);
     const local = Object.fromEntries(phrases.map((p) => [p, localPhrase(pr.lang, p, ten.settings)]).filter(([, v]) => v));
     // the private note and the safety overrides are never on paper; the diagnosis prints only for clinical roles (the desk reprints without it)
-    return { ...e, recommendations, data: { ...e.data, notes: undefined, overrides: undefined, ...(clinical(req.perms) ? {} : { assessment: undefined }) }, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, visit: v, labs, printRx: pr, pad: padConfig(ten.settings), local, vitalFields: Array.isArray(ten.settings?.vitalFields) ? ten.settings.vitalFields : [] };
+    return { ...e, recommendations, data: { ...e.data, notes: undefined, overrides: undefined, ...(clinical(req.perms) ? {} : { assessment: undefined }) }, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, doctor: e.doctor ? { ...e.doctor, signatureUrl: (ten.settings as any)?.signatures?.[e.doctor.id] ?? null } : e.doctor, visit: v, labs, printRx: pr, pad: padConfig(ten.settings), local, vitalFields: Array.isArray(ten.settings?.vitalFields) ? ten.settings.vitalFields : [] };
   });
 
   /** Worklists: open follow-ups and procedure recommendations with contact log. */

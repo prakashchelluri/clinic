@@ -51,7 +51,7 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
       {draft && <div aria-label="Draft, not signed" className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"><div className="whitespace-nowrap font-bold uppercase" style={{ transform: 'rotate(-35deg)', fontSize: '44px', color: 'rgba(200,0,0,0.18)', border: '4px solid rgba(200,0,0,0.18)', padding: '4px 16px' }}>Draft — not signed</div></div>}
       {!embed && <style>{`@page { size: A5; margin: 8mm } html, body { background: white !important; }`}</style>}
       <div className="flex justify-between border-b-2 border-black pb-2">
-        <div><div className="text-xl font-bold" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>{e.clinic.name}</div><div>{e.clinic.address}</div>{e.clinic.phone && <div>Ph: {e.clinic.phone}</div>}</div>
+        <div className="flex items-start gap-3">{e.clinic.logoUrl && <img src={e.clinic.logoUrl} alt="" className="h-14 max-w-[120px] object-contain" />}<div><div className="text-xl font-bold" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>{e.clinic.name}</div><div>{e.clinic.address}</div>{e.clinic.phone && <div>Ph: {e.clinic.phone}</div>}</div></div>
         <div className="text-right">{e.doctor && <><div className="font-semibold">{e.doctor.name}</div><div>{e.doctor.qualification}</div><div>Reg. No. {e.doctor.regNo}</div></>}</div>
       </div>
       <div className="flex justify-between py-2 border-b border-black">
@@ -83,7 +83,7 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
       {canvases.map((c: any) => <img key={c.id} src={`/api/documents/${c.docId}/file`} alt={c.name} className="mt-2 max-h-[70mm] max-w-full border border-gray-300" />)}
       {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
       {(e.amendments ?? []).length > 0 && <div className="mt-3 border-t border-black pt-1 text-[11px]">{e.amendments.map((a: any, k: number) => <div key={k}><b>Amended on {new Date(a.at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}:</b> {a.reason}</div>)}</div>}
-      <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div>{draft ? <div className="text-[11px] font-semibold text-red-700">Draft — not signed</div> : <div className="border-t border-black pt-1 w-48 text-center">Signature</div>}</div>
+      <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div>{draft ? <div className="text-[11px] font-semibold text-red-700">Draft — not signed</div> : <div className="w-48 text-center">{e.doctor?.signatureUrl && <img src={e.doctor.signatureUrl} alt="Doctor's signature" className="mx-auto mb-1 h-12 max-w-full object-contain" />}<div className="border-t border-black pt-1">Signature</div></div>}</div>
       {!embed && <button className="no-print btn mt-6" onClick={() => window.print()}>Print</button>}
     </div>
   );

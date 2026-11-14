@@ -6,6 +6,7 @@ import { Drawer, Chip, Empty, Icon, Modal, Skeleton, Tabs, toast, ask } from './
 import { RoutineEditor, DEFAULT_ROUTINE, routineSummary } from './routine';
 import { ChangeMyDay } from './dayChange';
 import { useRoles } from './pages/Roles';
+import { PictureUpload } from './pictureUpload';
 
 /** Staff & doctors: one person, one record. A person may sign in (a staff account with roles), consult patients (a doctor:
  *  name on the prescription, registration, weekly hours), or both. Underneath these are still a user and a practitioner, linked. */
@@ -121,6 +122,7 @@ function PersonDrawer({ value, cfg, me, iAmOwner, roleList, onClose, onDone, onS
             <div><label className="label" htmlFor="ps-reg">Registration no.</label><input id="ps-reg" className="input" maxLength={40} value={f.regNo} onChange={(e) => set('regNo', e.target.value)} /></div>
             <div><label className="label" htmlFor="ps-qual">Qualification</label><input id="ps-qual" className="input" maxLength={80} placeholder="e.g. MD (DVL)" value={f.qualification} onChange={(e) => set('qualification', e.target.value)} /></div>
           </div>}
+          {f.consults && <div><span className="label">Signature on the prescription</span>{f.pracId ? <PictureUpload wide url={cfg.tenant.settings?.signatures?.[f.pracId]} uploadTo={`/admin/practitioners/${f.pracId}/signature`} label="Signature" empty="No signature yet" hint="Printed above the signature line on finished prescriptions. Sign on white paper and take a photo, or use a PNG." /> : <div className="text-xs text-muted">Add the doctor first, then upload their signature.</div>}</div>}
           {!f.consults && f.wasConsulting && <div className="rounded-xl bg-amber-soft px-3 py-2 text-sm text-amber">Saving takes them off the calendar. Bookings already made stay; move them first.</div>}
         </div>}
         {tab === 'hours' && f.consults && <div className="space-y-3">

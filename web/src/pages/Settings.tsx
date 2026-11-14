@@ -13,6 +13,7 @@ import { PackagesCard, CalendarLookCard } from '../packages';
 import { AvailabilityTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './SettingsScheduling';
 import { ConsultTypesTab } from '../consultTypes';
 import { StaffTab } from '../staff';
+import { PictureUpload } from '../pictureUpload';
 import '../settings.css';
 
 type Tab = 'clinic' | 'billing' | 'desk' | 'people' | 'roles' | 'types' | 'procedures' | 'rooms' | 'photos' | 'rules' | 'messages' | 'pad' | 'templates' | 'vitals' | 'labtests' | 'privacy' | 'testdata' | 'hours';
@@ -175,6 +176,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
     <div className="space-y-4">
       <div className="card space-y-3">
         <div className="card-title">Name and contact</div>
+        <PictureUpload url={s.print?.logoUrl} uploadTo="/admin/clinic/logo" label="Logo" empty="No logo" hint="Printed at the top of prescriptions and bills. PNG or JPG, square works best, under 1 MB." />
         <div><label className="label" htmlFor="cl-name">Clinic name</label><input id="cl-name" className={`input ${f.name.trim() ? '' : '!border-rose'}`} maxLength={100} value={f.name} onChange={set('name')} /></div>
         <div><label className="label" htmlFor="cl-addr">Address</label><input id="cl-addr" className="input" maxLength={200} value={f.address} onChange={set('address')} /></div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><div><label className="label" htmlFor="cl-phone">Phone</label><input id="cl-phone" className="input" inputMode="tel" maxLength={40} value={f.phone} onChange={set('phone')} /></div><div><label className="label" htmlFor="cl-foot">Line at the bottom of the prescription</label><input id="cl-foot" className="input" maxLength={120} value={f.footer} onChange={set('footer')} placeholder="e.g. Get well soon" /></div></div>

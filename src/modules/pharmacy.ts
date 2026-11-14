@@ -143,7 +143,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const notIssued = r.sale.encounterId ? await notIssuedOn(tx, t, r.sale.encounterId) : [];
     const s = (tn?.settings as any) ?? {};
     const pt = r.patient.patientNo === WALK_IN_NO ? { ...r.patient, fullName: r.sale.buyerName || 'Walk-in', phone: r.sale.buyerPhone, patientNo: '' } : r.patient;
-    return { ...r.sale, patient: pt, walkIn: r.patient.patientNo === WALK_IN_NO, doctor: doc, notIssued, clinic: { name: tn?.name, address: s.address ?? null, gstin: s.gstin ?? null, drugLicence: s.print?.drugLicence ?? s.drugLicence ?? null } };
+    return { ...r.sale, patient: pt, walkIn: r.patient.patientNo === WALK_IN_NO, doctor: doc, notIssued, clinic: { name: tn?.name, logoUrl: s.print?.logoUrl ?? null, address: s.address ?? null, gstin: s.gstin ?? null, drugLicence: s.print?.drugLicence ?? s.drugLicence ?? null } };
   });
 
   /**

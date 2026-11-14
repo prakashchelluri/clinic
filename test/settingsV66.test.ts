@@ -84,3 +84,34 @@ test('lab tests and expense categories: the clinic’s own lists', async () => {
   assert.equal((await owner('POST', '/expenses', { description: 'Sheets', amountPaise: 50000, method: 'cash', category: 'Laundry', day })).status, 200);
   assert.equal((await owner('POST', '/expenses', { description: 'Tea', amountPaise: 5000, method: 'cash', category: 'Tea and snacks', day })).body.code, 'BAD_CATEGORY');
 });
+
+test('logo and signature: uploaded, printed, replaced, removed; never typed in as an address', async () => {
+  const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
+  // a 1×1 PNG
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const up = await owner('POST', '/admin/clinic/logo', { mime: 'image/png', dataBase64: png });
+  assert.equal(up.status, 200, JSON.stringify(up.body));
+  const path = new URL(up.body.logoUrl).pathname;
+  const served = await app.inject({ method: 'GET', url: path });
+  assert.equal(served.statusCode, 200); assert.equal(served.headers['content-type'], 'image/png');
+  assert.equal((await owner('GET', '/config')).body.tenant.settings.print.logoUrl, up.body.logoUrl);
+  assert.equal((await reception('POST', '/admin/clinic/logo', { mime: 'image/png', dataBase64: png })).status, 403);
+  assert.equal((await owner('PATCH', '/admin/clinic', { settings: { print: { logoUrl: 'https://evil.example/x.png' } } })).body.code, 'UPLOAD_THE_PICTURE');
+  assert.equal((await owner('POST', '/admin/clinic/logo', { mime: 'image/gif', dataBase64: png })).status, 400);
+  // replacing: the old address stops working; saving the profile keeps the logo
+  const up2 = await owner('POST', '/admin/clinic/logo', { mime: 'image/png', dataBase64: png });
+  assert.equal((await app.inject({ method: 'GET', url: path })).statusCode, 404);
+  await owner('PATCH', '/admin/clinic', { settings: { print: { address: 'New Road', phone: '', footer: '' } } });
+  assert.equal((await owner('GET', '/config')).body.tenant.settings.print.logoUrl, up2.body.logoUrl);
+  assert.equal((await owner('DELETE', '/admin/clinic/logo')).status, 200);
+  assert.equal((await app.inject({ method: 'GET', url: new URL(up2.body.logoUrl).pathname })).statusCode, 404);
+
+  const doc = (await owner('GET', '/config')).body.practitioners[0];
+  const sig = await owner('POST', `/admin/practitioners/${doc.id}/signature`, { mime: 'image/png', dataBase64: png });
+  assert.equal(sig.status, 200);
+  assert.equal((await app.inject({ method: 'GET', url: new URL(sig.body.signatureUrl).pathname })).statusCode, 200);
+  assert.equal((await owner('GET', '/config')).body.tenant.settings.signatures[doc.id], sig.body.signatureUrl);
+  assert.equal((await owner('DELETE', `/admin/practitioners/${doc.id}/signature`)).status, 200);
+  assert.equal((await app.inject({ method: 'GET', url: new URL(sig.body.signatureUrl).pathname })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'GET', url: '/api/public/brand/not-a-tenant/logo-aaaaaaaaaaaa.png' })).statusCode, 404);
+});
