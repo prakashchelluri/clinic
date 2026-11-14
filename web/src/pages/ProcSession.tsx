@@ -19,7 +19,7 @@ export function ProcSessionPage() {
   const canAct = can(perms, 'worklist.write') || can(perms, 'encounter.complete');
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
   const s = q.data; const schema: FormSchema | null = s?.form?.schema ?? null;
-  const sections = (schema?.sections ?? []).filter((x) => x.key !== 'consult');
+  const sections = (schema?.sections ?? []).filter((x) => x.key !== 'consult' && x.fields.length);
   const last: Record<string, unknown> = s?.earlier?.[0]?.outcome ?? {};
 
   // the values on screen: what is saved, plus "start with last session's value" fields still empty on a session not yet done
@@ -29,7 +29,7 @@ export function ProcSessionPage() {
     if (!s || vals) return;
     const v: Record<string, unknown> = { ...(s.outcome ?? {}) };
     if (s.state !== 'completed') for (const f of sections.flatMap((x) => x.fields)) if (f.carry && !filled(f, v[f.key]) && filled(f, last[f.key])) v[f.key] = last[f.key];
-    setVals(v); if (JSON.stringify(v) !== JSON.stringify(s.outcome ?? {})) setSaveState('dirty');
+    setVals(v); // carried values are saved with the first edit or on Mark done, so only looking at a session never asks to leave
   }, [s]);
   const editable = canAct && !!s && !['cancelled', 'postponed', 'missed'].includes(s.state);
   const save = async (v = vals) => {

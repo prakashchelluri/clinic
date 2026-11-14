@@ -186,7 +186,7 @@ export function App() {
   if (me.data.mustChangePassword) return <FirstPassword name={me.data.name} />;
   const signOut = async () => { window.dispatchEvent(new Event('app:save-now')); await new Promise((r) => setTimeout(r, 300)); await post('/auth/logout').catch(() => {}); qc.clear(); clearOfflineCache(); nav('/login'); };
   const clinic = cfg.data?.tenant.name ?? 'CUBOTT Clinical';
-  const topic = loc.pathname === '/settings' ? settingsTopic(new URLSearchParams(loc.search).get('tab')) : null;
+  const topic = loc.pathname === '/settings' ? settingsTopic(new URLSearchParams(loc.search).get('tab')) : loc.pathname.startsWith('/settings/procedures/') && loc.pathname.endsWith('/form') ? 'Procedure form' : null;
   // Back: the screen you came from; opened from a link or a fresh tab, the page above this one
   const seg = loc.pathname.split('/').filter(Boolean);
   const parent = topic ? '/settings' : seg[0] === 'patients' && seg[1] ? '/patients' : seg[0] === 'encounter' ? '/dashboard' : seg[0] === 'help' ? '/' : null;
@@ -222,7 +222,7 @@ export function App() {
         <Link to="/" aria-label="Cubott OPD · home" title="Cubott OPD" className="flex h-full shrink-0 items-center justify-center px-2 md:hidden"><img src="/cubott.png" alt="Cubott" className="h-8 w-8 object-contain" /></Link>
         <div className="flex min-w-0 flex-1 items-center gap-2 pr-3 md:px-7">
           {parent && !record && <button type="button" className="btn btn-ghost btn-icon !h-9 !w-9 shrink-0" aria-label="Back" title="Back" onClick={goBack}><Icon name="chevL" className="h-5 w-5" /></button>}
-          {<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[17px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : 'Home')}</span>}</nav>}
+          {<nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[17px] font-semibold tracking-tight text-muted">{topic ? <><button type="button" className="truncate hover:text-ink" onClick={() => nav('/settings')}>Settings</button><Icon name="chevR" className="h-4 w-4 shrink-0" /><span className="truncate text-ink">{topic}</span></> : <span className="truncate text-ink">{active?.label ?? (loc.pathname.startsWith('/encounter') ? 'Consultation' : loc.pathname.startsWith('/help') ? 'Help' : loc.pathname.startsWith('/procedure-sessions/') ? 'Procedure session' : 'Home')}</span>}</nav>}
           <span className="ml-auto" />
           {/* theme and help as one grouped control */}
           <span className="hidden overflow-hidden rounded-[6px] border border-line-2 bg-field sm:flex">

@@ -156,7 +156,7 @@ function FieldSettings({ f, set, remove }: { f: FormField; set: (p: Partial<Form
   useEffect(() => setOpts((f.options ?? []).join('\n')), [f.key]);
   const width = f.width ?? (f.type === 'textarea' || f.type === 'multiselect' ? 2 : 1);
   const sw = (on: boolean, label: string, onChange: (v: boolean) => void) => (
-    <label className="flex cursor-pointer items-center gap-2.5 text-[13.5px]"><input type="checkbox" className="peer sr-only" checked={on} onChange={(e) => onChange(e.target.checked)} />
+    <label className="relative flex cursor-pointer items-center gap-2.5 text-[13.5px]"><input type="checkbox" className="peer sr-only" checked={on} onChange={(e) => onChange(e.target.checked)} />
       <span className={`relative h-[18px] w-8 shrink-0 rounded-full transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-clay ${on ? 'bg-ink' : 'bg-line-2'}`} aria-hidden><span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white transition-all ${on ? 'left-[16px]' : 'left-[2px]'}`} /></span>{label}</label>);
   const types = useMemo(() => FIELD_TYPES, []);
   return (

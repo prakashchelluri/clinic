@@ -212,7 +212,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
   const d = q.data; const m = d.medicine;
   const margin = m.mrpPaise && d.avgCostPaise ? `${Math.round(((m.mrpPaise - d.avgCostPaise) / m.mrpPaise) * 100)}%` : '—';
   const moves = d.moves.filter((x: any) => kind === 'all' || (kind === 'in' ? x.change > 0 && x.kind !== 'count' && x.kind !== 'adjust' : kind === 'out' ? x.change < 0 && x.kind !== 'count' && x.kind !== 'adjust' : ['count', 'adjust'].includes(x.kind)));
-  const what: Record<string, string> = { receive: 'Received', sale: 'Sold', patient_return: 'Returned by patient', vendor_return: 'Returned to vendor', count: 'Stock count', adjust: 'Adjusted' };
+  const what: Record<string, string> = { receive: 'Received', sale: 'Sold', patient_return: 'Returned by patient', vendor_return: 'Returned to vendor', count: 'Stock count', adjust: 'Adjusted', procedure: 'Used in procedure' };
   const live = d.batches.filter((b: any) => b.qty > 0);
   const doAdjust = async (b: any) => {
     const a = await ask({ title: `Adjust ${m.name} · batch ${b.batchNo}`, body: `On hand ${b.qty}. Enter the change, e.g. -1 for a damaged strip.`, confirmLabel: 'Next', field: { label: 'Change (+ or -)', required: true, maxLength: 6 } });
