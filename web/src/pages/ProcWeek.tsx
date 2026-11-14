@@ -59,7 +59,7 @@ export function ProcWeek() {
 
   const q = useQuery({ queryKey: ['psessions', 'week', mon], queryFn: () => get(`/procedure-sessions?from=${mon}&to=${days[5]}&active=1`), refetchInterval: 20000 });
   const wk = useQuery({ queryKey: ['pweek', mon], queryFn: () => get(`/procedure-weeks/${mon}`) });
-  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} sitting${r.sent === 1 ? '' : 's'} for approval. From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
+  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval. From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: () => { refreshProcedures(); toast('Noted: the patient said yes', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
   const all: any[] = q.data ?? [];
@@ -110,7 +110,7 @@ export function ProcWeek() {
     {act('Reschedule…', () => { setOpenId(null); setMoving(s); })}
     {act(s.practitionerId ? 'Change doctor' : 'Pick doctor', () => { setOpenId(null); setAssigning(s); })}
     {s.approval === 'approved' && act(s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }))}
-    {act('Cancel sitting', async () => { if (await ask({ title: 'Cancel this sitting?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} on ${longDay(s.day)} ${t12(s.startTime)}. The course goes back to the desk to book another date.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', tone: 'danger' })) { setOpenId(null); await patch(`/procedure-sessions/${s.id}`, { state: 'cancelled', reason: 'Cancelled from the week plan' }).then(() => toast(`${s.patient.fullName}'s sitting is cancelled.`), (e) => toast(errText(e), 'err')); refreshProcedures(); } })}
+    {act('Cancel session', async () => { if (await ask({ title: 'Cancel this session?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} on ${longDay(s.day)} ${t12(s.startTime)}. The course goes back to the desk to book another date.`, confirmLabel: 'Cancel session', cancelLabel: 'Keep it', tone: 'danger' })) { setOpenId(null); await patch(`/procedure-sessions/${s.id}`, { state: 'cancelled', reason: 'Cancelled from the week plan' }).then(() => toast(`${s.patient.fullName}'s session is cancelled.`), (e) => toast(errText(e), 'err')); refreshProcedures(); } })}
   </> : null;
 
   return (
@@ -165,7 +165,7 @@ export function ProcWeek() {
               <span className="min-w-[34px] text-right text-[26px] font-extrabold leading-none">{d.list.length}</span>
               <span className="min-w-0 flex-1"><b className="text-[15px]">{d.name}</b><span className="block text-[13px] text-muted">{d.list.map((s) => `${s.patient.fullName} (${fmt(s.day, { weekday: 'short' })} ${t12(s.startTime)})`).join(', ')}</span></span>
             </div>))}
-          <div className="text-[13px] text-muted">Each doctor sees only their own sittings, on Today under “Needs your attention”. After this, any change you make in this week reaches the doctor straight away.</div>
+          <div className="text-[13px] text-muted">Each doctor sees only their own sessions, on Today under “Needs your attention”. After this, any change you make in this week reaches the doctor straight away.</div>
           <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setReview(false)}>Back</button>
             <button className="btn btn-primary" disabled={send.isPending} onClick={() => send.mutate()}><Icon name="check" />{byDoc.length > 1 ? `Send to ${byDoc.length} doctors` : `Send to ${byDoc[0]?.name ?? 'the doctor'}`}</button></div>
         </div>

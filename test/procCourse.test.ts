@@ -52,7 +52,7 @@ test('course: planned with a gap, booked one sitting at a time, confirmed a week
   let m = (await msgs(s1.id)).filter((x) => x.status === 'pending');
   assert.equal(m.length, 1); assert.equal(m[0].kind, 'sitting_reminder');
   assert.equal(new Date(m[0].sendAfter).getTime(), localToUtc(addDays(day10, -1), '10:00', 'Asia/Kolkata').getTime());
-  assert.match(m[0].body, /Chemical peel sitting \(1\/3\) is tomorrow/);
+  assert.match(m[0].body, /Chemical peel session \(1\/3\) is tomorrow/);
   assert.equal((await calls('procedures')).length, 0, 'booked: off the to-book list');
   assert.equal((await calls('confirm')).length, 0, 'ten days out: nothing to confirm yet');
 
@@ -64,7 +64,7 @@ test('course: planned with a gap, booked one sitting at a time, confirmed a week
   const setDay = (id: string, day: string) => withTenant(p.tenantId, SYS, (tx) => tx.update(procedureSession).set({ day }).where(eq(procedureSession.id, id)));
   await setDay(s1.id, addDays(today(), 6));
   let c = await calls('confirm');
-  assert.equal(c.length, 1); assert.equal(c[0].kind, 'confirm_week'); assert.equal(c[0].sitting.id, s1.id); assert.match(c[0].what, /sitting 1 of 3/);
+  assert.equal(c.length, 1); assert.equal(c[0].kind, 'confirm_week'); assert.equal(c[0].sitting.id, s1.id); assert.match(c[0].what, /session 1 of 3/);
   assert.equal((await R('POST', '/followups/log', { kind: 'confirm_week', refId: s1.id, patientId: p.id, outcome: 'confirmed' })).status, 200);
   assert.equal((await calls('confirm')).length, 0, 'confirmed for the week');
 

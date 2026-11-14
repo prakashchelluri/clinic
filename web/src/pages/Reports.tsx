@@ -86,7 +86,7 @@ export function Reports() {
     overview: () => csv('overview', [['Figure', 'This period', 'Period before'], ...FIGS.filter(([k]) => d.now[k] !== null).map(([k, l, isMoney]) => [l, isMoney ? d.now[k] / 100 : d.now[k], isMoney ? d.before[k] / 100 : d.before[k]]), ...(d.overview.perDoctor ?? []).map((x: any) => [`${x.name}: visits · patients · new`, `${x.visits} · ${x.patients} · ${x.newPatients}`, '']), [], ['Day', 'Visits'], ...d.overview.trend.map((x: any) => [x.day, x.visits])]),
     visits: () => csv('visits', [['Visit type', 'Visits'], ...Object.entries(d.visits.types), [], ['Day of week', 'Visits'], ...WEEK.map((w, i) => [w, d.visits.weekday[i]]), [], ['Hour', 'Visits'], ...Object.entries(d.visits.byHour).map(([h, n]) => [hourLabel(Number(h)), n]), [], ['Booked', d.visits.booked], ['Walk-in', d.visits.walkIn]]),
     patients: () => csv('patients', [...(['sex', 'ages', 'frequency', 'localities'] as const).flatMap((k) => [[{ sex: 'Men and women', ages: 'Age', frequency: 'Visits in the period', localities: 'Area' }[k], 'Patients'], ...d.patients[k].map((r: Row) => [r.name, r.n]), []]), ['Referral card', d.patients.referralCard]]),
-    clinical: () => d.clinical && csv('clinical', (['diagnoses', 'medicines', 'tests', 'procedures'] as const).flatMap((k) => [[{ diagnoses: 'Diagnosis', medicines: 'Medicine', tests: 'Test', procedures: 'Procedure (sittings done)' }[k], 'Count'], ...d.clinical[k].map((r: Row) => [r.name, r.n]), []])),
+    clinical: () => d.clinical && csv('clinical', (['diagnoses', 'medicines', 'tests', 'procedures'] as const).flatMap((k) => [[{ diagnoses: 'Diagnosis', medicines: 'Medicine', tests: 'Test', procedures: 'Procedure (sessions done)' }[k], 'Count'], ...d.clinical[k].map((r: Row) => [r.name, r.n]), []])),
   };
   const subtitle = tab === 'day' ? undefined : `${fmtDate(from)}${from !== to ? ` to ${fmtDate(to)}` : ''} · compared with the ${d ? `${fmtDate(d.previous.from)}${d.previous.from !== d.previous.to ? `–${fmtDate(d.previous.to)}` : ''}` : 'period before'}`;
   return (
@@ -114,7 +114,7 @@ export function Reports() {
 
 // [key, label, money?, lower is better?]
 const FIGS: [string, string, boolean, boolean][] = [['patients', 'Patients completed', false, false], ['newPatients', 'New patients', false, false], ['returning', 'Returning patients', false, false], ['collectedPaise', 'Collected', true, false],
-  ['duePaise', 'Still due', true, true], ['sittings', 'Procedure sittings done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'Booked, did not come', false, true]];
+  ['duePaise', 'Still due', true, true], ['sittings', 'Procedure sessions done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'Booked, did not come', false, true]];
 
 function Overview({ d }: { d: any }) {
   const span = d.overview.trend.length;
@@ -124,7 +124,7 @@ function Overview({ d }: { d: any }) {
         <Stat key={k} label={l} delay={i * 30} tone={k === 'collectedPaise' ? 'sage' : ''} value={d.now[k] === null ? '–' : isMoney ? money(d.now[k]) : k === 'waitMin' ? `${d.now[k]} min` : d.now[k]}
           sub={<span className="text-xs"><Change now={d.now[k]} before={d.before[k]} lowerIsBetter={low} /></span>} />))}
     </div>
-    {d.now.collectedPaise !== null && <div className="text-xs text-muted">{d.doctor ? "Collected is what was paid for this doctor's consultations and sittings in these dates, less refunds. Pharmacy and course advances are not split by doctor." : <>Collected is the End of day figure: payments received in these dates, less refunds, pharmacy included. <Link className="underline" to="/accounts">Accounts</Link> has the full picture.</>}</div>}
+    {d.now.collectedPaise !== null && <div className="text-xs text-muted">{d.doctor ? "Collected is what was paid for this doctor's consultations and sessions in these dates, less refunds. Pharmacy and course advances are not split by doctor." : <>Collected is the End of day figure: payments received in these dates, less refunds, pharmacy included. <Link className="underline" to="/accounts">Accounts</Link> has the full picture.</>}</div>}
     <Section title={<>Visits per day <span className="font-normal text-muted">· average {d.overview.averagePerDay}</span></>}>
       <Columns label="Visits per day" average={d.overview.averagePerDay} rows={d.overview.trend.map((x: any) => ({ key: x.day, label: span <= 14 ? fmtDate(x.day).split(' ')[0] : '', title: fmtDate(x.day), n: x.visits }))} />
     </Section>
@@ -184,7 +184,7 @@ function Clinical({ c }: { c: any }) {
       <Section title="Diagnoses"><Bars rows={c.diagnoses} /></Section>
       <Section title="Medicines prescribed"><Bars rows={c.medicines} /></Section>
       <Section title="Tests ordered"><Bars rows={c.tests} /></Section>
-      <Section title="Procedure sittings done"><Bars rows={c.procedures} /></Section>
+      <Section title="Procedure sessions done"><Bars rows={c.procedures} /></Section>
     </div>
   </>);
 }

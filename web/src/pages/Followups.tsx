@@ -12,9 +12,9 @@ type Tab = 'all' | 'confirm' | 'reviews' | 'missed' | 'procedures';
 /** One list, four reasons to call. Each tab says who is in it and what ends the call. */
 const TABS: [Tab, string, string][] = [['all', 'All calls', 'Everyone to call today, whatever the reason.'],
   ['reviews', 'Review visits', 'The doctor asked to see them again. They come up on the review date; book the visit and they leave the list.'],
-  ['procedures', 'Procedures to book', 'A procedure was advised (the patient is still deciding) or a course is running and its next sitting is not booked. Book the sitting, or close it if the patient says no.'],
-  ['confirm', 'Confirm sittings', 'A sitting is booked. Ring a week before and again the day before: Confirmed, or move it.'],
-  ['missed', 'Missed', 'Booked a visit or a sitting and did not come. Book again, or close it.']];
+  ['procedures', 'Procedures to book', 'A procedure was advised (the patient is still deciding) or a course is running and its next session is not booked. Book the session, or close it if the patient says no.'],
+  ['confirm', 'Confirm sessions', 'A session is booked. Ring a week before and again the day before: Confirmed, or move it.'],
+  ['missed', 'Missed', 'Booked a visit or a session and did not come. Book again, or close it.']];
 type Out = 'booked' | 'call_later' | 'no_answer' | 'not_interested' | 'confirmed';
 const OUT: Record<Out, string> = { booked: 'Booked', call_later: 'Call later', no_answer: 'No answer', not_interested: 'Not interested', confirmed: 'Confirmed' };
 /** The outcomes the procedure plans always used, each saved as one of the four call results. "Will come" books. */
@@ -27,7 +27,7 @@ const OUTCOMES: { label: string; out: Out | 'book'; note?: string }[] = [
 const CONFIRM_OUTCOMES: { label: string; out: Out | 'move'; note?: string }[] = [
   { label: 'Confirmed', out: 'confirmed' }, { label: 'No answer', out: 'no_answer' }, { label: 'Call later', out: 'call_later' }, { label: 'Wants another day', out: 'move' }, { label: 'Not coming', out: 'not_interested' },
 ];
-const KIND: Record<string, string> = { review: 'Review visit due', missed_visit: 'Missed a booked visit', missed_sitting: 'Missed a sitting', schedule: 'Course agreed · next sitting to book', advised: 'Procedure advised · patient deciding', confirm_week: 'Confirm · a week before', confirm_day: 'Confirm · the day before' };
+const KIND: Record<string, string> = { review: 'Review visit due', missed_visit: 'Missed a booked visit', missed_sitting: 'Missed a session', schedule: 'Course agreed · next session to book', advised: 'Procedure advised · patient deciding', confirm_week: 'Confirm · a week before', confirm_day: 'Confirm · the day before' };
 const isConfirm = (r: any) => r.kind === 'confirm_week' || r.kind === 'confirm_day';
 const refresh = () => ['followups', 'worklist', 'bookings', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
@@ -165,7 +165,7 @@ function CallDialog({ row, initial, onBook, onMove, onClose }: { row: any; initi
         <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How did the call go">{list.map((x, i) => (x.out !== 'book' || onBook) && (x.out !== 'move' || onMove) && <button key={x.label} type="button" role="radio" aria-checked={pick === i} className={`toggle-opt ${pick === i ? 'on' : ''}`} onClick={() => setPick(i)}>{x.label}</button>)}</div>
         {outcome === 'call_later' && <div><label className="label" htmlFor="cb">Call again on</label><input id="cb" type="date" min={today()} className="input" value={date} onChange={(e) => setDate(e.target.value)} /></div>}
         {outcome === 'no_answer' && !o.note && row.patient.phone && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={send} onChange={(e) => setSend(e.target.checked)} />Send a short message with the clinic number</label>}
-        {outcome === 'book' && <div className="text-sm text-muted">Book the visit or sitting; that takes the patient off the list.</div>}
+        {outcome === 'book' && <div className="text-sm text-muted">Book the visit or session; that takes the patient off the list.</div>}
         {outcome === 'move' && <div className="text-sm text-muted">Pick the new day and time; the patient is called again before it.</div>}
         {outcome !== 'book' && outcome !== 'move' && <div><label className="label" htmlFor="nt">{outcome === 'not_interested' && !o.note ? 'Why (required)' : 'Note (optional)'}</label><input id="nt" className="input" maxLength={180} value={note} onChange={(e) => setNote(e.target.value)} /></div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>

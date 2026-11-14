@@ -71,12 +71,12 @@ function PackageDrawer({ value, all, procs, onClose, onDone }: { value: Pkg; all
         <div><label className="label" htmlFor="pk-name">Name</label><input id="pk-name" autoFocus={!value.id} className={`input ${f.name && bad.name ? '!border-rose' : ''}`} maxLength={60} placeholder="e.g. Acne scar combo" value={f.name} onChange={(e) => setF((p) => ({ ...p, name: e.target.value }))} />{dup && <div className="mt-1 text-xs text-rose">There is already a package with this name.</div>}</div>
         <div>
           <span className="label">Procedures in the package</span>
-          {f.items.length > 0 && <div className={`${COLS} border-b border-line pb-1 text-[11.5px] text-muted`}><span>Procedure</span><span>Sittings</span><span>Every</span><span className="text-right">Full price</span><span /></div>}
+          {f.items.length > 0 && <div className={`${COLS} border-b border-line pb-1 text-[11.5px] text-muted`}><span>Procedure</span><span>Sessions</span><span>Every</span><span className="text-right">Full price</span><span /></div>}
           {f.items.map((it, i) => { const p = procs.find((x) => x.id === it.procedureId); return (
             <div key={it.procedureId} className={`${COLS} border-b border-line/60 py-2 text-sm`}>
-              <span className="min-w-0"><span className="block truncate">{p?.name ?? 'Procedure'}</span><span className="text-xs text-muted">{p?.pricePaise ? `${money(p.pricePaise)} a sitting` : 'No price set'}</span></span>
-              <NumInput aria-label={`Sittings of ${p?.name}`} max={60} className={`input !py-1.5 ${!(Number(it.sittings) >= 1) ? '!border-rose' : ''}`} value={it.sittings} onChange={(e) => setItem(i, 'sittings', e.target.value)} />
-              <span className="flex items-center gap-1 text-xs text-muted"><NumInput aria-label={`Days between sittings of ${p?.name}`} max={365} className="input !w-14 !py-1.5" value={it.intervalDays} onChange={(e) => setItem(i, 'intervalDays', e.target.value)} />days</span>
+              <span className="min-w-0"><span className="block truncate">{p?.name ?? 'Procedure'}</span><span className="text-xs text-muted">{p?.pricePaise ? `${money(p.pricePaise)} a session` : 'No price set'}</span></span>
+              <NumInput aria-label={`Sessions of ${p?.name}`} max={60} className={`input !py-1.5 ${!(Number(it.sittings) >= 1) ? '!border-rose' : ''}`} value={it.sittings} onChange={(e) => setItem(i, 'sittings', e.target.value)} />
+              <span className="flex items-center gap-1 text-xs text-muted"><NumInput aria-label={`Days between sessions of ${p?.name}`} max={365} className="input !w-14 !py-1.5" value={it.intervalDays} onChange={(e) => setItem(i, 'intervalDays', e.target.value)} />days</span>
               <span className="text-right text-ink-2">{money((p?.pricePaise ?? 0) * (Number(it.sittings) || 0))}</span>
               <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove ${p?.name}`} onClick={() => setF((x) => ({ ...x, items: x.items.filter((_, j) => j !== i) }))}><Icon name="x" className="h-3.5 w-3.5" /></button>
             </div>); })}
@@ -89,7 +89,7 @@ function PackageDrawer({ value, all, procs, onClose, onDone }: { value: Pkg; all
         </div>
         {price > 0 && full > price && <div className="inline-block rounded-md bg-sage-soft px-2.5 py-1 text-sm text-sage">The patient saves {money(full - price)} ({pct(full, price)}%)</div>}
         <div><span className="label">Valid for</span><div className="flex items-center gap-2 text-sm"><NumInput aria-label="Months" max={60} className={`input !w-20 ${bad.months ? '!border-rose' : ''}`} value={f.months} onChange={(e) => setF((p) => ({ ...p, months: e.target.value }))} />months from the day the patient agrees</div>
-          <div className="mt-1 text-xs text-muted">Sittings not done by then show as Expired. The desk can still refund them.</div></div>
+          <div className="mt-1 text-xs text-muted">Sessions not done by then show as Expired. The desk can still refund them.</div></div>
         <div className="modal-foot !justify-between">
           {value.id ? <button type="button" className="btn" disabled={save.isPending} onClick={() => submit(value.active === false)}>{value.active === false ? 'Make active' : 'Mark inactive'}</button> : <span />}
           <div className="flex gap-2"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={off || save.isPending} onClick={() => submit(value.active !== false)}>{value.id ? 'Save' : 'Add package'}</button></div>

@@ -59,7 +59,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     const c = course0.get(x.r.id);
     if (booked.has(x.r.id) || c?.live) continue;
     if (x.r.status === 'scheduled' && !c?.done && !c?.lastDay) continue; // booked once and nothing has happened to it since (old data)
-    const what = `${x.proc ?? 'Procedure'}${c?.done ? ` · sitting ${c.done + 1}${x.r.sittings ? ` of ${x.r.sittings}` : ''} to book` : x.r.sittings ? ` · ${x.r.sittings} sittings` : ''}`;
+    const what = `${x.proc ?? 'Procedure'}${c?.done ? ` · session ${c.done + 1}${x.r.sittings ? ` of ${x.r.sittings}` : ''} to book` : x.r.sittings ? ` · ${x.r.sittings} sessions` : ''}`;
     rows.push({ key: x.r.id, kind: agreed.has(x.r.id) ? 'schedule' : 'advised', refId: x.r.id, patient: x.p, what, dueOn: x.r.dueOn, recId: x.r.id, procedureId: x.r.procedureId, sittings: x.r.sittings });
   }
   const from = addDays(today, -30);
@@ -71,7 +71,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     .where(and(eq(appointment.tenantId, t), inArray(appointment.patientId, noShows.map((x) => x.p.id)), inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today))) : [];
   const rebooked = (x: { p: { id: string }; day: string }) => nextBookings.some((b) => b.id === x.p.id && new Date(b.at).getTime() >= Date.parse(dayBounds(x.day, tz).start));
   for (const x of noShows) if (!rebooked(x)) rows.push({ key: x.a.id, kind: 'missed_visit', refId: x.a.id, patient: x.p, what: `Visit on ${dayLabel(x.day)}, ${x.start}`, dueOn: x.day });
-  for (const x of missed) if (!x.ps.recommendationId || !booked.has(x.ps.recommendationId)) rows.push({ key: x.ps.id, kind: 'missed_sitting', refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'}, sitting ${x.ps.sittingNo} on ${dayLabel(x.ps.day)}`, dueOn: x.ps.day, recId: x.ps.recommendationId, procedureId: x.ps.procedureId });
+  for (const x of missed) if (!x.ps.recommendationId || !booked.has(x.ps.recommendationId)) rows.push({ key: x.ps.id, kind: 'missed_sitting', refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'}, session ${x.ps.sittingNo} on ${dayLabel(x.ps.day)}`, dueOn: x.ps.day, recId: x.ps.recommendationId, procedureId: x.ps.procedureId });
   // reports to tell are not here: the desk tells the patient from Test reports, where the doctor's words and Book are
   // booked sittings to confirm: a week before, and the day before
   const ahead = await tx.select({ ps: procedureSession, p: P, proc: procedureCatalog.name, of: recommendation.sittings }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
@@ -82,7 +82,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     const kind: Kind | null = n <= DAY_CALL ? 'confirm_day' : n >= WEEK_CALL.from && !x.ps.weekConfirmedAt ? 'confirm_week' : null;
     if (!kind) continue;
     const at = `${dayLabel(x.ps.day)}, ${x.ps.startTime}`;
-    rows.push({ key: `${kind}:${x.ps.id}`, kind, refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'} · sitting ${x.ps.sittingNo}${x.of ? ` of ${x.of}` : ''} ${n === 0 ? 'today,' : n === 1 ? 'tomorrow,' : 'on'} ${n <= 1 ? x.ps.startTime : at}`,
+    rows.push({ key: `${kind}:${x.ps.id}`, kind, refId: x.ps.id, patient: x.p, what: `${x.proc ?? 'Procedure'} · session ${x.ps.sittingNo}${x.of ? ` of ${x.of}` : ''} ${n === 0 ? 'today,' : n === 1 ? 'tomorrow,' : 'on'} ${n <= 1 ? x.ps.startTime : at}`,
       dueOn: today, recId: x.ps.recommendationId, procedureId: x.ps.procedureId, sittings: x.of,
       sitting: { id: x.ps.id, day: x.ps.day, startTime: x.ps.startTime, endTime: x.ps.endTime, practitionerId: x.ps.practitionerId, sittingNo: x.ps.sittingNo, of: x.of, weekConfirmedAt: x.ps.weekConfirmedAt } });
   }

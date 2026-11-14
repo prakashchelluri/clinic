@@ -63,7 +63,7 @@ function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: s
     } catch (e) { toast(errText(e), 'err'); } finally { setSaving(false); }
   };
   return (
-    <Modal title={`Consent for ${what}`} subtitle={`${s.patient.fullName} · asked once, before the first sitting`} onClose={onClose} width="max-w-lg" dirty={ink}>
+    <Modal title={`Consent for ${what}`} subtitle={`${s.patient.fullName} · asked once, before the first session`} onClose={onClose} width="max-w-lg" dirty={ink}>
       <div className="mb-3 flex gap-2">
         <button className={`btn btn-sm ${how === 'sign' ? 'btn-primary' : ''}`} aria-pressed={how === 'sign'} onClick={() => setHow('sign')}><Icon name="edit" />Patient signs here</button>
         <button className={`btn btn-sm ${how === 'paper' ? 'btn-primary' : ''}`} aria-pressed={how === 'paper'} onClick={() => setHow('paper')}>Paper form filed</button>
@@ -89,7 +89,7 @@ function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: s
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
   const m = s.money;
   const pay = !m ? '' : m.kind === 'due' ? (m.prepaidPaise ? ` ${money(m.prepaidPaise)} comes from the advance and ${money(m.amountPaise)} will be due.` : ` ${money(m.amountPaise)} will be due.`) : m.kind === 'prepaid' ? ' It is paid from the advance.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
-  return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} sitting ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
+  return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
 }
 
 const STATE: Record<string, { label: string; tone: '' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
@@ -108,7 +108,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const [signing, setSigning] = useState(false);
   const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false); const [moving, setMoving] = useState(false);
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
-    onSuccess: (_r, b) => { setSigning(false); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Sitting marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Sitting started'); },
+    onSuccess: (_r, b) => { setSigning(false); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
     onError: (e) => toast(errText(e), 'err') });
   const s = q.data;
   const p = s?.patient;
@@ -118,7 +118,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const photos = usePhotos(p?.id ?? '');
   const mine: any[] = (photos.data?.photos ?? []).filter((x: any) => (x.sitting?.id ?? x.procedureSessionId) === id);
   const nBefore = mine.filter((x) => /^Before ·/.test(x.title ?? '')).length, nAfter = mine.filter((x) => /^After ·/.test(x.title ?? '')).length;
-  const label = s ? `${s.procedure ?? 'Procedure'} · sitting ${s.sittingNo}${s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}` : '';
+  const label = s ? `${s.procedure ?? 'Procedure'} · session ${s.sittingNo}${s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}` : '';
   // more sittings to come and none booked yet: reception books the next tentative date right here
   const nextSit: any = (s?.sittings ?? []).find((x: any) => x.state === 'confirmed' && x.id !== id); const nextBooked = !!nextSit; // sittings come oldest first
   const [movingNext, setMovingNext] = useState(false);
@@ -130,7 +130,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const more = !!s && s.state === 'completed' && !nextBooked && (!s.plan?.sittings || s.sittingNo < s.plan.sittings);
 
   return (
-    <Drawer title={p ? <span className="flex flex-wrap items-center gap-2">{p.fullName}<FlagChips flags={p.flags} /></span> : 'Procedure sitting'} subtitle={p ? [p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' '), p.phone].filter(Boolean).join(' · ') : undefined} width="max-w-md" onClose={onClose}>
+    <Drawer title={p ? <span className="flex flex-wrap items-center gap-2">{p.fullName}<FlagChips flags={p.flags} /></span> : 'Procedure session'} subtitle={p ? [p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' '), p.phone].filter(Boolean).join(' · ') : undefined} width="max-w-md" onClose={onClose}>
       <div className="flex flex-1 flex-col gap-4">
         {q.isError ? <div className="text-sm text-rose">Couldn't load. {errText(q.error)} <button className="btn btn-sm ml-1" onClick={() => q.refetch()}>Retry</button></div> :!s ? <Skeleton rows={6} /> : (<>
           {/* the sitting's state and money as one row of tags (who it is sits in the drawer's title) */}
@@ -143,16 +143,16 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           </div>
 
           <div className="glass !rounded-[10px] p-4">
-            <b>{s.procedure ?? 'Procedure'} · sitting {s.sittingNo}{s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}</b>
+            <b>{s.procedure ?? 'Procedure'} · session {s.sittingNo}{s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}</b>
             <div className="mt-1 text-sm text-muted">{dayLabel(s.day)} · {s.startTime}–{s.endTime}</div>
             <div className="text-sm text-muted">{[s.room, s.doctor ?? 'no doctor yet', s.supervisor ? `supervised by ${s.supervisor}` : null].filter(Boolean).join(' · ')}</div>
             {s.notes && <div className="mt-2 rounded-xl bg-paper px-3 py-2 text-sm">“{s.notes}”</div>}
             {s.stateReason && <div className="mt-2 text-sm text-amber">Reason: {s.stateReason}</div>}
           </div>
-          {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => s.consentNeeded ? setSigning(true) : setState.mutate({ state: 'in_progress' })}><Icon name="check" />Start sitting</button>}
+          {canAct && s.state === 'confirmed' && s.day === today() && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={() => s.consentNeeded ? setSigning(true) : setState.mutate({ state: 'in_progress' })}><Icon name="check" />Start session</button>}
           {canAct && (overdue || ['missed', 'postponed'].includes(s.state)) && <div className="rounded-[10px] border border-rose/25 bg-rose-soft/50 p-4">
-            <div className="font-semibold">{overdue ? 'The patient did not come for this sitting' : s.state === 'missed' ? 'This sitting was missed' : 'This sitting was postponed'}</div>
-            <div className="mt-0.5 text-sm text-muted">Pick a new date and time with the patient. The course and its sitting number stay the same.</div>
+            <div className="font-semibold">{overdue ? 'The patient did not come for this session' : s.state === 'missed' ? 'This session was missed' : 'This session was postponed'}</div>
+            <div className="mt-0.5 text-sm text-muted">Pick a new date and time with the patient. The course and its session number stay the same.</div>
             <div className="mt-3 flex flex-wrap gap-2"><button className="btn btn-primary" onClick={() => setMoving(true)}><Icon name="calendar" />Reschedule</button>
               {overdue && <button className="btn" disabled={markMissed.isPending} onClick={() => markMissed.mutate()}>Mark as missed</button>}</div>
           </div>}
@@ -162,7 +162,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           {canAct && s.state === 'in_progress' && <button className="btn btn-primary justify-center" disabled={setState.isPending} onClick={async () => { if (await confirmDone({ ...s, of: s.plan?.sittings })) setState.mutate({ state: 'completed' }); }}><Icon name="check" />Mark done</button>}
 
           {canAct && ['confirmed', 'in_progress', 'completed'].includes(s.state) && <div>
-            <Head>Photos of this sitting</Head>
+            <Head>Photos of this session</Head>
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className="btn btn-sm" onClick={() => setShoot('before')}><Icon name="spark" className="h-3.5 w-3.5" />Before photo{nBefore ? ` · ${nBefore}` : ''}</button>
               {s.state !== 'confirmed' && <button type="button" className="btn btn-sm" onClick={() => setShoot('after')}><Icon name="spark" className="h-3.5 w-3.5" />After photo{nAfter ? ` · ${nAfter}` : ''}</button>}
@@ -171,15 +171,15 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           </div>}
           {/* done with more to come: the next sitting the plan booked (or reception did), with Change date; else Book next sitting */}
           {s.state === 'completed' && nextSit && <div className="rounded-[10px] border border-line bg-surface-2 px-4 py-3">
-            <div className="flex flex-wrap items-center gap-2"><span className="text-[13.5px] font-semibold">Next: sitting {nextSit.sittingNo}{s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}</span>{nextSit.autoBooked && <Chip tone="sky">Booked by the plan</Chip>}</div>
+            <div className="flex flex-wrap items-center gap-2"><span className="text-[13.5px] font-semibold">Next: session {nextSit.sittingNo}{s.plan?.sittings ? ` of ${s.plan.sittings}` : ''}</span>{nextSit.autoBooked && <Chip tone="sky">Booked by the plan</Chip>}</div>
             <div className="mt-0.5 text-[14px]">{new Date(nextSit.day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} · {nextSit.startTime}</div>
             <div className="mt-0.5 text-[12.5px] text-muted">{nextSit.autoBooked ? 'Tell the patient now; the coordinator confirms it with them the week before.' : 'Tentative until the doctor approves the week.'}</div>
             {canAct && <button type="button" className="btn btn-sm mt-2" onClick={() => setMovingNext(true)}><Icon name="calendar" className="h-3.5 w-3.5" />Change date</button>}
           </div>}
           {canAct && more && <div className="rounded-[10px] border border-clay-line bg-clay-soft px-4 py-3">
-            <div className="text-[13.5px] font-semibold text-clay-ink">Book the next sitting</div>
-            <div className="mt-0.5 text-[12.5px] text-muted">{s.plan?.sittings ? `Sitting ${s.sittingNo + 1} of ${s.plan.sittings}. ` : ''}Pick a date with the patient now; it is tentative until the doctor approves the week.</div>
-            <button type="button" className="btn btn-primary btn-sm mt-2" onClick={() => setBooking(true)}>Book next sitting</button>
+            <div className="text-[13.5px] font-semibold text-clay-ink">Book the next session</div>
+            <div className="mt-0.5 text-[12.5px] text-muted">{s.plan?.sittings ? `Session ${s.sittingNo + 1} of ${s.plan.sittings}. ` : ''}Pick a date with the patient now; it is tentative until the doctor approves the week.</div>
+            <button type="button" className="btn btn-primary btn-sm mt-2" onClick={() => setBooking(true)}>Book next session</button>
           </div>}
 
           <div>
@@ -203,7 +203,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
 
           {s.sittings.length > 1 && (
             <div>
-              <Head>Sittings</Head>
+              <Head>Sessions</Head>
               {s.sittings.map((x: any) => (
                 <div key={x.id} className={`flex items-start gap-2 border-t border-line/60 py-1.5 text-sm first:border-t-0 ${x.id === s.id ? 'font-semibold' : ''}`}>
                   <span className="w-6 shrink-0 text-muted">{x.sittingNo}</span>

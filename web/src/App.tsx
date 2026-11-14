@@ -195,7 +195,7 @@ export function App() {
   const mc = counts.data;
   const badges: Badges = mc ? {
     '/calls': mc.calls ? { n: mc.calls, hint: `${mc.calls} to call today` } : undefined,
-    '/worklist': mc.sittings ? { n: mc.sittings, warn: mc.unconfirmed > 0, hint: mc.unconfirmed ? `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today, ${mc.unconfirmed} not confirmed` : `${mc.sittings} sitting${mc.sittings === 1 ? '' : 's'} today` } : undefined,
+    '/worklist': mc.sittings ? { n: mc.sittings, warn: mc.unconfirmed > 0, hint: mc.unconfirmed ? `${mc.sittings} session${mc.sittings === 1 ? '' : 's'} today, ${mc.unconfirmed} not confirmed` : `${mc.sittings} session${mc.sittings === 1 ? '' : 's'} today` } : undefined,
   } : {};
   const side = { items, active, clinic, me: me.data, roles, badges, onSignOut: signOut };
   // Settings has its own left menu: the main menu slims to icons there, so the settings get the room

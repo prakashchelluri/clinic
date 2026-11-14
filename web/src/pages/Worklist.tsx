@@ -18,7 +18,7 @@ export function Worklist() {
   return (
     <div>
       <PageHeader title="Procedures" />
-      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sittings" }, { value: 'week', label: 'Week plan' }, { value: 'courses', label: 'All courses' }]} />
+      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sessions" }, { value: 'week', label: 'Week plan' }, { value: 'courses', label: 'All courses' }]} />
       {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <CourseList />}
     </div>
   );
@@ -48,12 +48,12 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
   return (
     <Drawer title={`${sitting ? 'Reschedule' : 'Schedule'} · ${proc?.name ?? 'procedure'}`} subtitle={`${rec.patient.fullName} · ${rec.patient.phone ?? ''}${rec.sittings ? ` · ${rec.sittings} ${rec.sittings === 1 ? 'sitting' : 'sittings'} planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
       <div className="space-y-4">
-        {(existing.data ?? []).length > 0 && <div className="text-xs text-muted flex flex-wrap gap-1.5 items-center">Previous sittings: {existing.data.map((s: any) => <Chip key={s.id} tone={s.state === 'completed' ? 'sage' : s.state === 'confirmed' ? 'sky' : ''}>{fmtDate(s.day)} · {({ confirmed: 'Booked', in_progress: 'In room', completed: 'Done', missed: 'Missed', cancelled: 'Cancelled', postponed: 'Postponed' } as Record<string, string>)[s.state] ?? s.state}</Chip>)}</div>}
+        {(existing.data ?? []).length > 0 && <div className="text-xs text-muted flex flex-wrap gap-1.5 items-center">Previous sessions: {existing.data.map((s: any) => <Chip key={s.id} tone={s.state === 'completed' ? 'sage' : s.state === 'confirmed' ? 'sky' : ''}>{fmtDate(s.day)} · {({ confirmed: 'Booked', in_progress: 'In room', completed: 'Done', missed: 'Missed', cancelled: 'Cancelled', postponed: 'Postponed' } as Record<string, string>)[s.state] ?? s.state}</Chip>)}</div>}
         <div className="grid grid-cols-3 gap-3">
           <div><label className="label">Day</label><input type="date" className="input" value={day} onChange={(e) => { setDay(e.target.value); setPick(null); }} /></div>
           <div><label className="label">Duration (min)</label><div className="flex gap-1 flex-wrap">{[15, 30, 45, 60, 90, 120].map((m) => <button key={m} className={`toggle-opt ${minutes === m ? 'on' : ''}`} onClick={() => { setMinutes(m); setPick(null); }}>{m}</button>)}</div></div>
           <div><label className="label">Doctor {proc?.requiresMainDoctor && <span className="text-clay">Required</span>}</label><select className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setPick(null); }}><option value="">Other staff / none</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-            {doc && <div className="text-[11px] text-amber mt-1">{cfg.practitioners.find((p: any) => p.id === doc)?.name ?? 'This doctor'} gets no OPD bookings {(pick?.startTime ?? manual.startTime) ? `${pick?.startTime ?? manual.startTime}–${endOf(pick?.startTime ?? manual.startTime)}` : 'for the sitting'}.</div>}</div>
+            {doc && <div className="text-[11px] text-amber mt-1">{cfg.practitioners.find((p: any) => p.id === doc)?.name ?? 'This doctor'} gets no OPD bookings {(pick?.startTime ?? manual.startTime) ? `${pick?.startTime ?? manual.startTime}–${endOf(pick?.startTime ?? manual.startTime)}` : 'for the session'}.</div>}</div>
         </div>
         <div>
           <label className="label">Free slots by room</label>
@@ -93,7 +93,7 @@ export function ScheduleProcedure({ cfg, onClose, at, head }: { cfg: any; onClos
             <button key={r.id} type="button" className="flex w-full items-center gap-3 border-t border-line px-3.5 py-3 text-left first:border-t-0 hover:bg-surface-2" onClick={() => setPick(r)}>
               <span className="min-w-0 flex-1"><b className="block truncate text-[14.5px] font-semibold">{r.patient.fullName}</b>
                 <span className="block truncate text-[12.5px] text-muted">{[r.patient.patientNo, r.patient.phone].filter(Boolean).join(' · ')}</span>
-                <span className="block truncate text-[13px]">{r.procedure ?? 'Procedure'} · sitting {(r.done ?? 0) + 1}{r.sittings ? ` of ${r.sittings}` : ''}<span className="text-muted"> · {r.next ? `next booked ${day(r.next.day)}` : 'not booked'}</span></span></span>
+                <span className="block truncate text-[13px]">{r.procedure ?? 'Procedure'} · session {(r.done ?? 0) + 1}{r.sittings ? ` of ${r.sittings}` : ''}<span className="text-muted"> · {r.next ? `next booked ${day(r.next.day)}` : 'not booked'}</span></span></span>
               <span className="btn btn-sm shrink-0">{r.next ? 'Book another' : 'Book'}</span>
             </button>))}</div>}
         {open.length > 40 && <div className="text-[12.5px] text-muted">Showing 40 of {open.length}. Type a name to narrow it.</div>}

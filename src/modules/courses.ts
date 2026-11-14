@@ -71,7 +71,7 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
     const rec = await tx.select({ amountPaise: recommendation.amountPaise, sittings: recommendation.sittings }).from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
     const price = rec?.amountPaise ? Math.round(rec.amountPaise / Math.max(1, rec.sittings ?? 1)) : proc?.pricePaise;
     if (!price) return; // no price anywhere: nothing to bill
-    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} sitting ${ps.sittingNo ?? 1}${rec?.amountPaise ? " · doctor's price" : ''}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${ps.sittingNo ?? 1}${rec?.amountPaise ? ' · custom price' : ''}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, prepaid: false, status: 'due' }).returning();
     await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: price, listPrice: !rec?.amountPaise });
     return;
   }
@@ -81,7 +81,7 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   const amount = isLast ? Math.max(0, c.totalPaise - (before[0]?.s ?? 0)) : st.perSittingPaise; // the last sitting takes the rounding
   if (amount <= 0) return;
   const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.name) : null;
-  const what = `${proc ?? 'Procedure'} sitting ${n} of ${c.sittings}${c.priceSource === 'doctor' ? " · doctor's price" : ''}`;
+  const what = `${proc ?? 'Procedure'} session ${n} of ${c.sittings}${c.priceSource === 'doctor' ? ' · custom price' : ''}`;
   // the advance pays what it can; a partly covered sitting gets two charges: the part from the advance (paid) and the balance (due)
   const fromAdvance = Math.min(amount, st.unusedPaise); let billId: string | undefined; // both parts of one sitting are one invoice
   if (fromAdvance > 0) {

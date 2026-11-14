@@ -11,7 +11,7 @@ const viewLabel = (v?: string | null) => VIEWS.find((x) => x[0] === v)?.[1] ?? '
 const fileUrl = (id: string) => `/api/documents/${id}/file`;
 const dayLabel = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
-const sittingLabel = (s: any) => `${s.procedure ?? 'Procedure'} · sitting ${s.sittingNo}${s.of ? ` of ${s.of}` : ''}`;
+const sittingLabel = (s: any) => `${s.procedure ?? 'Procedure'} · session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''}`;
 const daysApart = (a: string, b: string) => Math.round(Math.abs(new Date(b).getTime() - new Date(a).getTime()) / 86400000);
 const refresh = (patientId: string) => { qc.invalidateQueries({ queryKey: ['photos', patientId] }); qc.invalidateQueries({ queryKey: ['documents', patientId] }); };
 
@@ -108,7 +108,7 @@ export function PhotoCapture({ patient, sitting, phase, onClose }: { patient: { 
     <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1011] text-white anim-fade-in" role="dialog" aria-label="Take photos">
       <div className="flex items-center gap-3 px-4 pb-2 pt-4" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <button className="grid h-10 w-10 place-items-center rounded-full bg-white/15" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
-        <div className="min-w-0 flex-1"><div className="truncate font-semibold">{patient.fullName}</div><div className="truncate text-xs text-white/70">{sitting?.label ?? 'Not tied to a sitting'}</div></div>
+        <div className="min-w-0 flex-1"><div className="truncate font-semibold">{patient.fullName}</div><div className="truncate text-xs text-white/70">{sitting?.label ?? 'Not tied to a session'}</div></div>
         {consent && <span className="rounded-full bg-sage-soft px-2.5 py-1 text-[11px] font-bold text-sage">consent ✓</span>}
       </div>
       {q.isLoading ? <div className="p-6"><Skeleton rows={3} /></div> : !consent ? <div className="flex flex-1 items-center p-4"><ConsentStep dark patientId={patient.id} name={patient.fullName} onDone={() => {}} /></div> : (<>
@@ -123,7 +123,7 @@ export function PhotoCapture({ patient, sitting, phase, onClose }: { patient: { 
           {!camErr && <video ref={video} playsInline muted className="absolute inset-0 h-full w-full object-cover" />}
           {last && <img src={fileUrl(last.id)} alt="" aria-hidden className="pointer-events-none absolute inset-0 h-full w-full object-cover" style={{ opacity: camErr ? 0.9 : ghost / 100 }} />}
           {flash && <div className="absolute inset-0 bg-white/70" />}
-          {last && <div className="absolute left-3 top-3 rounded-xl bg-black/50 px-2.5 py-1.5 text-xs">{camErr ? 'Last photo' : 'Faint overlay'}: {last.sitting ? `sitting ${last.sitting.sittingNo} · ` : ''}{shortDay(last.takenAt)}</div>}
+          {last && <div className="absolute left-3 top-3 rounded-xl bg-black/50 px-2.5 py-1.5 text-xs">{camErr ? 'Last photo' : 'Faint overlay'}: {last.sitting ? `session ${last.sitting.sittingNo} · ` : ''}{shortDay(last.takenAt)}</div>}
           {!last && !camErr && ready && <div className="absolute left-3 top-3 rounded-xl bg-black/50 px-2.5 py-1.5 text-xs">First {curArea.toLowerCase()} {viewLabel(view).toLowerCase()} photo: no overlay yet</div>}
           {camErr && <div className="absolute inset-x-3 bottom-3 rounded-2xl bg-black/60 p-3 text-sm">{camErr}</div>}
           {!camErr && last && <label className="absolute inset-x-3 bottom-3 flex items-center gap-3 rounded-2xl bg-black/50 px-3 py-2 text-xs">Overlay<input type="range" min={0} max={80} step={5} value={ghost} onChange={(e) => setGhost(Number(e.target.value))} className="flex-1 accent-white" aria-label="Overlay strength" />{ghost}%</label>}
@@ -138,7 +138,7 @@ export function PhotoCapture({ patient, sitting, phase, onClose }: { patient: { 
           <div className="flex min-w-0 flex-1 justify-end">{!camErr && <label className="cursor-pointer text-xs text-white/70 underline">or pick files<input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { pick(e.target.files); e.target.value = ''; }} /></label>}</div>
         </div>
         <div className="px-4 pt-2" style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}>
-          <button className="btn btn-accent w-full justify-center !py-3.5" disabled={!shots.length || saving} onClick={saveAll}>{saving ? 'Saving…' : shots.length ? `Save ${shots.length} photo${shots.length === 1 ? '' : 's'}${sitting ? ' to this sitting' : ''}` : 'Take a photo first'}</button>
+          <button className="btn btn-accent w-full justify-center !py-3.5" disabled={!shots.length || saving} onClick={saveAll}>{saving ? 'Saving…' : shots.length ? `Save ${shots.length} photo${shots.length === 1 ? '' : 's'}${sitting ? ' to this session' : ''}` : 'Take a photo first'}</button>
           <div className="mt-2 text-center text-[11.5px] text-white/60">Photos are shrunk on this device before upload. Tap a thumbnail to drop it.</div>
         </div>
       </>)}
@@ -164,7 +164,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
     for (const p of shown) {
       const key = p.sitting?.id ?? 'd:' + new Date(p.takenAt).toDateString();
       let row = g.find((x) => x.key === key);
-      if (!row) g.push(row = { key, title: dayLabel(p.sitting?.day ? p.sitting.day + 'T06:00:00Z' : p.takenAt), sub: p.sitting ? sittingLabel(p.sitting) : 'Not tied to a sitting', items: [] });
+      if (!row) g.push(row = { key, title: dayLabel(p.sitting?.day ? p.sitting.day + 'T06:00:00Z' : p.takenAt), sub: p.sitting ? sittingLabel(p.sitting) : 'Not tied to a session', items: [] });
       row.items.push(p);
     }
     return g;
@@ -175,7 +175,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
   const nSittings = new Set(photos.map((p) => p.sitting?.id).filter(Boolean)).size;
 
   return (
-    <Section title={<>Photos <span className="font-normal text-muted">· {photos.length}{nSittings ? ` · ${nSittings} sitting${nSittings === 1 ? '' : 's'}` : ''}</span></>}
+    <Section title={<>Photos <span className="font-normal text-muted">· {photos.length}{nSittings ? ` · ${nSittings} session${nSittings === 1 ? '' : 's'}` : ''}</span></>}
       aside={canWrite && <button className="btn btn-sm btn-accent" onClick={() => setCapturing(true)}><Icon name="plus" className="h-3.5 w-3.5" />Take photos</button>}>
       <div className="space-y-3 p-4">
         {q.isLoading ? <Skeleton rows={2} /> : (<>
@@ -188,7 +188,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
             <button role="radio" aria-checked={area === 'all'} className={`toggle-opt ${area === 'all' ? 'on' : ''}`} onClick={() => setArea('all')}>All <span className="opacity-60">{photos.length}</span></button>
             {Object.entries(counts).map(([a, n]) => <button key={a} role="radio" aria-checked={area === a} className={`toggle-opt ${area === a ? 'on' : ''}`} onClick={() => setArea(a)}>{a} <span className="opacity-60">{n}</span></button>)}
           </div>}
-          {photos.length === 0 ? <Empty icon="spark" title="No clinical photos yet" hint="Take photos before a course starts and at each sitting. Each new photo lines up with the last one." />
+          {photos.length === 0 ? <Empty icon="spark" title="No clinical photos yet" hint="Take photos before a course starts and at each session. Each new photo lines up with the last one." />
             : groups.map((g) => (
               <div key={g.key} className="flex flex-col gap-2.5 border-t border-line/60 pt-3 first:border-t-0">
                 <div className="flex flex-wrap items-baseline gap-x-2"><span className="font-semibold">{g.title}</span><span className="text-xs text-muted">{g.sub}</span></div>
@@ -214,7 +214,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
           <button className="grid h-8 w-8 place-items-center rounded-full hover:bg-white/10" aria-label="Clear selection" onClick={() => setSel([])}><Icon name="x" className="h-3.5 w-3.5" /></button>
         </div>
       )}
-      {capturing && <PhotoCapture patient={patient} sitting={sittingToday ? { id: sittingToday.id, label: `${sittingToday.procedure ?? 'Procedure'} · sitting ${sittingToday.sittingNo}` } : null} onClose={() => setCapturing(false)} />}
+      {capturing && <PhotoCapture patient={patient} sitting={sittingToday ? { id: sittingToday.id, label: `${sittingToday.procedure ?? 'Procedure'} · session ${sittingToday.sittingNo}` } : null} onClose={() => setCapturing(false)} />}
       {comparing && pair.length === 2 && <PhotoCompare name={patient.fullName} a={pair[0]} b={pair[1]} onClose={() => setComparing(false)} />}
       {viewing && <PhotoViewer photo={viewing} list={shown} areas={q.data?.areas ?? []} canWrite={canWrite} patientId={patient.id} onClose={() => setViewing(null)} onMove={setViewing} />}
     </Section>
@@ -233,7 +233,7 @@ export function PhotoCompare({ name, a, b, onClose }: { name: string; a: any; b:
   useScrollLock();
   const [mode, setMode] = useState<'side' | 'slider'>('side'); const [x, setX] = useState(50);
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); if (mode === 'slider' && e.key === 'ArrowLeft') setX((v) => Math.max(0, v - 5)); if (mode === 'slider' && e.key === 'ArrowRight') setX((v) => Math.min(100, v + 5)); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [mode, onClose]);
-  const tag = (p: any, which: string) => <div className="absolute left-3 top-3 rounded-xl bg-black/55 px-3 py-2 text-sm leading-tight text-white"><b>{which}</b> · {shortDay(p.takenAt)}<div className="text-xs text-white/70">{p.sitting ? `sitting ${p.sitting.sittingNo}${p.sitting.of ? ` of ${p.sitting.of}` : ''}` : 'no sitting'} · {viewLabel(p.view)}</div></div>;
+  const tag = (p: any, which: string) => <div className="absolute left-3 top-3 rounded-xl bg-black/55 px-3 py-2 text-sm leading-tight text-white"><b>{which}</b> · {shortDay(p.takenAt)}<div className="text-xs text-white/70">{p.sitting ? `session ${p.sitting.sittingNo}${p.sitting.of ? ` of ${p.sitting.of}` : ''}` : 'no session'} · {viewLabel(p.view)}</div></div>;
   return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col gap-3 bg-[#141516] p-3 text-white anim-fade-in sm:p-6" role="dialog" aria-label="Compare photos">
       <div className="flex flex-wrap items-center gap-3">
@@ -278,7 +278,7 @@ function PhotoViewer({ photo, list, areas, canWrite, patientId, onClose, onMove 
         {i < list.length - 1 && <button className="absolute right-4 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/15" aria-label="Next photo" onClick={() => onMove(list[i + 1])}><Icon name="chevR" /></button>}
       </div>
       <div className="w-full space-y-3 bg-[#1c1d1f] p-5 lg:w-[340px]">
-        <div><div className="text-lg font-semibold">{dayLabel(photo.takenAt)}</div><div className="text-sm text-white/70">{photo.sitting ? sittingLabel(photo.sitting) : 'Not tied to a sitting'}</div></div>
+        <div><div className="text-lg font-semibold">{dayLabel(photo.takenAt)}</div><div className="text-sm text-white/70">{photo.sitting ? sittingLabel(photo.sitting) : 'Not tied to a session'}</div></div>
         {canWrite ? (<>
           <div><label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60" htmlFor="pv-area">Area</label><input id="pv-area" list="pv-areas" maxLength={40} className="w-full rounded-xl bg-white/10 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-white/40" value={area} onChange={(e) => setArea(e.target.value)} /><datalist id="pv-areas">{areas.map((a) => <option key={a} value={a} />)}</datalist></div>
           <div><span className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-white/60">View</span><div className="flex flex-wrap gap-1.5">{VIEWS.map(([k, l]) => <button key={k} onClick={() => setView(k)} className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold ${view === k ? 'bg-white text-ink' : 'bg-white/10'}`}>{l}</button>)}</div></div>

@@ -237,7 +237,7 @@ export async function loadSample(tx: Tx, t: string, userId: string, tz: string) 
     const pz = plan[i]; if (!pz?.room) continue;
     const pr = r.procedureId ? procs[Object.keys(procs).find((k) => procs[k].id === r.procedureId)!] : null;
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: r.id, patientId: r.patientId, procedureId: r.procedureId, practitionerId: pz.doc.id, roomId: pz.room.id, sittingNo: 1, day: today, startTime: pz.start, endTime: pz.end, state: i === 0 ? 'confirmed' : 'confirmed', notes: r.notes }).returning();
-    await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: pz.doc.id, roomId: pz.room.id, day: today, startTime: pz.start, endTime: pz.end, kind: 'procedure', note: `${pr?.name ?? 'Procedure'} · sitting 1`, procedureSessionId: ps.id });
+    await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: pz.doc.id, roomId: pz.room.id, day: today, startTime: pz.start, endTime: pz.end, kind: 'procedure', note: `${pr?.name ?? 'Procedure'} · session 1`, procedureSessionId: ps.id });
     await tx.update(recommendation).set({ dueOn: today }).where(eq(recommendation.id, r.id));
   }
 

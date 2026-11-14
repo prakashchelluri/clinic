@@ -43,7 +43,7 @@ test('Dashboard, Reports, End of day and the Clinic page agree: consult, sitting
   const rec = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p2.id);
   const ps = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '10:00', minutes: 30, practitionerId: doc.id, force: true })).body;
   assert.equal((await R('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200);
-  const sit = (await O('GET', `/patients/${p2.id}/timeline`)).body.charges.find((c: any) => /Chemical peel sitting/.test(c.description));
+  const sit = (await O('GET', `/patients/${p2.id}/timeline`)).body.charges.find((c: any) => /Chemical peel session/.test(c.description));
   assert.equal((await R('POST', '/payments', { patientId: p2.id, chargeId: sit.id, amountPaise: sit.amountPaise, method: 'cash', idempotencyKey: 'ledger-sit' })).status, 200);
 
   // a pharmacy sale, and a return the caller does not mark as sealed

@@ -28,7 +28,7 @@ export function ProcToday() {
   const canWrite = can(perms, 'worklist.write');
 
   const q = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1&detail=1`), refetchInterval: 15000 });
-  const DONE: Record<string, string> = { in_progress: 'Sitting started', completed: 'Marked done', missed: 'Moved to missed', cancelled: 'Sitting cancelled' };
+  const DONE: Record<string, string> = { in_progress: 'Session started', completed: 'Marked done', missed: 'Moved to missed', cancelled: 'Session cancelled' };
   const setState = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/procedure-sessions/${id}`, b), onSuccess: (_r, v: any) => { refreshProcedures(); toast(DONE[v.state] ?? 'Updated'); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: (_r, v: any) => { refreshProcedures(); toast(v.confirmed ? 'Noted: the patient said yes' : 'Patient answer removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
@@ -56,8 +56,8 @@ export function ProcToday() {
     {s.approval === 'approved' && act(s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }))}
     {act(s.practitionerId ? 'Change doctor' : 'Pick doctor', () => { setOpenId(null); setAssigning(s); })}
     {act('Reschedule', () => { setOpenId(null); setMoving(s); })}
-    {act('Mark as missed', async () => { if (await ask({ title: 'Mark this sitting as missed?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark missed', cancelLabel: 'Keep it' })) { setOpenId(null); setState.mutate({ id: s.id, state: 'missed' }); } })}
-    {act('Cancel sitting', async () => { const a = await ask({ title: 'Cancel this sitting?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and the course goes back to Pending schedules.`, confirmLabel: 'Cancel sitting', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { setOpenId(null); setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } })}
+    {act('Mark as missed', async () => { if (await ask({ title: 'Mark this session as missed?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room is freed.`, confirmLabel: 'Mark missed', cancelLabel: 'Keep it' })) { setOpenId(null); setState.mutate({ id: s.id, state: 'missed' }); } })}
+    {act('Cancel session', async () => { const a = await ask({ title: 'Cancel this session?', body: `${s.patient.fullName} · ${s.procedure ?? 'procedure'} at ${s.startTime}. The room and doctor are freed and the course goes back to Pending schedules.`, confirmLabel: 'Cancel session', cancelLabel: 'Keep it', field: { label: 'Reason', maxLength: 200 } }); if (a) { setOpenId(null); setState.mutate({ id: s.id, state: 'cancelled', reason: a.value || undefined }); } })}
   </> : canWrite && s.state === 'missed' ? act('Reschedule', () => { setOpenId(null); setMoving(s); }, true) : null;
 
   return (
@@ -67,10 +67,10 @@ export function ProcToday() {
         <label className="fd-sch-date"><span>{day === t ? `Today · ${longDay(day)}` : day === addDay(t, 1) ? `Tomorrow · ${longDay(day)}` : longDay(day)}</span><input type="date" aria-label="Pick a day" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></label>
         <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next day" onClick={() => setDay(addDay(day, 1))}><Icon name="chevR" className="h-4 w-4" /></button>
         {day !== t && <button type="button" className="btn btn-sm" onClick={() => setDay(t)}>Today</button>}
-        <span className="ml-auto text-[13.5px] text-muted">{live.length ? `${live.length} sitting${live.length === 1 ? '' : 's'}${notYes ? ` · ${notYes} not confirmed` : ''}` : ''}</span>
+        <span className="ml-auto text-[13.5px] text-muted">{live.length ? `${live.length} session${live.length === 1 ? '' : 's'}${notYes ? ` · ${notYes} not confirmed` : ''}` : ''}</span>
       </div>
       {q.isLoading ? <div className="p-4"><Skeleton rows={4} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div>
-        : !all.length ? <div className="border-t border-line"><Empty icon="calendar" title={day === t ? 'No sittings today' : 'No sittings this day'} hint="Sittings are planned on Week plan." /></div> : (
+        : !all.length ? <div className="border-t border-line"><Empty icon="calendar" title={day === t ? 'No sessions today' : 'No sessions this day'} hint="Sessions are planned on Week plan." /></div> : (
         hours.map((h) => {
           const key = `T|${h}`; const here = inHour(all, h); const fill = fillsHour(all, h);
           const why = drag.hoverWhy(key);

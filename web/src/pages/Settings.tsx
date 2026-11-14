@@ -32,7 +32,7 @@ const GROUPS: [string, TabDef[]][] = [
   ]],
   ['Services', [
     ['types', 'Consultation types', 'What a patient comes in for: its fee, how it is booked, its colour on the calendar.', 'fee fees consultation visit type review renewal free price code token'],
-    ['procedures', 'Procedures & packages', 'Procedures with their price, time and room, and the packages sold as a course.', 'procedure package laser peel price sittings gst'],
+    ['procedures', 'Procedures & packages', 'Procedures with their price, time and room, and the packages sold as a course.', 'procedure package laser peel price sessions gst'],
     ['rooms', 'Rooms', 'Procedure rooms and what each one has.', 'room laser equipment'],
     ['photos', 'Photo areas', 'Body areas for before and after photos.', 'photo picture area body'],
   ]],
@@ -320,7 +320,7 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [showOff, setShowOff] = useState(false); const off = useInactive(showOff); const rows = [...cfg.procedures, ...(showOff ? off.data?.procedures ?? [] : [])];
   return (
     <Section title="Procedures" aside={<div className="flex items-center gap-3"><ShowInactive on={showOff} set={setShowOff} n={off.data?.procedures?.length} /><AddBtn label="Add procedure" onClick={add} /></div>}>
-      <table className="table"><thead><tr><th className="pl-4">Name</th><th>Typical</th><th>Sittings</th><th>Needs room with</th><th className="text-right">Price</th><th>GST</th><th>Rules</th><th /></tr></thead>
+      <table className="table"><thead><tr><th className="pl-4">Name</th><th>Typical</th><th>Sessions</th><th>Needs room with</th><th className="text-right">Price</th><th>GST</th><th>Rules</th><th /></tr></thead>
         <tbody>{rows.map((p: any) => <tr key={p.id} className={p.active === false ? 'opacity-50' : ''}><td className="pl-4 font-medium">{p.name}{p.active === false && <> <Chip tone="rose">inactive</Chip></>}</td><td className="text-muted">{p.typicalMinutes} min{p.bufferMinutes ? ` +${p.bufferMinutes}` : ''}</td><td>{p.typicalSittings}</td><td>{p.requiredCapability ? <Chip>{p.requiredCapability}</Chip> : <span className="text-muted text-xs">Any</span>}</td><td className="text-right">{p.pricePaise != null ? money(p.pricePaise) : '—'}</td><td className="text-xs text-muted">{p.taxRateBp ? `${p.taxRateBp / 100}%` : 'exempt'}</td><td><div className="flex gap-1 flex-wrap">{p.requiresMainDoctor && <Chip tone="clay">doctor</Chip>}</div></td><td className="text-right pr-3"><button aria-label="Edit" className="btn btn-ghost btn-icon" onClick={() => setEdit({ ...p, price: p.pricePaise != null ? p.pricePaise / 100 : '', requiredCapability: p.requiredCapability ?? '' })}><Icon name="edit" /></button></td></tr>)}</tbody></table>
       {edit && (
         <Drawer title={edit.id ? 'Edit procedure' : 'New procedure'} onClose={() => setEdit(null)} width="max-w-lg">
@@ -329,7 +329,7 @@ function ProceduresTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
             <div className="grid grid-cols-4 gap-2">
               <div><label className="label">Minutes</label><NumInput max={600} className="input" value={edit.typicalMinutes} onChange={(e) => setEdit({ ...edit, typicalMinutes: Number(e.target.value) })} /></div>
               <div><label className="label">Buffer after</label><NumInput max={240} className="input" value={edit.bufferMinutes ?? 0} onChange={(e) => setEdit({ ...edit, bufferMinutes: Number(e.target.value) })} /></div>
-              <div><label className="label">Sittings</label><NumInput max={50} className="input" value={edit.typicalSittings} onChange={(e) => setEdit({ ...edit, typicalSittings: Number(e.target.value) })} /></div>
+              <div><label className="label">Sessions</label><NumInput max={50} className="input" value={edit.typicalSittings} onChange={(e) => setEdit({ ...edit, typicalSittings: Number(e.target.value) })} /></div>
               <div><label className="label">Price (₹)</label><MoneyInput value={String(edit.price ?? "")} onChange={(v) => setEdit({ ...edit, price: v })} /></div>
             </div>
             <div><label className="label">Needs a room with</label><div className="flex flex-wrap gap-1"><button className={`toggle-opt ${!edit.requiredCapability ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: '' })}>Any room</button>{caps.map((c) => <button key={c} className={`toggle-opt ${edit.requiredCapability === c ? 'on' : ''}`} onClick={() => setEdit({ ...edit, requiredCapability: c })}>{c}</button>)}</div><div className="text-[11px] text-muted mt-1">These come from what the rooms have (Settings › Rooms).</div></div>
@@ -389,7 +389,7 @@ function TestDataCard() {
     <div className="card space-y-3">
       <div className="card-title">Test data</div>
       <div className="text-sm text-ink-2">Clears everything this clinic has done and starts fresh with one week of realistic data including today: bookings, visits, pharmacy bills and counter sales, expenses, repeat visits, patient messages and two procedure courses with before/after photos. Staff, doctors, rooms, prices, forms and templates are kept. Use it on a test clinic, not one with real patients.</div>
-      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.series} repeat visits, {result.sittings} procedure sittings, {result.photos} photos.</div>}
+      {result && <div className="rounded-2xl bg-sage-soft px-4 py-3 text-sm text-sage">Cleared and loaded {result.from} to {result.to}: {result.booked + result.confirmed} upcoming bookings ({result.confirmed} confirmed), {result.arrived} past visits, {result.no_show} no-shows, {result.cancelled} cancelled, {result.pharmacyBills + result.counterSales} pharmacy sales, {result.expenses} expenses, {result.series} repeat visits, {result.sittings} procedure sessions, {result.photos} photos.</div>}
       <button className="btn" disabled={load.isPending} onClick={run}>{load.isPending ? 'Working… (up to a minute)' : 'Clear everything and load test data'}</button>
     </div>
   );

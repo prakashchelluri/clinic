@@ -34,7 +34,7 @@ async function plan(owner: any, reception: any, name: string, phone: string, sit
   return { peel, p, rec };
 }
 const book = async (reception: any, recId: string, at: string) => (await reception('POST', '/procedure-sessions', { recommendationId: recId, day: today(), startTime: at, minutes: 30, force: true })).json();
-const sittingCharges = async (owner: any, pid: string) => (await owner('GET', `/patients/${pid}/timeline`)).json().charges.filter((c: any) => /Chemical peel sitting/.test(c.description));
+const sittingCharges = async (owner: any, pid: string) => (await owner('GET', `/patients/${pid}/timeline`)).json().charges.filter((c: any) => /Chemical peel session/.test(c.description));
 
 test('a sitting with no agreed course is billed once at the list price; cancelling it cancels the charge; rebooking bills once', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
@@ -54,7 +54,7 @@ test('a sitting with no agreed course is billed once at the list price; cancelli
   // cancelled after being done: the charge is reversed with a reason
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'cancelled', reason: 'wrong patient' })).statusCode, 200);
   ch = await sittingCharges(owner, p.id);
-  assert.equal(ch[0].status, 'cancelled'); assert.equal(ch[0].adjustmentReason, 'Sitting cancelled');
+  assert.equal(ch[0].status, 'cancelled'); assert.equal(ch[0].adjustmentReason, 'Session cancelled');
 
   // rebooked and done: one live charge, not two
   const again = await book(reception, rec.id, '11:00');

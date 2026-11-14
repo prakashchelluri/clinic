@@ -5,6 +5,7 @@ import { get, post, qc, errText, NO_WHATSAPP } from './api';
 import { can } from './App';
 import { Drawer, Chip, Icon, MoneyInput, Section, money, toPaise, toast } from './ui';
 import { TakePayment } from './takePayment';
+import { openPrint } from './printPreview';
 import { ScheduleModal } from './pages/Worklist';
 
 const REFUND_MODES: ['cash' | 'upi' | 'card' | 'bank', string][] = [['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['bank', 'Bank']];
@@ -20,14 +21,14 @@ function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | n
     <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line py-2.5 first:border-t-0"><span className="text-muted">{label}</span><div>{children}</div></div>);
   return (
     <div className="rounded-[10px] border border-line px-4 py-1 text-[14px]">
-      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sittings <span className="text-muted">· {money(c.perSittingPaise)} each</span>
-        <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Doctor's price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? `Share of the ${c.packageName ?? 'clinic'} package${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : 'Standard price'}</div>
-        {c.validUntil && <div className={`text-[13px] ${c.expired ? 'text-rose' : 'text-muted'}`}>{c.expired ? `Expired on ${day(c.validUntil)}: sittings not done can only be refunded` : `Valid till ${day(c.validUntil)}`}</div>}</Row>
+      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· {money(c.perSittingPaise)} each</span>
+        <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Custom price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? `Share of the ${c.packageName ?? 'clinic'} package${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : 'Standard price'}</div>
+        {c.validUntil && <div className={`text-[13px] ${c.expired ? 'text-rose' : 'text-muted'}`}>{c.expired ? `Expired on ${day(c.validUntil)}: sessions not done can only be refunded` : `Valid till ${day(c.validUntil)}`}</div>}</Row>
       <Row label="Agreed">By the patient on {day(c.createdAt)}<div className="text-[13px] text-muted">{c.agreedBy ? `Recorded by ${c.agreedBy}` : ''}</div></Row>
       <Row label="Paid">{paid > 0 ? <b>{money(paid)}</b> : 'Nothing yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span>
         {(c.creditPaise ?? 0) > 0 && <div className="text-[13px] text-muted">plus {money(c.creditPaise)} approved discount</div>}
-        {c.unusedPaise > 0 && <div className="text-[13px] text-muted">{money(c.unusedPaise)} in advance, covers {c.unusedSittings} sitting{c.unusedSittings === 1 ? '' : 's'}</div>}</Row>
-      <Row label="Sittings"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `sitting ${(booked as any).sittingNo ?? c.doneSittings + 1} booked on ${day(booked.day)}${(booked as any).startTime ? ` ${(booked as any).startTime}` : ''}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
+        {c.unusedPaise > 0 && <div className="text-[13px] text-muted">{money(c.unusedPaise)} in advance, covers {c.unusedSittings} session{c.unusedSittings === 1 ? '' : 's'}</div>}</Row>
+      <Row label="Sessions"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `session ${(booked as any).sittingNo ?? c.doneSittings + 1} booked on ${day(booked.day)}${(booked as any).startTime ? ` ${(booked as any).startTime}` : ''}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
     </div>
   );
 }
@@ -37,14 +38,13 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&
 export async function printQuote(id: string) {
   try {
     const r: any = await get(`/quotes/${id}/print`);
-    const w = window.open('', '_blank', 'width=460,height=700'); if (!w) return toast('Allow pop-ups to print the quote', 'err');
-    w.document.write(`<!doctype html><title>Quote ${esc(r.number)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:6px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
+    // shown in the app's print preview, like the prescription and bills; Print there prints only the quote
+    openPrint({ title: `Quote ${r.number}`, html: `<!doctype html><title>Quote ${esc(r.number)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:6px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
       ${r.clinic.print?.logoUrl ? `<img src="${esc(r.clinic.print?.logoUrl)}" alt="" style="display:block;height:44px;max-width:150px;object-fit:contain;margin-bottom:6px">` : ''}<h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}</div>
       <p><b>Quote ${esc(r.number)}</b><br><span class="s">For ${esc(r.patient.fullName)} · prepared by ${esc(r.preparedBy)}</span></p>
-      <table><tr><td>${esc(r.procedure)}: ${esc(r.sittings)} sittings</td><td class="r">${esc(money(r.totalPaise))}</td></tr>${r.extras.map((x: any) => `<tr><td>${esc(x.name)}</td><td class="r">${esc(money(x.pricePaise))}</td></tr>`).join('')}
+      <table><tr><td>${esc(r.procedure)}: ${esc(r.sittings)} sessions</td><td class="r">${esc(money(r.totalPaise))}</td></tr>${r.extras.map((x: any) => `<tr><td>${esc(x.name)}</td><td class="r">${esc(money(x.pricePaise))}</td></tr>`).join('')}
       <tr><td><b>Total</b></td><td class="r"><b>${esc(money(r.grandTotalPaise))}</b></td></tr></table>
-      <p class="s">${esc(r.taxNote)}. Valid until ${esc(r.validUntil)}. Consultation and medicines are charged separately.</p><script>window.onload=function(){window.print()}<\/script>`);
-    w.document.close();
+      <p class="s">${esc(r.taxNote)}. Valid until ${esc(r.validUntil)}. Consultation and medicines are charged separately.</p>` });
   } catch (e) { toast(errText(e), 'err'); }
 }
 
@@ -60,7 +60,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   const [days, setDays] = useState(15); const pk = rec.package;
   const qs = useQuery({ queryKey: ['quotes', rec.id], queryFn: () => get(`/quotes?recommendationId=${rec.id}`) }); const quotes: any[] = qs.data ?? [];
   // the patient agrees the price (reception records it): this fixes the course at that price, before the first sitting is booked
-  const agree = useMutation({ mutationFn: () => post('/courses', { recommendationId: rec.id }), onSuccess: () => { refresh(); toast(pk ? `Recorded: the patient agreed the ${pk.name} package (${money(pk.pricePaise)}). Book the first sitting.` : `Recorded: the patient agreed ${money(list)}. Book the first sitting.`); }, onError: (e) => toast(errText(e), 'err') });
+  const agree = useMutation({ mutationFn: () => post('/courses', { recommendationId: rec.id }), onSuccess: () => { refresh(); toast(pk ? `Recorded: the patient agreed the ${pk.name} package (${money(pk.pricePaise)}). Book the first session.` : `Recorded: the patient agreed ${money(list)}. Book the first session.`); }, onError: (e) => toast(errText(e), 'err') });
   const makeQuote = useMutation({ mutationFn: (send: 'whatsapp' | 'print') => post('/quotes', { recommendationId: rec.id, validDays: days, send }),
     onSuccess: (r: any, send) => { qc.invalidateQueries({ queryKey: ['quotes', rec.id] }); if (r.whatsapp === 'opted_out') { toast(`Quote ${r.number} saved. ${NO_WHATSAPP}`, 'info', { label: 'Print', run: () => printQuote(r.id) }); return; }
       toast(send === 'whatsapp' ? `Quote ${r.number} is on its way` : `Quote ${r.number} ready`); if (send === 'print') printQuote(r.id); },
@@ -75,10 +75,10 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   if (booking || moving) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} sitting={moving ?? undefined} onClose={() => { setBooking(false); setMoving(null); refresh(); ['psessions', 'timeline', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />;
   if (paying) return <TakePayment patientId={patientId} patientName={patientName} ahead={{ recommendationId: rec.id }} onClose={() => { setPaying(false); refresh(); }} />;
   return (
-    <Drawer title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${c?.sittings ?? sittings} sittings planned`} onClose={onClose} width="max-w-lg">
+    <Drawer title={rec.procedure ?? 'Procedure'} subtitle={`${patientName} · ${c?.sittings ?? sittings} sessions planned`} onClose={onClose} width="max-w-lg">
       {!cs.data ? <div className="text-sm text-muted">Loading…</div> : !c ? (
         <div className="space-y-4">
-          <div className="text-sm">Price: <b>{money(list)}</b> for {sittings} sittings{pk ? <>, its share of the <b>{pk.name}</b> package ({money(pk.pricePaise)} for all its procedures, full price {money(pk.listPaise)}). Agreeing records the whole package.</> : custom ? <>, <b>set by the doctor</b>.</> : ` (${money(proc?.pricePaise ?? 0)} each), the standard price.`} <span className="text-muted">A lower price is a discount on the bill; above the clinic's limit it needs approval.</span></div>
+          <div className="text-sm">Price: <b>{money(list)}</b> for {sittings} sessions{pk ? <>, its share of the <b>{pk.name}</b> package ({money(pk.pricePaise)} for all its procedures, full price {money(pk.listPaise)}). Agreeing records the whole package.</> : custom ? <>, <b>set by the doctor</b>.</> : ` (${money(proc?.pricePaise ?? 0)} each), the standard price.`} <span className="text-muted">A lower price is a discount on the bill; above the clinic's limit it needs approval.</span></div>
           <div className="rounded-xl border border-line p-3 space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-sm"><b>Quote</b>{quotes[0] ? <Chip tone={quotes[0].state === 'open' ? 'sky' : quotes[0].state === 'expired' ? 'rose' : ''}>{quotes[0].number} · {money(quotes[0].totalPaise)} · {quotes[0].state === 'expired' ? 'expired' : `valid to ${quotes[0].validUntil}`}{quotes[0].sentVia ? ` · ${quotes[0].sentVia}` : ''}</Chip> : <span className="text-muted">None sent yet</span>}</div>
             {quotes[0]?.state === 'expired' && <div className="text-xs text-rose">This quote has run out. Call the patient or make a new one.</div>}
@@ -90,15 +90,15 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
         </div>
       ) : (
         <div className="space-y-4">
-          <Standing c={c} booked={booked} action={booked?.id ? <button className="btn btn-sm" onClick={() => setMoving(booked)}>Reschedule</button> : c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book sitting {c.doneSittings + 1}</button>} />
+          <Standing c={c} booked={booked} action={booked?.id ? <button className="btn btn-sm" onClick={() => setMoving(booked)}>Reschedule</button> : c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book session {c.doneSittings + 1}</button>} />
           {rf && <div className="rounded-xl border border-line p-3 space-y-3 anim-fade-up">
-            <div className="label !mb-0">Refund unused sittings · up to {money(c.refundablePaise)}</div>
+            <div className="label !mb-0">Refund unused sessions · up to {money(c.refundablePaise)}</div>
             <div><label className="label" htmlFor="rf-amt">Amount</label><MoneyInput id="rf-amt" value={rf.amount} onChange={(v) => setRf({ ...rf, amount: v })} /></div>
             <div><span className="label">Given back by</span><div className="flex flex-wrap gap-1.5">{REFUND_MODES.map(([m, l]) => <button key={m} type="button" className={`toggle-opt !py-1 ${rf.mode === m ? 'on' : ''}`} aria-pressed={rf.mode === m} onClick={() => setRf({ ...rf, mode: m })}>{l}</button>)}</div></div>
             <div><label className="label" htmlFor="rf-why">Why</label><input id="rf-why" className="input" maxLength={200} value={rf.why} onChange={(e) => setRf({ ...rf, why: e.target.value })} /></div>
             <div className="flex gap-2"><button className="btn btn-ghost btn-sm" onClick={() => setRf(null)}>Cancel</button><button className="btn btn-primary btn-sm" disabled={refund.isPending || rfPaise <= 0 || rfPaise > c.refundablePaise || rf.why.trim().length < 3} onClick={() => refund.mutate()}>Give back {money(rfPaise)}</button></div>
           </div>}
-          <div className="modal-foot">{can(perms, 'refund.course') && c.refundablePaise > 0 && !rf && <button className="btn btn-sm mr-auto" onClick={() => setRf({ amount: String(c.refundablePaise / 100), mode: 'upi', why: '' })}>Refund unused sittings</button>}<button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && leftToPay && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Take advance</button>}</div>
+          <div className="modal-foot">{can(perms, 'refund.course') && c.refundablePaise > 0 && !rf && <button className="btn btn-sm mr-auto" onClick={() => setRf({ amount: String(c.refundablePaise / 100), mode: 'upi', why: '' })}>Refund unused sessions</button>}<button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && leftToPay && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Take advance</button>}</div>
         </div>
       )}
     </Drawer>

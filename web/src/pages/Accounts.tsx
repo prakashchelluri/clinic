@@ -9,7 +9,7 @@ import { Drawer, Icon, NoAccess, PageHeader, Segmented, Skeleton, Stat, Tabs, mo
 
 type Period = 'today' | 'month' | 'last' | 'pick';
 type Tab = 'sum' | 'days' | 'spend' | 'due';
-const SOURCES = [['consultation', 'Consultations', 'fees taken at check-in'], ['procedure', 'Procedures', 'sittings and course advances'], ['pharmacy', 'Pharmacy', 'medicine sales, less returns'], ['other', 'Other', 'anything not tied to a visit or a sitting']] as const;
+const SOURCES = [['consultation', 'Consultations', 'fees taken at check-in'], ['procedure', 'Procedures', 'sessions and course advances'], ['pharmacy', 'Pharmacy', 'medicine sales, less returns'], ['other', 'Other', 'anything not tied to a visit or a session']] as const;
 // one shade per source, told apart by lightness as well as colour; works in both themes
 const SHADE: Record<string, string> = { consultation: 'bg-muted', procedure: 'bg-clay', pharmacy: 'bg-line-2', other: 'bg-paper-2' };
 const MODES = [['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['other', 'EMI and other']] as const;
@@ -250,12 +250,12 @@ function NotIn({ d, perms }: { d: any; perms: string[] }) {
       <div className="space-y-4">
         {can(perms, 'payment.record') ? <div className="[&>section]:!mt-0"><EmiAwaiting /></div> : null}
         {(d.doctorPrices ?? []).length > 0 && <section className="card overflow-hidden !p-0 xl:col-span-2">
-          <div className="px-5 py-4"><b className="text-[15px]">Doctor's prices · {d.doctorPrices.length}</b><span className="ml-2 text-[12.5px] text-muted">procedure courses the doctor priced instead of the standard price, each agreed by the patient</span></div>
+          <div className="px-5 py-4"><b className="text-[15px]">Custom prices · {d.doctorPrices.length}</b><span className="ml-2 text-[12.5px] text-muted">procedure courses the doctor gave a custom price instead of the standard price, each agreed by the patient</span></div>
           <div className="overflow-x-auto"><table className="table min-w-[760px]">
-            <thead><tr><th className="pl-5">Agreed</th><th>Patient</th><th>Procedure</th><th>Doctor</th><th className="text-right">Standard</th><th className="text-right">Doctor's price</th><th className="pr-5 text-right">Difference</th></tr></thead>
+            <thead><tr><th className="pl-5">Agreed</th><th>Patient</th><th>Procedure</th><th>Doctor</th><th className="text-right">Standard</th><th className="text-right">Custom price</th><th className="pr-5 text-right">Difference</th></tr></thead>
             <tbody>{d.doctorPrices.map((x: any) => { const diff = x.standardPaise ? x.totalPaise - x.standardPaise : null; return (
               <tr key={x.id}><td className="pl-5 whitespace-nowrap">{new Date(x.day + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}<div className="text-[12px] text-muted">recorded by {x.recordedBy ?? '—'}</div></td>
-                <td><b>{x.patient}</b><div className="text-[12px] text-muted">{x.patientNo}</div></td><td>{x.procedure ?? 'Procedure'}<div className="text-[12px] text-muted">{x.sittings} sittings</div></td><td>{x.doctor ?? '—'}</td>
+                <td><b>{x.patient}</b><div className="text-[12px] text-muted">{x.patientNo}</div></td><td>{x.procedure ?? 'Procedure'}<div className="text-[12px] text-muted">{x.sittings} sessions</div></td><td>{x.doctor ?? '—'}</td>
                 <td className="text-right tabular-nums text-muted">{x.standardPaise ? money(x.standardPaise) : '—'}</td><td className="text-right font-semibold tabular-nums">{money(x.totalPaise)}</td>
                 <td className={`pr-5 text-right tabular-nums ${diff === null ? 'text-muted' : diff < 0 ? 'text-rose' : diff > 0 ? 'text-sage' : 'text-muted'}`}>{diff === null ? '—' : `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${money(Math.abs(diff))}`}</td></tr>); })}</tbody>
           </table></div>

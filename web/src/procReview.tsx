@@ -29,11 +29,11 @@ export function ProcReview({ onClose }: { onClose: () => void }) {
   const all: any[] = (data?.sittings ?? []).filter((s: any) => s.state === 'confirmed');
   const waiting = all.filter((s) => s.approval === 'sent');
   const awayOn = (d: string) => (data?.away ?? []).some((a: any) => a.day === d);
-  const flag = (s: any) => awayOn(s.day) ? 'You are away that day' : s.lastDone && s.gapDays && s.day < addDay(s.lastDone, s.gapDays) ? `Too soon: last sitting ${fmt(s.lastDone, { day: 'numeric', month: 'short' })}, every ${s.gapDays} days` : '';
+  const flag = (s: any) => awayOn(s.day) ? 'You are away that day' : s.lastDone && s.gapDays && s.day < addDay(s.lastDone, s.gapDays) ? `Too soon: last session ${fmt(s.lastDone, { day: 'numeric', month: 'short' })}, every ${s.gapDays} days` : '';
   const days = [...new Set(all.map((s) => s.day))].sort();
 
   return (
-    <Modal title="Procedures to approve" subtitle={data ? `${data.pending} sitting${data.pending === 1 ? '' : 's'} from the coordinator` : undefined} onClose={onClose} width="max-w-3xl">
+    <Modal title="Procedures to approve" subtitle={data ? `${data.pending} session${data.pending === 1 ? '' : 's'} from the coordinator` : undefined} onClose={onClose} width="max-w-3xl">
       {q.isLoading ? <Skeleton rows={6} /> : !waiting.length ? <div className="py-8 text-center text-muted">Nothing waiting for you. Everything is approved.</div> : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2"><span className="text-[13.5px] text-muted">Check the dates, then approve. Move or send back only what needs it.</span><span className="flex-1" />
@@ -54,7 +54,7 @@ export function ProcReview({ onClose }: { onClose: () => void }) {
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                       <span className="w-28 shrink-0 text-[13.5px] font-medium">{t12(s.startTime)}–{t12(s.endTime)}</span>
                       <span className="min-w-[180px] flex-1"><b className="block text-[14.5px] font-semibold">{s.patient}</b>
-                        <span className="block text-[12.5px] text-muted">{[`${s.procedure ?? 'Procedure'} · sitting ${s.sittingNo}${s.of ? ` of ${s.of}` : ''}`, s.room, s.lastDone ? `last ${fmt(s.lastDone, { day: 'numeric', month: 'short' })}` : 'first sitting'].filter(Boolean).join(' · ')}</span>
+                        <span className="block text-[12.5px] text-muted">{[`${s.procedure ?? 'Procedure'} · session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''}`, s.room, s.lastDone ? `last ${fmt(s.lastDone, { day: 'numeric', month: 'short' })}` : 'first session'].filter(Boolean).join(' · ')}</span>
                         {f && <span className="block text-[12.5px] font-semibold text-rose">{f}</span>}</span>
                       {s.approval === 'sent' ? <span className="flex flex-wrap gap-1.5">
                         <button className="btn btn-sm btn-primary" disabled={decide.isPending} onClick={() => decide.mutate({ ids: [s.id], action: 'approve' })}>Approve</button>

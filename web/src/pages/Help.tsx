@@ -60,7 +60,7 @@ function Overview() {
     <Flow label="What happens after Checkout.">
       <Step who="pharmacy" title="Pharmacy counter">The prescription is waiting. Medicines are paid for here.</Step>
       <Step who="reception" title="Tests">Reports come back later as photos. The doctor reviews, you tell the patient.</Step>
-      <Step who="reception" title="Procedure">Sittings are booked. Each is paid on the day, or from an advance.</Step>
+      <Step who="reception" title="Procedure">Sessions are booked. Each is paid on the day, or from an advance.</Step>
       <Step who="reception" title="Follow-up">If the patient does not come back, you call from the Follow-ups page.</Step>
     </Flow>
 
@@ -69,16 +69,16 @@ function Overview() {
     <div className="my-4 grid gap-3 md:grid-cols-3">
       <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Consultation fee</div><div className="font-semibold">At check-in</div><div className="mt-1 text-sm text-ink-2">Reception, on the Check-in screen. Cash, UPI or card. A free or waived visit takes nothing.</div></div>
       <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Medicines</div><div className="font-semibold">At the pharmacy counter</div><div className="mt-1 text-sm text-ink-2">The pharmacist bills the prescription and takes the money. Reception does not.</div></div>
-      <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Procedures</div><div className="font-semibold">On the day of each sitting</div><div className="mt-1 text-sm text-ink-2">Or ahead of time: the patient can pay for some sittings in advance (for example 2 of 6).</div></div>
+      <div className="rounded-2xl border border-line bg-surface/80 p-4"><div className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted">Procedures</div><div className="font-semibold">On the day of each session</div><div className="mt-1 text-sm text-ink-2">Or ahead of time: the patient can pay for some sessions in advance (for example 2 of 6).</div></div>
     </div>
 
     <H2 id="words">Words you will see</H2>
     <Table head={['Word', 'What it means']} rows={[
       ['Checkout', 'The list of patients the doctor has finished with, who still need something from reception.'],
       ['Hand-off', 'A line on Checkout that only tells you where the patient pays next. It never stops you closing the visit.'],
-      ['Advised / Started / Paid', 'A procedure plan moves through these. Advised: the doctor suggested it. Started: sittings were paid ahead or done. Paid: every sitting is paid for.'],
-      ['Course', 'A procedure over several sittings, for example 6 chemical peels, at the list price or a clinic package price.'],
-      ['Advance', 'Money paid ahead for some sittings of a course. The price is locked from the first payment.'],
+      ['Advised / Started / Paid', 'A procedure plan moves through these. Advised: the doctor suggested it. Started: sessions were paid ahead or done. Paid: every session is paid for.'],
+      ['Course', 'A procedure over several sessions, for example 6 chemical peels, at the list price or a clinic package price.'],
+      ['Advance', 'Money paid ahead for some sessions of a course. The price is locked from the first payment.'],
       ['Test order', 'The tests the doctor asked for in one visit. The doctor reviews the order once, when every report is in.'],
       ['Completed', 'The doctor has reviewed the results, in the consultation or from Test reports. The desk can still add a report to it afterwards.'],
       ['Handle carefully', 'A flag with a written reason, shown beside the patient’s name. Read the reason before you speak to them.'],
@@ -120,12 +120,12 @@ function Reception() {
     <P>When the doctor finishes, the patient appears under <b>Checkout</b> with a count such as &ldquo;3 open&rdquo;. Work through the lines, then close the visit.</P>
     <Flow label="Checkout in order. Close visit is last.">
       <Step n={1} who="reception" title="Tests">Explain the tests to the patient, then tap <b>Explained</b>. Upload each report from the same side bar when it comes in.</Step>
-      <Step n={2} who="reception" title="Procedure">Tap <b>Quote and payment</b> to send the quote or take payment for sittings. Tap <b>Schedule</b> to book a sitting.</Step>
+      <Step n={2} who="reception" title="Procedure">Tap <b>Quote and payment</b> to send the quote or take payment for sessions. Tap <b>Schedule</b> to book a session.</Step>
       <Step n={3} who="reception" title="Review">Tap <b>Book visit</b>. The doctor&rsquo;s date is filled in.</Step>
       <Step n={4} who="reception" title="Close visit">Tap <b>Close visit</b> when nothing above is open.</Step>
     </Flow>
     <Table head={['Line', 'What to do']} rows={[
-      ['Procedure', <>Price &amp; advance opens the price screen (see Procedures below). Schedule books the first sitting.</>],
+      ['Procedure', <>Price &amp; advance opens the price screen (see Procedures below). Schedule books the first session.</>],
       ['Tests', 'Explained. Upload each report beside its test in the side bar when it arrives.'],
       ['Follow-up', 'Book visit opens the booking screen for the date the doctor asked for. A Sunday or closed day is warned about.'],
       ['Hand-off (grey)', 'Information only. It says the consultation was paid at check-in, medicines are at the pharmacy, and procedures are paid on the day.'],
@@ -150,25 +150,25 @@ function Reception() {
     ]}</Steps>
     <Warn>You cannot mark a result as told before the doctor has reviewed it. If the doctor chose &ldquo;I will call&rdquo;, only the doctor can close it.</Warn>
 
-    <H2 id="procedures">Procedures: price, advance, sittings</H2>
-    <Flow label="A procedure course from advice to the last sitting.">
+    <H2 id="procedures">Procedures: price, advance, sessions</H2>
+    <Flow label="A procedure course from advice to the last session.">
       <Step n={1} who="doctor" title="Advised">The doctor suggests the procedure.</Step>
       <Step n={2} who="reception" title="Quote (optional)">Send or print a quote that is valid for 7, 15 or 30 days.</Step>
-      <Step n={3} who="reception" title="Pay ahead (optional)">The patient pays for some sittings now, on the same Add bill / payment screen.</Step>
-      <Step n={4} who="reception" title="Sittings">Each sitting is paid from the advance, or on the day.</Step>
+      <Step n={3} who="reception" title="Pay ahead (optional)">The patient pays for some sessions now, on the same Add bill / payment screen.</Step>
+      <Step n={4} who="reception" title="Sessions">Each session is paid from the advance, or on the day.</Step>
     </Flow>
     <Steps>{[
-      <>Open the procedure from Checkout or the Courses list. The price comes from the price list; nobody types a price. If the clinic has a <b>package</b> (a fixed price for a number of sittings), tap it.</>,
+      <>Open the procedure from Checkout or the Courses list. The price comes from the price list; nobody types a price. If the clinic has a <b>package</b> (a fixed price for a number of sessions), tap it.</>,
       <>To send a quote, choose the validity and tap <Btn>Send on WhatsApp</Btn> or <Btn>Print</Btn>. The quote never shows consultation or medicine prices. A quote for a package keeps that price when the patient pays.</>,
-      <>If the patient wants to pay now, tap <Btn>Pay for sittings</Btn>. The Add bill / payment screen opens with the sittings: use <b>+</b> and <b>&minus;</b> to choose how many (for example 2 of 6). Sittings paid ahead are paid in full.</>,
+      <>If the patient wants to pay now, tap <Btn>Pay for sessions</Btn>. The Add bill / payment screen opens with the sessions: use <b>+</b> and <b>&minus;</b> to choose how many (for example 2 of 6). Sessions paid ahead are paid in full.</>,
       <>A discount is given on that screen, never on the price (see Taking a payment).</>,
     ]}</Steps>
-    <Tip>Paying ahead for sittings you may not use is normal. Unused sittings stay on the course. A refund of unused sittings is rare and only the owner can approve it, with a reason.</Tip>
-    <P>The <b>Procedures</b> page has three views. <b>Schedule</b> shows sittings by date. <b>Board</b> shows every plan as Advised, Started or Paid; tap a plan to see each sitting: when, who did it, and whether it was paid. <b>Plans to schedule</b> lists plans with no booked sitting.</P>
-    <P>To put a second doctor on a sitting as supervisor, open Schedule, choose the sitting, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
+    <Tip>Paying ahead for sessions you may not use is normal. Unused sessions stay on the course. A refund of unused sessions is rare and only the owner can approve it, with a reason.</Tip>
+    <P>The <b>Procedures</b> page has three views. <b>Schedule</b> shows sessions by date. <b>Board</b> shows every plan as Advised, Started or Paid; tap a plan to see each session: when, who did it, and whether it was paid. <b>Plans to schedule</b> lists plans with no booked session.</P>
+    <P>To put a second doctor on a session as supervisor, open Schedule, choose the session, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
 
     <H2 id="payments">Add bill / payment</H2>
-    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sittings paid ahead. It opens from the patient&rsquo;s profile, from Collect on the Calendar, and from a procedure course.</P>
+    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sessions paid ahead. It opens from the patient&rsquo;s profile, from Collect on the Calendar, and from a procedure course.</P>
     <Steps>{[
       <>Open <b>Patients</b>, find the patient, and tap <Btn>Add bill / payment</Btn>. Everything due is listed and ticked.</>,
       <>To bill something new, pick it from <b>+ Add an item from the price list</b>.</>,
@@ -184,13 +184,13 @@ function Reception() {
     <P>Open <b>Follow-ups</b> each morning. It has four lists. Every row shows how many calls have been made and what happened last.</P>
     <Table head={['List', 'Who is in it']} rows={[
       ['Reviews due', 'The doctor asked to see them again.'],
-      ['Missed visits', 'Booked and did not come, and missed procedure sittings. A booking whose day has passed with no check-in is marked "did not come" by itself the next day.'],
-      ['Procedures to schedule', 'Sittings are paid for, but none is booked.'],
+      ['Missed visits', 'Booked and did not come, and missed procedure sessions. A booking whose day has passed with no check-in is marked "did not come" by itself the next day.'],
+      ['Procedures to schedule', 'Sessions are paid for, but none is booked.'],
       ['Advised, not started', 'The doctor advised a procedure and nothing is paid or booked yet.'],
     ]} />
     <Steps>{[
       <>Tap <Btn>Call</Btn> to dial from a phone, or phone from your desk.</>,
-      <>Tap <Btn>Outcome</Btn> on the row and choose what happened: <b>Will come · book</b>, <b>No answer</b>, <b>Call later</b> (choose a date), or <b>Close with a reason</b> (Declined, Done elsewhere, Moved away, Wrong number). A sitting's confirm call also has <b>Confirmed</b>, <b>Wants another day</b> and <b>Not coming</b>.</>,
+      <>Tap <Btn>Outcome</Btn> on the row and choose what happened: <b>Will come · book</b>, <b>No answer</b>, <b>Call later</b> (choose a date), or <b>Close with a reason</b> (Declined, Done elsewhere, Moved away, Wrong number). A session's confirm call also has <b>Confirmed</b>, <b>Wants another day</b> and <b>Not coming</b>.</>,
       <>On <b>No answer</b> you can tick &ldquo;Send a short message with the clinic number&rdquo;. A Sunday date asks you to confirm.</>,
     ]}</Steps>
     <Tip>Booking and closing with a reason take the patient off the list; the reason stays in the patient's history. Call later puts them at the bottom until that day.</Tip>
@@ -200,7 +200,7 @@ function Reception() {
     <Table head={['On the profile', 'What it is for']} rows={[
       ['Chips beside the name', 'VIP, Family and friends, and amber Handle carefully. Hover (or read the banner) for the reason.'],
       ['Guardian', 'A child has a link to the parent’s own profile. “Contact is mother” says who answers the phone.'],
-      ['Filter tabs', 'All, Visits, Procedures, Payments, Reports and Missed. Missed lists missed visits and sittings with every call made, in case the patient later says nobody told them.'],
+      ['Filter tabs', 'All, Visits, Procedures, Payments, Reports and Missed. Missed lists missed visits and sessions with every call made, in case the patient later says nobody told them.'],
       ['Courses and Bills', 'Each course, what is paid ahead, and every bill with its totals.'],
     ]} />
     <P>Only the doctor or owner can set a flag. You can see all flags. To change who answers a phone or add a guardian, tap the pencil on the profile.</P>
@@ -269,13 +269,13 @@ function Owner() {
     <Table head={['Settings tab', 'What it does']} rows={[
       ['Roles and access', 'Tick what each role can do. This is where you decide who may refund, give discounts, close the day, or see fees. Also set the one discount limit for the whole clinic: anything above it waits for your approval on Today.'],
       ['Templates', 'The ready-made sets doctors tap in the consultation: checklists, medicines, advice, findings, tests, procedures. Approve the drafts that doctors save.'],
-      ['Procedures', 'Prices and sittings, and Packages: a procedure with sittings and one price, so reception can pick it instead of typing.'],
+      ['Procedures', 'Prices and sessions, and Packages: a procedure with sessions and one price, so reception can pick it instead of typing.'],
       ['Booking rules', 'Booking windows. Also the calendar text size for the whole clinic.'],
       ['Privacy & access', 'Where staff can work from, hidden phone numbers, how soon a quiet screen signs out.'],
     ]} />
     <Warn>Settings has a <b>Clear everything and load test data</b> button at the bottom of Settings, Clinic details. It deletes every patient, visit, bill and message in the clinic and loads sample data. Use it only on a test clinic. You must type RESET.</Warn>
     <H2 id="owner-reports">Owner: reports</H2>
-    <P><b>Reports</b> shows a period you pick (today, last 7 or 30 days, a month, or your own dates) against the period before it. <b>Overview</b>: patients, new and returning, collected, still due, sittings done, waiting time and no-shows, visits per day and each doctor. <b>Visits</b>: visit types, booked against walk-in, busiest day and hour. <b>Patients</b>: men and women, age, area, how often they came. <b>Clinical</b>: top diagnoses, medicines, tests and procedures. Pick a doctor at the top to see only theirs; a doctor sees only their own. <b>Day</b> has the daily report and End of day. Each tab downloads as a CSV file. <b>Audit log</b> lists every change with who made it.</P>
+    <P><b>Reports</b> shows a period you pick (today, last 7 or 30 days, a month, or your own dates) against the period before it. <b>Overview</b>: patients, new and returning, collected, still due, sessions done, waiting time and no-shows, visits per day and each doctor. <b>Visits</b>: visit types, booked against walk-in, busiest day and hour. <b>Patients</b>: men and women, age, area, how often they came. <b>Clinical</b>: top diagnoses, medicines, tests and procedures. Pick a doctor at the top to see only theirs; a doctor sees only their own. <b>Day</b> has the daily report and End of day. Each tab downloads as a CSV file. <b>Audit log</b> lists every change with who made it.</P>
   </>);
 }
 

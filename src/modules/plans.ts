@@ -104,7 +104,9 @@ export function planRoutes(app: FastifyInstance) {
         doctor: next?.doctor ?? done.at(-1)?.doctor ?? x.prescriber ?? null, advisedOn: x.r.createdAt,
         next: next ? { id: next.ps.id, day: next.ps.day, startTime: next.ps.startTime, endTime: next.ps.endTime, sittingNo: next.ps.sittingNo, practitionerId: next.ps.practitionerId, approval: next.ps.approval, confirmed: !!(next.ps.weekConfirmedAt || next.ps.patientConfirmedAt) } : null,
         missed: missed && !next ? { day: missed.ps.day, sittingNo: missed.ps.sittingNo } : null,
-        listPaise: fees ? (x.price ?? 0) * sit : null, totalPaise: fees ? c?.totalPaise ?? null : null,
+        // the price before the patient agrees: the doctor's own (or the plan's share of a package), else the price list
+        listPaise: fees ? (x.r.amountPaise && x.r.amountPaise > 0 ? x.r.amountPaise : (x.price ?? 0) * sit) : null, amountPaise: fees ? x.r.amountPaise ?? null : null, package: fees ? x.r.package ?? null : null,
+        totalPaise: fees ? c?.totalPaise ?? null : null,
         paidPaise: m ? m.advancePaise - m.refundedPaise + m.paidOnDayPaise : null, stillToPayPaise: m ? m.stillToPayPaise : null,
         quote: q ? { number: q.number, validUntil: q.validUntil, state: quoteState } : null, ledger };
     });

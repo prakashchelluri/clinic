@@ -77,7 +77,7 @@ test('photos need consent, carry area/view/sitting, and form a timeline', async 
     const mv = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { day, startTime: '17:30', minutes: 30, roomId: room.id, reason: 'patient asked for evening' });
     assert.equal(mv.status, 200, JSON.stringify(mv.body)); assert.equal(mv.body.startTime, '17:30'); assert.equal(mv.body.state, 'confirmed');
     const nxt = (await doctor('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patient.id === p.id);
-    assert.equal(nxt.next.startTime, '11:00', 'worklist carries the next sitting'); assert.ok(nxt.contactLog.some((c: any) => c.outcome === 'Sitting rescheduled'), 'rescheduling is logged');
+    assert.equal(nxt.next.startTime, '11:00', 'worklist carries the next sitting'); assert.ok(nxt.contactLog.some((c: any) => c.outcome === 'Session rescheduled'), 'rescheduling is logged');
     const clash2 = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { day, startTime: '16:00', minutes: 30, roomId: room.id });
     assert.equal(clash2.status, 200, 'a free slot is accepted');
     // schedule screen: list by day with planned sittings, counts per day, patient confirmation, assigning a doctor

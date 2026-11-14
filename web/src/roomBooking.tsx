@@ -29,7 +29,7 @@ export function RoomBooking({ cfg, at, booking, onClose }: { cfg: any; at: { roo
   const cancel = async () => { if (!(await ask({ title: 'Cancel this room booking?', body: `${roomName} · ${purpose} · ${dayName(day)} ${start}–${end}`, confirmLabel: 'Cancel booking', cancelLabel: 'Keep it' }))) return;
     try { await del(`/calendar/blocks/${booking.id}`); toast('Room booking cancelled'); done(); } catch (e) { toast(errText(e), 'err'); } };
 
-  const sw = !booking && <Segmented<'room' | 'proc'> value={mode} onChange={setMode} options={[{ value: 'room', label: 'Room booking' }, { value: 'proc', label: 'Procedure sitting' }]} />;
+  const sw = !booking && <Segmented<'room' | 'proc'> value={mode} onChange={setMode} options={[{ value: 'room', label: 'Room booking' }, { value: 'proc', label: 'Procedure session' }]} />;
   if (mode === 'proc') return <ScheduleProcedure cfg={cfg} at={{ day: at.day, roomId: at.roomId, startTime: at.startTime }} head={sw} onClose={done} />;
   return (
     <Drawer title={booking ? 'Room booking' : `Book ${roomName}`} subtitle={`${roomName} · ${dayName(day)}`} onClose={onClose} width="max-w-lg">

@@ -81,7 +81,7 @@ test('a clinic with no GSTIN prints a bill of supply with no CGST/SGST; with one
   assert.deepEqual(gstSummary(null, [{ amountPaise: 118000, taxRateBp: 1800 }]).rates, []);
   const O = as(await login('owner@demo.clinic'));
   const p = (await O('POST', '/patients', { fullName: 'Gst Patient', phone: '9876533333' })).body;
-  const ch = (await O('POST', '/charges', { patientId: p.id, description: 'Chemical peel sitting 1', amountPaise: 118000, taxRateBp: 1800 })).body;
+  const ch = (await O('POST', '/charges', { patientId: p.id, description: 'Chemical peel session 1', amountPaise: 118000, taxRateBp: 1800 })).body;
   const ex = (await O('POST', '/charges', { patientId: p.id, description: 'Consultation', amountPaise: 30000 })).body;
   await O('PATCH', '/admin/clinic', { settings: { gstin: '' } });
   const paid = await O('POST', '/payments/take', { patientId: p.id, chargeIds: [ch.id, ex.id], idempotencyKey: 'gst-take-1', parts: [{ method: 'upi', amountPaise: 148000, reference: 'UPI1' }] });

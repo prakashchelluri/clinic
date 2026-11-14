@@ -61,7 +61,7 @@ export function Clinic() {
       body: <div>{reviews.map((r: any) => <div key={r.id} className="flex justify-between gap-3 border-t border-line py-2.5 text-[14px] font-semibold"><span>{r.vendor ?? 'Vendor'}{r.billNo ? ` · bill ${r.billNo}` : ''}</span><span className="text-[13px] font-medium text-muted">{r.lines?.length ?? 0} line{r.lines?.length === 1 ? '' : 's'} to check</span></div>)}</div> }] : []),
     ...(expired > 0 ? [{ key: 'exp', title: `${expired} expired still on the shelf`, where: 'Inventory', act: 'Take them off', to: '/inventory?tab=batches', body: <p className="text-[14px]">They can no longer be sold. Taking them off writes them off the stock.</p> }] : []),
     ...(s.emi.n ? [{ key: 'emi', title: `${money(s.emi.totalPaise)} EMI not yet paid by the lender`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">{s.emi.n} EMI payment{s.emi.n === 1 ? '' : 's'} counted as received, waiting for the lender to settle.</p> }] : []),
-    ...(s.dues.totalPaise ? [{ key: 'due', title: `${money(s.dues.totalPaise)} still due from ${s.dues.patients} patient${s.dues.patients === 1 ? '' : 's'}`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">Consultations, sittings or other charges billed and not yet paid.</p> }] : []),
+    ...(s.dues.totalPaise ? [{ key: 'due', title: `${money(s.dues.totalPaise)} still due from ${s.dues.patients} patient${s.dues.patients === 1 ? '' : 's'}`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">Consultations, sessions or other charges billed and not yet paid.</p> }] : []),
   ];
   const yc = s.yesterday.closed;
   const max = Math.max(1, ...s.week.map((w: any) => w.totalPaise));
@@ -114,7 +114,7 @@ export function Clinic() {
               <span key={d.id + 'w'} className="border-t border-line py-2.5">{waiting.filter((v) => v.practitionerId === d.id).length}</span>,
               <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.collectedPaise !== null ? money(d.collectedPaise) : '—'}</span>])}
           </div>
-          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sittings, less refunds, from the same figures as End of day. Pharmacy and course advances are not split by doctor.</div>
+          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sessions, less refunds, from the same figures as End of day. Pharmacy and course advances are not split by doctor.</div>
         </section>
       </div>
 

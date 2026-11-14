@@ -12,7 +12,7 @@ export const KINDS: { kind: TmplKind; label: string; one: string; hint: string }
   { kind: 'finding', label: 'Findings', one: 'findings set', hint: 'Examination findings to tick' },
   { kind: 'advice', label: 'Advice', one: 'advice set', hint: 'Advice lines for the patient' },
   { kind: 'tests', label: 'Test panels', one: 'test panel', hint: 'Tests that are ordered together' },
-  { kind: 'procedure', label: 'Procedures', one: 'procedure package', hint: 'Procedure, sittings and interval' },
+  { kind: 'procedure', label: 'Procedures', one: 'procedure package', hint: 'Procedure, sessions and interval' },
   { kind: 'symptom', label: 'Symptom sets', one: 'symptom set', hint: 'Symptoms with since and severity, saved from the pad' },
   { kind: 'diagnosis', label: 'Diagnosis sets', one: 'diagnosis set', hint: 'Diagnoses with severity, saved from the pad' },
 ];

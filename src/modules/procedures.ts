@@ -24,7 +24,7 @@ export async function procedureConsent(tx: Tx, t: string, ps: { id: string; pati
   if (on) return { consentNeeded: false, consent: on };
   const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, ps.patientId), eq(procedureSession.procedureId, ps.procedureId),
     sql`${procedureSession.state} in ('in_progress','completed')`, sql`${procedureSession.id} <> ${ps.id}`));
-  return n ? { consentNeeded: false, consent: { grantedAt: '', by: '', how: 'given at an earlier sitting' } } : { consentNeeded: true, consent: null };
+  return n ? { consentNeeded: false, consent: { grantedAt: '', by: '', how: 'given at an earlier session' } } : { consentNeeded: true, consent: null };
 }
 
 const HHMM = z.string().regex(/^\d{2}:\d{2}$/); const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -126,7 +126,7 @@ async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$i
       const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: done.recommendationId, patientId: done.patientId, procedureId: done.procedureId, practitionerId: done.practitionerId, roomId: done.roomId,
         sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, done.practitionerId, day)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
       await planSittingReminder(tx, t, ps.id);
-      if (done.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: done.practitionerId, roomId: done.roomId, day, startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${n + 1}`, procedureSessionId: ps.id });
+      if (done.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: done.practitionerId, roomId: done.roomId, day, startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
       await emit(tx, ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day, startTime, endTime, roomId: done.roomId, practitionerId: done.practitionerId, byPlan: true });
       return ps;
     }
@@ -175,7 +175,7 @@ export function procedureRoutes(app: FastifyInstance) {
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
       sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).returning();
     await planSittingReminder(tx, t, ps.id);
-    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${n + 1}`, procedureSessionId: ps.id });
+    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
     await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
     await emit(tx, req.ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day: body.day, startTime: body.startTime, endTime, roomId: body.roomId, practitionerId: body.practitionerId, forced: c.length > 0 });
     return { ...ps, warnings: c };
@@ -220,7 +220,7 @@ export function procedureRoutes(app: FastifyInstance) {
     const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId, ...who, ...(body.supervisorId !== undefined ? { supervisorId: body.supervisorId } : {}) }).where(eq(procedureSession.id, id)).returning();
     await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
-    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: ps.roomId, day: ps.day, startTime: ps.startTime, endTime: ps.endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
+    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: ps.roomId, day: ps.day, startTime: ps.startTime, endTime: ps.endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${ps.sittingNo}`, procedureSessionId: id });
     await emit(tx, req.ctx, 'procedure_session.doctor_assigned', 'procedure_session', id, { practitionerId: body.practitionerId });
     return row;
   });
@@ -257,7 +257,7 @@ export function procedureRoutes(app: FastifyInstance) {
       .leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
       .where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((x) => x[0]);
     if (!r) throw new HttpError(404, 'NOT_FOUND');
-    await auditView(tx, req, r.p.id, 'Opened a procedure sitting');
+    await auditView(tx, req, r.p.id, 'Opened a procedure session');
     const enc = r.rec ? await tx.select({ at: encounter.createdAt, data: encounter.data }).from(encounter).where(eq(encounter.id, r.rec.encounterId)).then((x) => x[0]) : null;
     const names = (x: any) => (Array.isArray(x) ? x.map((d) => (typeof d === 'string' ? d : d?.name)).filter(Boolean) : []);
     const sittings = await tx.select({ id: procedureSession.id, sittingNo: procedureSession.sittingNo, day: procedureSession.day, startTime: procedureSession.startTime, endTime: procedureSession.endTime, practitionerId: procedureSession.practitionerId, roomId: procedureSession.roomId, autoBooked: procedureSession.autoBooked, approval: procedureSession.approval, state: procedureSession.state, notes: procedureSession.notes, outcome: procedureSession.outcome, stateReason: procedureSession.stateReason })
@@ -289,9 +289,9 @@ export function procedureRoutes(app: FastifyInstance) {
     const [moved] = await tx.update(procedureSession).set({ autoBooked: false, day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 && !body.planned ? new Date().toISOString() : null, notes: body.notes ?? ps.notes, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).where(eq(procedureSession.id, id)).returning();
     await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
-    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · sitting ${ps.sittingNo}`, procedureSessionId: id });
+    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${ps.sittingNo}`, procedureSessionId: id });
     const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
-    if (rec) await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Sitting rescheduled', note: `${ps.day} ${ps.startTime} → ${body.day} ${body.startTime}${body.reason ? ` · ${body.reason}` : ''}` }] }).where(eq(recommendation.id, rec.id));
+    if (rec) await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Session rescheduled', note: `${ps.day} ${ps.startTime} → ${body.day} ${body.startTime}${body.reason ? ` · ${body.reason}` : ''}` }] }).where(eq(recommendation.id, rec.id));
     await emit(tx, req.ctx, 'procedure_session.rescheduled', 'procedure_session', id, { from: { day: ps.day, startTime: ps.startTime, roomId: ps.roomId }, to: { day: body.day, startTime: body.startTime, roomId: body.roomId }, reason: body.reason, forced: c.length > 0 });
     return { ...moved, warnings: c };
   };
@@ -453,7 +453,7 @@ export function procedureRoutes(app: FastifyInstance) {
     }
     await planSittingReminder(tx, t, id); // only a sitting still booked keeps its reminder
     if (body.state === 'completed') await drawSitting(tx, req.ctx, ps);
-    else if (cur.state === 'completed') await reverseSitting(tx, req.ctx, id, body.state === 'cancelled' ? 'Sitting cancelled' : `Sitting moved back to ${body.state.replace('_', ' ')}`);
+    else if (cur.state === 'completed') await reverseSitting(tx, req.ctx, id, body.state === 'cancelled' ? 'Session cancelled' : `Session moved back to ${body.state.replace('_', ' ')}`);
     await emit(tx, req.ctx, `procedure_session.${body.state}`, 'procedure_session', id, { reason: body.reason, ...(body.state === 'in_progress' && body.consent !== undefined ? { consent: body.consent } : {}) });
     return ps;
   });

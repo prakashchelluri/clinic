@@ -43,7 +43,7 @@ export function Block({ s, week = false, doctor = false, cls = '', onDown, onCli
     <button type="button" className={`pw-blk ${st.cls} ${onDown ? '' : 'fixed'} ${cls}`} onPointerDown={onDown} onClick={onClick} title={s.approvalNote ? `Doctor's note: ${s.approvalNote}` : undefined}>
       <span className="top"><span>{t12(s.startTime)}–{t12(s.endTime)} · {lenText(len)}</span><span className="st">{st.word}</span></span>
       <b>{s.state === 'completed' ? '✓ ' : ''}{s.patient.fullName}</b>
-      <span>{s.procedure ?? 'Procedure'} · {s.of ? `${s.sittingNo} of ${s.of}` : `sitting ${s.sittingNo}`}</span>
+      <span>{s.procedure ?? 'Procedure'} · {s.of ? `${s.sittingNo} of ${s.of}` : `session ${s.sittingNo}`}</span>
       <span>{s.doctor ?? 'No doctor'} · {s.room ?? 'no room'}</span>
       {s.approval === 'change' && s.approvalNote && <span className="st">“{s.approvalNote}”</span>}
     </button>

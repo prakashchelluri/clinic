@@ -44,9 +44,9 @@ export const MSG = {
   en: {
     triedToCall: (first: string, clinic: string, phone?: string) => `Hello ${first}, we tried to reach you from ${clinic}. ${phone ? `Please call ${phone} or ` : 'Please '}reply to this message and we will help you.`,
     rxFor: (clinic: string, name: string) => `${clinic}: prescription for ${name}.`, medicines: 'Medicines', howToUse: 'How to use', reviewOn: (d: string) => `Review on ${d}.`, questions: (p: string) => `Questions? Call ${p}.`,
-    quote: 'Quote', plan: 'Your treatment plan', sittings: 'sittings', total: 'Total', validUntil: (d: string) => `Valid until ${d}.`, replyYes: 'Reply YES to book your first sitting.',
+    quote: 'Quote', plan: 'Your treatment plan', sittings: 'sittings', total: 'Total', validUntil: (d: string) => `Valid until ${d}.`, replyYes: 'Reply YES to book your first session.',
     pharmacyBill: 'Pharmacy bill', gstIncluded: '(GST included)',
-    sittingReminder: (first: string, proc: string, part: string, date: string, time: string, clinic: string, phone?: string) => `Hello ${first}, a reminder from ${clinic}: your ${proc} sitting${part ? ` (${part})` : ''} is tomorrow, ${date} at ${time}. ${phone ? `To change it, please call ${phone}.` : 'To change it, reply to this message.'}`,
+    sittingReminder: (first: string, proc: string, part: string, date: string, time: string, clinic: string, phone?: string) => `Hello ${first}, a reminder from ${clinic}: your ${proc} session${part ? ` (${part})` : ''} is tomorrow, ${date} at ${time}. ${phone ? `To change it, please call ${phone}.` : 'To change it, reply to this message.'}`,
   },
   te: {
     triedToCall: (first: string, clinic: string, phone?: string) => `నమస్తే ${first} గారు, ${clinic} నుండి మీకు ఫోన్ చేశాము. ${phone ? `దయచేసి ${phone} కి ఫోన్ చేయండి లేదా ` : 'దయచేసి '}ఈ మెసేజ్‌కి రిప్లై ఇవ్వండి, మేము సహాయం చేస్తాము.`,

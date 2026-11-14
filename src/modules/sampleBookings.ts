@@ -113,7 +113,7 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
         const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
         const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: p.id, procedureId: proc.id, practitionerId: doc.id, roomId: rm?.id ?? null, sittingNo,
           day, startTime: start, endTime: end, state: off < 0 ? 'completed' : 'confirmed', notes: off < 0 ? ['tolerated well', 'mild redness, settled in 10 min', 'good response'][k % 3] : null }).returning();
-        if (off >= 0) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doc.id, roomId: rm?.id ?? null, day, startTime: start, endTime: end, kind: 'procedure', note: `${proc.name} · sitting ${sittingNo}`, procedureSessionId: ps.id });
+        if (off >= 0) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doc.id, roomId: rm?.id ?? null, day, startTime: start, endTime: end, kind: 'procedure', note: `${proc.name} · session ${sittingNo}`, procedureSessionId: ps.id });
         psId = ps.id; counts.sittings++;
       }
       if (off >= 0) continue;

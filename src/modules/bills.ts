@@ -103,7 +103,7 @@ export function billRoutes(app: FastifyInstance) {
         if (gross <= 0) throw new HttpError(409, 'NOTHING_LEFT_TO_PAY_AHEAD');
         if (c.validUntil && c.validUntil < todayIn(ctx.timezone)) throw new HttpError(409, 'PACKAGE_EXPIRED', { validUntil: c.validUntil });
         const name = c.procedureId ? await tx.select({ n: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]?.n) : null;
-        items.push({ what: `${name ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${l.sittings} sitting${l.sittings === 1 ? '' : 's'} paid ahead`, gross, prior: 0, disc: l.discountPaise, canDiscount: !waiting.has(c.id), why: waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined, courseId: c.id, ahead: true, at: '' });
+        items.push({ what: `${name ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${l.sittings} session${l.sittings === 1 ? '' : 's'} paid ahead`, gross, prior: 0, disc: l.discountPaise, canDiscount: !waiting.has(c.id), why: waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined, courseId: c.id, ahead: true, at: '' });
       }
     }
 

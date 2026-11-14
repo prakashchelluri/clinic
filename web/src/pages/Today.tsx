@@ -49,7 +49,7 @@ export function Today() {
   const ordq = useQuery({ queryKey: ['orders'], queryFn: () => get('/orders'), refetchInterval: 30000, enabled: !!doc && can(perms, 'document.read') });
   const secq = useQuery({ queryKey: ['security'], queryFn: () => get('/security'), enabled: (me.roles ?? []).includes('owner'), refetchInterval: 60000 });
   const open = useMutation({ mutationFn: (visitId: string) => post(`/visits/${visitId}/encounter`), onSuccess: (e: any) => nav(`/encounter/${e.id}`, { viewTransition: true }), onError: (e) => toast(errText(e), 'err') });
-  const take = useMutation({ mutationFn: (id: string) => post(`/procedure-sessions/${id}/assign`, { practitionerId: doc }), onSuccess: () => { ['calendar', 'psessions'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('The sitting is yours'); }, onError: (e) => toast(errText(e), 'err') });
+  const take = useMutation({ mutationFn: (id: string) => post(`/procedure-sessions/${id}/assign`, { practitionerId: doc }), onSuccess: () => { ['calendar', 'psessions'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('The session is yours'); }, onError: (e) => toast(errText(e), 'err') });
   const [change, setChange] = useState<{ kind: ChangeKind; day?: string } | null>(null);
   const [dayMenu, setDayMenu] = useState(false); // My day: running late, change my day, not coming tomorrow
   // sittings the coordinator sent for this doctor's approval
@@ -161,7 +161,7 @@ export function Today() {
             {otherCount > 0 && <>
               <div className="border-t border-line px-4 pb-1.5 pt-3 text-[12.5px] font-semibold text-muted">Needs your attention · {otherCount}</div>
               {asksN > 0 && <DiscountAsks />}
-              {toApprove > 0 && <Attn title={`${toApprove} procedure sitting${toApprove === 1 ? '' : 's'} to approve`} sub={`From the coordinator${approvals.data?.weeks?.length ? ` · week of ${new Date(approvals.data.weeks[0] + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : ''}`} action="Review" onClick={() => setReviewing(true)} />}
+              {toApprove > 0 && <Attn title={`${toApprove} procedure session${toApprove === 1 ? '' : 's'} to approve`} sub={`From the coordinator${approvals.data?.weeks?.length ? ` · week of ${new Date(approvals.data.weeks[0] + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}` : ''}`} action="Review" onClick={() => setReviewing(true)} />}
               {drafts.map((v: any) => <Attn key={v.id} title={v.patient.fullName} sub={`Arrived ${hhmm(v.arrivedAt)} · note not finished`} action="Finish" onClick={() => open.mutate(v.id)} />)}
               {noDoc.map((p: any) => <Attn key={p.id} title={p.patient.fullName} sub={`${p.procedure ?? 'Procedure'} ${p.startTime} has no doctor`} action={doc ? 'Take it' : 'Open'} onClick={() => doc ? take.mutate(p.id) : nav(`/worklist?tab=today&day=${today()}`)} />)}
               {overdue.length > 0 && <Attn title={`${overdue.length} follow-up${overdue.length === 1 ? '' : 's'} overdue`} sub="On the desk's Calls list" action="See" onClick={() => nav('/calls?tab=reviews')} />}

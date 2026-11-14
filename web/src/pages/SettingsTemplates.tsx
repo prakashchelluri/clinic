@@ -96,7 +96,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
         </div>}
         {kind === 'procedure' && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="col-span-2"><label className="label" htmlFor="t-proc">Procedure</label><select id="t-proc" className="input" value={proc.procedureId} onChange={(e) => { const x = cfg.procedures.find((y: any) => y.id === e.target.value); setProc({ ...proc, procedureId: e.target.value, sittings: proc.sittings || String(x?.typicalSittings ?? ''), price: proc.price || (x?.pricePaise ? String(x.pricePaise / 100) : '') }); }}>{cfg.procedures.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></div>
-          <div><label className="label" htmlFor="t-sit">Sittings</label><NumInput id="t-sit" max={60} className="input" value={proc.sittings} onChange={(e) => setProc({ ...proc, sittings: e.target.value })} /></div>
+          <div><label className="label" htmlFor="t-sit">Sessions</label><NumInput id="t-sit" max={60} className="input" value={proc.sittings} onChange={(e) => setProc({ ...proc, sittings: e.target.value })} /></div>
           <div><label className="label" htmlFor="t-int">Every (days)</label><NumInput id="t-int" max={365} className="input" value={proc.intervalDays} onChange={(e) => setProc({ ...proc, intervalDays: e.target.value })} /></div>
           <div><label className="label">Package price</label><MoneyInput value={proc.price} onChange={(v) => setProc({ ...proc, price: v })} /></div>
         </div>}
@@ -116,7 +116,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
 }
 
 const n = (x: number, one: string) => `${x} ${one}${x === 1 ? '' : 's'}`;
-const summary = (t: Tmpl) => t.kind === 'medicine' ? n(t.payload.items?.length ?? 0, 'medicine') : t.kind === 'complaint' ? n(t.payload.questions?.length ?? 0, 'question') : t.kind === 'finding' ? n((t.payload.chips?.length ?? 0) + (t.payload.items?.length ?? 0), 'finding') : t.kind === 'notes' ? String(t.payload.text ?? '').slice(0, 60) : t.kind === 'canvas' ? 'drawing' : t.kind === 'module' ? n(t.payload.rows?.length ?? 0, 'line') : t.kind === 'advice' ? n(t.payload.lines?.length ?? 0, 'line') : t.kind === 'tests' ? (t.payload.tests ?? []).map((x: any) => x.name).join(', ') : t.kind === 'symptom' || t.kind === 'diagnosis' ? (t.payload.items ?? []).map((x: any) => x.name).join(', ') : `${t.payload.sittings ?? '?'} sittings${t.payload.pricePaise ? ` · ${money(t.payload.pricePaise)}` : ''}`;
+const summary = (t: Tmpl) => t.kind === 'medicine' ? n(t.payload.items?.length ?? 0, 'medicine') : t.kind === 'complaint' ? n(t.payload.questions?.length ?? 0, 'question') : t.kind === 'finding' ? n((t.payload.chips?.length ?? 0) + (t.payload.items?.length ?? 0), 'finding') : t.kind === 'notes' ? String(t.payload.text ?? '').slice(0, 60) : t.kind === 'canvas' ? 'drawing' : t.kind === 'module' ? n(t.payload.rows?.length ?? 0, 'line') : t.kind === 'advice' ? n(t.payload.lines?.length ?? 0, 'line') : t.kind === 'tests' ? (t.payload.tests ?? []).map((x: any) => x.name).join(', ') : t.kind === 'symptom' || t.kind === 'diagnosis' ? (t.payload.items ?? []).map((x: any) => x.name).join(', ') : `${t.payload.sittings ?? '?'} sessions${t.payload.pricePaise ? ` · ${money(t.payload.pricePaise)}` : ''}`;
 
 /** Settings → Templates: every kind of set the doctors use, linked to complaints and diagnoses. */
 export function TemplatesTab({ cfg }: { cfg: any }) {

@@ -59,7 +59,7 @@ export const PERMISSIONS: { key: string; group: string; label: string; hint: str
   { key: 'fees.see', group: 'Money', label: 'See fees and payments', hint: 'Off for junior doctors: prices, amounts due and revenue are hidden' },
   { key: 'discount.give', group: 'Money', label: 'Give procedure discounts', hint: 'Up to the clinic limit; above it the discount waits for approval' },
   { key: 'discount.approve', group: 'Money', label: 'Approve discounts above the limit', hint: 'Owner by default' },
-  { key: 'refund.course', group: 'Money', label: 'Approve refunds of unused prepaid sittings', hint: 'Owner by default' },
+  { key: 'refund.course', group: 'Money', label: 'Approve refunds of unused prepaid sessions', hint: 'Owner by default' },
   { key: 'day.close', group: 'Money', label: 'Close the day', hint: 'End of day: count the drawer, check against the diary, lock the day' },
   { key: 'report.daily', group: 'Money', label: 'See the daily report', hint: 'Reports page' },
   { key: 'expense.read', group: 'Money', label: 'See expenses', hint: 'Expenses page' },
