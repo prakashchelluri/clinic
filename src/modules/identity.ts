@@ -10,6 +10,7 @@ import { LAB_PARAMS } from '../lib/labs.js';
 import { historyCategories } from '../lib/history.js';
 import { verifyPassword, hashPassword, HttpError, can } from '../lib/auth.js';
 import { testDataAllowed } from './sample.js';
+import { labTestsOf, expenseCategoriesOf } from '../lib/lists.js';
 import { route } from '../lib/route.js';
 
 const Login = z.object({ tenant: z.string().optional(), email: z.string().email(), password: z.string() });
@@ -88,7 +89,7 @@ export function identityRoutes(app: FastifyInstance) {
     return { tenant: { id: ten.id, name: ten.name, slug: ten.slug, timezone: ten.timezone, settings },
       testData: owner ? await testDataAllowed(tx, t, req.ctx.tenantKind) : false,
       branches, practitioners, ...priced, forms, specialties: specs, rooms, whatsappReady: whatsappReady(),
-      pad: padConfig(ten.settings), printRx: printSettings(ten.settings), labParams: LAB_PARAMS, historyCategories: historyCategories(ten.settings) };
+      pad: padConfig(ten.settings), printRx: printSettings(ten.settings), labParams: LAB_PARAMS, labTests: labTestsOf(ten.settings), expenseCategories: expenseCategoriesOf(ten.settings), historyCategories: historyCategories(ten.settings) };
   });
 
   route(app, 'get', '/users', 'user.read', async (req, tx) =>

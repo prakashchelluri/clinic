@@ -4,7 +4,7 @@ import { get, patch, qc, errText } from './api';
 import { Floating, NumInput, fmtDate, toast } from './ui';
 
 /** The clinic's vitals, one list for check-in, the pad, past values and the printed prescription:
- *  the six every clinic knows, plus any the owner adds in Settings → Consultation form fields. settings.vitals says which are taken. */
+ *  the six every clinic knows, plus any the owner adds in Settings › Vitals. settings.vitals says which are taken. */
 export type VitalField = { key: string; label: string; unit: string; type: 'number' | 'text'; ph?: string; decimal?: boolean; min?: number; max?: number; custom?: boolean };
 export const BUILTIN_VITALS: VitalField[] = [
   { key: 'weight_kg', label: 'Weight', unit: 'kg', type: 'number', decimal: true, min: 1, max: 400 },

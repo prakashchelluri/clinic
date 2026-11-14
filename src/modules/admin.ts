@@ -37,6 +37,10 @@ export function adminRoutes(app: FastifyInstance) {
     // what patients read when their own language is not set
     if (body.settings?.messages?.language !== undefined) body.settings.messages.language = z.enum(['en', 'te', 'hi']).parse(body.settings.messages.language);
     if (body.settings && 'display' in body.settings) throw new HttpError(400, 'DISPLAY_TOKEN_IS_GENERATED');
+    // the tests a doctor picks from, and what an expense can be for: short lists of names, no repeats
+    const NameList = (max: number, len: number) => z.array(z.string().trim().min(1).max(len)).min(1).max(max).refine((xs) => new Set(xs.map((x) => x.toLowerCase())).size === xs.length, 'DUPLICATE_NAME');
+    if (body.settings?.labTests !== undefined) body.settings.labTests = NameList(200, 60).parse(body.settings.labTests);
+    if (body.settings?.expenseCategories !== undefined) body.settings.expenseCategories = NameList(40, 40).parse(body.settings.expenseCategories);
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
     if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner'); // privacy settings change only through /security (owner)
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
@@ -185,18 +189,57 @@ export function adminRoutes(app: FastifyInstance) {
     req.audited = true; return row;
   });
 
-  // --- medicines ---
+  // --- consultation types: the fee charged at check-in and the visit type booked on the calendar, kept as one ---
+  // The fee is the record; its visit type (service.fee_category_id) follows its name, fee and active, and holds the booking side.
+  const BookIn = z.object({ bookable: z.boolean(), places: z.number().int().min(1).max(10).optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+    practitionerIds: z.array(z.string().uuid()).max(50).optional(), description: z.string().trim().max(300).optional().nullable() });
+  const linkedService = (tx: any, t: string, feeId: string) => tx.select().from(service).where(and(eq(service.tenantId, t), eq(service.feeCategoryId, feeId))).orderBy(desc(service.active), service.sortOrder).then((r: any[]) => r[0] ?? null);
+  async function syncBooking(tx: any, t: string, fee: any, b: z.infer<typeof BookIn> | undefined) {
+    const cur = await linkedService(tx, t, fee.id);
+    const bookable = b ? b.bookable : !!cur?.active;
+    if (!cur && !bookable) return null;
+    const set: any = { name: fee.name, pricePaise: fee.amountPaise, feeCategoryId: fee.id, active: bookable && fee.active !== false,
+      ...(b?.places !== undefined ? { places: b.places } : {}), ...(b?.color ? { color: b.color } : {}), ...(b?.practitionerIds ? { practitionerIds: b.practitionerIds } : {}), ...(b && b.description !== undefined ? { description: b.description || null } : {}) };
+    if (cur) return (await tx.update(service).set(set).where(eq(service.id, cur.id)).returning())[0];
+    const n = await tx.select({ n: sql<number>`count(*)::int` }).from(service).where(eq(service.tenantId, t)).then((r: any[]) => r[0].n);
+    return (await tx.insert(service).values({ ...set, tenantId: t, sortOrder: n, minutes: 60 }).returning())[0];
+  }
+  route(app, 'get', '/admin/consult-types', 'config.write', async (req, tx) => {
+    const t = req.ctx.tenantId;
+    const [fees, svcs] = await Promise.all([tx.select().from(feeCategory).where(eq(feeCategory.tenantId, t)).orderBy(feeCategory.code), tx.select().from(service).where(eq(service.tenantId, t)).orderBy(desc(service.active), service.sortOrder, service.name)]);
+    // visit types not tied to any fee (made before the merge, "decide at check-in"): listed so the owner can tie each to one
+    return { types: fees.map((f) => ({ ...f, booking: svcs.find((s) => s.feeCategoryId === f.id) ?? null })), unlinked: svcs.filter((s) => s.active && !fees.some((f) => f.id === s.feeCategoryId)) };
+  });
+  route(app, 'post', '/admin/consult-types', 'config.write', async (req, tx) => {
+    const body = z.object({ fee: FeeIn, booking: BookIn.optional() }).parse(req.body); checkRule(body.fee.eligibility); const t = req.ctx.tenantId;
+    if ((await tx.select({ id: feeCategory.id }).from(feeCategory).where(and(eq(feeCategory.tenantId, t), eq(feeCategory.code, body.fee.code))).limit(1)).length) throw new HttpError(409, 'DUPLICATE_CODE');
+    const [fee] = await tx.insert(feeCategory).values({ ...body.fee, tenantId: t }).returning();
+    return { ...fee, booking: await syncBooking(tx, t, fee, body.booking) };
+  });
+  route(app, 'patch', '/admin/consult-types/:id', 'config.write', async (req, tx) => {
+    const body = z.object({ fee: FeeIn.omit({ code: true }).partial().default({}), booking: BookIn.optional() }).parse(req.body);
+    const b = sent(body.fee, (req.body as any)?.fee); checkRule(b.eligibility);
+    // only the booking side changed: nothing to write on the fee itself
+    const fee = Object.keys(b).length ? await upd(tx, feeCategory, req, b) : await tx.select().from(feeCategory).where(and(eq(feeCategory.id, (req.params as any).id), eq(feeCategory.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (!fee) throw new HttpError(404, 'NOT_FOUND');
+    const booking = await syncBooking(tx, req.ctx.tenantId, fee, body.booking);
+    await writeAudit(tx, req.ctx, { kind: 'settings', action: 'PATCH /admin/consult-types/:id', summary: feeSummary(fee.name, (req.auditBefore as any)?.amountPaise, b.amountPaise), entity: 'admin', entityId: fee.id, before: req.auditBefore, after: req.body as any });
+    req.audited = true; return { ...fee, booking };
+  });
+
+  // --- medicines: kept in Inventory (stock.write) or by whoever runs Settings (config.write) ---
+  const stockOrConfig = (req: any): undefined => { if (!can(req.perms, 'stock.write') && !can(req.perms, 'config.write')) throw new HttpError(403, 'FORBIDDEN:stock.write'); return undefined; };
   const MedIn = z.object({ name: Name, form: z.string().optional().nullable(), packSize: z.number().int().min(1).max(1000).optional(), reorderLevel: z.number().int().min(0).max(100000).optional(), strength: z.string().optional().nullable(), scheduleClass: z.string().optional().nullable(), mrpPaise: z.number().int().min(0).max(100000000).optional(), gstBp: z.number().int().min(0).max(2800).optional(), hsn: z.string().max(10).optional().nullable(), leafletUrl: z.string().trim().url().max(500).optional().nullable(), generic: z.string().trim().max(120).optional().nullable(), allergyClass: z.string().trim().max(60).optional().nullable(), defaults: z.object({ dose: z.string().optional(), route: z.string().optional(), frequency: z.string().optional(), durationDays: z.number().int().optional(), instructions: z.string().optional() }).optional().nullable() });
-  route(app, 'post', '/admin/medicines', 'config.write', async (req, tx) => {
+  route(app, 'post', '/admin/medicines', null, async (req, tx) => { stockOrConfig(req);
     const b = MedIn.parse(req.body);
     const dup = await tx.select({ id: medicine.id }).from(medicine).where(and(eq(medicine.tenantId, req.ctx.tenantId), sql`lower(${medicine.name}) = ${b.name.toLowerCase()}`, sql`coalesce(${medicine.strength},'') = ${b.strength ?? ''}`)).limit(1);
     if (dup.length) throw new HttpError(409, 'DUPLICATE', { what: 'medicine' });
     return (await tx.insert(medicine).values({ ...b, tenantId: req.ctx.tenantId }).returning())[0];
   });
-  route(app, 'patch', '/admin/medicines/:id', 'config.write', async (req, tx) => upd(tx, medicine, req, sent(MedIn.partial().parse(req.body), req.body)));
+  route(app, 'patch', '/admin/medicines/:id', null, async (req, tx) => stockOrConfig(req) ?? upd(tx, medicine, req, sent(MedIn.partial().parse(req.body), req.body)));
   /** The "how to use" leaflet: a PDF or picture the patient gets on WhatsApp with the prescription. Stored like a document; served to the patient without a login. */
   const LEAFLET_EXT: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
-  route(app, 'post', '/admin/medicines/:id/leaflet', 'config.write', async (req, tx) => {
+  route(app, 'post', '/admin/medicines/:id/leaflet', null, async (req, tx) => { stockOrConfig(req);
     const b = z.object({ mime: z.enum(['application/pdf', 'image/jpeg', 'image/png']), dataBase64: z.string().min(1) }).parse(req.body);
     const id = (req.params as any).id; const t = req.ctx.tenantId;
     const m = await tx.select({ id: medicine.id }).from(medicine).where(and(eq(medicine.id, id), eq(medicine.tenantId, t))).then((r) => r[0]);
@@ -220,7 +263,7 @@ export function adminRoutes(app: FastifyInstance) {
     const mime = m[2] === 'pdf' ? 'application/pdf' : m[2] === 'jpg' ? 'image/jpeg' : 'image/png';
     return reply.type(mime).header('cache-control', 'public, max-age=86400').header('content-disposition', `inline; filename="${med.name.replace(/[^\w. -]/g, '_')}.${m[2]}"`).send(file);
   });
-  route(app, 'delete', '/admin/medicines/:id', 'config.write', async (req, tx) => { await tx.delete(medicine).where(and(eq(medicine.id, (req.params as any).id), eq(medicine.tenantId, req.ctx.tenantId))); return { ok: true }; });
+  route(app, 'delete', '/admin/medicines/:id', null, async (req, tx) => { stockOrConfig(req); await tx.delete(medicine).where(and(eq(medicine.id, (req.params as any).id), eq(medicine.tenantId, req.ctx.tenantId))); return { ok: true }; });
 
   // --- procedures ---
   const ProcIn = z.object({ name: Name, typicalMinutes: z.number().int().min(5).optional(), bufferMinutes: z.number().int().min(0).optional(), requiresMainDoctor: z.boolean().optional(), requiresReview: z.boolean().optional(), requiredCapability: z.string().optional().nullable(), pricePaise: z.number().int().min(0).optional().nullable(), taxRateBp: z.number().int().min(0).optional(), typicalSittings: z.number().int().min(1).optional(), specialtyId: z.string().uuid().optional().nullable(), active: z.boolean().optional() });

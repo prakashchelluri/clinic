@@ -3,7 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, patch, del, qc, errText } from '../api';
 import { NAV, can } from '../App';
-import { Drawer, Chip, Icon, NumInput, Skeleton, toast, useAddFromNew } from '../ui';
+import { Drawer, Chip, Icon, NumInput, Skeleton, toast } from '../ui';
 
 /** Every permission the system knows, in plain words. Mirrors the server list (src/lib/auth.ts). */
 export const useRoles = () => useQuery({ queryKey: ['roles'], queryFn: () => get('/admin/roles'), staleTime: 30_000 });
@@ -22,7 +22,6 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
   const [draft, setDraft] = useState<string[] | null>(null); const [name, setName] = useState('');
   const [adding, setAdding] = useState<{ name: string; from: string } | null>(null);
   const list: any[] = roles.data ?? []; const role = list.find((r) => r.key === sel) ?? list[0];
-  useAddFromNew(() => setAdding({ name: '', from: role?.key ?? 'receptionist' }));
   useEffect(() => { setDraft(null); setName(role?.name ?? ''); }, [role?.key, roles.dataUpdatedAt]);
   const perms: string[] = draft ?? role?.perms ?? [];
   const dirty = !!role && ((draft && [...draft].sort().join() !== [...role.perms].sort().join()) || (!role.builtin && name.trim() !== role.name));
@@ -51,6 +50,7 @@ export function RolesTab({ onSaved }: { onSaved: () => void }) {
             <div className="flex items-center gap-2"><span className="text-sm font-medium">{r.name}</span>{!r.builtin && <Chip tone="sky">custom</Chip>}</div>
             <div className="text-xs text-muted">{r.users} {r.users === 1 ? 'person' : 'people'}{r.builtin && !r.locked && [...r.perms].sort().join() !== [...(r.defaultPerms ?? [])].sort().join() ? ' · changed' : ''}</div>
           </button>))}
+        <button type="button" className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm font-medium text-clay hover:bg-surface/50" onClick={() => setAdding({ name: '', from: role?.key ?? 'receptionist' })}><Icon name="plus" className="h-3.5 w-3.5" />New role</button>
       </div>
 
       <div className="card-flat p-5 min-w-0">

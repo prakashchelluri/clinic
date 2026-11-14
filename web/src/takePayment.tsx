@@ -22,7 +22,7 @@ export function moneyErr(e: any): string {
   if (c === 'DISCOUNT_MORE_THAN_THE_ITEM') return `The discount is the whole of ${b.what}. Ask for it to be waived instead.`;
   if (c === 'NOTHING_DUE') return 'Nothing is due on one of these any more. Close and open again.';
   if (c === 'NOTHING_LEFT_TO_PAY_AHEAD') return 'Every sitting of this course is already paid.';
-  if (c === 'NO_PRICE_ON_THE_PRICE_LIST') return 'This has no price on the price list. Set it in Settings › Prices.';
+  if (c === 'NO_PRICE_ON_THE_PRICE_LIST') return 'This has no price on the price list. Set it in Settings › Consultation types or Procedures & packages.';
   if (c === 'MORE_THAN_THE_ADVANCE') return `Only ${money(b.balancePaise)} is left in the advance.`;
   if (c === 'NOTHING_TO_BILL') return 'Add an item, or type an amount to take as advance.';
   return errText(e);

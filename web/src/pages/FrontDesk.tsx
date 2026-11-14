@@ -483,7 +483,7 @@ export function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, on
   const [newFlags, setNewFlags] = useState(NO_FLAGS); // asked only when registering here
   const [first, setFirst] = useState<First>(NO_FIRST); // first-visit details: asked once, kept on the patient
   const [cat, setCat] = useState('');
-  const vitalList = enabledVitals(cfg?.tenant.settings); // the clinic's vitals (Settings → Consultation form fields)
+  const vitalList = enabledVitals(cfg?.tenant.settings); // the clinic's vitals (Settings › Vitals)
   const [vit, setVit] = useState<Record<string, string>>({});
   const [locality, setLocality] = useState('');
   const [list, setList] = useState<Complaint[]>([]);

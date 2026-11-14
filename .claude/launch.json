@@ -1,13 +1,129 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "cubott", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3000, "autoPort": true },
-    { "name": "cubott-review", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3010, "autoPort": true, "env": { "PGLITE_DIR": "./data/pglite-review", "PORT": "3010" } },
-    { "name": "cubott-accounts", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3020, "autoPort": true, "env": { "PGLITE_DIR": "./data/pglite-accounts", "PORT": "3020" } },
-    { "name": "cubott-courses", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3040, "autoPort": false, "env": { "PGLITE_DIR": "./data/pglite-courses", "PORT": "3040" } },
-    { "name": "cubott-patient", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3030, "autoPort": false, "env": { "PGLITE_DIR": "./data/pglite-patient", "PORT": "3030" } }
-    ,{ "name": "cubott-labs", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3060, "autoPort": false, "env": { "PGLITE_DIR": "./data/pglite-labs", "PORT": "3060", "ALLOW_TEST_RESET": "1" } }
-    ,{ "name": "cubott-nav", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3050, "autoPort": true, "env": { "PGLITE_DIR": "./data/pglite-nav", "PORT": "3050" } }
-    ,{ "name": "cubott-bills", "runtimeExecutable": "npx", "runtimeArgs": ["tsx", "src/server.ts"], "port": 3070, "autoPort": false, "env": { "PGLITE_DIR": "./data/pglite-bills", "PORT": "3070" } }
+    {
+      "name": "cubott",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "cubott-review",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3010,
+      "autoPort": true,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-review",
+        "PORT": "3010"
+      }
+    },
+    {
+      "name": "cubott-accounts",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3020,
+      "autoPort": true,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-accounts",
+        "PORT": "3020"
+      }
+    },
+    {
+      "name": "cubott-courses",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3040,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-courses",
+        "PORT": "3040"
+      }
+    },
+    {
+      "name": "cubott-patient",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3030,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-patient",
+        "PORT": "3030"
+      }
+    },
+    {
+      "name": "cubott-labs",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3060,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-labs",
+        "PORT": "3060",
+        "ALLOW_TEST_RESET": "1"
+      }
+    },
+    {
+      "name": "cubott-nav",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3050,
+      "autoPort": true,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-nav",
+        "PORT": "3050"
+      }
+    },
+    {
+      "name": "cubott-bills",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3070,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-bills",
+        "PORT": "3070"
+      }
+    },
+    {
+      "name": "cubott-settings",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3080,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-settings",
+        "PORT": "3080",
+        "ALLOW_TEST_RESET": "1"
+      }
+    }
   ]
 }

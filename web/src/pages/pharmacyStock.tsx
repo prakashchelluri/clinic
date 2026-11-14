@@ -5,6 +5,7 @@ import { get, post, patch, qc, today, fmtTime, errText } from '../api';
 import { can } from '../App';
 import { Drawer, Chip, Empty, Icon, Tabs, Filter, Skeleton, money, toast, MoneyInput, toPaise, NumInput, ask, fmtDate, useAddFromNew } from '../ui';
 import { DataTable, type Col, type FilterDef } from '../table';
+import { MedicineDrawer, blankMedicine } from '../medicineEditor';
 
 type Go = (next: Record<string, string>) => void;
 const exp = (d: string) => d.slice(5, 7) + '/' + d.slice(2, 4);
@@ -52,7 +53,7 @@ export function Inventory({ tab, sp, go }: { tab: InvTab; sp: URLSearchParams; g
           {d.reviews.length > 0 && <Stat icon="bell" value={d.reviews.length} label="Deliveries for the owner to check" onClick={() => go({ tab: 'stock' })} />}
         </div>}
         <div className="anim-fade-up flex flex-wrap items-center gap-2" style={{ animationDelay: '60ms' }}>
-          <Tabs<InvTab> className="w-full" value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Stock' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
+          <Tabs<InvTab> className="w-full" value={tab} onChange={(v) => go({ tab: v })} options={[{ value: 'stock', label: 'Medicines' }, { value: 'batches', label: 'Batches & expiry', count: flagged || undefined }, { value: 'orders', label: 'Orders', count: t?.ordersOpen || undefined }, { value: 'vendors', label: 'Vendors' }]} />
         </div>
       </>}
       {tab === 'stock' && <StockTab sp={sp} go={go} />}
@@ -68,6 +69,7 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
   const item = sp.get('item'); const count = sp.get('count');
   const q = useQuery({ queryKey: ['stock'], queryFn: () => get('/stock'), refetchInterval: 30000 });
   const [review, setReview] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false); const keeps = can(perms, 'stock.write') || can(perms, 'config.write');
   const countOne = useMutation({ mutationFn: (medicineId: string) => post('/stock/counts', { medicineId }), onSuccess: (d: any) => go({ tab: 'stock', count: d.id }),
     onError: (e: any) => { if (e?.body?.code === 'COUNT_OPEN') { toast('A count is already open: finish it first', 'info'); go({ tab: 'stock', count: e.body.id }); } else toast(errText(e), 'err'); } });
   if (item) return <ItemView id={item} go={go} />;
@@ -101,9 +103,10 @@ function StockTab({ sp, go }: { sp: URLSearchParams; go: Go }) {
 
       <DataTable id="inventory-stock" exportName={`stock-${today()}`} rows={d.items} rowKey={(i: any) => i.id} columns={columns} sort={{ key: 'name' }}
         onRow={(i: any) => go({ tab: 'stock', item: i.id })} filters={[SHOW]} search={{ placeholder: 'Find a medicine', text: (i: any) => [i.name] }}
-        empty={{ title: 'No medicines yet', hint: 'Add medicines under Settings → Medicines, then receive a delivery.' }}
-        toolbar={t.count && <button type="button" className="text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>} />
+        empty={{ title: 'No medicines yet', hint: 'Add a medicine, then receive a delivery to put it on the shelf.' }}
+        toolbar={<>{keeps && <button type="button" className="btn btn-primary btn-sm" onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add medicine</button>}{t.count && <button type="button" className="text-[12.5px] text-muted hover:text-ink" onClick={() => go({ tab: 'stock', count: t.count.id })}>Last count {t.count.docNo} · {t.count.status === 'closed' ? 'done' : t.count.status === 'open' ? 'open' : `${t.count.gapLines} gap${t.count.gapLines === 1 ? '' : 's'}`} · {fmtDate(t.count.at)}</button>}</>} />
       {review && <DecisionDialog id={review} onClose={() => setReview(null)} />}
+      {adding && <MedicineDrawer value={blankMedicine()} onClose={() => setAdding(false)} onSaved={(m) => m?.id && go({ tab: 'stock', item: m.id })} />}
     </div>
   );
 }
@@ -203,7 +206,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
   const { perms } = useOutletContext<any>();
   const q = useQuery({ queryKey: ['stock', 'item', id], queryFn: () => get(`/stock/medicines/${id}`) });
   const [kind, setKind] = useState<'all' | 'in' | 'out' | 'adj'>('all');
-  const [returning, setReturning] = useState(false);
+  const [returning, setReturning] = useState(false); const [editing, setEditing] = useState(false);
   const adjust = useMutation({ mutationFn: (b: any) => post(`/stock/batches/${b.batchId}/adjust`, { change: b.change, reason: b.reason }), onSuccess: () => { toast('Stock corrected'); refresh(); }, onError: (e) => toast(errText(e), 'err') });
   if (q.isLoading || !q.data) return <Skeleton rows={6} />;
   const d = q.data; const m = d.medicine;
@@ -221,8 +224,9 @@ function ItemView({ id, go }: { id: string; go: Go }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Stock</button><h2 className="text-[18px] font-semibold">{m.name}</h2>
+        <div className="mr-auto"><button className="text-sm text-muted hover:text-ink" onClick={() => go({ tab: 'stock' })}>← Medicines</button><h2 className="text-[18px] font-semibold">{m.name}</h2>
           <div className="text-sm text-muted">{[['tab', 'cap'].includes(m.form) ? `strip of ${m.packSize}` : m.form, m.scheduleClass && m.scheduleClass !== 'OTC' ? `Schedule ${m.scheduleClass}` : 'OTC', m.hsn ? `HSN ${m.hsn}` : null, `GST ${m.gstBp / 100}%`, `MRP ${money(m.mrpPaise)}`].filter(Boolean).join(' · ')}</div></div>
+        {(can(perms, 'stock.write') || can(perms, 'config.write')) && <button className="btn" onClick={() => setEditing(true)}><Icon name="edit" className="h-3.5 w-3.5" />Edit details</button>}
         {can(perms, 'stock.write') && <><button className="btn" onClick={() => setReturning(true)}>Return to vendor</button><button className="btn btn-primary" onClick={() => go({ tab: 'orders', order: 'new' })}>Order more</button></>}
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -246,6 +250,7 @@ function ItemView({ id, go }: { id: string; go: Go }) {
             <td className={`text-right font-semibold ${x.change > 0 ? 'text-sage' : 'text-rose'}`}>{x.change > 0 ? '+' : ''}{x.change}</td><td className="text-right">{x.balance}</td><td>{x.byName}</td><td className="font-medium">{x.docNo ?? '—'}</td></tr>)}</tbody></table>
       </div>
       {returning && <ReturnDialog medicine={m} batches={live} onClose={() => setReturning(false)} />}
+      {editing && <MedicineDrawer value={m} onClose={() => setEditing(false)} />}
     </div>
   );
 }

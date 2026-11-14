@@ -37,6 +37,7 @@ const DURATION_WORDS = ['Stat', 'To be continued', 'Till required'];
 /** Findings to search beside the clinic's own exam lists. */
 const EXAM_OPTIONS = ['Erythematous', 'Erythema', 'Scaly plaque', 'Papules', 'Pustules', 'Nodules', 'Vesicles', 'Comedones', 'Macule', 'Patch', 'Plaque', 'Scale', 'Crust', 'Erosion', 'Ulcer', 'Scar', 'Lichenification', 'Excoriation', 'Hypopigmented patch', 'Hyperpigmented patch', 'Annular lesion', 'Well-defined border', 'Satellite lesions', 'Burrows', 'Wheals', 'Nail pitting', 'Onycholysis', 'Koebner phenomenon', 'Diffuse hair thinning', 'Patchy alopecia'];
 const asExam = (v: any): ExamRow[] => (Array.isArray(v?.items) ? v.items : []);
+/** Used only until /config has loaded; the clinic's own list is Settings › Lab tests (cfg.labTests). */
 const TESTS = ['CBC', 'FBS / PPBS', 'HbA1c', 'LFT', 'RFT', 'Lipid profile', 'TSH', 'Vitamin D', 'Vitamin B12', 'Serum ferritin', 'KOH mount', 'Skin biopsy', 'Patch test', 'VDRL', 'HIV', 'HBsAg', 'ANA', 'Urine routine', 'Culture & sensitivity', 'Woods lamp'];
 const ADVICE = ['Keep the area dry', "Don't share towels", 'Wash clothes in hot water', 'No steroid creams', 'Loose cotton clothes', 'Sunscreen every 3 hours', 'Moisturise twice daily', 'Avoid scrubbing', 'Avoid oily food', 'Mild soap only'];
 const SEVERITIES = ['Mild', 'Moderate', 'Severe'];
@@ -476,7 +477,7 @@ export function Encounter() {
     const v = raw.trim(); if (!v) return; const lc = v.toLowerCase();
     const it = parseRxLine(v, meds);
     const dxOpt = [...DX_OPTIONS, ...(dxField?.options ?? [])].find((o) => o.toLowerCase() === lc || (lc.length >= 4 && o.toLowerCase().startsWith(lc)));
-    const testOpt = TESTS.find((o) => o.toLowerCase() === lc) ?? (cfg?.labParams ?? []).find((o: any) => o.name.toLowerCase() === lc)?.name;
+    const testOpt = ((cfg?.labTests ?? TESTS) as string[]).find((o) => o.toLowerCase() === lc) ?? (cfg?.labParams ?? []).find((o: any) => o.name.toLowerCase() === lc)?.name;
     // "itching 2 weeks" → the symptom Itching since 2 weeks
     const m = v.match(/^(.*?)\s+(?:since\s+|for\s+|x\s*)?(\d+\s*(?:d|days?|w|wks?|weeks?|m|months?|y|years?))$/i);
     const base = (m ? m[1] : v).trim().toLowerCase();
@@ -605,7 +606,7 @@ export function Encounter() {
     advice: ['advice', 'Adv', 'advice', adviceLines.length ? () => clearSection('the advice', () => set('plan', 'advice', '')) : null],
     tests: ['tests', 'Lab', 'tests', tests.some((r) => r.status !== 'done') ? () => clearSection('the tests', () => setRecs(recs.filter((r) => r.kind !== 'investigation' || r.status === 'done'))) : null],
   };
-  const labNames = uniq([...TESTS, ...(cfg?.labParams ?? []).map((o: any) => o.name)]);
+  const labNames = uniq([...(cfg?.labTests ?? TESTS), ...(cfg?.labParams ?? []).map((o: any) => o.name)]);
   const procName = (id?: string | null) => cfg?.procedures?.find((x: any) => x.id === id)?.name ?? 'Procedure';
   // which part of a past visit belongs to which section (Load previous loads only that)
   const PART: Record<string, Part> = { symptoms: 'sx', diagnosis: 'dx', exam: 'ex', medicines: 'rx', advice: 'advice', tests: 'tests' };

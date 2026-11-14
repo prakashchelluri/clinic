@@ -5,6 +5,7 @@ import { charge, payment, expense, visit, feeCategory, patient, tenant, appUser 
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
+import { expenseCategoriesOf } from '../lib/lists.js';
 import { assertDayOpen, dayFigures } from './dayclose.js';
 
 /** [start,end) in UTC for a local day in the tenant timezone. */
@@ -187,8 +188,7 @@ export function billingRoutes(app: FastifyInstance) {
   });
 
   // --- expenses: money going out. Same care as money coming in: validated, categorised, never silently deleted ---
-  const DEFAULT_EXPENSE_CATEGORIES = ['Staff salary', 'Rent', 'Electricity and water', 'Medicines and supplies', 'Consumables', 'Equipment and repairs', 'Lab and outsourced work', 'Marketing', 'Travel and fuel', 'Tea and snacks', 'Cleaning', 'Taxes and fees', 'Other'];
-  const categoriesOf = (settings: any): string[] => (Array.isArray(settings?.expenseCategories) && settings.expenseCategories.length ? settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES);
+  const categoriesOf = expenseCategoriesOf;
   const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => !Number.isNaN(Date.parse(d + 'T00:00:00Z')), 'BAD_DATE');
   const ExpenseIn = z.object({
     day: DAY.optional(), description: z.string().trim().min(2, 'Say what it was for').max(200),
