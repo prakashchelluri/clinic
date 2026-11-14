@@ -103,18 +103,19 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
 /** The line at the foot of a card, Eka's "Start typing…": matches as you type, Enter adds the top match or what was typed. */
 /** A set suggested in an empty search box: a template linked to this patient's complaint or diagnosis. */
 type SetHint = { label: string; hint?: string; pick: () => void };
-/** Search box of a pad section. Typing searches `options`. Clicked while empty (or ↓), it lists what the old Quick add chips offered:
+/** Search box of a pad section. Typing searches `options`. Clicked while empty (or ↓), it lists what the old Quick add chips offered (a pick closes it):
  *  sets suggested for this patient, then the usual picks (`common`). It never opens by itself, so a box that gets the cursor on load stays quiet. */
 function SearchLine({ placeholder, options = [], onAdd, invalid, autoFocus, sets = [], common = [], commonTitle = 'Common' }: { placeholder: string; options?: string[]; onAdd: (t: string) => void; invalid?: boolean; autoFocus?: boolean; sets?: SetHint[]; common?: string[]; commonTitle?: string }) {
   const [v, setV] = useState(''); const [shut, setShut] = useState(false); const [open, setOpen] = useState(false); const [sel, setSel] = useState(-1); const box = useRef<HTMLDivElement>(null);
   const q = v.trim().toLowerCase();
-  const add = (t: string) => { if (t.trim()) onAdd(t.trim()); setV(''); setSel(-1); };
+  const done = () => { setV(''); setSel(-1); setOpen(false); }; // a pick closes the list; the cursor stays here, so ↓ or a click opens it again
+  const add = (t: string) => { if (t.trim()) onAdd(t.trim()); done(); };
   type It = { key: string; label: string; hint?: string; group?: string; run: () => void };
   const hits: It[] = q ? options.filter((o) => o.toLowerCase().includes(q)).slice(0, 8).map((o) => ({ key: o, label: o, run: () => add(o) })) : [];
   const SUG = 8;
   const sug: It[] = q || !open ? [] : [
-    ...sets.slice(0, SUG).map((x) => ({ key: `s:${x.label}`, label: x.label, hint: x.hint, group: 'Suggested for this patient', run: () => { x.pick(); setSel(-1); } })),
-    ...common.slice(0, Math.max(0, SUG - sets.length)).map((o) => ({ key: `c:${o}`, label: o, group: commonTitle, run: () => { onAdd(o); setSel(-1); } })),
+    ...sets.slice(0, SUG).map((x) => ({ key: `s:${x.label}`, label: x.label, hint: x.hint, group: 'Suggested for this patient', run: () => { x.pick(); done(); } })),
+    ...common.slice(0, Math.max(0, SUG - sets.length)).map((o) => ({ key: `c:${o}`, label: o, group: commonTitle, run: () => { onAdd(o); done(); } })),
   ];
   const items = q ? hits : sug;
   return (
