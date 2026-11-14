@@ -13,18 +13,18 @@ const pct = (full: number, price: number) => (full > price ? Math.round((1 - pri
 /** Packages: a bundle of procedures at one price, valid for some months. The doctor adds one on the Rx pad, in Procedures. */
 export function PackagesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const all: Pkg[] = cfg.tenant.settings?.packages ?? []; const procs: any[] = cfg.procedures ?? [];
-  const [show, setShow] = useState<'active' | 'archived'>('active'); const [edit, setEdit] = useState<Pkg | null>(null);
+  const [show, setShow] = useState<'active' | 'inactive'>('active'); const [edit, setEdit] = useState<Pkg | null>(null);
   const rows = all.filter((k) => (show === 'active') === (k.active !== false));
   const procName = (id: string) => procs.find((p) => p.id === id)?.name ?? 'Procedure';
   const add = () => setEdit({ id: '', name: '', items: [], pricePaise: 0, validMonths: 12, active: true });
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1.5" role="group" aria-label="Show">{(['active', 'archived'] as const).map((k) => <button key={k} type="button" aria-pressed={show === k} className={`toggle-opt ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{k === 'active' ? 'Active' : 'Archived'} · {all.filter((x) => (k === 'active') === (x.active !== false)).length}</button>)}</div>
+        <div className="flex gap-1.5" role="group" aria-label="Show">{(['active', 'inactive'] as const).map((k) => <button key={k} type="button" aria-pressed={show === k} className={`toggle-opt ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{k === 'active' ? 'Active' : 'Inactive'} · {all.filter((x) => (k === 'active') === (x.active !== false)).length}</button>)}</div>
         <button type="button" className="btn btn-primary ml-auto" onClick={add}><Icon name="plus" />New package</button>
       </div>
       <div className="card !p-0 overflow-x-auto">
-        {rows.length === 0 ? <Empty icon="box" title={show === 'active' ? 'No packages yet' : 'Nothing archived'} hint={show === 'active' ? 'A package is a bundle of procedures at one price, e.g. 4 CO2 laser + 3 peels for ₹34,000. The doctor adds it on the Rx pad.' : undefined} /> : (
+        {rows.length === 0 ? <Empty icon="box" title={show === 'active' ? 'No packages yet' : 'Nothing inactive'} hint={show === 'active' ? 'A package is a bundle of procedures at one price, e.g. 4 CO2 laser + 3 peels for ₹34,000. The doctor adds it on the Rx pad.' : undefined} /> : (
           <table className="table min-w-[720px]">
             <thead><tr><th className="pl-4">Package</th><th className="!text-right">Full price</th><th className="!text-right">Package price</th><th /><th>Valid</th></tr></thead>
             <tbody>{rows.map((k) => { const full = fullPrice(k, procs); return (
@@ -56,7 +56,7 @@ function PackageDrawer({ value, all, procs, onClose, onDone }: { value: Pkg; all
       const me: Pkg = { id: value.id || crypto.randomUUID().slice(0, 8), name: f.name.trim(), items, pricePaise: price, validMonths: Number(f.months), active };
       return patch('/admin/clinic', { settings: { packages: value.id ? all.map((k) => (k.id === value.id ? me : k)) : [...all, me] } });
     },
-    onSuccess: (_r, active) => { toast(!value.id ? 'Package added' : active !== (value.active !== false) ? (active ? 'Restored' : 'Archived') : 'Package saved'); onDone(); },
+    onSuccess: (_r, active) => { toast(!value.id ? 'Package added' : active !== (value.active !== false) ? (active ? 'Active again' : 'Marked inactive') : 'Package saved'); onDone(); },
     onError: (e) => toast(errText(e), 'err'),
   });
   const submit = async (active: boolean) => {
@@ -91,7 +91,7 @@ function PackageDrawer({ value, all, procs, onClose, onDone }: { value: Pkg; all
         <div><span className="label">Valid for</span><div className="flex items-center gap-2 text-sm"><NumInput aria-label="Months" max={60} className={`input !w-20 ${bad.months ? '!border-rose' : ''}`} value={f.months} onChange={(e) => setF((p) => ({ ...p, months: e.target.value }))} />months from the day the patient agrees</div>
           <div className="mt-1 text-xs text-muted">Sittings not done by then show as Expired. The desk can still refund them.</div></div>
         <div className="modal-foot !justify-between">
-          {value.id ? <button type="button" className="btn" disabled={save.isPending} onClick={() => submit(value.active === false)}>{value.active === false ? 'Restore' : 'Archive'}</button> : <span />}
+          {value.id ? <button type="button" className="btn" disabled={save.isPending} onClick={() => submit(value.active === false)}>{value.active === false ? 'Make active' : 'Mark inactive'}</button> : <span />}
           <div className="flex gap-2"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={off || save.isPending} onClick={() => submit(value.active !== false)}>{value.id ? 'Save' : 'Add package'}</button></div>
         </div>
       </div>

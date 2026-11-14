@@ -22,7 +22,7 @@ const SAY: Record<string, string> = { DUPLICATE_CODE: 'Another consultation type
 
 export function ConsultTypesTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const q = useQuery({ queryKey: ['consult-types'], queryFn: () => get('/admin/consult-types') });
-  const [show, setShow] = useState<'active' | 'archived'>('active');
+  const [show, setShow] = useState<'active' | 'inactive'>('active');
   const [edit, setEdit] = useState<any>(null);
   const refresh = () => { qc.invalidateQueries({ queryKey: ['consult-types'] }); qc.invalidateQueries({ queryKey: ['admin-services'] }); onSaved(); };
   const link = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/admin/services/${id}`, b), onSuccess: () => { toast('Saved'); refresh(); }, onError: (e: any) => toast(errText(e), 'err') });
@@ -35,11 +35,11 @@ export function ConsultTypesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex gap-1.5" role="group" aria-label="Show">{(['active', 'archived'] as const).map((k) => <button key={k} type="button" aria-pressed={show === k} className={`toggle-opt ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{k === 'active' ? 'Active' : 'Archived'} · {all.filter((t) => (k === 'active') === t.active).length}</button>)}</div>
+        <div className="flex gap-1.5" role="group" aria-label="Show">{(['active', 'inactive'] as const).map((k) => <button key={k} type="button" aria-pressed={show === k} className={`toggle-opt ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{k === 'active' ? 'Active' : 'Inactive'} · {all.filter((t) => (k === 'active') === t.active).length}</button>)}</div>
         <button type="button" className="btn btn-primary ml-auto" onClick={add}><Icon name="plus" />Add consultation type</button>
       </div>
       <div className="card !p-0 overflow-x-auto">
-        {q.isLoading ? <div className="p-4"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="calendar" title={show === 'active' ? 'No consultation types yet' : 'Nothing archived'} hint={show === 'active' ? 'Add what patients come in for: a new consultation, a review, a report review.' : undefined} /> : (
+        {q.isLoading ? <div className="p-4"><Skeleton rows={4} /></div> : rows.length === 0 ? <Empty icon="calendar" title={show === 'active' ? 'No consultation types yet' : 'Nothing inactive'} hint={show === 'active' ? 'Add what patients come in for: a new consultation, a review, a report review.' : undefined} /> : (
           <table className="table min-w-[760px]">
             <thead><tr><th className="pl-4">Name</th><th>Code</th><th className="!text-right">Fee</th><th>Booking</th><th>Doctors</th><th>Rules</th></tr></thead>
             <tbody>{rows.map((t) => (
@@ -58,7 +58,7 @@ export function ConsultTypesTab({ cfg, onSaved }: { cfg: any; onSaved: () => voi
         <div className="text-xs text-muted">These were set up before fees and visit types became one. Tie each to a consultation type; until then the desk picks the fee at check-in.</div>
         {unlinked.map((s) => <div key={s.id} className="flex flex-wrap items-center gap-2 border-t border-line/70 pt-2 text-sm"><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} /><b className="mr-auto font-medium">{s.name}</b>
           <select className="input !w-60" aria-label={`Tie ${s.name} to`} value="" onChange={(e) => e.target.value && link.mutate({ id: s.id, feeCategoryId: e.target.value })}><option value="">Tie to…</option>{all.filter((t) => t.active && !t.booking?.active).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-          <button type="button" className="btn btn-sm" onClick={() => link.mutate({ id: s.id, active: false })}>Archive</button></div>)}
+          <button type="button" className="btn btn-sm" onClick={() => link.mutate({ id: s.id, active: false })}>Mark inactive</button></div>)}
       </div>}
       {edit && <TypeDrawer value={edit} cfg={cfg} onClose={() => setEdit(null)} onDone={() => { setEdit(null); refresh(); }} />}
     </div>
@@ -78,7 +78,7 @@ function TypeDrawer({ value, cfg, onClose, onDone }: { value: any; cfg: any; onC
       const booking = { bookable: b.bookable, places: Number(b.places), color: b.color, practitionerIds: b.practitionerIds, description: b.description.trim() || null };
       return f.id ? patch(`/admin/consult-types/${f.id}`, { fee, booking }) : post('/admin/consult-types', { fee: { ...fee, code: f.code }, booking });
     },
-    onSuccess: (_: any, active: boolean) => { toast(!f.id ? 'Consultation type added' : active !== value.active ? (active ? 'Restored' : 'Archived') : 'Saved'); onDone(); },
+    onSuccess: (_: any, active: boolean) => { toast(!f.id ? 'Consultation type added' : active !== value.active ? (active ? 'Active again' : 'Marked inactive') : 'Saved'); onDone(); },
     onError: (e: any) => toast(SAY[e?.body?.code] ?? errText(e), 'err'),
   });
   const submit = async (active: boolean) => {
@@ -123,7 +123,7 @@ function TypeDrawer({ value, cfg, onClose, onDone }: { value: any; cfg: any; onC
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-clay" checked={f.affectsCapacity} onChange={(e) => set('affectsCapacity', e.target.checked)} />A walk-in uses one of the doctor's places</label>
         <div><label className="label" htmlFor="ct-note">Note for reception</label><input id="ct-note" className="input" maxLength={200} placeholder="e.g. First visit, or more than 3 months since the last" value={f.eligibilityNote} onChange={(e) => set('eligibilityNote', e.target.value)} /></div>
         <div className="modal-foot !justify-between">
-          {f.id ? <button type="button" className="btn" disabled={save.isPending} onClick={() => submit(!value.active)}>{value.active ? 'Archive' : 'Restore'}</button> : <span />}
+          {f.id ? <button type="button" className="btn" disabled={save.isPending} onClick={() => submit(!value.active)}>{value.active ? 'Mark inactive' : 'Make active'}</button> : <span />}
           <div className="flex gap-2"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={save.isPending || Object.values(bad).some(Boolean)} onClick={() => submit(f.id ? value.active : true)}><Icon name="check" />{f.id ? 'Save' : 'Add'}</button></div>
         </div>
       </div>
