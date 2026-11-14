@@ -17,7 +17,6 @@ const Payload = {
   finding: z.object({ chips: z.array(Str).max(30).optional(), items: z.array(z.object({ name: Str, note: z.string().trim().max(120).optional() })).max(30).optional() }).refine((p) => (p.chips?.length ?? 0) + (p.items?.length ?? 0) > 0),
   advice: z.object({ lines: z.array(Str).min(1).max(20) }),
   tests: z.object({ tests: z.array(z.object({ name: Str, days: z.number().int().min(0).max(60).optional(), note: z.string().trim().max(120).optional() })).min(1).max(20) }),
-  procedure: z.object({ procedureId: z.string().uuid(), sittings: z.number().int().min(1).max(60).optional(), intervalDays: z.number().int().min(1).max(365).optional(), pricePaise: z.number().int().min(0).optional() }),
   // per-section templates on the pad (the spec's Tsx / TDx), saved from the card header
   symptom: z.object({ items: z.array(z.object({ name: Str, since: z.string().trim().max(40).optional(), severity: z.string().trim().max(20).optional(), note: z.string().trim().max(120).optional() })).min(1).max(20) }),
   diagnosis: z.object({ items: z.array(z.object({ name: Str, since: z.string().trim().max(40).optional(), severity: z.string().trim().max(20).optional(), status: z.string().trim().max(20).optional(), note: z.string().trim().max(120).optional() })).min(1).max(10) }),
@@ -27,7 +26,7 @@ const Payload = {
   // lines for one custom module on the pad (its id, then a box per column)
   module: z.object({ moduleId: z.string().uuid(), rows: z.array(z.array(z.string().max(200)).max(4)).min(1).max(30) }),
 } as const;
-const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'procedure', 'symptom', 'diagnosis', 'notes', 'canvas', 'module']);
+const Kind = z.enum(['medicine', 'complaint', 'finding', 'advice', 'tests', 'symptom', 'diagnosis', 'notes', 'canvas', 'module']);
 const Linked = z.object({ complaints: z.array(Str).max(20).optional(), diagnoses: z.array(Str).max(20).optional() }).default({});
 const Body = z.object({ kind: Kind, name: z.string().trim().min(2).max(80), linked: Linked, mode: z.enum(['chip', 'auto']).default('chip'), payload: z.record(z.string(), z.any()) });
 const checkPayload = (kind: keyof typeof Payload, payload: unknown) => { const r = Payload[kind].safeParse(payload); if (!r.success) throw new HttpError(400, 'BAD_TEMPLATE', { errors: r.error.issues }); return r.data as Record<string, any>; };
@@ -37,7 +36,8 @@ export function templateRoutes(app: FastifyInstance) {
   route(app, 'get', '/templates', null, async (req, tx) => {
     if (!can(req.perms, 'encounter.intake') && !can(req.perms, 'visit.write') && !can(req.perms, 'config.write')) throw new HttpError(403, 'FORBIDDEN:encounter.intake');
     const kind = (req.query as any).kind as string | undefined; const all = (req.query as any).all === '1' && can(req.perms, 'config.write');
-    return tx.select().from(tmpl).where(and(eq(tmpl.tenantId, req.ctx.tenantId), kind ? eq(tmpl.kind, kind) : sql`true`, all ? sql`true` : and(eq(tmpl.active, true), eq(tmpl.draft, false))))
+    // procedure templates were removed (15 Nov 2026): a procedure's sessions, gap and price live in Settings; old rows stay unused
+    return tx.select().from(tmpl).where(and(eq(tmpl.tenantId, req.ctx.tenantId), kind ? eq(tmpl.kind, kind) : sql`${tmpl.kind} <> 'procedure'`, all ? sql`true` : and(eq(tmpl.active, true), eq(tmpl.draft, false))))
       .orderBy(asc(tmpl.sortOrder), desc(tmpl.uses), asc(tmpl.name));
   });
 

@@ -437,7 +437,6 @@ export function Encounter() {
     else if (t.kind === 'tests') { count((p.tests ?? []).map((x: any) => x.name), recs.filter((r) => r.kind === 'investigation').map((r) => norm(r.notes ?? ''))); for (const x of p.tests ?? []) addTestNamed(x.name); const notes = (p.tests ?? []).filter((x: any) => x.note); if (notes.length) setData((d) => ({ ...d, plan: { ...(d.plan ?? {}), testNotes: { ...(d.plan?.testNotes ?? {}), ...Object.fromEntries(notes.map((x: any) => [x.name, x.note])) } } })); }
     else if (t.kind === 'symptom') { count((p.items ?? []).map((x: Sym) => x.name), asSym(data.complaint?.chief_complaint).map((s) => norm(s.name))); addSyms(p.items ?? []); }
     else if (t.kind === 'diagnosis') { count((p.items ?? []).map((x: Dx) => x.name), dNames); addDxs(p.items ?? []); }
-    else if (t.kind === 'procedure') { if (recs.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId)) had++; else { added++; setRecs((cur) => (cur.some((r) => r.kind === 'procedure' && r.procedureId === p.procedureId) ? cur : [...cur, { kind: 'procedure', procedureId: p.procedureId, sittings: p.sittings, gapDays: p.intervalDays || gapFor(p.procedureId) }])); } }
     markApplied(t.id); post(`/templates/${t.id}/use`).catch(() => {});
     return `${t.name}: ${added ? `added ${added}` : 'nothing new'}${had ? `, ${had} already there` : ''}.`;
   };
@@ -773,7 +772,7 @@ export function Encounter() {
           {recs.map((r, k) => r.kind !== 'procedure' || r.package ? null : procRow(r, k, false))}
         </>;
       })()}
-      {!readOnly && <SearchLine placeholder="Search procedures or packages" options={[...pkgs.map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).map((x: any) => x.name)]} sets={setsFor('procedure')}
+      {!readOnly && <SearchLine placeholder="Search procedures or packages" options={[...pkgs.map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).map((x: any) => x.name)]}
         common={[...pkgs.filter((k) => !recs.some((r) => r.package?.id === k.id)).map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).filter((x: any) => !recs.some((r) => r.kind === 'procedure' && r.procedureId === x.id)).map((x: any) => x.name)]} onAdd={(t) => {
         const k = pkgs.find((x) => `${x.name} (package)`.toLowerCase() === t.toLowerCase() || x.name.toLowerCase() === t.toLowerCase());
         if (k) {

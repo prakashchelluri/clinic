@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { get } from './api';
 
 /** Small reusable sets for one section of the note. They are suggested by the complaint or diagnosis they are linked to, and they stack. */
-export type TmplKind = 'medicine' | 'complaint' | 'finding' | 'advice' | 'tests' | 'procedure' | 'symptom' | 'diagnosis' | 'notes' | 'canvas' | 'module';
+export type TmplKind = 'medicine' | 'complaint' | 'finding' | 'advice' | 'tests' | 'symptom' | 'diagnosis' | 'notes' | 'canvas' | 'module';
 export type Tmpl = { id: string; kind: TmplKind; name: string; linked: { complaints?: string[]; diagnoses?: string[] }; mode: 'chip' | 'auto'; payload: any; uses: number; active: boolean; draft: boolean };
 export type Linked = { complaints?: string[]; diagnoses?: string[] };
 
@@ -12,7 +12,6 @@ export const KINDS: { kind: TmplKind; label: string; one: string; hint: string }
   { kind: 'finding', label: 'Findings', one: 'findings set', hint: 'Examination findings to tick' },
   { kind: 'advice', label: 'Advice', one: 'advice set', hint: 'Advice lines for the patient' },
   { kind: 'tests', label: 'Test panels', one: 'test panel', hint: 'Tests that are ordered together' },
-  { kind: 'procedure', label: 'Procedures', one: 'procedure package', hint: 'Procedure, sessions and interval' },
   { kind: 'symptom', label: 'Symptom sets', one: 'symptom set', hint: 'Symptoms with since and severity, saved from the pad' },
   { kind: 'diagnosis', label: 'Diagnosis sets', one: 'diagnosis set', hint: 'Diagnoses with severity, saved from the pad' },
 ];

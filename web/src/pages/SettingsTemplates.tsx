@@ -31,7 +31,6 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
   const [chips, setChips] = useState<string[]>(p.chips ?? []);
   const [lines, setLines] = useState<string>((p.lines ?? []).join('\n'));
   const [tests, setTests] = useState<{ name: string; days?: number }[]>(p.tests ?? []);
-  const [proc, setProc] = useState<{ procedureId: string; sittings: string; intervalDays: string; price: string }>({ procedureId: p.procedureId ?? cfg.procedures?.[0]?.id ?? '', sittings: String(p.sittings ?? ''), intervalDays: String(p.intervalDays ?? ''), price: p.pricePaise ? String(p.pricePaise / 100) : '' });
   const fields: any[] = cfg.forms?.find((f: any) => f.key === 'encounter')?.schema?.sections?.flatMap((s: any) => s.fields) ?? [];
   const dxOptions: string[] = fields.find((f) => f.type === 'diagnoses')?.options ?? [];
   const morph: string[] = fields.find((f) => f.key === 'morphology')?.options ?? [];
@@ -41,10 +40,9 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
     if (kind === 'complaint') return { questions: questions.filter((q) => q.q.trim()).map((q) => ({ q: q.q.trim(), ...(q.detail?.trim() ? { detail: q.detail.trim() } : {}) })) };
     if (kind === 'finding') return { chips };
     if (kind === 'advice') return { lines: lines.split('\n').map((x) => x.trim()).filter(Boolean) };
-    if (kind === 'tests') return { tests };
-    return { procedureId: proc.procedureId, ...(proc.sittings ? { sittings: Number(proc.sittings) } : {}), ...(proc.intervalDays ? { intervalDays: Number(proc.intervalDays) } : {}), ...(proc.price ? { pricePaise: toPaise(proc.price) } : {}) };
+    return { tests };
   };
-  const empty = (() => { const x = payload(); return kind === 'procedure' ? !x.procedureId : !Object.values(x)[0] || (Object.values(x)[0] as any[]).length === 0; })();
+  const empty = (() => { const x = payload(); return !Object.values(x)[0] || (Object.values(x)[0] as any[]).length === 0; })();
   const blocker = name.trim().length < 2 ? 'Give it a name of at least 2 letters' : kind === 'complaint' ? '' : empty ? { medicine: 'Add at least one medicine', finding: 'Pick at least one finding', advice: 'Write at least one advice line', tests: 'Add at least one test', procedure: 'Pick a procedure' }[kind as string] ?? '' : '';
   const save = useMutation({
     mutationFn: () => { const body = { name: name.trim(), linked, mode, payload: payload() }; return initial ? patch(`/templates/${initial.id}`, body) : post('/templates', { kind, ...body }); },
@@ -93,12 +91,6 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
           <span className="label">Tests</span>
           <Words label="Tests" value={tests.map((t) => t.name)} onChange={(v) => setTests(v.map((n) => tests.find((t) => t.name === n) ?? { name: n }))} options={['CBC', 'LFT', 'RFT', 'TSH', 'HbA1c', 'FBS / PPBS', 'Lipid profile', 'Vitamin D', 'Vitamin B12', 'Serum ferritin', 'KOH mount', 'Skin biopsy', 'Patch test', 'ANA']} placeholder="Type a test, press Enter" />
           <div className="mt-1 text-xs text-muted">A test that takes 3 days or more (biopsy, patch test) is put in an order of its own, so it never holds the quick ones back.</div>
-        </div>}
-        {kind === 'procedure' && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="col-span-2"><label className="label" htmlFor="t-proc">Procedure</label><select id="t-proc" className="input" value={proc.procedureId} onChange={(e) => { const x = cfg.procedures.find((y: any) => y.id === e.target.value); setProc({ ...proc, procedureId: e.target.value, sittings: proc.sittings || String(x?.typicalSittings ?? ''), price: proc.price || (x?.pricePaise ? String(x.pricePaise / 100) : '') }); }}>{cfg.procedures.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></div>
-          <div><label className="label" htmlFor="t-sit">Sessions</label><NumInput id="t-sit" max={60} className="input" value={proc.sittings} onChange={(e) => setProc({ ...proc, sittings: e.target.value })} /></div>
-          <div><label className="label" htmlFor="t-int">Every (days)</label><NumInput id="t-int" max={365} className="input" value={proc.intervalDays} onChange={(e) => setProc({ ...proc, intervalDays: e.target.value })} /></div>
-          <div><label className="label">Package price</label><MoneyInput value={proc.price} onChange={(v) => setProc({ ...proc, price: v })} /></div>
         </div>}
 
         <div className="rounded-2xl bg-paper px-4 py-3.5 space-y-3">

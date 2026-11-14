@@ -124,11 +124,6 @@ async function insertStarterSets(db: any, tid: string) {
   add('tests', 'Hair fall panel', { tests: [{ name: 'CBC' }, { name: 'TSH' }, { name: 'Vitamin D' }, { name: 'Serum ferritin' }] }, { complaints: ['Hair fall'] });
   add('tests', 'Fungal scraping', { tests: [{ name: 'KOH mount' }] }, { diagnoses: ['Tinea corporis', 'Tinea cruris', 'Pityriasis versicolor'] });
   add('tests', 'Skin biopsy', { tests: [{ name: 'Skin biopsy', days: 7 }] }, {});
-  const courses: [string, string, { complaints?: string[]; diagnoses?: string[] }][] = [['Chemical peel · course', 'Chemical peel', { diagnoses: ['Acne vulgaris', 'Melasma'] }], ['Laser hair reduction · course', 'Laser hair reduction', {}], ['PRP · hair course', 'PRP (hair)', { complaints: ['Hair fall'], diagnoses: ['Androgenetic alopecia'] }], ['Cryotherapy · warts', 'Cryotherapy (warts)', { complaints: ['Warts'], diagnoses: ['Verruca vulgaris'] }]];
-  for (const [name, pn, link] of courses) {
-    const p = procs.find((x: any) => x.name === pn);
-    if (p) add('procedure', name, { procedureId: p.id, sittings: p.typicalSittings, intervalDays: 28, ...(p.pricePaise ? { pricePaise: p.pricePaise } : {}) }, link);
-  }
   await db.insert(tmpl).values(rows.map((r, i) => ({ ...r, sortOrder: i, tenantId: tid })));
   // whole-note protocols are suggested by diagnosis too
   const link = (name: string, linked: any) => db.update(rxTemplate).set({ linked }).where(and(eq(rxTemplate.tenantId, tid), eq(rxTemplate.name, name)));
