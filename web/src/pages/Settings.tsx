@@ -80,6 +80,8 @@ export function Settings() {
   useEffect(() => { if (asked === 'medicines') nav('/inventory?tab=stock', { replace: true }); }, [asked]);
   const want = (ALIAS[asked] === 'people' && !admin ? 'hours' : ALIAS[asked]) ?? asked;
   const tab: Tab = TABS.find((t) => t[0] === want && visible(t[0]))?.[0] ?? (admin ? 'clinic' : 'hours');
+  // the address always names the topic, so the top bar reads Settings › Clinic profile
+  useEffect(() => { if (cfg && asked !== tab && asked !== 'medicines') setParams({ tab }, { replace: true }); }, [asked, tab, !!cfg]);
   const setTab = (k: Tab) => { setParams({ tab: k }, { replace: true }); window.scrollTo({ top: 0 }); };
   const refresh = () => { ['config', 'users', 'inactive', 'sessions', 'calendar', 'frontdesk'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }; // hours changed here show at check-in at once
   const [find, setFind] = useState('');
@@ -136,8 +138,8 @@ function NameListEditor({ title, noun, items, max, maxLen, placeholder, hint, so
   const [add, setAdd] = useState('');
   const clean = add.trim(); const dup = !!clean && list.some((a) => a.toLowerCase() === clean.toLowerCase());
   const dirty = JSON.stringify(list) !== JSON.stringify(items);
-  const doAdd = () => { if (!clean || dup || list.length >= max) return; setList([...list, clean.slice(0, maxLen)]); setAdd(''); };
-  const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= list.length) return; const n = [...list]; [n[i], n[j]] = [n[j], n[i]]; setList(n); };
+  const doAdd = () => { if (!clean || dup || list.length >= max) return; setList((l) => [...l, clean.slice(0, maxLen)]); setAdd(''); };
+  const move = (i: number, d: number) => setList((l) => { const j = i + d; if (j < 0 || j >= l.length) return l; const n = [...l]; [n[i], n[j]] = [n[j], n[i]]; return n; });
   const m = useMutation({ mutationFn: () => onSave(list), onSuccess: () => { toast('Saved'); onSaved(); }, onError: (e) => toast(say(e), 'err') });
   return (
     <div className="space-y-4">
@@ -153,7 +155,7 @@ function NameListEditor({ title, noun, items, max, maxLen, placeholder, hint, so
             <span className="flex-1 text-sm">{a}</span>
             <button type="button" className="btn btn-ghost btn-icon" aria-label={`Move ${a} up`} disabled={i === 0} onClick={() => move(i, -1)}><Icon name="up" className="h-3.5 w-3.5" /></button>
             <button type="button" className="btn btn-ghost btn-icon" aria-label={`Move ${a} down`} disabled={i === list.length - 1} onClick={() => move(i, 1)}><Icon name="up" className="h-3.5 w-3.5 rotate-180" /></button>
-            <button type="button" className="btn btn-ghost btn-icon" aria-label={`Remove ${a}`} onClick={() => setList(list.filter((x) => x !== a))}><Icon name="x" className="h-3.5 w-3.5" /></button>
+            <button type="button" className="btn btn-ghost btn-icon" aria-label={`Remove ${a}`} onClick={() => setList((l) => l.filter((x) => x !== a))}><Icon name="x" className="h-3.5 w-3.5" /></button>
           </div>))}
       </Section>
       <div className="settings-save"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setList(items)}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || m.isPending || list.length === 0} onClick={() => m.mutate()}><Icon name="check" />Save</button></div>
@@ -168,7 +170,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [f, setF] = useState(init);
   const dirty = JSON.stringify(f) !== JSON.stringify(init);
   const save = useMutation({ mutationFn: () => patch('/admin/clinic', { name: f.name.trim(), settings: { print: { address: f.address.trim(), phone: f.phone.trim(), footer: f.footer.trim() }, messages: { language: f.language } } }), onSuccess: () => { toast('Clinic profile saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
-  const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
+  const set = (k: string) => (e: any) => setF((p) => ({ ...p, [k]: e.target.value }));
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
@@ -179,7 +181,7 @@ function ClinicTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
       </div>
       <div className="card space-y-3">
         <div className="card-title">Patients' language</div>
-        <div className="flex gap-1" role="group" aria-label="Patients' language">{[['en', 'English'], ['te', 'Telugu'], ['hi', 'Hindi']].map(([k, l]) => <button key={k} type="button" aria-pressed={f.language === k} className={`toggle-opt ${f.language === k ? 'on' : ''}`} onClick={() => setF({ ...f, language: k })}>{l}</button>)}</div>
+        <div className="flex gap-1" role="group" aria-label="Patients' language">{[['en', 'English'], ['te', 'Telugu'], ['hi', 'Hindi']].map(([k, l]) => <button key={k} type="button" aria-pressed={f.language === k} className={`toggle-opt ${f.language === k ? 'on' : ''}`} onClick={() => setF((p) => ({ ...p, language: k }))}>{l}</button>)}</div>
         <div className="text-xs text-muted">For patients with no language of their own: WhatsApp messages, the patient link and the waiting-room screen.</div>
       </div>
       <div className="settings-save"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setF(init)}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || save.isPending || !f.name.trim()} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
@@ -200,8 +202,8 @@ function BillingTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
     <div className="space-y-4">
       <div className="card space-y-3">
         <div className="card-title">Tax and payments</div>
-        <div><label className="label" htmlFor="cl-gstin">GSTIN (leave empty if not registered)</label><input id="cl-gstin" className={`input uppercase ${gstBad ? '!border-rose' : ''}`} maxLength={15} value={f.gstin} onChange={(e) => setF({ ...f, gstin: e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '') })} /><div className={`mt-1 text-xs ${gstBad ? 'text-rose' : 'text-muted'}`}>{gstBad ? 'A GSTIN has 15 letters and numbers.' : 'With a GSTIN, receipts print as a Tax Invoice with CGST and SGST per rate. Without one, they print as a Bill of Supply with no tax lines.'}</div></div>
-        <div><label className="label" htmlFor="cl-upi">UPI ID for payments</label><input id="cl-upi" className={`input ${upiBad ? '!border-rose' : ''}`} maxLength={130} value={f.upiId} onChange={(e) => setF({ ...f, upiId: e.target.value.replace(/\s/g, '') })} placeholder="clinic@okhdfc" /><div className={`mt-1 text-xs ${upiBad ? 'text-rose' : 'text-muted'}`}>{upiBad ? 'Write it as name@bank, e.g. clinic@okhdfc.' : 'The pharmacy shows a QR code with the amount filled in.'}</div></div>
+        <div><label className="label" htmlFor="cl-gstin">GSTIN (leave empty if not registered)</label><input id="cl-gstin" className={`input uppercase ${gstBad ? '!border-rose' : ''}`} maxLength={15} value={f.gstin} onChange={(e) => setF((p) => ({ ...p, gstin: e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '') }))} /><div className={`mt-1 text-xs ${gstBad ? 'text-rose' : 'text-muted'}`}>{gstBad ? 'A GSTIN has 15 letters and numbers.' : 'With a GSTIN, receipts print as a Tax Invoice with CGST and SGST per rate. Without one, they print as a Bill of Supply with no tax lines.'}</div></div>
+        <div><label className="label" htmlFor="cl-upi">UPI ID for payments</label><input id="cl-upi" className={`input ${upiBad ? '!border-rose' : ''}`} maxLength={130} value={f.upiId} onChange={(e) => setF((p) => ({ ...p, upiId: e.target.value.replace(/\s/g, '') }))} placeholder="clinic@okhdfc" /><div className={`mt-1 text-xs ${upiBad ? 'text-rose' : 'text-muted'}`}>{upiBad ? 'Write it as name@bank, e.g. clinic@okhdfc.' : 'The pharmacy shows a QR code with the amount filled in.'}</div></div>
         <div className="flex justify-end gap-2"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setF(init)}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || save.isPending || upiBad || gstBad} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
       </div>
       <div className="card-title !mt-6">Expense categories</div>
@@ -222,17 +224,17 @@ function DeskTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
     <div className="space-y-4">
       <div className="card space-y-3">
         <div className="card-title">Token numbers</div>
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Token numbers">{[['day+category', 'One series per consultation type (GEN-1, REN-1…)'], ['day', 'One series for the whole day (1, 2, 3…)']].map(([v, l]) => <button key={v} type="button" aria-pressed={f.opNumberScope === v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF({ ...f, opNumberScope: v })}>{l}</button>)}</div>
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Token numbers">{[['day+category', 'One series per consultation type (GEN-1, REN-1…)'], ['day', 'One series for the whole day (1, 2, 3…)']].map(([v, l]) => <button key={v} type="button" aria-pressed={f.opNumberScope === v} className={`toggle-opt ${f.opNumberScope === v ? 'on' : ''}`} onClick={() => setF((p) => ({ ...p, opNumberScope: v }))}>{l}</button>)}</div>
         <div className="text-xs text-muted">Numbers start again every morning.</div>
       </div>
       <div className="card space-y-3">
         <div className="card-title">Junior doctor screening</div>
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Junior doctor screening">{([['off', 'Off'], ['first', 'When a junior is on'], ['required', 'Every patient']] as const).map(([v, l]) => <button key={v} type="button" aria-pressed={f.screening === v} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF({ ...f, screening: v })}>{l}</button>)}</div>
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Junior doctor screening">{([['off', 'Off'], ['first', 'When a junior is on'], ['required', 'Every patient']] as const).map(([v, l]) => <button key={v} type="button" aria-pressed={f.screening === v} className={`toggle-opt ${f.screening === v ? 'on' : ''}`} onClick={() => setF((p) => ({ ...p, screening: v }))}>{l}</button>)}</div>
         <div className="text-xs text-muted">{f.screening === 'off' ? 'Reception sends patients straight to the doctor. A junior doctor can still screen anyone waiting; the doctor does not wait for it.' : f.screening === 'first' ? 'The junior takes patients from the waiting list for screening. The doctor sees screened patients first and is never shown someone mid-screening.' : 'Reception cannot send a patient to the doctor until the junior has screened them.'}</div>
       </div>
       <div className="card space-y-3">
         <div className="card-title">Coming back with test reports</div>
-        <div className="flex flex-wrap items-center gap-2 text-sm"><span>Free within</span><NumInput aria-label="Days" max={365} className={`input !w-24 ${daysBad ? '!border-rose' : ''}`} value={f.freeDays} onChange={(e: any) => setF({ ...f, freeDays: e.target.value })} /><span>days of the tests</span></div>
+        <div className="flex flex-wrap items-center gap-2 text-sm"><span>Free within</span><NumInput aria-label="Days" max={365} className={`input !w-24 ${daysBad ? '!border-rose' : ''}`} value={f.freeDays} onChange={(e: any) => setF((p) => ({ ...p, freeDays: e.target.value }))} /><span>days of the tests</span></div>
         <div className={`text-xs ${daysBad ? 'text-rose' : 'text-muted'}`}>{daysBad ? 'From 0 to 365 days.' : 'Within this time, coming back with reports has no fee, and the desk sees it pre-filled at check-in.'}</div>
       </div>
       <div className="card space-y-3">

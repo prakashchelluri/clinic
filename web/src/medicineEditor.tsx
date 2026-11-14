@@ -40,7 +40,7 @@ export function MedicineDrawer({ value, onClose, onSaved }: { value: any; onClos
           <div><span className="label">Schedule</span><div className="flex gap-1">{['OTC', 'H', 'H1', 'X'].map((x) => <button key={x} type="button" aria-pressed={edit.scheduleClass === x} className={`toggle-opt ${edit.scheduleClass === x ? 'on' : ''}`} onClick={() => set('scheduleClass', x)}>{x}</button>)}</div></div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><label className="label" htmlFor="md-mrp">MRP per {perPack} (₹, GST included)</label><MoneyInput id="md-mrp" value={edit.mrp ?? String((edit.mrpPaise ?? 0) / 100 || '')} onChange={(v: string) => set('mrp', v)} /></div>
-            <div><label className="label" htmlFor="md-hsn">HSN code</label><input id="md-hsn" className="input" inputMode="numeric" maxLength={8} value={edit.hsn ?? ''} onChange={(e) => set('hsn', e.target.value.replace(/\D/g, ''))} /></div>
+            <div><label className="label" htmlFor="md-hsn">HSN code</label><input id="md-hsn" className="input" inputMode="numeric" value={edit.hsn ?? ''} onChange={(e) => set('hsn', e.target.value.replace(/\D/g, '').slice(0, 8))} /></div>
             <div><span className="label">GST</span><div className="flex flex-wrap gap-1">{[0, 500, 1200, 1800].map((x) => <button key={x} type="button" aria-pressed={(edit.gstBp ?? 1200) === x} className={`toggle-opt ${(edit.gstBp ?? 1200) === x ? 'on' : ''}`} onClick={() => set('gstBp', x)}>{x / 100}%</button>)}</div></div>
           </div>
           <div className="-mt-1 text-xs text-muted">A delivery with a new MRP updates it here.</div>

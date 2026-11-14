@@ -49,8 +49,7 @@ export function RoutineEditor({ value, onChange }: { value: Routine; onChange: (
       </div>
       {monday.length > 0 && <button type="button" className="btn btn-sm" onClick={() => onChange({ ...value, days: Object.fromEntries(Object.keys(value.days).map((d) => [d, value.days[d]?.length ? monday : []])) })}>Copy Monday to all working days</button>}
       <div className="grid grid-cols-2 gap-3 pt-3 border-t border-line">
-        <div><label className="label">Patients per hour</label><NumInput max={99} className="input" value={value.capacity} onChange={(e) => onChange({ ...value, capacity: Number(e.target.value) })} /></div>
-        <div><label className="label">Window length</label><div className="flex gap-1">{[30, 60].map((m) => <button type="button" key={m} className={`toggle-opt ${value.windowMinutes === m ? 'on' : ''}`} onClick={() => onChange({ ...value, windowMinutes: m })}>{m} min</button>)}</div></div>
+        <div><label className="label">Patients per hour</label><NumInput max={99} className="input" value={value.capacity} onChange={(e) => onChange({ ...value, capacity: Number(e.target.value), windowMinutes: 60 })} /></div>
       </div>
     </div>
   );

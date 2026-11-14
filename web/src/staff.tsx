@@ -87,7 +87,7 @@ function PersonDrawer({ value, cfg, me, iAmOwner, roleList, onClose, onDone, onS
   const roles = roleList.filter((r) => iAmOwner || r.key !== 'owner');
   const toggleRole = (r: string) => set('roles', f.roles.includes(r) ? f.roles.filter((x: string) => x !== r) : [...f.roles, r]);
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim());
-  const problem = !f.name.trim() ? 'Give the name.' : !f.consults && !f.signIn ? 'Tick Consults patients, or let them sign in.' : f.signIn && !emailOk ? 'Give a sign-in email (Sign-in tab).' : f.signIn && !f.roles.length ? 'Pick at least one role.' : '';
+  const problem = !f.name.trim() ? 'Give the name.' : !f.consults && !f.signIn ? 'Tick Consults patients, or let them sign in.' : f.signIn && !emailOk ? 'Give a sign-in email (Sign-in tab).' : f.signIn && !f.roles.length && !f.consults ? 'Pick at least one role.' : '';
   const save = useMutation({
     mutationFn: async (active: boolean) => {
       let pracId = f.pracId;
@@ -128,7 +128,7 @@ function PersonDrawer({ value, cfg, me, iAmOwner, roleList, onClose, onDone, onS
           <RoutineEditor value={f.routine} onChange={(r) => set('routine', r)} />
         </div>}
         {tab === 'signin' && <div className="space-y-3">
-          {!value.signIn && <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-0.5 accent-clay" checked={f.signIn} onChange={(e) => set('signIn', e.target.checked)} /><span><b className="block font-medium">Signs in to the app</b><span className="text-xs text-muted">The app makes a first password and shows it once after you save.</span></span></label>}
+          {!f.userId && <label className="flex items-start gap-3 text-sm"><input type="checkbox" className="mt-0.5 accent-clay" checked={f.signIn} onChange={(e) => set('signIn', e.target.checked)} /><span><b className="block font-medium">Signs in to the app</b><span className="text-xs text-muted">The app makes a first password and shows it once after you save.</span></span></label>}
           {lockedOwner && <div className="rounded-xl bg-amber-soft px-3 py-2 text-sm text-amber">This person is an owner. Only an owner can change their email, password or whether they are active.</div>}
           {f.signIn && <>
             <div><label className="label" htmlFor="ps-email">Email (used to sign in)</label><input id="ps-email" type="email" className={`input ${f.email && !emailOk ? '!border-rose' : ''}`} maxLength={200} disabled={lockedOwner} value={f.email} onChange={(e) => set('email', e.target.value)} /></div>
