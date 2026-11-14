@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from './api';
 import { can } from './App';
-import { Chip, Icon, Modal, MoneyInput, Section, money, toPaise, toast, fmtDate } from './ui';
+import { Icon, Modal, MoneyInput, Section, money, toPaise, toast, fmtDate } from './ui';
 import { printReceipt } from './invoices';
 
 /** The money codes the server sends, in the desk's words. */
@@ -136,12 +136,16 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const cap = Number(cfg?.tenant?.settings?.discountCapPct ?? 10);
   const mayGive = can(perms, 'discount.give'); const mayApprove = can(perms, 'discount.approve');
   const needsOk = off > 0 && (!mayGive || (pct > cap && !mayApprove));
-  const amt = (p: Part, i: number) => (p.amount === '' && parts.length === 1 && i === 0 ? payable : toPaise(p.amount));
   const [later, setLater] = useState(false); // bill now, nothing taken now
-  const total = later ? 0 : parts.reduce((s, p, i) => s + amt(p, i), 0);
+  // the patient's advance comes off the bill first (ticked by default); the rest is paid by the modes below
+  const [useAdv, setUseAdv] = useState(true);
+  const advUse = useAdv && !later ? Math.min(advPaise, payable) : 0; const toPay = payable - advUse;
+  const amt = (p: Part, i: number) => (p.amount === '' && parts.length === 1 && i === 0 ? toPay : toPaise(p.amount));
+  const allAdv = advUse > 0 && toPay === 0; // the advance pays it all: no mode to pick
+  const paidNew = later || allAdv ? 0 : parts.reduce((s, p, i) => s + amt(p, i), 0); const total = advUse + paidNew;
   const aheadNeed = on.filter((l) => l.kind === 'ahead').reduce((s, l) => s + gross(l) - lineOff(l), 0);
   const tooBig = on.find((l) => !l.noDiscount && lineOff(l) >= gross(l) && lineOff(l) > 0);
-  const fromAdv = later ? 0 : parts.reduce((s, p, i) => s + (p.method === 'advance' ? amt(p, i) : 0), 0);
+  const fromAdv = advUse;
   const extra = Math.max(0, total - payable); // more than the bill: kept as advance when ticked
   const gst = on.reduce((s, l) => { const after = gross(l) - lineOff(l); const share = !l.noDiscount && room ? Math.round((extra_ * after) / room) : 0; return s + gstIn(after - share, l.taxBp); }, 0);
   const problem = !on.length && total <= 0 ? 'Tick or add an item, or type an amount to take as advance'
@@ -158,11 +162,11 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     mutationFn: () => post('/bills', {
       patientId, idempotencyKey: key, reason: why.trim(), extraDiscountPaise: extra_, keepExtraAsAdvance: keep && total > payable,
       lines: on.map((l) => ({ ...(l.kind === 'charge' ? { chargeId: l.id } : l.kind === 'proc' ? { procedureId: l.id, qty: l.qty } : l.kind === 'service' ? { serviceId: l.id, qty: l.qty } : { recommendationId: l.id, sittings: l.qty }), discountPaise: lineOff(l) })),
-      parts: later ? [] : parts.map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0),
+      parts: later ? [] : [...(advUse ? [{ method: 'advance', amountPaise: advUse }] : []), ...parts.map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0)],
     }),
     onSuccess: (r: any) => {
       refresh(); qc.invalidateQueries({ queryKey: ['advance'] });
-      const modes = [...new Set(parts.filter((p, i) => amt(p, i) > 0).map((p) => MODE_NAME[p.method] ?? p.method))].join(' + ');
+      const modes = [...new Set([...parts.filter((p, i) => amt(p, i) > 0).map((p) => MODE_NAME[p.method] ?? p.method), ...(advUse ? ['the advance'] : [])])].join(' + ');
       const first = patientName.split(' ')[0];
       const head = r.paidPaise ? `${money(r.paidPaise)} ${modes} from ${first}` : `Bill saved for ${first}`;
       toast(`${head}${r.keptAsAdvancePaise ? ` · ${money(r.keptAsAdvancePaise)} kept as advance` : ''}${r.waitingForApproval ? ` · ${money(r.offPaise)} discount sent for approval` : ''}${r.balancePaise ? ` · ${money(r.balancePaise)} still due` : ''}`, 'ok', r.receiptNo ? { label: 'Receipt', run: () => printReceipt(r.receiptNo) } : undefined);
@@ -191,12 +195,11 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     } else { const ls0 = withPackage(v.split(':')[1]).filter((l) => !lines.some((x) => x.key === l.key)); if (ls0.length) setLines((ls) => [...ls, ...ls0]); else toast('Nothing left to pay ahead on this course', 'info'); }
   };
   const setPart = (i: number, patch: Partial<Part>) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
-  const modes: [Part['method'], string][] = advPaise > 0 ? [...MODES, ['advance', 'From advance']] : MODES;
+  const modes = MODES;
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0 space-y-3">
-        {advPaise > 0 && <div className="flex flex-wrap items-center gap-2 text-sm"><Chip tone="sage">Advance balance {money(advPaise)}</Chip><span className="text-xs text-muted">Pick “From advance” to use it on this bill.</span></div>}
         <div className="relative">
           <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input className="input !pl-9" placeholder="Search procedures and services to add…" aria-label="Search the price list" autoComplete="off" value={q} maxLength={60}
@@ -234,25 +237,28 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
         {extra_ > 0 && <div className="flex justify-end text-xs text-muted">−{money(extra_)}</div>}
         <div className="flex justify-between border-t border-line pt-2.5 text-base font-bold"><span>Payable</span><span className="tabular-nums">{money(payable)}</span></div>
         <div className="flex justify-between text-xs"><span className="text-muted">of which GST</span><span className="tabular-nums">{money(gst)}</span></div>
+        {advPaise > 0 && payable > 0 && <>
+          <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" checked={useAdv} disabled={later} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
+          {advUse > 0 && <div className="flex justify-between font-bold"><span>To pay</span><span className="tabular-nums">{money(toPay)}</span></div>}
+        </>}
         {off > 0 && <div className="text-xs text-muted">{pct}% off · {mayApprove ? 'you approve discounts yourself' : mayGive ? `your limit is ${cap}%` : 'every discount needs approval'}</div>}
         {needsOk && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium text-ink" role="status">{pct}% off is above {mayGive ? `your limit of ${cap}%` : 'what you may give'}. The discount goes to the owner for approval. You can take {money(payable)} or less now; if the owner says no, {money(off)} becomes due.</div>}
 
         <div className="flex items-center justify-between pt-2"><span className="label !mb-0">Paid now</span>{on.length > 0 && <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="accent-clay" checked={later} onChange={(e) => setLater(e.target.checked)} />Nothing now, pay later</label>}</div>
-        {!later && <div className="space-y-2">{parts.map((p, i) => (
+        {!later && !allAdv && <div className="space-y-2">{parts.map((p, i) => (
           <div key={i} className="space-y-1.5 rounded-xl bg-surface p-2">
-            <div className="flex flex-wrap items-center gap-1">{modes.map(([m, lb]) => <button key={m} type="button" aria-pressed={p.method === m} className={`toggle-opt !min-h-0 !px-2.5 !py-1 ${p.method === m ? 'on' : ''}`} onClick={() => setPart(i, { method: m, ...(m === 'advance' && p.amount === '' ? { amount: String(Math.min(advPaise, payable) / 100) } : {}) })}>{lb}</button>)}
+            <div className="flex flex-wrap items-center gap-1">{modes.map(([m, lb]) => <button key={m} type="button" aria-pressed={p.method === m} className={`toggle-opt !min-h-0 !px-2.5 !py-1 ${p.method === m ? 'on' : ''}`} onClick={() => setPart(i, { method: m })}>{lb}</button>)}
               <span className="ml-auto" />{parts.length > 1 && <button type="button" className="btn btn-ghost btn-sm !px-1.5" aria-label="Remove this mode" onClick={() => setParts(parts.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button>}</div>
-            <MoneyInput value={p.amount} label={`Amount by ${MODE_NAME[p.method] ?? p.method}`} placeholder={i === 0 && parts.length === 1 ? String(payable / 100) : '0'} onChange={(v) => setPart(i, { amount: v })} />
+            <MoneyInput value={p.amount} label={`Amount by ${MODE_NAME[p.method] ?? p.method}`} placeholder={i === 0 && parts.length === 1 ? String(toPay / 100) : '0'} onChange={(v) => setPart(i, { amount: v })} />
             {p.method !== 'cash' && p.method !== 'advance' && <input className="input" maxLength={60} aria-label={p.method === 'emi' ? 'Approval code' : 'Reference'} placeholder={p.method === 'emi' ? 'Approval code' : p.method === 'upi' ? 'Ref, last 4 digits' : 'Reference'} value={p.reference} onChange={(e) => setPart(i, { reference: e.target.value })} />}
             {p.method === 'emi' && <input className="input" maxLength={60} aria-label="Lender" placeholder="Lender, for example Bajaj Finserv" value={p.lender} onChange={(e) => setPart(i, { lender: e.target.value })} />}
-            {p.method === 'advance' && <div className="text-xs text-muted">{money(advPaise)} in the advance.</div>}
           </div>))}
           {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => setParts([...parts, { method: 'cash', amount: '', reference: '', lender: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
         </div>}
-        <div className="flex justify-between border-t border-line pt-2.5 font-bold"><span>Paying now</span><span className="tabular-nums">{money(total)}</span></div>
+        <div className="flex justify-between border-t border-line pt-2.5 font-bold"><span>Paying now</span><span className="tabular-nums">{money(paidNew)}</span></div>
         <div className="flex justify-between"><span className="text-muted">Stays due</span><span className="tabular-nums font-semibold text-amber">{money(Math.max(0, payable - total))}</span></div>
         {extra > 0 && <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" className="accent-clay" checked={keep} onChange={(e) => setKeep(e.target.checked)} />{on.length ? `Keep the extra ${money(extra)} as advance` : `Take ${money(extra)} as advance`}</label>}
-        <button className="btn btn-primary mt-2 w-full" disabled={!!problem || go.isPending} onClick={() => go.mutate()}><Icon name="check" />{!on.length ? `Take ${money(total)} as advance` : needsOk ? `Send discount for approval${total ? ` · take ${money(total)}` : ''}` : total ? `Collect ${money(total)}` : 'Save the bill'}</button>
+        <button className="btn btn-primary mt-2 w-full" disabled={!!problem || go.isPending} onClick={() => go.mutate()}><Icon name="check" />{!on.length ? `Take ${money(total)} as advance` : needsOk ? `Send discount for approval${total ? ` · take ${money(total)}` : ''}` : paidNew ? `Collect ${money(paidNew)}` : advUse ? `Pay ${money(advUse)} from advance` : 'Save the bill'}</button>
         <div className="text-center text-xs text-muted" role="status">{problem || (extra > 0 ? `${money(extra)} goes to the advance` : total < payable ? `${money(payable - total)} stays due on the bill` : fromAdv === total && total > 0 ? 'Paid from the advance: no receipt' : 'One receipt for everything')}</div>
       </aside>
     </div>
