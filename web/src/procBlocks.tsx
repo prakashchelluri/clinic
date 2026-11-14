@@ -40,7 +40,7 @@ export const dragItem = (s: any): DragItem => ({ id: s.id, title: s.patient.full
 export function Block({ s, week = false, doctor = false, cls = '', onDown, onClick }: { s: any; week?: boolean; doctor?: boolean; cls?: string; onDown?: (e: React.PointerEvent) => void; onClick: () => void }) {
   const st = sitStatus(s, week, doctor); const len = toMin(s.endTime) - toMin(s.startTime);
   return (
-    <button type="button" className={`pw-blk ${st.cls} ${onDown ? '' : 'fixed'} ${cls}`} onPointerDown={onDown} onClick={onClick} title={s.approvalNote ? `Doctor's note: ${s.approvalNote}` : undefined}>
+    <button type="button" className={`pw-blk ${st.cls} ${onDown ? '' : 'pw-still'} ${cls}`} onPointerDown={onDown} onClick={onClick} title={s.approvalNote ? `Doctor's note: ${s.approvalNote}` : undefined}>
       <span className="top"><span>{t12(s.startTime)}–{t12(s.endTime)} · {lenText(len)}</span><span className="st">{st.word}</span></span>
       <b>{s.state === 'completed' ? '✓ ' : ''}{s.patient.fullName}</b>
       <span>{s.procedure ?? 'Procedure'} · {s.of ? `${s.sittingNo} of ${s.of}` : `session ${s.sittingNo}`}</span>

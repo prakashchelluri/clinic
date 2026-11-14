@@ -16,7 +16,7 @@
 .pw-blk.room b, .pw-blk.room .top { color: var(--color-surface); }
 .pw-blk.done { background: transparent; color: var(--color-muted); box-shadow: inset 0 0 0 1px var(--color-line); cursor: pointer; }
 .pw-blk.done b { color: var(--color-muted); }
-.pw-blk.fixed { cursor: pointer; }
+.pw-blk.pw-still { cursor: pointer; } /* not "fixed": that name is Tailwind's position: fixed */
 .pw-blk.draft { box-shadow: none; outline: 1.5px dashed var(--color-line-2); outline-offset: -1.5px; }
 .pw-blk.sent { box-shadow: inset 0 0 0 1.5px var(--color-ink-2); }
 .pw-blk.change { box-shadow: inset 0 0 0 1.5px var(--color-rose); }
