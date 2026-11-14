@@ -24,7 +24,7 @@ const PROC = ['schedule', 'advised', 'missed_sitting'];
 /** Consultation or procedure: what the call is about */
 const isProc = (r: any) => PROC.includes(r.kind) || isConfirm(r);
 /** The reason, short: the table's one line */
-const reason = (r: any): string => ({ review: 'Review visit', missed_visit: 'No show', missed_sitting: 'No show', advised: 'Advised · patient deciding', confirm_week: 'Confirm session · a week before', confirm_day: 'Confirm session · the day before' } as Record<string, string>)[r.kind]
+const reason = (r: any): string => (r.items?.length > 1 ? `Book ${r.items.length} procedures` : undefined) ?? ({ review: 'Review visit', missed_visit: 'No show', missed_sitting: 'No show', advised: 'Advised · patient deciding', confirm_week: 'Confirm session · a week before', confirm_day: 'Confirm session · the day before' } as Record<string, string>)[r.kind]
   ?? (/to book/.test(r.what) ? 'Book next session' : 'Book first session');
 const refresh = () => ['followups', 'worklist', 'bookings', 'orders'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
@@ -70,7 +70,7 @@ export function Calls() {
   const log = (r: any, outcome: Out, extra: object = {}) => post('/followups/log', { kind: r.kind, refId: r.refId, patientId: r.patient.id, outcome, ...extra });
   // several rows at once: each gets its own No answer, as if logged one by one
   const many = useMutation({
-    mutationFn: async ({ list, send }: { list: any[]; send: boolean }) => { let n = 0, sent = 0; for (const r of list) { const x: any = await log(r, 'no_answer', { sendMessage: send }); n++; if (x.messaged) sent++; } return { n, sent }; },
+    mutationFn: async ({ list, send }: { list: any[]; send: boolean }) => { let sent = 0; for (const r of list) for (const [i, it] of (r.items ?? [r]).entries()) { const x: any = await log(it, 'no_answer', { sendMessage: send && i === 0 }); if (x.messaged) sent++; } return { n: list.length, sent }; },
     onSuccess: ({ n, sent }) => { refresh(); toast(`Logged ${n} call${n === 1 ? '' : 's'} as no answer${sent ? `; ${sent} message${sent === 1 ? '' : 's'} on the way` : ''}`); },
     onError: (e) => { refresh(); toast(errText(e), 'err'); },
   });
@@ -101,7 +101,7 @@ export function Calls() {
       <span className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
       {canWrite && <button type="button" className="btn btn-sm" disabled={many.isPending} onClick={() => many.mutate({ list: [r], send: false })}>No answer</button>}
       {canWrite && isConfirm(r) ? <button type="button" className="btn btn-sm btn-primary" disabled={confirmed.isPending} onClick={() => confirmed.mutate(r)}>Confirmed</button>
-        : bookable(r) ? <button type="button" className="btn btn-sm btn-primary" onClick={() => book(r)}>Book</button> : null}
+        : bookable(r) ? <button type="button" className="btn btn-sm btn-primary" onClick={() => r.items?.length > 1 ? setOpen(r.key) : book(r)}>Book</button> : null}
       <MoreMenu label={`Other outcomes of the call to ${r.patient.fullName}`} items={[
         { label: 'Wants another day…', hidden: !canWrite || !isConfirm(r), onClick: () => setMoving(r) },
         { label: 'Call later…', hidden: !canWrite, onClick: () => setOpen(r.key) },
@@ -142,7 +142,7 @@ export function Calls() {
         <span>{rows.length} call{rows.length === 1 ? '' : 's'}{late ? ` · ${late} late` : ''}</span>
         {stale.length > 0 && <button type="button" className="ml-auto font-medium text-clay hover:underline" onClick={() => setOld(!old)}>{old ? 'Back to the list' : `${stale.length} more than ${STALE} days late · show`}</button>}
       </div>
-      {row && <CallDrawer key={row.key} row={row} fees={can(perms, 'fees.see')} canWrite={canWrite} onBook={bookable(row) ? () => book(row) : undefined} onMove={isConfirm(row) && canWrite ? () => setMoving(row) : undefined} onProfile={() => nav(`/patients/${row.patient.id}`)} onClose={() => setOpen(null)} />}
+      {row && <CallDrawer key={row.key} row={row} fees={can(perms, 'fees.see')} canWrite={canWrite} onBook={!(row.items?.length > 1) && bookable(row) ? () => book(row) : undefined} onBookItem={(it: any) => { setOpen(null); book(it); }} onMove={isConfirm(row) && canWrite ? () => setMoving(row) : undefined} onProfile={() => nav(`/patients/${row.patient.id}`)} onClose={() => setOpen(null)} />}
       {moving && <ScheduleModal rec={{ id: moving.recId, procedureId: moving.procedureId, sittings: moving.sittings, patient: moving.patient }} sitting={moving.sitting} onClose={() => { setMoving(null); refresh(); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
       {sitting && <ScheduleModal rec={sitting} onClose={() => { setSitting(null); refresh(); qc.invalidateQueries({ queryKey: ['calendar'] }); }} />}
     </div>
@@ -150,7 +150,7 @@ export function Calls() {
 }
 
 /** One call in the side drawer: the reason in full, every call so far (date, time, who), and what happened on this one. */
-function CallDrawer({ row, fees, canWrite, onBook, onMove, onProfile, onClose }: { row: any; fees: boolean; canWrite: boolean; onBook?: () => void; onMove?: () => void; onProfile: () => void; onClose: () => void }) {
+function CallDrawer({ row, fees, canWrite, onBook, onBookItem, onMove, onProfile, onClose }: { row: any; fees: boolean; canWrite: boolean; onBook?: () => void; onBookItem: (item: any) => void; onMove?: () => void; onProfile: () => void; onClose: () => void }) {
   const list: { label: string; out: Out | 'book' | 'move'; note?: string }[] = isConfirm(row) ? CONFIRM_OUTCOMES : OUTCOMES;
   const [pick, setPick] = useState<number>(() => Math.max(0, list.findIndex((o) => o.out === (isConfirm(row) ? 'confirmed' : 'call_later'))));
   const o = list[pick]; const outcome = o.out;
@@ -159,18 +159,20 @@ function CallDrawer({ row, fees, canWrite, onBook, onMove, onProfile, onClose }:
     mutationFn: async (confirmClosedDay?: boolean) => {
       // not coming to a booked sitting: postpone it first (frees the room and the doctor), then log the call
       if (isConfirm(row) && outcome === 'not_interested') await patch(`/procedure-sessions/${row.sitting.id}`, { state: 'postponed', reason: `Not coming: ${[o.note, note.trim()].filter(Boolean).join(' · ')}` });
-      return post('/followups/log', { kind: row.kind, refId: row.refId, patientId: row.patient.id, outcome, note: [o.note, note.trim()].filter(Boolean).join(' · ') || undefined, callbackOn: outcome === 'call_later' ? date : undefined, sendMessage: outcome === 'no_answer' && !o.note ? send : undefined, confirmClosedDay });
+      // several procedures in the row: the one call is logged on each
+      let r: any; for (const [i, it] of (row.items ?? [row]).entries()) r = await post('/followups/log', { kind: it.kind, refId: it.refId, patientId: row.patient.id, outcome, note: [o.note, note.trim()].filter(Boolean).join(' · ') || undefined, callbackOn: outcome === 'call_later' ? date : undefined, sendMessage: outcome === 'no_answer' && !o.note && i === 0 ? send : undefined, confirmClosedDay });
+      return r;
     },
     onSuccess: (r: any) => { refresh(); toast(r.messaged ? 'Saved. A short message is on its way' : 'Saved'); onClose(); },
     onError: (e: any) => { if (e?.body?.code === 'CLOSED_DAY' && confirm(`${fmtDate(date)} is a Sunday and the clinic may be closed. Use this date anyway?`)) go.mutate(true); else toast(errText(e), 'err'); },
   });
   const bad = outcome === 'book' || outcome === 'move' || (outcome === 'call_later' && (!date || date < today())) || (outcome === 'not_interested' && !o.note && note.trim().length < 3);
-  const d = callOn(row); const n = days(d); const x = row.detail ?? {};
+  const d = callOn(row); const n = days(d); const x = row.detail ?? {}; const items: any[] = row.items?.length > 1 ? row.items : [];
   const facts: [string, string][] = [
-    [isProc(row) ? 'Procedure' : 'For', row.what],
+    ...(items.length ? [] : [[isProc(row) ? 'Procedure' : 'For', row.what] as [string, string]]),
     ...(x.by || x.advisedOn ? [['Advised by', [x.by, x.advisedOn && fmtDate(String(x.advisedOn).slice(0, 10))].filter(Boolean).join(' · ')] as [string, string]] : []),
-    ...(x.gapDays ? [['Gap', `Every ${x.gapDays} days`] as [string, string]] : []),
-    ...(fees && x.amountPaise ? [['Price', money(x.amountPaise)] as [string, string]] : []),
+    ...(!items.length && x.gapDays ? [['Gap', `Every ${x.gapDays} days`] as [string, string]] : []),
+    ...(!items.length && fees && x.amountPaise ? [['Price', money(x.amountPaise)] as [string, string]] : []),
   ];
   const history: any[] = row.history ?? [];
   return (
@@ -181,6 +183,9 @@ function CallDrawer({ row, fees, canWrite, onBook, onMove, onProfile, onClose }:
             <span className={`ml-auto text-[12.5px] font-medium ${n < 0 ? 'text-rose' : 'text-muted'}`}>Due {n === 0 ? 'today' : n === 1 ? 'tomorrow' : fmtDate(d)}{n < 0 ? ` · ${-n} day${n === -1 ? '' : 's'} late` : ''}</span></div>
           <div className="text-[15px] font-semibold">{reason(row)}</div>
           <dl className="grid grid-cols-[100px_1fr] gap-x-3 gap-y-1.5 text-[13px]">{facts.flatMap(([k, v]) => [<dt key={`t${k}`} className="text-muted">{k}</dt>, <dd key={`d${k}`}>{v}</dd>])}</dl>
+          {items.length > 0 && <div className="divide-y divide-line rounded-[8px] border border-line">{items.map((it) => <div key={it.key} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+            <span className="min-w-0 flex-1">{it.what}{fees && it.detail?.amountPaise ? <span className="text-muted"> · {money(it.detail.amountPaise)}</span> : null}</span>
+            {canWrite && it.recId && it.procedureId && <button type="button" className="btn btn-sm" onClick={() => onBookItem(it)}><Icon name="calendar" className="h-3.5 w-3.5" />Book</button>}</div>)}</div>}
         </section>
         <section className="space-y-2">
           <div className="text-[13px] font-semibold text-ink-2">Call history · {history.length}</div>

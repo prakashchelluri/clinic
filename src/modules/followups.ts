@@ -19,7 +19,7 @@ export const WEEK_CALL = { from: 2, to: 7 }; export const DAY_CALL = 1;
 type Tab = keyof typeof TABS;
 const P = { id: patient.id, fullName: patient.fullName, phone: patient.phone, patientNo: patient.patientNo, ageYears: patient.ageYears, sex: patient.sex, flags: patient.flags };
 /** recId/procedureId: the plan a Book button books a sitting for; order: the report a "Told" button closes. */
-type Row = { key: string; kind: Kind; refId: string; patient: any; what: string; dueOn: string | null; recId?: string | null; procedureId?: string | null; sittings?: number | null; order?: { encounterId: string; orderNo: number; needsVisit: boolean }; lastCall?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null; attempts: number } | null; waiting?: boolean;
+type Row = { key: string; kind: Kind; refId: string; patient: any; what: string; dueOn: string | null; recId?: string | null; procedureId?: string | null; sittings?: number | null; order?: { encounterId: string; orderNo: number; needsVisit: boolean }; lastCall?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null; attempts: number } | null; waiting?: boolean; /** a patient's procedures to book, all in this one row */ items?: Row[];
   /** for the drawer: when and by whom it was advised, a course's price and gap; every call so far, newest first */
   detail?: { advisedOn: string; by: string | null; amountPaise?: number | null; gapDays?: number | null }; history?: { outcome: string; note: string | null; at: string; by: string; callbackOn: string | null }[];
   /** confirm rows: the booked sitting, so Move can reschedule it and Not coming can postpone it */
@@ -61,7 +61,7 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     const c = course0.get(x.r.id);
     if (booked.has(x.r.id) || c?.live) continue;
     if (x.r.status === 'scheduled' && !c?.done && !c?.lastDay) continue; // booked once and nothing has happened to it since (old data)
-    const what = `${x.proc ?? 'Procedure'}${c?.done ? ` · session ${c.done + 1}${x.r.sittings ? ` of ${x.r.sittings}` : ''} to book` : x.r.sittings ? ` · ${x.r.sittings} sessions` : ''}`;
+    const what = `${x.proc ?? 'Procedure'}${c?.done ? ` · session ${c.done + 1}${x.r.sittings ? ` of ${x.r.sittings}` : ''} to book` : x.r.sittings ? ` · ${x.r.sittings} session${x.r.sittings === 1 ? '' : 's'}` : ''}`;
     rows.push({ key: x.r.id, kind: agreed.has(x.r.id) ? 'schedule' : 'advised', refId: x.r.id, patient: x.p, what, dueOn: x.r.dueOn, recId: x.r.id, procedureId: x.r.procedureId, sittings: x.r.sittings, detail: { advisedOn: x.r.createdAt, by: x.doc, amountPaise: x.r.amountPaise, gapDays: x.r.gapDays } });
   }
   const from = addDays(today, -30);
@@ -102,7 +102,21 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
     out.push(r);
   }
   out.sort((a, b) => Number(!!a.waiting) - Number(!!b.waiting) || (a.lastCall?.callbackOn ?? a.dueOn ?? '9999').localeCompare(b.lastCall?.callbackOn ?? b.dueOn ?? '9999'));
-  return out;
+  // a patient's procedures to book are one call: one row per patient, each procedure inside it
+  const merged: Row[] = []; const byP = new Map<string, Row>();
+  for (const r of out) {
+    if (!['schedule', 'advised'].includes(r.kind)) { merged.push(r); continue; }
+    const g = byP.get(r.patient.id);
+    if (!g) { const h: Row = { ...r, items: [r] }; byP.set(r.patient.id, h); merged.push(h); continue; }
+    g.items!.push(r);
+    if ((r.dueOn ?? '9999') < (g.dueOn ?? '9999')) g.dueOn = r.dueOn;
+    g.waiting = g.waiting && r.waiting;
+    // one call logged on each procedure shows once
+    const seen = new Set<string>(); g.history = [...(g.history ?? []), ...(r.history ?? [])].sort((x, y) => y.at.localeCompare(x.at)).filter((c) => { const k = `${c.at.slice(0, 16)}|${c.outcome}|${c.by}`; return !seen.has(k) && !!seen.add(k); });
+    const last = [g.lastCall, r.lastCall].filter(Boolean).sort((x, y) => y!.at.localeCompare(x!.at))[0];
+    g.lastCall = last ? { ...last, attempts: g.history.length } : null;
+  }
+  return merged;
 }
 
 /** A booking whose day has passed with no visit for that patient that day is a "did not come": nobody has to remember to mark it.
