@@ -87,10 +87,12 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
   const closed = !!d.checkoutClosedAt || (seen && open.length === 0);
   const finished = left || (seen && closed && !held);
 
-  const vit: [StepState, string] = canDesk && onToJunior && v.status === 'waiting' && !d.screenedAt ? ['next', 'not yet'] : v.status === 'intake' ? ['now', 'with the junior doctor now'] : d.screenedAt ? ['done', `${hhmm(d.screenedAt)} · junior doctor`]
+  // the step titles are the doctors' names; the meta keeps the role so a name alone still reads
+  const junior = d.screenedBy ?? d.juniorBy;
+  const vit: [StepState, string] = canDesk && onToJunior && v.status === 'waiting' && !d.screenedAt ? ['next', 'not yet'] : v.status === 'intake' ? ['now', junior ? 'junior doctor · with them now' : 'with them now'] : d.screenedAt ? ['done', `${hhmm(d.screenedAt)}${junior ? ' · junior doctor' : ''}`]
     : v.status === 'waiting' && screening === 'required' ? ['next', 'junior doctor sees them first'] : seen || v.status === 'in_consult' || screening === 'off' ? ['skip', 'not needed for this visit'] : ['next', 'if the junior doctor picks them'];
-  const doc: [StepState, string] = left ? ['skip', 'left without seeing the doctor'] : seen ? ['done', `${v.completedAt ? hhmm(v.completedAt) : ''}${v.doctor ? ` · ${v.doctor}` : ''}`]
-    : v.status === 'in_consult' ? ['now', `in the room${d.calledAt ? ` since ${hhmm(d.calledAt)} · ${minsSince(d.calledAt)} min` : ''}`] : ['next', `${v.doctor ?? 'no doctor picked'}${inLine ? ` · ${inLine === 1 ? 'next' : `${inLine}th in line`}` : ''}`];
+  const doc: [StepState, string] = left ? ['skip', 'left without seeing the doctor'] : seen ? ['done', [v.completedAt && hhmm(v.completedAt), v.doctor && 'doctor'].filter(Boolean).join(' · ')]
+    : v.status === 'in_consult' ? ['now', `in the room${d.calledAt ? ` since ${hhmm(d.calledAt)} · ${minsSince(d.calledAt)} min` : ''}`] : ['next', `${v.doctor ? 'doctor' : 'no doctor picked'}${inLine ? ` · ${inLine === 1 ? 'next' : `${inLine}th in line`}` : ''}`];
   const arr: [StepState, string] = !seen ? ['next', 'if the doctor orders any'] : recs.length === 0 ? ['skip', 'none ordered'] : open.length ? ['now', `${open.length} pending`] : ['done', 'none pending'];
   const rep: [StepState, string] = tests.length === 0 ? (seen ? ['skip', 'no tests'] : ['next', '']) : held ? ['now', order ? `${order.got} of ${order.tests.length} in` : 'awaited'] : seen ? ['done', 'seen by the doctor'] : ['next', ''];
 
@@ -106,8 +108,8 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
       {complaints.length > 0 && <section><div className="mb-1.5 text-[12.5px] font-semibold text-muted">Complaints</div><div className="flex flex-wrap gap-1.5">{complaints.map((c) => <span key={c} className="chip">{c}</span>)}</div></section>}
       <ol className="m-0 list-none p-0">
         <Step i={0} state="done" title="Checked in" meta={`${hhmm(v.arrivedAt)} · ${v.category}`} />
-        <Step i={1} state={vit[0]} title="Junior doctor" meta={vit[1]}>{canDesk && onToJunior && v.status === 'waiting' && <div className="mt-2"><button className="btn btn-sm" onClick={() => onToJunior(v.id)}>Send to junior doctor</button></div>}</Step>
-        <Step i={2} state={doc[0]} title="Doctor" meta={doc[1]}>
+        <Step i={1} state={vit[0]} title={junior ?? 'Junior doctor'} meta={vit[1]}>{canDesk && onToJunior && v.status === 'waiting' && <div className="mt-2"><button className="btn btn-sm" onClick={() => onToJunior(v.id)}>Send to junior doctor</button></div>}</Step>
+        <Step i={2} state={doc[0]} title={v.doctor ?? 'Doctor'} meta={doc[1]}>
           {seen && v.rxCount > 0 && <div className="mt-0.5 text-[12.5px] text-muted">{plural(v.rxCount, 'medicine')} · the pharmacy has the Rx</div>}
           {canDesk && waiting && (() => { const s = canSend(v); return <div className="mt-2"><SendIn ok={s.ok} why={s.why} onClick={() => onSendIn(v.id)} /></div>; })()}
         </Step>

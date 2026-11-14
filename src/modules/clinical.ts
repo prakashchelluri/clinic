@@ -57,7 +57,7 @@ export function clinicalRoutes(app: FastifyInstance) {
     // Brings the patient in. Reception may already have sent them (details.calledBy = desk); otherwise the doctor is pulling them in and the desk is told.
     const bringIn = async (status: 'intake' | 'in_consult') => {
       if (v.status === status) return;
-      const details = status === 'in_consult' ? { ...(v.details ?? {}), calledBy: (v.details as any)?.calledBy === 'desk' && v.status === 'in_consult' ? 'desk' : 'doctor', calledAt: new Date().toISOString() } : v.details;
+      const details = status === 'in_consult' ? { ...(v.details ?? {}), calledBy: (v.details as any)?.calledBy === 'desk' && v.status === 'in_consult' ? 'desk' : 'doctor', calledAt: new Date().toISOString() } : { ...(v.details ?? {}), juniorBy: req.ctx.name }; // the junior's name shows on the patient's journey
       await tx.update(visit).set({ status, details }).where(eq(visit.id, visitId));
     };
     // Back with reports: the same consultation opens again, nothing new is created.
