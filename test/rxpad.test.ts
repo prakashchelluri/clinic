@@ -67,3 +67,13 @@ test('a custom module locks only once a line on the pad holds something', async 
   assert.deepEqual(usedModuleIds({ modules: { [a]: { rows: [['', ' '], ['Rice', '']] }, [b]: { rows: [['', '']] }, junk: { rows: [['x']] } } }), [a], 'blank lines and a bad id lock nothing');
   assert.deepEqual(usedModuleIds({}), []);
 });
+
+test("the patient's visit list never carries the private note, overrides, screening or drawings", async () => {
+  const { listData } = await import('../src/lib/pad.js');
+  const d = { complaint: { chief_complaint: ['Itching'] }, assessment: { diagnosis: ['Tinea'] }, notes: { private: 'secret' }, overrides: [{ reason: 'x' }], screen: { answers: {} }, canvases: [{ elements: [] }], modules: {} };
+  const doc = listData(d, true); const desk = listData(d, false);
+  for (const k of ['notes', 'overrides', 'screen', 'canvases']) { assert.equal(k in doc, false, k); assert.equal(k in desk, false, k); }
+  assert.deepEqual(doc.assessment, d.assessment, 'the doctor keeps the diagnosis');
+  assert.equal(desk.assessment, undefined, 'the desk does not');
+  assert.deepEqual(listData(null, true), {});
+});

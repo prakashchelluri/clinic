@@ -7,6 +7,7 @@ import { auditView, writeAudit } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { normHistory, cleanHistory, allergyText, HISTORY_KEYS } from '../lib/history.js';
+import { listData } from '../lib/pad.js';
 
 const PatientIn = z.object({
   fullName: z.string().trim().min(2).max(100),
@@ -199,7 +200,7 @@ export function patientRoutes(app: FastifyInstance) {
     if (!p) throw new HttpError(404, 'NOT_FOUND');
     await auditView(tx, req, id, 'Opened the patient record');
     const visits = await tx.select().from(visit).where(and(eq(visit.patientId, id), eq(visit.tenantId, t))).orderBy(desc(visit.arrivedAt)).limit(20);
-    const encounters = await tx.select().from(encounter).where(and(eq(encounter.patientId, id), eq(encounter.tenantId, t))).orderBy(desc(encounter.createdAt)).limit(10);
+    const encounters = await tx.select().from(encounter).where(and(eq(encounter.patientId, id), eq(encounter.tenantId, t))).orderBy(desc(encounter.createdAt)).limit(200);
     const rx = encounters.length
       ? await tx.select().from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), sql`${prescriptionItem.encounterId} in ${encounters.map((e) => e.id)}`))
       : [];
@@ -222,6 +223,6 @@ export function patientRoutes(app: FastifyInstance) {
     const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
     // roles without 'See fees and payments' see no prices, payments or amounts due
     const fees = can(req.perms, 'fees.see');
-    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, ...(clinical(req.perms) ? {} : { data: { ...(e.data as any), assessment: undefined } }), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
+    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, data: listData(e.data, clinical(req.perms)), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
   });
 }

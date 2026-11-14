@@ -6,7 +6,7 @@ import { get, post, patch, api, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { BackButton, Drawer, Avatar, Chip, Empty, Icon, Modal, MoreMenu, PageHeader, Section, Skeleton, Tabs, fmtDate, money, toast, NumInput, usePageSearch, useAddFromNew } from '../ui';
 import { BroadcastDialog, SentMessages, PatientMessages } from './Broadcast';
-import { UploadButton, joinList } from '../encounterDetail';
+import { EncounterDetail, UploadButton, VisitSwitch, joinList, useVisitView } from '../encounterDetail';
 import { PrintRx } from './PrintRx';
 import { openPrint } from '../printPreview';
 import { enabledVitals } from '../vitals';
@@ -79,6 +79,7 @@ function Timeline({ id }: { id: string }) {
   const [edit, setEdit] = useState<any>(null);
   const [flagging, setFlagging] = useState(false); const [sec, setSec] = useState<Sec>('visits');
   const [vi, setVi] = useState(0); // the visit shown, newest first
+  const [view, setView] = useVisitView(); const canNotes = can(perms, 'encounter.intake'); // Full notes reads the visit itself, which needs this
   const [paying, setPaying] = useState(false);
   const courses = useCourses(id); const [courseOf, setCourseOf] = useState<any>(null); // the course popup of one procedure
   const isOwner = (me?.roles ?? []).includes('owner'); const [merging, setMerging] = useState(false);
@@ -191,12 +192,18 @@ function Timeline({ id }: { id: string }) {
                 <div className="flex flex-wrap items-center gap-2 border-b border-line/70 px-5 py-3">
                   <div className="min-w-0 flex-1"><b className="text-[15px]">{joinList(e.data?.assessment?.diagnosis) || joinList(e.data?.complaint?.chief_complaint) || 'Consultation'}</b><div className="text-xs text-muted">{fmtDate(e.createdAt)}</div></div>
                   <button className="btn btn-sm !px-2" aria-label="Newer visit" disabled={vi === 0} onClick={() => setVi(vi - 1)}><Icon name="chevL" className="h-4 w-4" /></button>
-                  <b className="min-w-[48px] text-center text-sm">{Math.min(vi, encounters.length - 1) + 1} / {encounters.length}</b>
+                  {/* the count opens the list of visit dates: any visit is one pick away */}
+                  <label className="relative min-w-[56px] cursor-pointer rounded-md px-1.5 py-1 text-center text-sm font-bold hover:bg-surface-2" title="Pick a visit">{Math.min(vi, encounters.length - 1) + 1} / {encounters.length}
+                    <select aria-label="Pick a visit" className="absolute inset-0 cursor-pointer opacity-0" value={e.id} onChange={(ev) => setVi(encounters.findIndex((x: any) => x.id === ev.target.value))}>
+                      {encounters.map((x: any) => <option key={x.id} value={x.id}>{fmtDate(x.createdAt)} · {joinList(x.data?.assessment?.diagnosis) || joinList(x.data?.complaint?.chief_complaint) || 'Consultation'}</option>)}
+                    </select></label>
                   <button className="btn btn-sm !px-2" aria-label="Older visit" disabled={vi >= encounters.length - 1} onClick={() => setVi(vi + 1)}><Icon name="chevR" className="h-4 w-4" /></button>
+                  {canNotes && <VisitSwitch value={view} onChange={setView} />}
                   <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: e.id })}><Icon name="print" className="h-3.5 w-3.5" />Print</button>
                 </div>
-                {/* the prescription as it was written and printed */}
-                <div className="overflow-x-auto bg-paper-2 p-4"><div className="mx-auto w-fit bg-white shadow-md"><PrintRx key={e.id} id={e.id} embed /></div></div>
+                {/* the prescription as it was written and printed, or everything written (loaded only when Full notes is picked) */}
+                {canNotes && view === 'full' ? <div className="px-5 py-3"><EncounterDetail key={e.id} id={e.id} /></div>
+                  : <div className="overflow-x-auto bg-paper-2 p-4"><div className="mx-auto w-fit bg-white shadow-md"><PrintRx key={e.id} id={e.id} embed /></div></div>}
               </>}
             </section>
           </div>}

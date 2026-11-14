@@ -99,3 +99,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const usedModuleIds = (data: Record<string, any>) => Object.entries(data?.modules ?? {})
   .filter(([k, m]: [string, any]) => UUID.test(k) && Array.isArray(m?.rows) && m.rows.some((r: unknown) => Array.isArray(r) && r.some((c) => String(c ?? '').trim())))
   .map(([k]) => k);
+
+/** A visit in the patient's list (timeline): what the profile and Load previous use. The private note, the warning overrides, the
+ *  screening answers and the drawings stay out; they come one visit at a time from GET /encounters/:id, which checks the role. */
+export const listData = (d: Record<string, any> | null | undefined, clinicalRole: boolean) => {
+  const { notes: _n, overrides: _o, screen: _s, canvases: _c, ...rest } = d ?? {};
+  return clinicalRole ? rest : { ...rest, assessment: undefined };
+};
