@@ -6,13 +6,14 @@ import { ProcedureDrawer } from './procDrawer';
 
 type Stage = 'ongoing' | 'completed' | 'expired' | 'cancelled';
 const LIVE = (s: any) => !['cancelled', 'postponed'].includes(s.state);
-const STATE: Record<string, [string, string]> = { completed: ['Completed', 'sage'], in_progress: ['In progress', 'sky'], confirmed: ['Booked', 'sky'], missed: ['Missed', 'rose'] };
+const STATE: Record<string, [string, string]> = { completed: ['Completed', 'sage'], in_progress: ['In progress', 'sky'], confirmed: ['Booked', 'sky'], missed: ['No show', 'rose'] };
 
 /** The patient's procedures, as the clinic follows them: one card per procedure (or per package, its procedures together),
- *  every session listed 1…N with its date and state, and the next one to book. Filter chips split ongoing, completed, expired and cancelled. */
+ *  every session listed 1…N with its date and state, and the next one to book; once every session is done the list folds to its header. Filter chips split ongoing, completed, expired and cancelled. */
 export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: { plans: any[]; sessions: any[]; courses: any[]; procName: (r: any) => string; onOpen: (r: any) => void }) {
   const { perms } = useOutletContext<any>();
   const [open, setOpen] = useState<string | null>(null); // a session's drawer
+  const [shownIds, setShownIds] = useState<string[]>([]); // finished procedures opened by hand; a finished one is folded to its header
   const sitsOf = (r: any) => sessions.filter((x) => x.recommendationId === r.id && LIVE(x));
   const doneOf = (r: any) => sitsOf(r).filter((x) => x.state === 'completed').length;
   const courseOf = (r: any) => courses.find((c) => c.recommendationId === r.id);
@@ -54,13 +55,16 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
         })}
       </ol>);
   };
+  const folded = (r: any) => stageOf(r) === 'completed' && !shownIds.includes(r.id);
+  const fold = (r: any) => stageOf(r) === 'completed' && <button type="button" className="btn btn-sm btn-ghost" aria-expanded={!folded(r)} onClick={() => setShownIds((x) => (x.includes(r.id) ? x.filter((y) => y !== r.id) : [...x, r.id]))}>
+    <Icon name="up" className={`h-3.5 w-3.5 transition-transform ${folded(r) ? 'rotate-180' : ''}`} />{folded(r) ? 'Show sessions' : 'Hide sessions'}</button>;
   const money1 = (r: any) => { const c = courseOf(r); return c ? `${c.unusedSittings > 0 ? `${c.unusedSittings} paid ahead · ` : ''}${c.stillToPayPaise > 0 ? `${money(c.stillToPayPaise)} still to pay` : 'Fully paid'}` : 'Price not agreed yet'; };
   const head = (r: any, sub?: boolean) => (
     <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 ${sub ? 'pt-2' : ''}`}>
       <span className={`h-2 w-2 rounded-full ${({ ongoing: 'bg-sage', completed: 'bg-sky', expired: 'bg-amber', cancelled: 'bg-rose' } as const)[stageOf(r)]}`} aria-hidden />
       <b className={sub ? 'text-[14px]' : 'text-[15px]'}>{procName(r)}</b>
       <span className="text-[13px] text-muted">{doneOf(r)}/{r.sittings ?? '?'} sessions completed · {money1(r)}{courseOf(r)?.validUntil ? ` · ${courseOf(r).expired ? 'expired' : 'valid till'} ${fmtDate(courseOf(r).validUntil)}` : ''}</span>
-      <button type="button" className="btn btn-sm btn-ghost ml-auto" onClick={() => onOpen(r)}>Price & payments</button>
+      <span className="ml-auto flex items-center gap-1">{fold(r)}<button type="button" className="btn btn-sm btn-ghost" onClick={() => onOpen(r)}>Price & payments</button></span>
     </div>);
 
   return (
@@ -70,12 +74,12 @@ export function ProcedurePlans({ plans, sessions, courses, procName, onOpen }: {
       </div>
       {shown.length === 0 ? <div className="px-5 py-6 text-sm text-muted">{plans.length ? `Nothing ${tab}.` : 'No procedures prescribed.'}</div>
         : shown.map((g) => { const pk = g[0].package;
-          if (!pk) return <div key={g[0].id} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">{head(g[0])}{timeline(g[0])}</div>;
+          if (!pk) return <div key={g[0].id} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">{head(g[0])}{!folded(g[0]) && timeline(g[0])}</div>;
           const done = g.reduce((s, r) => s + doneOf(r), 0); const total = g.reduce((s, r) => s + (r.sittings ?? 0), 0);
           return (
             <div key={pk.group} className="space-y-2 border-b border-line/70 px-5 py-4 last:border-b-0">
               <div className="flex flex-wrap items-center gap-2"><Icon name="box" className="h-4 w-4 text-clay-ink" /><b className="text-[15px]">{pk.name}</b><span className="rounded bg-clay-soft px-1.5 text-[11px] font-semibold text-clay-ink">Package</span><span className="text-[13px] text-muted">{done}/{total} sessions completed{pk.pricePaise ? ` · ${money(pk.pricePaise)}` : ''}</span></div>
-              {g.map((r) => <div key={r.id} className="ml-2 border-l-2 border-clay-line pl-4">{head(r, true)}{timeline(r)}</div>)}
+              {g.map((r) => <div key={r.id} className="ml-2 border-l-2 border-clay-line pl-4">{head(r, true)}{!folded(r) && timeline(r)}</div>)}
             </div>);
         })}
       {open && <ProcedureDrawer key={open} id={open} canAct={can(perms, 'worklist.write')} onClose={() => setOpen(null)} />}
