@@ -6,7 +6,8 @@ import { valuesLine } from './procForm';
 import { can } from './App';
 import { Chip, Icon, fmtDate, money } from './ui';
 import { ProcedureDrawer } from './procDrawer';
-import { AddPlanDialog, CancelPlanDialog, EditPlanDrawer } from './planEdit';
+import { CancelPlanDialog, EditPlanDrawer } from './planEdit';
+import { sessionsOf } from './procedureSettings';
 
 type Stage = 'ongoing' | 'completed' | 'expired' | 'cancelled';
 const LIVE = (s: any) => !['cancelled', 'postponed'].includes(s.state);
@@ -18,7 +19,7 @@ export function ProcedurePlans({ patientId, patientName, plans, sessions, course
   const { perms } = useOutletContext<any>(); const nav = useNavigate();
   const [open, setOpen] = useState<string | null>(null); // a session's drawer
   const [foldMap, setFoldMap] = useState<Record<string, boolean>>({}); // opened or folded by hand; by default a finished procedure is folded to its header
-  const [adding, setAdding] = useState(false); const [editing, setEditing] = useState<any[] | null>(null); const [cancelling, setCancelling] = useState<any[] | null>(null);
+  const [editing, setEditing] = useState<any[] | null>(null); const [cancelling, setCancelling] = useState<any[] | null>(null);
   const manage = can(perms, 'worklist.write') && can(perms, 'fees.see');
   const sitsOf = (r: any) => sessions.filter((x) => x.recommendationId === r.id && LIVE(x));
   const doneOf = (r: any) => sitsOf(r).filter((x) => x.state === 'completed').length;
@@ -36,6 +37,8 @@ export function ProcedurePlans({ patientId, patientName, plans, sessions, course
   const [tab, setTab] = useState<Stage>(() => (['ongoing', 'completed', 'expired', 'cancelled'] as Stage[]).find((s) => count(s) > 0) ?? 'ongoing');
   const shown = groups.filter((g) => stageOfGroup(g) === tab);
 
+  const { cfg } = useOutletContext<any>();
+  const defOf = (r: any, k: number) => { const p = cfg?.procedures?.find((x: any) => x.id === r.procedureId); return p?.sessions?.length ? sessionsOf(p)[k - 1] : undefined; };
   const timeline = (r: any) => {
     const live = sitsOf(r); const n = Math.max(r.sittings ?? 1, ...live.map((x) => x.sittingNo));
     // Book only when nothing is booked: the first session is booked by hand, each next one by the plan when the one before is done
@@ -51,7 +54,7 @@ export function ProcedurePlans({ patientId, patientName, plans, sessions, course
             <li key={k} className="relative flex items-center gap-3">
               <span className={`relative z-[1] grid h-8 w-8 shrink-0 place-items-center rounded-full text-[13px] font-semibold ${done ? 'bg-sage text-white' : 'border-2 border-sage/60 bg-surface text-sage'}`}>{k}</span>
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 rounded-[10px] border border-line bg-surface px-4 py-2.5">
-                <div className="min-w-0 flex-1"><div className="text-[14px] font-medium">Session {k}</div>
+                <div className="min-w-0 flex-1"><div className="text-[14px] font-medium">{defOf(r, k)?.name ?? `Session ${k}`}{defOf(r, k)?.note && <span className="ml-2 text-xs font-normal text-muted">{defOf(r, k)!.note}</span>}</div>
                   {s?.state === 'completed' && <SessionValues planId={r.id} sessionId={s.id} />}
                   <div className="text-xs text-muted">{s ? `${fmtDate(s.day)}${s.startTime ? `, ${s.startTime}` : ''}${s.doctor ? ` · ${s.doctor}` : ''}${s.autoBooked && s.state === 'confirmed' && !s.patientConfirmedAt ? ' · booked by the plan, not confirmed yet' : ''}` : r.status === 'cancelled' ? 'Not done' : 'Not booked yet'}</div></div>
                 {s?.notes && <span title={s.notes} aria-label={`Note: ${s.notes}`} className="text-muted"><Icon name="edit" className="h-3.5 w-3.5" /></span>}
@@ -85,7 +88,6 @@ export function ProcedurePlans({ patientId, patientName, plans, sessions, course
     <section className="card-flat overflow-hidden anim-fade-up">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-line/70 px-5 py-3">
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">{([['ongoing', 'Ongoing'], ['completed', 'Completed'], ['expired', 'Expired'], ['cancelled', 'Cancelled']] as const).map(([k, l]) => <button key={k} type="button" aria-pressed={tab === k} className={`toggle-opt ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l} · {count(k)}</button>)}</div>
-        {manage && <button type="button" className="btn btn-primary btn-sm ml-auto" onClick={() => setAdding(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add procedure or package</button>}
       </div>
       {shown.length === 0 ? <div className="px-5 py-6 text-sm text-muted">{plans.length ? `Nothing ${tab}.` : 'No procedures prescribed.'}</div>
         : shown.map((g) => { const pk = g[0].package;
@@ -98,7 +100,6 @@ export function ProcedurePlans({ patientId, patientName, plans, sessions, course
             </div>);
         })}
       {open && <ProcedureDrawer key={open} id={open} canAct={can(perms, 'worklist.write')} onClose={() => setOpen(null)} />}
-      {adding && <AddPlanDialog patientId={patientId} patientName={patientName} onClose={() => setAdding(false)} />}
       {editing && <EditPlanDrawer key={editing[0].id} plans={editing} sessions={sessions} courses={courses} procName={procName} onClose={() => setEditing(null)} />}
       {cancelling && <CancelPlanDialog plans={cancelling} sessions={sessions} courses={courses} procName={procName} onClose={() => setCancelling(null)} />}
     </section>

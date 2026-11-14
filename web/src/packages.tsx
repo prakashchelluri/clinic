@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { patch, errText } from './api';
 import { Drawer, Empty, Icon, MoneyInput, NumInput, Segmented, money, toPaise, toast, ask } from './ui';
+import { stdTotal } from './procedureSettings';
 
 export type PkgItem = { procedureId: string; sittings: number; intervalDays: number };
 export type Pkg = { id: string; name: string; items: PkgItem[]; pricePaise: number; validMonths: number; active: boolean };
 
 /** The full price of a package: each procedure's list price × its sittings. */
-export const fullPrice = (k: { items: PkgItem[] }, procs: any[]) => k.items.reduce((s, it) => s + (procs.find((p) => p.id === it.procedureId)?.pricePaise ?? 0) * it.sittings, 0);
+export const fullPrice = (k: { items: PkgItem[] }, procs: any[]) => k.items.reduce((s, it) => s + stdTotal(procs.find((p) => p.id === it.procedureId), it.sittings), 0);
 const pct = (full: number, price: number) => (full > price ? Math.round((1 - price / full) * 100) : 0);
 
 /** Packages: a bundle of procedures at one price, valid for some months. The doctor adds one on the Rx pad, in Procedures. */
@@ -77,7 +78,7 @@ function PackageDrawer({ value, all, procs, onClose, onDone }: { value: Pkg; all
               <span className="min-w-0"><span className="block truncate">{p?.name ?? 'Procedure'}</span><span className="text-xs text-muted">{p?.pricePaise ? `${money(p.pricePaise)} a session` : 'No price set'}</span></span>
               <NumInput aria-label={`Sessions of ${p?.name}`} max={60} className={`input !py-1.5 ${!(Number(it.sittings) >= 1) ? '!border-rose' : ''}`} value={it.sittings} onChange={(e) => setItem(i, 'sittings', e.target.value)} />
               <span className="flex items-center gap-1 text-xs text-muted"><NumInput aria-label={`Days between sessions of ${p?.name}`} max={365} className="input !w-14 !py-1.5" value={it.intervalDays} onChange={(e) => setItem(i, 'intervalDays', e.target.value)} />days</span>
-              <span className="text-right text-ink-2">{money((p?.pricePaise ?? 0) * (Number(it.sittings) || 0))}</span>
+              <span className="text-right text-ink-2">{money(stdTotal(p, Number(it.sittings) || 0))}</span>
               <button type="button" className="btn btn-ghost btn-icon !h-7 !w-7" aria-label={`Remove ${p?.name}`} onClick={() => setF((x) => ({ ...x, items: x.items.filter((_, j) => j !== i) }))}><Icon name="x" className="h-3.5 w-3.5" /></button>
             </div>); })}
           {avail.length > 0 && f.items.length < 10 && <select aria-label="Add a procedure" className="input mt-2 !border-dashed" value="" onChange={(e) => { const p = procs.find((x) => x.id === e.target.value); if (p) setF((x) => ({ ...x, items: [...x.items, { procedureId: p.id, sittings: String(p.typicalSittings || 1), intervalDays: '30' }] })); }}>

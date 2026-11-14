@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, gte, lte, inArray, desc } from 'drizzle-orm';
-import { procedureSession, procedureWeek, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant, formDefinition, medicine, type FormSchema, type SupplyAsk } from '../db/schema.js';
+import { procedureSession, procedureWeek, course, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant, formDefinition, medicine, type FormSchema, type SupplyAsk } from '../db/schema.js';
 import { randomUUID } from 'node:crypto';
 import { missingRequired, cleanValues } from '../lib/procForm.js';
 import { bookingSettings, localToUtc } from '../lib/booking.js';
@@ -13,7 +13,8 @@ import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
-import { drawSitting, reverseSitting, sittingMoney } from './courses.js';
+import { drawSitting, reverseSitting, sittingMoney, standing } from './courses.js';
+import { sessionDef } from '../lib/procPrice.js';
 
 type Consent = { grantedAt: string; by: string; how?: string; documentId?: string };
 const consentKey = (procedureId: string) => `procedure:${procedureId}`;
@@ -123,8 +124,10 @@ async function conflicts(tx: Tx, t: string, day: string, start: string, end: str
  * a week ahead at most. Tentative (the coordinator confirms it with the patient in the week before); nothing is booked when nothing fits.
  */
 async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$inferSelect, gapDays: number) {
-  const t = ctx.tenantId; const span = toMin(done.endTime) - toMin(done.startTime); const want = toMin(done.startTime);
-  const proc = done.procedureId ? await tx.select({ name: procedureCatalog.name }).from(procedureCatalog).where(eq(procedureCatalog.id, done.procedureId)).then((r) => r[0]) : null;
+  const t = ctx.tenantId; const want = toMin(done.startTime);
+  const proc = done.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, done.procedureId)).then((r) => r[0]) : null;
+  const def = sessionDef(proc, done.sittingNo + 1); // the next session as set up in Settings: its own length
+  const span = def ? def.minutes + (proc?.bufferMinutes ?? 0) : toMin(done.endTime) - toMin(done.startTime);
   const first = addDays(done.day, gapDays);
   for (let k = 0; k < 7; k++) {
     const day = addDays(first, k);
@@ -163,7 +166,7 @@ export function procedureRoutes(app: FastifyInstance) {
     return { minutes, rooms: rooms.map((r) => ({ id: r.id, name: r.name })), requiredCapability: proc.requiredCapability, slots };
   });
 
-  const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
+  const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), autoMinutes: z.boolean().optional(), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
     // planned: placed on the coordinator's week, not booked with the patient, so it does not count as the patient's yes
     planned: z.boolean().default(false) });
   /** Schedule a sitting. Blocks the doctor's OP time when a doctor is assigned, so booking capacity drops automatically. */
@@ -177,11 +180,12 @@ export function procedureRoutes(app: FastifyInstance) {
       const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
       if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
     }
-    const endTime = toHHMM(toMin(body.startTime) + body.minutes + (proc?.bufferMinutes ?? 0));
-    const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId);
-    if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     // the next number after every sitting still on the plan (done or booked ahead), so two booked ahead never share a number
     const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), sql`${procedureSession.state} <> 'cancelled'`));
+    const minutes = body.autoMinutes ? sessionDef(proc, n + 1)?.minutes ?? body.minutes : body.minutes; // that session's length from Settings, unless the desk picked one
+    const endTime = toHHMM(toMin(body.startTime) + minutes + (proc?.bufferMinutes ?? 0));
+    const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId);
+    if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
     const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
@@ -436,6 +440,12 @@ export function procedureRoutes(app: FastifyInstance) {
     }
     // Start needs the procedure consent on file; the first Start records it on the patient (paper form filed), so later sittings don't ask
     if (body.state === 'in_progress' && cur.state !== 'in_progress' && cur.procedureId) {
+      const pr = await tx.select({ pricing: procedureCatalog.pricing }).from(procedureCatalog).where(eq(procedureCatalog.id, cur.procedureId)).then((r) => r[0]);
+      if (pr?.pricing === 'upfront') { // paid in full before it starts
+        const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, cur.recommendationId))).then((r) => r[0]);
+        const left = c ? (await standing(tx, t, c)).stillToPayPaise : null;
+        if (left === null || left > 0) throw new HttpError(409, 'PAY_UPFRONT_FIRST', { stillToPayPaise: left });
+      }
       if ((await procedureConsent(tx, t, cur)).consentNeeded) {
         if (body.consent !== true) throw new HttpError(409, 'CONSENT_NEEDED');
         // a signature from the tablet must be a document of this same patient, in this clinic
@@ -468,13 +478,15 @@ export function procedureRoutes(app: FastifyInstance) {
       const log = ['postponed', 'missed', 'cancelled'].includes(body.state) ? [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: `Session ${body.state}`, note: body.reason }] : rec.contactLog;
       // a sitting done with more to come: the next falls due one gap after it (not after the original plan), unless one is booked already
       let nextDue: string | undefined;
-      if (body.state === 'completed' && newStatus !== 'done' && rec.gapDays) {
+      const nextDef = cur.procedureId ? sessionDef(await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, cur.procedureId)).then((r) => r[0]), ps.sittingNo + 1) : undefined;
+      const gap = nextDef?.gapDays || rec.gapDays;
+      if (body.state === 'completed' && newStatus !== 'done' && gap) {
         const [{ ahead }] = await tx.select({ ahead: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), eq(procedureSession.state, 'confirmed'), sql`${procedureSession.id} <> ${id}`));
-        if (!ahead) nextDue = addDays(ps.day, rec.gapDays);
+        if (!ahead) nextDue = addDays(ps.day, gap);
       }
       await tx.update(recommendation).set({ status: newStatus, contactLog: log, ...(nextDue ? { dueOn: nextDue } : {}) }).where(eq(recommendation.id, rec.id));
       // with no sitting booked ahead, the plan books the next one itself (the first is always booked with the patient)
-      if (nextDue && rec.gapDays) { const nb = await bookNextByPlan(tx, req.ctx, ps, rec.gapDays); if (nb) await tx.update(recommendation).set({ status: 'scheduled', dueOn: nb.day }).where(eq(recommendation.id, rec.id)); }
+      if (nextDue && gap) { const nb = await bookNextByPlan(tx, req.ctx, ps, gap); if (nb) await tx.update(recommendation).set({ status: 'scheduled', dueOn: nb.day }).where(eq(recommendation.id, rec.id)); }
     }
     await planSittingReminder(tx, t, id); // only a sitting still booked keeps its reminder
     if (body.state === 'completed') await drawSitting(tx, req.ctx, ps);

@@ -4,7 +4,6 @@ import { useOutletContext } from 'react-router';
 import { api, post, errText, qc } from './api';
 import { can } from './App';
 import { Drawer, Icon, Modal, NumInput, money, toast } from './ui';
-import { fullPrice, type Pkg } from './packages';
 
 const refresh = () => ['timeline', 'courses', 'worklist', 'calendar', 'psessions', 'procedure-plans'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 const addMonthsTo = (n: number) => { const d = new Date(); d.setMonth(d.getMonth() + n); return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); };
@@ -17,58 +16,6 @@ function ValidTill({ date, none, onDate, onNone }: { date: string; none: boolean
     <div><span className="label">Valid till</span>
       <div className="flex flex-wrap items-center gap-3"><input type="date" aria-label="Valid till" className="input !w-44" min={todayStr()} value={none ? '' : date} disabled={none} onChange={(e) => onDate(e.target.value)} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-ink" checked={none} onChange={(e) => onNone(e.target.checked)} />No expiry</label></div></div>);
-}
-
-/** Add a procedure (its sessions and gap) or a package (its procedures, each with its sessions) to a patient, from their record. Prices are fixed. */
-export function AddPlanDialog({ patientId, patientName, onClose }: { patientId: string; patientName: string; onClose: () => void }) {
-  const { cfg } = useOutletContext<any>();
-  const procs: any[] = (cfg?.procedures ?? []).filter((p: any) => p.active !== false && p.pricePaise > 0);
-  const pkgs: Pkg[] = ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.active !== false && k.pricePaise > 0);
-  const [mode, setMode] = useState<'procedure' | 'package'>(pkgs.length ? 'package' : 'procedure');
-  const [pid, setPid] = useState(procs[0]?.id ?? ''); const p = procs.find((x) => x.id === pid);
-  const [n, setN] = useState(String(p?.typicalSittings || 1)); const [gap, setGap] = useState('28');
-  const [kid, setKid] = useState(pkgs[0]?.id ?? ''); const k = pkgs.find((x) => x.id === kid);
-  const [doc, setDoc] = useState('');
-  const [date, setDate] = useState(k ? addMonthsTo(k.validMonths) : ''); const [none, setNone] = useState(!pkgs.length);
-  const pickMode = (m: 'procedure' | 'package') => { setMode(m); setNone(m === 'procedure'); setDate(m === 'package' && k ? addMonthsTo(k.validMonths) : ''); };
-  const pickPkg = (id: string) => { setKid(id); const x = pkgs.find((y) => y.id === id); if (x && !none) setDate(addMonthsTo(x.validMonths)); };
-  const sessions = Number(n) || 0;
-  const items = mode === 'package' ? (k?.items ?? []).map((it) => ({ proc: procs.find((x) => x.id === it.procedureId) ?? cfg?.procedures?.find((x: any) => x.id === it.procedureId), n: it.sittings, gap: it.intervalDays }))
-    : p ? [{ proc: p, n: sessions, gap: Number(gap) || 0 }] : [];
-  const price = mode === 'package' ? k?.pricePaise ?? 0 : (p?.pricePaise ?? 0) * sessions; const full = mode === 'package' && k ? fullPrice(k, cfg?.procedures ?? []) : 0;
-  const bad = mode === 'package' ? !k : !p || !(sessions >= 1 && sessions <= 60) || Number(gap) > 365;
-  const add = useMutation({
-    mutationFn: () => post('/procedure-plans/add', { patientId, ...(mode === 'package' ? { packageId: kid } : { procedureId: pid, sittings: sessions, gapDays: Number(gap) || 0 }), ...(doc ? { practitionerId: doc } : {}), noExpiry: none, ...(!none && date ? { validUntil: date } : {}) }),
-    onSuccess: () => { refresh(); toast(`${mode === 'package' ? k?.name : p?.name} added for ${patientName.split(' ')[0]}. Book the first session from the card.`); onClose(); },
-    onError: (e) => toast(say(e), 'err'),
-  });
-  return (
-    <Modal title="Add procedure or package" subtitle={patientName} onClose={onClose} width="max-w-4xl">
-      <div className="space-y-4">
-        <div className="flex gap-1.5" role="group" aria-label="What">{([['procedure', 'Procedure'], ['package', 'Package']] as const).map(([v, l]) => <button key={v} type="button" aria-pressed={mode === v} disabled={v === 'package' && !pkgs.length} className={`toggle-opt ${mode === v ? 'on' : ''}`} onClick={() => pickMode(v)}>{l}</button>)}</div>
-        {mode === 'package' ? (
-          <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr_auto]">
-            <div><label className="label" htmlFor="ap-pkg">Package</label><select id="ap-pkg" className="input" value={kid} onChange={(e) => pickPkg(e.target.value)}>{pkgs.map((x) => <option key={x.id} value={x.id}>{x.name} · {money(x.pricePaise)}</option>)}</select></div>
-            <div><label className="label" htmlFor="ap-doc">Conducted by</label><select id="ap-doc" className="input" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">The consulting doctor</option>{(cfg?.practitioners ?? []).map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-            <div><span className="label">Price</span><div className="flex h-10 items-center gap-2"><b className="text-[15px]">{money(price)}</b>{full > price && <s className="text-sm text-muted">{money(full)}</s>}</div></div>
-          </div>) : (
-          <div className="grid gap-3 sm:grid-cols-[1.4fr_auto_auto_1fr_auto]">
-            <div><label className="label" htmlFor="ap-proc">Procedure</label><select id="ap-proc" className="input" value={pid} onChange={(e) => { setPid(e.target.value); const x = procs.find((y) => y.id === e.target.value); if (x) setN(String(x.typicalSittings || 1)); }}>{procs.map((x) => <option key={x.id} value={x.id}>{x.name} · {money(x.pricePaise)} a session</option>)}</select></div>
-            <div><span className="label">Sessions</span><div className="flex items-center gap-1"><button type="button" className="btn btn-icon" aria-label="One session less" disabled={sessions <= 1} onClick={() => setN(String(Math.max(1, sessions - 1)))}>−</button><NumInput aria-label="Sessions" max={60} className={`input !w-14 text-center ${sessions < 1 ? '!border-rose' : ''}`} value={n} onChange={(e) => setN(e.target.value)} /><button type="button" className="btn btn-icon" aria-label="One session more" disabled={sessions >= 60} onClick={() => setN(String(sessions + 1))}>+</button></div></div>
-            <div><label className="label" htmlFor="ap-gap">Every</label><div className="flex items-center gap-1.5 text-sm"><NumInput id="ap-gap" max={365} className="input !w-16" value={gap} onChange={(e) => setGap(e.target.value)} />days</div></div>
-            <div><label className="label" htmlFor="ap-doc">Conducted by</label><select id="ap-doc" className="input" value={doc} onChange={(e) => setDoc(e.target.value)}><option value="">The consulting doctor</option>{(cfg?.practitioners ?? []).map((d: any) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
-            <div><span className="label">Price</span><div className="flex h-10 items-center gap-2"><b className="text-[15px]">{money(price)}</b><span className="text-xs text-muted">{sessions} × {money(p?.pricePaise ?? 0)}</span></div></div>
-          </div>)}
-        <ValidTill date={date} none={none} onDate={setDate} onNone={(v) => { setNone(v); if (!v && !date) setDate(k && mode === 'package' ? addMonthsTo(k.validMonths) : addMonthsTo(12)); }} />
-        <div className="text-xs text-muted">The price comes from Settings › Procedures &amp; packages. A discount is given on the bill, not here.</div>
-        <div><span className="label">Sessions</span>
-          <div className="overflow-hidden rounded-lg border border-line"><table className="table"><thead><tr><th className="pl-4">Procedure</th><th>Sessions</th><th>Duration</th><th>Booking</th></tr></thead>
-            <tbody>{items.map((it, i) => <tr key={i}><td className="pl-4 font-medium">{it.proc?.name ?? 'Procedure'}</td><td>{it.n}{it.n > 1 && it.gap ? <span className="text-muted"> · every {it.gap} days</span> : null}</td><td className="text-muted">{it.proc?.typicalMinutes ?? 30} min</td>
-              <td className="text-xs text-muted">Session 1: book from the card after adding{it.n > 1 ? '; the rest are booked by the plan as each one is done' : ''}</td></tr>)}</tbody></table></div></div>
-        <div className="modal-foot"><span className="mr-auto text-xs text-muted">Payment is taken on the bill, now or on the session day.</span><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={bad || add.isPending || (!none && !date)} onClick={() => add.mutate()}><Icon name="check" />{mode === 'package' ? 'Add package' : 'Add procedure'}</button></div>
-      </div>
-    </Modal>
-  );
 }
 
 const LIVE = (s: any) => ['confirmed', 'in_progress', 'completed'].includes(s.state);

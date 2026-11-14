@@ -30,15 +30,17 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
   const [day, setDay] = useState(at ? at.day : sitting ? (sitting.day >= today() ? sitting.day : today()) : rec.dueOn && rec.dueOn >= today() ? rec.dueOn : today());
   const [reason, setReason] = useState('');
   const toM = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
-  const [minutes, setMinutes] = useState<number>(sitting ? Math.max(5, toM(sitting.endTime) - toM(sitting.startTime) - (proc?.bufferMinutes ?? 0)) : proc?.typicalMinutes ?? 30);
-  const [doc, setDoc] = useState<string>(sitting ? sitting.practitionerId ?? '' : (rec as any).practitionerId ?? (proc?.requiresMainDoctor ? cfg.practitioners[0]?.id ?? '' : ''));
+  const [minutesTouched, setMinutesTouched] = useState(false);
+  const [minutes, setMinutesRaw] = useState<number>(sitting ? Math.max(5, toM(sitting.endTime) - toM(sitting.startTime) - (proc?.bufferMinutes ?? 0)) : proc?.typicalMinutes ?? 30);
+  const setMinutes = (m: number) => { setMinutesRaw(m); setMinutesTouched(true); };
+  const [doc, setDoc] = useState<string>(sitting ? sitting.practitionerId ?? '' : (rec as any).practitionerId ?? proc?.practitionerId ?? (proc?.requiresMainDoctor ? cfg.practitioners[0]?.id ?? '' : ''));
   const [pick, setPick] = useState<{ roomId: string; startTime: string } | null>(at ? { roomId: at.roomId, startTime: at.startTime } : null); // a free room-hour tapped on the schedule
   const [manual, setManual] = useState({ startTime: '', roomId: '' });
   const [conf, setConf] = useState<any[] | null>(null);
   const endOf = (start: string) => { const m = toM(start) + minutes + (proc?.bufferMinutes ?? 0); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
   const slots =useQuery({ queryKey: ['slots', rec.procedureId, day, doc, minutes], queryFn: () => get(`/procedure-sessions/slots?day=${day}&procedureId=${rec.procedureId}&minutes=${minutes}${doc ? `&practitionerId=${doc}` : ''}`), enabled: !!rec.procedureId });
   const save = useMutation({
-    mutationFn: (force: boolean) => post(sitting ? `/procedure-sessions/${sitting.id}/reschedule` : '/procedure-sessions', { ...(sitting ? { reason: reason.trim() || undefined } : { recommendationId: rec.id }), day, startTime: pick?.startTime ?? manual.startTime, minutes, roomId: pick?.roomId ?? manual.roomId ?? null, practitionerId: doc || null, force }),
+    mutationFn: (force: boolean) => post(sitting ? `/procedure-sessions/${sitting.id}/reschedule` : '/procedure-sessions', { ...(sitting ? { reason: reason.trim() || undefined } : { recommendationId: rec.id }), day, startTime: pick?.startTime ?? manual.startTime, minutes, ...(!sitting && !minutesTouched ? { autoMinutes: true } : {}), roomId: pick?.roomId ?? manual.roomId ?? null, practitionerId: doc || null, force }),
     onSuccess: (r: any) => { toast(`${sitting ? 'Moved to' : 'Scheduled'} ${day} ${r.startTime}`); onClose(); },
     onError: (e: any) => { if (e?.body?.code === 'CONFLICT') setConf(e.body.conflicts); else toast(errText(e), 'err'); },
   });

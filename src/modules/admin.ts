@@ -321,8 +321,25 @@ export function adminRoutes(app: FastifyInstance) {
 
   // --- procedures ---
   const ProcIn = z.object({ name: Name, typicalMinutes: z.number().int().min(5).optional(), bufferMinutes: z.number().int().min(0).optional(), requiresMainDoctor: z.boolean().optional(), requiresReview: z.boolean().optional(), requiredCapability: z.string().optional().nullable(), pricePaise: z.number().int().min(0).optional().nullable(), taxRateBp: z.number().int().min(0).optional(), typicalSittings: z.number().int().min(1).optional(), specialtyId: z.string().uuid().optional().nullable(), active: z.boolean().optional() });
-  route(app, 'post', '/admin/procedures', 'config.write', async (req, tx) => (await tx.insert(procedureCatalog).values({ ...ProcIn.parse(req.body), tenantId: req.ctx.tenantId }).returning())[0]);
-  route(app, 'patch', '/admin/procedures/:id', 'config.write', async (req, tx) => upd(tx, procedureCatalog, req, sent(ProcIn.partial().parse(req.body), req.body)));
+  // a procedure with its sessions: each session's name, minutes, gap and note; the session count and first duration follow them.
+  // Upfront: the total for all sessions, its share per session is kept as the session price (for a session added later).
+  const More = z.object({ sessions: z.array(z.object({ name: z.string().trim().min(1).max(40), minutes: z.number().int().min(5).max(600), gapDays: z.number().int().min(0).max(365), note: z.string().trim().max(200).optional() })).min(1).max(60).optional(),
+    pricing: z.enum(['upfront', 'per_session']).optional(), totalPaise: z.number().int().min(0).nullable().optional(), practitionerId: z.string().uuid().nullable().optional(),
+    validFor: z.number().int().min(1).max(60).nullable().optional(), validUnit: z.enum(['days', 'months']).nullable().optional() });
+  const procBody = (raw: any, partial: boolean) => {
+    const b: any = { ...(partial ? ProcIn.partial() : ProcIn).parse(raw), ...More.parse(raw) };
+    if (b.sessions) { b.typicalSittings = b.sessions.length; b.typicalMinutes = b.sessions[0].minutes; }
+    if (b.pricing === 'upfront') { if (!b.totalPaise) throw new HttpError(400, 'UPFRONT_NEEDS_A_TOTAL'); b.pricePaise = Math.round(b.totalPaise / (b.typicalSittings ?? 1)); }
+    if (b.pricing === 'per_session') b.totalPaise = null;
+    if (b.validFor && !b.validUnit) b.validUnit = 'months';
+    return b;
+  };
+  route(app, 'post', '/admin/procedures', 'config.write', async (req, tx) => (await tx.insert(procedureCatalog).values({ ...procBody(req.body, false), tenantId: req.ctx.tenantId }).returning())[0]);
+  route(app, 'patch', '/admin/procedures/:id', 'config.write', async (req, tx) => {
+    const b = procBody(req.body, true); const out: any = sent(b, req.body);
+    for (const k of ['typicalSittings', 'typicalMinutes', 'pricePaise', 'totalPaise', 'validUnit']) if (b[k] !== undefined && (req.body as any)?.[k] === undefined) out[k] = b[k]; // what follows from the sessions and the pricing
+    return upd(tx, procedureCatalog, req, out);
+  });
 
   // --- visit types (services): what patients book ---
   const ServiceIn = z.object({ name: Name, description: z.string().trim().max(300).optional().nullable(), minutes: z.number().int().min(5).max(480).optional(),

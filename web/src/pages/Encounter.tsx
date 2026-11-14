@@ -21,6 +21,7 @@ import { LabResultsCard, ReportLink, reportFor } from '../labs';
 import { ReportList } from '../labHistory';
 import type { PadCanvas } from '../padCanvas';
 import { AddModuleDrawer, ModuleInfo, ModuleLoadPrev, ModuleMenu, ModuleTable, deleteModule, filledRows, setOnPad, usePadModules, type ModuleData, type PadModule } from '../padModules';
+import { sessionsOf, stdTotal } from '../procedureSettings';
 // the drawing board loads only when the Canvas drawer opens (it is a large library)
 const CanvasDrawer = lazy(() => import('../padCanvas').then((m) => ({ default: m.CanvasDrawer })));
 
@@ -295,7 +296,7 @@ export function Encounter() {
   const { id } = useParams(); const nav = useNavigate(); const { cfg, perms, me } = useOutletContext<any>();
   /** Days between sittings for a procedure: a clinic package's gap for it, else four weeks. The doctor can change it on the line. */
   const pkgs: Pkg[] = ((cfg?.tenant?.settings?.packages ?? []) as Pkg[]).filter((k) => k.active !== false);
-  const gapFor = (pid?: string | null): number => pkgs.flatMap((k) => k.items).find((it) => it.procedureId === pid && it.intervalDays > 0)?.intervalDays ?? 28;
+  const gapFor = (pid?: string | null): number => sessionsOf((cfg?.procedures ?? []).find((x: any) => x.id === pid))[1]?.gapDays || pkgs.flatMap((k) => k.items).find((it) => it.procedureId === pid && it.intervalDays > 0)?.intervalDays || 28;
   const enc = useQuery({ queryKey: ['encounter', id], queryFn: () => get(`/encounters/${id}`) });
   const timeline = useQuery({ queryKey: ['timeline', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/timeline`), enabled: !!enc.data });
   const docs = useQuery({ queryKey: ['documents', enc.data?.patientId], queryFn: () => get(`/patients/${enc.data.patientId}/documents`), enabled: !!enc.data });
@@ -742,7 +743,7 @@ export function Encounter() {
             {inPkg ? <span className="flex w-28 items-center pr-2 text-xs text-muted"><b className="mr-1 text-ink">{r.sittings}</b>sessions</span>
               : <label className="flex w-28 items-center pr-2 text-xs text-muted"><NumInput aria-label="Sessions" max={50} className="cell-in !w-12" value={r.sittings ?? ''} disabled={readOnly} onChange={(ev) => setRec(k, { sittings: Number(ev.target.value) })} />sessions</label>}
             {(r.sittings ?? 0) > 1 ? <label className="flex w-36 items-center px-2 text-xs text-muted">every<NumInput aria-label="Days between sessions" max={365} className="cell-in !w-12" value={r.gapDays ?? ''} disabled={readOnly} onChange={(ev) => setRec(k, { gapDays: Number(ev.target.value) || undefined })} />days</label> : <span className="w-36" />}
-            {inPkg ? <span className="flex w-48 items-center px-2 text-xs text-muted">In the package</span> : (() => { const std = (cfg?.procedures?.find((x: any) => x.id === r.procedureId)?.pricePaise ?? 0) * Math.max(1, r.sittings ?? 1); return (
+            {inPkg ? <span className="flex w-48 items-center px-2 text-xs text-muted">In the package</span> : (() => { const std = stdTotal(cfg?.procedures?.find((x: any) => x.id === r.procedureId), Math.max(1, r.sittings ?? 1)); return (
               <label className="flex w-48 items-center gap-1 px-2 text-xs text-muted" title="The total for all sessions. Leave empty for the clinic's standard price.">₹<NumInput aria-label="Amount, total for all sessions" max={10000000} className={`cell-in !w-24 ${PH}`} placeholder={std ? (std / 100).toLocaleString('en-IN') : 'Amount'} value={r.amountPaise ? String(r.amountPaise / 100) : ''} disabled={readOnly}
                 onChange={(ev) => setRec(k, { amountPaise: ev.target.value ? Math.round(Number(ev.target.value) * 100) : null })} />{r.amountPaise ? 'Custom' : 'Standard'}</label>); })()}
             <input aria-label="Notes" className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Notes" value={r.notes ?? ''} disabled={readOnly} onChange={(ev) => setRec(k, { notes: ev.target.value })} />

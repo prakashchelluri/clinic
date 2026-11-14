@@ -119,8 +119,15 @@ export const procedureCatalog = pgTable('procedure_catalog', {
   typicalSittings: integer('typical_sittings').notNull().default(1),
   requiredCapability: text('required_capability'), // e.g. 'laser': only rooms tagged with it qualify
   bufferMinutes: integer('buffer_minutes').notNull().default(0),
+  // every session of the procedure, set up once: its name, minutes, days after the session before, a note. typicalSittings/typicalMinutes follow it.
+  sessions: jsonb('sessions').$type<SessionDef[]>().notNull().default([]),
+  pricing: text('pricing').notNull().default('per_session'), // upfront (the whole total before the first session) | per_session (each on its day)
+  totalPaise: integer('total_paise'),                        // upfront: the total for all its sessions (pricePaise is then its share per session)
+  practitionerId: uuid('practitioner_id'),                   // the doctor who conducts it; booking picks them first
+  validFor: integer('valid_for'), validUnit: text('valid_unit'), // a course of it is valid for N days | months from the day it is agreed; empty = no expiry
   active: boolean('active').notNull().default(true),
 });
+export type SessionDef = { name: string; minutes: number; gapDays: number; note?: string };
 
 export type PatientFlags = { vip?: boolean; family?: boolean; careful?: { note: string; by: string; at: string } };
 export const patient = pgTable('patient', {

@@ -5,6 +5,7 @@ import { get, post, qc, errText } from './api';
 import { can } from './App';
 import { Icon, Modal, MoneyInput, Section, money, toPaise, toast, fmtDate } from './ui';
 import { printReceipt } from './invoices';
+import { stdTotal } from './procedureSettings';
 
 /** The money codes the server sends, in the desk's words. */
 export function moneyErr(e: any): string {
@@ -94,7 +95,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     const custom = r.amountPaise > 0 ? r.amountPaise as number : 0; // the doctor's own amount (or the package share), for all sittings
     const n = r.sittings ?? 1;
     const per = custom ? Math.round(custom / n) : procs.find((p) => p.id === r.procedureId)?.pricePaise ?? 0;
-    const total = custom || per * n;
+    const total = custom || stdTotal(procs.find((p) => p.id === r.procedureId), n);
     if (!total) return null;
     return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(r.procedureId)}${pkgOf(r)} · paid ahead`, sub: r.package ? `${n} sessions for ${money(total)}, its share of the package price` : custom ? `${n} sessions for ${money(total)}, custom price` : `${n} sessions at ${money(per)}`, unitPaise: Math.round(total / n), qty: r.package ? n : 1, maxQty: n, capPaise: total, on: true, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId) };
   };

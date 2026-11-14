@@ -7,6 +7,7 @@ import { Drawer, Chip, Icon, MoneyInput, Section, money, toPaise, toast } from '
 import { TakePayment } from './takePayment';
 import { openPrint } from './printPreview';
 import { ScheduleModal } from './pages/Worklist';
+import { stdTotal } from './procedureSettings';
 
 const REFUND_MODES: ['cash' | 'upi' | 'card' | 'bank', string][] = [['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['bank', 'Bank']];
 const refresh = () => ['courses', 'timeline', 'frontdesk', 'daily', 'payments-awaiting', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
@@ -56,7 +57,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
   const cs = useCourses(patientId); const c = (cs.data ?? []).find((x: any) => x.recommendationId === rec.id);
   const proc = cfg?.procedures?.find((p: any) => p.id === rec.procedureId);
   const sittings = rec.sittings ?? 1; const custom = rec.amountPaise && rec.amountPaise > 0 ? rec.amountPaise : 0; // the doctor's own price, for all sittings
-  const list = custom || (proc?.pricePaise ?? 0) * sittings;
+  const list = custom || stdTotal(proc, sittings);
   const [days, setDays] = useState(15); const pk = rec.package;
   const qs = useQuery({ queryKey: ['quotes', rec.id], queryFn: () => get(`/quotes?recommendationId=${rec.id}`) }); const quotes: any[] = qs.data ?? [];
   // the patient agrees the price (reception records it): this fixes the course at that price, before the first sitting is booked

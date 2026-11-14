@@ -295,6 +295,13 @@
       "when": 1796200000000,
       "tag": "0041_plan_desk",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1796300000000,
+      "tag": "0042_procedure_sessions",
+      "breakpoints": true
     }
   ]
 }

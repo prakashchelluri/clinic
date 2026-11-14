@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { charge, course, encounter, message, patient, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
 import { standing } from './courses.js';
+import { stdTotal } from '../lib/procPrice.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -21,7 +22,7 @@ export function planRoutes(app: FastifyInstance) {
     const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, b.recommendationId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'))).then((r) => r[0]);
     if (!rec || !rec.procedureId) throw new HttpError(404, 'PLAN_NOT_FOUND');
     const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
-    const sittings = rec.sittings ?? 1; const total = rec.amountPaise && rec.amountPaise > 0 ? rec.amountPaise : (proc?.pricePaise ?? 0) * sittings;
+    const sittings = rec.sittings ?? 1; const total = rec.amountPaise && rec.amountPaise > 0 ? rec.amountPaise : stdTotal(proc, sittings);
     if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
     const p = await tx.select().from(patient).where(eq(patient.id, rec.patientId)).then((r) => r[0]);
     const number = 'Q-' + String(await nextNumber(tx, t, 'quote_no', 'tenant')).padStart(4, '0');

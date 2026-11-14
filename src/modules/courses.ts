@@ -7,6 +7,7 @@ import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, addMonths } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
+import { stdTotal, validTill } from '../lib/procPrice.js';
 import { nextReceiptNo } from './billing.js';
 
 type Course = typeof course.$inferSelect;
@@ -42,14 +43,14 @@ export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, s
   const proc = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]);
   const sittings = rec.sittings ?? 1; const pkg = rec.package;
   const custom = rec.amountPaise != null && rec.amountPaise > 0; // the doctor's price (or the package share) beats the list
-  const total = custom ? rec.amountPaise! : (proc?.pricePaise ?? 0) * sittings;
+  const total = custom ? rec.amountPaise! : stdTotal(proc, sittings);
   if (!total) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
-  const list = custom ? total : Math.max(total, (proc?.pricePaise ?? 0) * sittings);
+  const list = custom ? total : Math.max(total, stdTotal(proc, sittings));
   // for the accounts: where the price came from, the standard price for the same sittings, and the doctor who set their own
-  const standardPaise = (proc?.pricePaise ?? 0) * sittings || null;
+  const standardPaise = stdTotal(proc, sittings) || null;
   const priceBy = custom && !pkg ? await tx.select({ n: practitioner.name }).from(encounter).leftJoin(practitioner, eq(practitioner.id, encounter.practitionerId)).where(eq(encounter.id, rec.encounterId)).then((x) => x[0]?.n ?? null) : null;
   // valid till: the date set on the plan, or none when it has no expiry, or a package's months from today
-  const validUntil = rec.noExpiry ? null : rec.validUntil ?? (pkg ? addMonths(todayIn(ctx.timezone), pkg.validMonths) : null);
+  const validUntil = rec.noExpiry ? null : rec.validUntil ?? (pkg ? addMonths(todayIn(ctx.timezone), pkg.validMonths) : validTill(proc, todayIn(ctx.timezone)));
   const [row] = await tx.insert(course).values({ tenantId: t, patientId: rec.patientId, recommendationId: rec.id, procedureId: rec.procedureId, sittings, listPaise: list, totalPaise: total, agreedBy: ctx.name,
     priceSource: pkg ? 'package' : custom ? 'doctor' : 'standard', standardPaise, priceBy, packageName: pkg?.name ?? null, packageGroup: pkg?.group ?? null, validUntil }).returning();
   await tx.update(quote).set({ status: 'agreed' }).where(and(eq(quote.tenantId, t), eq(quote.recommendationId, rec.id), eq(quote.status, 'open')));
