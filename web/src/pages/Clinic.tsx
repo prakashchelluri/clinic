@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, today, errText } from '../api';
 import { can } from '../App';
-import { Icon, Skeleton, money } from '../ui';
+import { Drawer, Icon, Skeleton, money } from '../ui';
 import { DiscountAsks, useDiscountAsks } from '../takePayment';
 import '../frontdesk.css';
 
@@ -119,12 +118,12 @@ export function Clinic() {
         </section>
       </div>
 
-      {open && createPortal(
-        <aside aria-label={open.title} className="fixed inset-y-0 right-0 z-30 flex w-[min(440px,100vw)] flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-5 anim-slide-in" style={{ boxShadow: '-24px 0 48px -32px rgba(16,32,24,.45)' }}>
-          <div className="flex items-center gap-3"><b className="min-w-0 flex-1 text-[18px]">{open.title}</b><button className="btn btn-icon" aria-label="Close" onClick={() => setOpen(null)}><Icon name="x" className="h-4 w-4" /></button></div>
+      {open && <Drawer title={open.title} width="max-w-md" onClose={() => setOpen(null)}>
+        <div className="flex flex-1 flex-col gap-4">
           {open.body}
           <div className="mt-auto flex gap-2 border-t border-line pt-3.5"><button className="btn btn-primary" onClick={() => nav(open.to)}>{open.act}</button><button className="btn" onClick={() => setOpen(null)}>Later</button></div>
-        </aside>, document.body)}
+        </div>
+      </Drawer>}
     </div>
   );
 }

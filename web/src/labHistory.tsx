@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { ArrowDown, ArrowUp, ChevronRight, FileText, Star } from 'lucide-react';
-import { Chip, Icon, ask, fmtDate, toast } from './ui';
+import { Chip, Drawer, Icon, ask, fmtDate, toast } from './ui';
 import { errText } from './api';
 import { useLabResults, isOut, rangeText, saveLabValues, reportFor, type LabRow } from './labs';
 import { openViewer } from './viewer';
@@ -35,13 +34,10 @@ export function LabHistoryDrawer({ patientId, docs, test: first, onClose }: { pa
   }, [q.data, stars]);
   const rows = byTest.filter(([t]) => t.toLowerCase().includes(find.trim().toLowerCase()));
   const docOf = (r: LabRow) => reportFor(docs, r.documentId, r.recommendationId) ?? undefined;
-  return createPortal(
-    <aside role="dialog" aria-label="Test results history" className="side-drawer" style={{ width: 'min(860px, 100vw)', zIndex: 45 }} onKeyDown={(e) => e.key === 'Escape' && (test ? setTest(null) : onClose())}>
-      <div className="flex items-center gap-2">
-        {test && <button className="btn btn-ghost btn-icon" aria-label="Back to all tests" onClick={() => setTest(null)}><Icon name="chevL" /></button>}
-        <h2 className="text-[18px] font-semibold">{test ?? 'Test results history'}</h2>
-        <button className="btn btn-ghost btn-icon ml-auto" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
-      </div>
+  return (
+    <Drawer title={test ?? 'Test results history'} width="max-w-5xl" onClose={onClose}>
+    <div className="flex flex-1 flex-col gap-4">
+      {test && <button className="btn btn-sm self-start" onClick={() => setTest(null)}><Icon name="chevL" className="h-3.5 w-3.5" />All tests</button>}
       {test ? <Trend rows={byTest.find(([t]) => t === test)?.[1] ?? []} docOf={docOf} /> : <>
         <input autoFocus className="input" placeholder="Search a test" aria-label="Search a test" value={find} onChange={(e) => setFind(e.target.value)} />
         {q.isLoading ? <div className="text-sm text-muted">Loading…</div> : byTest.length === 0 ? <div className="text-sm text-muted">No values have been typed for this patient yet. Values come from the report form when a report arrives.</div> : (
@@ -60,7 +56,9 @@ export function LabHistoryDrawer({ patientId, docs, test: first, onClose }: { pa
             {rows.length === 0 && <div className="py-3 text-sm text-muted">No test matches “{find}”.</div>}
           </div>)}
       </>}
-    </aside>, document.body);
+    </div>
+    </Drawer>
+  );
 }
 
 /** One test over time: a line with the normal band shaded, then every reading with its report. Words (Negative, Reactive) skip the chart. */

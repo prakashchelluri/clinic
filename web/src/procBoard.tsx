@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router';
 import { get, qc, today } from './api';
 import { can } from './App';
-import { Empty, Icon, PageSearchBox, Skeleton, fmtDate, fmtTime, money, usePageSearch } from './ui';
+import { Drawer, Empty, Icon, PageSearchBox, Skeleton, fmtDate, fmtTime, money, usePageSearch } from './ui';
 import { FlagChips } from './flags';
 import { ScheduleModal } from './pages/Worklist';
 import { CourseDialog } from './courses';
@@ -100,11 +100,8 @@ export function CourseList() {
 function CourseSide({ p, canBook, onClose, onSchedule, onCourse, onRecord }: { p: any; canBook: boolean; onClose: () => void; onSchedule: () => void; onCourse: () => void; onRecord: () => void }) {
   const s = standing(p); const open = p.stage !== 'finished';
   return (
-    <aside role="dialog" aria-label={`${p.patient.fullName} · ${p.procedure}`} className="side-drawer" onKeyDown={(e) => e.key === 'Escape' && onClose()}>
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1"><b className="text-lg">{p.patient.fullName}</b><div className="text-sm text-muted">{p.procedure} · {p.sittings} sittings{p.gapDays ? `, every ${p.gapDays} days` : ''}{p.doctor ? ` · ${p.doctor}` : ''}</div></div>
-        <button className="btn btn-sm !px-2" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
-      </div>
+    <Drawer title={p.patient.fullName} subtitle={`${p.procedure} · ${p.sittings} sittings${p.gapDays ? `, every ${p.gapDays} days` : ''}${p.doctor ? ` · ${p.doctor}` : ''}`} width="max-w-md" onClose={onClose}>
+    <div className="flex flex-1 flex-col gap-4">
       <div className="rounded-xl bg-surface-2 px-4 py-3"><b className={s.tone}>{s.t}</b><div className="text-xs text-muted">{s.sub}</div></div>
       <div>
         <b className="text-sm">Sittings</b>
@@ -126,6 +123,7 @@ function CourseSide({ p, canBook, onClose, onSchedule, onCourse, onRecord }: { p
         {p.stage !== 'advised' && (p.totalPaise == null ? open && p.listPaise != null : p.stillToPayPaise > 0) && <button className="btn btn-sm" onClick={onCourse}>{p.totalPaise == null ? 'Pay for sittings' : 'Take payment'}</button>}
         <button className="btn btn-sm" onClick={onRecord}><Icon name="eye" />View profile</button>
       </div>
-    </aside>
+    </div>
+    </Drawer>
   );
 }

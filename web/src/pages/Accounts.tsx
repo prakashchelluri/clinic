@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useOutletContext, useSearchParams } from 'react-router';
 import { get, today, errText, listOut } from '../api';
 import { can } from '../App';
 import { EmiAwaiting } from '../takePayment';
 import { Expenses } from './Expenses';
-import { Icon, NoAccess, PageHeader, Segmented, Skeleton, Stat, Tabs, money as inr } from '../ui';
+import { Drawer, Icon, NoAccess, PageHeader, Segmented, Skeleton, Stat, Tabs, money as inr } from '../ui';
 
 type Period = 'today' | 'month' | 'last' | 'pick';
 type Tab = 'sum' | 'days' | 'spend' | 'due';
@@ -101,12 +100,8 @@ export function Accounts() {
         : tab === 'days' ? <Days d={d} open={open} onDay={setOpen} />
         : <NotIn d={d} perms={perms} />}
 
-      {sel && createPortal(
-        <aside aria-label={dayName(sel.day)} className="fixed inset-y-0 right-0 z-30 flex w-[min(460px,100vw)] flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-5 anim-slide-in" style={{ boxShadow: '-24px 0 48px -32px rgba(16,32,24,.45)' }}>
-          <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1"><b className="text-[18px]">{fmt(sel.day, { weekday: 'long', day: 'numeric', month: 'long' })}</b><div className="text-[13px] text-muted"><Closed x={sel} long /></div></div>
-            <button className="btn btn-icon" aria-label="Close" onClick={() => setOpen(null)}><Icon name="x" className="h-4 w-4" /></button>
-          </div>
+      {sel && <Drawer title={fmt(sel.day, { weekday: 'long', day: 'numeric', month: 'long' })} subtitle={<Closed x={sel} long />} width="max-w-md" onClose={() => setOpen(null)}>
+        <div className="flex flex-1 flex-col gap-4">
           {sel.money ? <ModeTable m={sel.money} /> : <div className="text-[14px] text-muted">No money came in.</div>}
           <div>
             <div className="mb-1 text-[11.5px] font-bold uppercase tracking-wider text-muted">Went out</div>
@@ -118,7 +113,8 @@ export function Accounts() {
             {can(perms, 'report.daily') && <button className="btn btn-primary" onClick={() => nav(`/reports?day=${sel.day}&view=eod`)}>Open End of day</button>}
             <button className="btn" onClick={() => setOpen(null)}>Close</button>
           </div>
-        </aside>, document.body)}
+        </div>
+      </Drawer>}
     </div>
   );
 }

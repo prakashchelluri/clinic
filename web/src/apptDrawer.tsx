@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, errText, ApiError, today, dialable } from './api';
 import { PatientActions } from './pages/frontDeskJourney';
-import { Chip, Icon, Skeleton, toast } from './ui';
+import { Chip, Drawer, Icon, Skeleton, toast } from './ui';
 
 export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
   booked: { label: 'Booked', tone: '' }, confirmed: { label: 'Confirmed', tone: 'sage' },
@@ -34,7 +33,6 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
   const [mode, setMode] = useState<null | 'cancel' | 'move'>(null);
   const [reason, setReason] = useState('');
   const [seriesToo, setSeriesToo] = useState(false);
-  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.modal-back') && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   const done = (msg: string) => { refreshBookings(); toast(msg); setMode(null); setReason(''); };
   const fail = (e: any) => toast(errText(e), 'err');
   const update = useMutation({ mutationFn: (b: any) => patch(`/appointments/${id}`, b), onSuccess: (r: any, b: any) => done(b.status === 'cancelled' ? `Cancelled${r.alsoCancelled ? ` with ${r.alsoCancelled} later visit${r.alsoCancelled === 1 ? '' : 's'}` : ''}. ${told(r.whatsapp)}` : b.status === 'confirmed' ? 'Marked confirmed' : b.status === 'no_show' ? 'Marked as did not come' : b.sessionId ? `Moved. ${told(r.whatsapp)}` : 'Updated'), onError: fail });
@@ -44,18 +42,16 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
   const arriveEarly = cfg?.tenant.settings.scheduling?.arriveEarlyMinutes ?? 35;
   const warnAt = cfg?.tenant.settings.booking?.noShowWarnAt ?? 2;
 
-  return createPortal(
-      <aside role="dialog" aria-label="Booking details" className="side-drawer">
+  return (
+    <Drawer title={a?.patient.fullName ?? 'Booking'} subtitle={a ? `${a.patient.patientNo}${a.patient.phone ? ` · ${a.patient.phone}` : ' · no phone'}${a.patient.ageYears ? ` · ${a.patient.ageYears}${a.patient.sex ?? ''}` : ''}` : undefined} width="max-w-md" onClose={onClose}>
+      <div className="flex flex-1 flex-col gap-4">
         {!a ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
             <StatusChip s={a.status} />
             <span className="truncate text-xs text-muted">{a.source === 'repeat' ? 'Repeat booking' : a.source === 'walk_in' ? 'Walk-in' : 'Booked by phone'} · {when(a.createdAt)}</span>
-            <button className="btn btn-ghost btn-icon ml-auto" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
           </div>
           <div>
-            <div className="text-2xl font-semibold">{a.patient.fullName}</div>
-            <div className="text-sm text-muted">{a.patient.patientNo}{a.patient.phone ? ` · ${a.patient.phone}` : ' · no phone'}{a.patient.ageYears ? ` · ${a.patient.ageYears}${a.patient.sex ?? ''}` : ''}</div>
-            <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+            <div className="flex flex-wrap gap-1.5 text-xs">
               <Chip>{a.history.total} booking{a.history.total === 1 ? '' : 's'}</Chip>
               {a.history.noShows > 0 && <Chip tone={a.history.noShows >= warnAt ? 'rose' : 'amber'}>did not come {a.history.noShows} time{a.history.noShows === 1 ? '' : 's'}</Chip>}
             </div>
@@ -102,8 +98,9 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
           </div>
         </>)}
         {q.isError && <div className="text-sm text-rose">{errText(q.error)}</div>}
-      </aside>
-  , document.body);
+      </div>
+    </Drawer>
+  );
 }
 
 /** Pick a new time: a date, then that doctor's times with room (not the ones already over today). Tapping a time asks first; nothing moves until "Move". */

@@ -321,7 +321,12 @@ function useDialogFocus(panel: React.RefObject<HTMLDivElement | null>, active = 
 }
 const SIZE: Record<string, string> = { 'max-w-sm': 'sm:max-w-[440px]', 'max-w-md': 'sm:max-w-[440px]', 'max-w-lg': 'sm:max-w-[560px]', 'max-w-xl': 'sm:max-w-[560px]', 'max-w-2xl': 'sm:max-w-[720px]', 'max-w-3xl': 'sm:max-w-[760px]', 'max-w-4xl': 'sm:max-w-[900px]', 'max-w-5xl': 'sm:max-w-[1040px]', 'max-w-6xl': 'sm:max-w-[1160px]' };
 
-const DRAWER: Record<string, number> = { 'max-w-sm': 440, 'max-w-md': 440, 'max-w-lg': 520, 'max-w-xl': 560, 'max-w-2xl': 640, 'max-w-3xl': 720, 'max-w-4xl': 860, 'max-w-5xl': 960, 'max-w-6xl': 1040 };
+/** Three drawer widths: narrow (details, short forms), wide (forms with lists or tables), full (a results table across dates). */
+const DRAWER: Record<string, number> = { 'max-w-sm': 480, 'max-w-md': 480, 'max-w-lg': 480, 'max-w-xl': 720, 'max-w-2xl': 720, 'max-w-3xl': 720, 'max-w-4xl': 720, 'max-w-5xl': 960, 'max-w-6xl': 960 };
+/** The drawer this one was opened from: a drawer opened inside a drawer takes its width and shows Back instead of ×. */
+const DrawerParent = createContext<{ width: number } | null>(null);
+/** Drawers opened from the page itself. One at a time: a new one replaces the open one (asking first when it has typing in it). */
+const rootDrawers = new Set<{ replace: () => Promise<boolean> }>();
 /** The side drawer: the same dialog docked on the right, the page behind still in view. For opening one thing from a list,
  *  a calendar or the Rx pad. A popup (Modal) is for a short step to finish or cancel, or something that needs the full width. */
 export const Drawer = (p: Omit<Parameters<typeof Modal>[0], 'side'>) => <Modal {...p} side />;
@@ -336,6 +341,18 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
     close.current();
   }).current;
   useScrollLock(!side); useDialogFocus(panel);
+  const parent = useContext(DrawerParent);
+  const child = side && from === 'right' && !!parent; // opened from inside a drawer: on top of it, same width, Back returns to it
+  const w = child ? parent!.width : DRAWER[width] ?? 720;
+  const typed = useRef(false); // something typed or picked in this drawer: another drawer replacing it asks first
+  useEffect(() => {
+    if (!side || from !== 'right' || parent) return;
+    const me = { replace: async () => { if ((isDirty.current || typed.current) && !(await ask({ title: 'Discard changes?', body: 'What you typed in the open drawer will be lost.', confirmLabel: 'Discard', cancelLabel: 'Keep editing', tone: 'danger' }))) return false; close.current(); return true; } };
+    const open = [...rootDrawers]; rootDrawers.add(me);
+    // the drawer already open gives way; one kept for its typing keeps its place and this one closes
+    void (async () => { for (const o of open) if (rootDrawers.has(o) && !(await o.replace())) { close.current(); return; } })();
+    return () => { rootDrawers.delete(me); };
+  }, []);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const p = panel.current; if (!p) return;
@@ -350,10 +367,10 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
   }, [submitOnEnter]);
   return createPortal(
     <div className={`modal-back ${side ? 'is-drawer' : ''} ${side && from === 'left' ? 'from-left' : ''}`} role="dialog" aria-modal={!side} aria-labelledby={id}>
-      <div ref={panel} tabIndex={-1} className={`modal-panel ${side ? '' : SIZE[width] ?? 'sm:max-w-[720px]'}`} style={side ? { width: DRAWER[width] ?? 640 } : undefined}>
+      <div ref={panel} tabIndex={-1} onInput={side ? () => { typed.current = true; } : undefined} className={`modal-panel ${side ? '' : SIZE[width] ?? 'sm:max-w-[720px]'}`} style={side ? { width: w } : undefined}>
         <span className="modal-grab" aria-hidden />
-        <div className="modal-head"><div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div><button className="btn btn-ghost btn-icon shrink-0" onClick={tryClose} aria-label="Close"><Icon name="x" /></button></div>
-        <div className="modal-body">{children}</div>
+        <div className="modal-head">{child && <button className="btn btn-ghost btn-icon -ml-2 shrink-0" onClick={tryClose} aria-label="Back"><Icon name="chevL" /></button>}<div className="mr-auto min-w-0"><h2 id={id} className="text-[18px] font-semibold leading-tight">{title}</h2>{subtitle && <div className="text-sm text-muted mt-1">{subtitle}</div>}</div>{!child && <button className="btn btn-ghost btn-icon shrink-0" onClick={tryClose} aria-label="Close"><Icon name="x" /></button>}</div>
+        <div className="modal-body"><DrawerParent.Provider value={side ? { width: w } : parent}>{children}</DrawerParent.Provider></div>
       </div>
     </div>,
     document.body,

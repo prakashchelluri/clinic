@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, today, errText } from './api';
-import { Chip, Icon, Modal, Skeleton, ask, money, toast } from './ui';
+import { Chip, Drawer, Icon, Modal, Skeleton, ask, money, toast } from './ui';
 import { FlagChips } from './flags';
 import { PhotoCapture, usePhotos } from './photos';
 import { ScheduleModal } from './pages/Worklist';
@@ -111,7 +110,6 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
     onSuccess: (_r, b) => { setSigning(false); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Sitting marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Sitting started'); },
     onError: (e) => toast(errText(e), 'err') });
-  useEffect(() => { const k = (e: KeyboardEvent) => e.key === 'Escape' && !document.querySelector('.modal-back') && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   const s = q.data;
   const p = s?.patient;
   const conditions: any[] = p?.history?.conditions ?? [];
@@ -131,17 +129,13 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const markMissed = useMutation({ mutationFn: () => patch(`/procedure-sessions/${id}`, { state: 'missed' }), onSuccess: () => { refresh(); toast('Marked as missed'); }, onError: (e) => toast(errText(e), 'err') });
   const more = !!s && s.state === 'completed' && !nextBooked && (!s.plan?.sittings || s.sittingNo < s.plan.sittings);
 
-  return createPortal(
-      <aside role="dialog" aria-label="Procedure sitting" className="side-drawer">
+  return (
+    <Drawer title={p ? <span className="flex flex-wrap items-center gap-2">{p.fullName}<FlagChips flags={p.flags} /></span> : 'Procedure sitting'} subtitle={p ? [p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' '), p.phone].filter(Boolean).join(' · ') : undefined} width="max-w-md" onClose={onClose}>
+      <div className="flex flex-1 flex-col gap-4">
         {q.isError ? <div className="text-sm text-rose">Couldn't load. {errText(q.error)} <button className="btn btn-sm ml-1" onClick={() => q.refetch()}>Retry</button></div> :!s ? <Skeleton rows={6} /> : (<>
-          {/* who first, with Close; then the sitting's state and money as one row of tags */}
+          {/* the sitting's state and money as one row of tags (who it is sits in the drawer's title) */}
           <div>
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><span className="text-[22px] font-semibold leading-tight">{p.fullName}</span><FlagChips flags={p.flags} /></div>
-                <div className="mt-0.5 text-sm text-muted">{[p.patientNo, [p.ageYears, p.sex].filter(Boolean).join(' '), p.phone].filter(Boolean).join(' · ')}</div></div>
-              <button className="btn btn-ghost btn-icon -mr-1 -mt-1 shrink-0" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
-            </div>
-            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 [&_.chip]:whitespace-nowrap">
+            <div className="flex flex-wrap items-center gap-1.5 [&_.chip]:whitespace-nowrap">
               {overdue ? <Chip tone="rose">Didn't come</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
               {s.patientConfirmedAt && <Chip tone="sage">Patient confirmed</Chip>}
               <MoneyChip m={s.money} />
@@ -227,6 +221,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
         {movingNext && s && nextSit && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} sitting={nextSit} onClose={() => { setMovingNext(false); refresh(); }} />}
         {moving && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} sitting={s} onClose={() => { setMoving(false); refresh(); }} />}
         {booking && s && <ScheduleModal rec={{ id: s.recommendationId, procedureId: s.procedureId, patient: { fullName: p.fullName, phone: p.phone }, sittings: s.plan?.sittings }} onClose={() => { setBooking(false); ['procedure-session', 'psessions', 'worklist', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />}
-      </aside>
-  , document.body);
+      </div>
+    </Drawer>
+  );
 }

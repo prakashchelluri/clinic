@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate, useOutletContext } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { dialable, get } from '../api';
@@ -7,7 +6,7 @@ import { can } from '../App';
 import { TakePayment } from '../takePayment';
 import { openPrint } from '../printPreview';
 import { FlagChips } from '../flags';
-import { Chip, Floating, Icon, Num, money } from '../ui';
+import { Chip, Drawer, Floating, Icon, Num, money } from '../ui';
 import { vitalFields, vitalsText } from '../vitals';
 import { ReportDialog, type Order } from './TestReports';
 import '../frontdesk.css';
@@ -97,13 +96,10 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
   const rep: [StepState, string] = tests.length === 0 ? (seen ? ['skip', 'no tests'] : ['next', '']) : held ? ['now', order ? `${order.got} of ${order.tests.length} in` : 'awaited'] : seen ? ['done', 'seen by the doctor'] : ['next', ''];
 
   return (
-    <Drawer onClose={onClose} label={`Journey of ${v.patient.fullName}`}>
-      <div className="flex items-center gap-3">
-        <span className="grid h-12 min-w-12 shrink-0 place-items-center whitespace-nowrap rounded-[16px] bg-paper-2 px-2.5 text-[15px] font-extrabold tabular-nums">{v.opNumber}</span>
-        <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-1.5"><b className="text-[18px] leading-tight">{v.patient.fullName}</b><FlagChips flags={v.patient.flags} /></div>
-          <div className="truncate text-[12.5px] text-muted">{[[v.patient.ageYears, v.patient.sex].filter(Boolean).join(' '), v.patient.patientNo, v.patient.phone].filter(Boolean).join(' · ')}</div></div>
-        <button className="btn btn-icon" aria-label="Close" title="Close" onClick={onClose}><Icon name="x" className="h-4 w-4" /></button>
-      </div>
+    <Drawer onClose={onClose} width="max-w-md"
+      title={<span className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-paper-2 px-2 py-0.5 text-[14px] font-extrabold tabular-nums">{v.opNumber}</span>{v.patient.fullName}<FlagChips flags={v.patient.flags} /></span>}
+      subtitle={[[v.patient.ageYears, v.patient.sex].filter(Boolean).join(' '), v.patient.patientNo, v.patient.phone].filter(Boolean).join(' · ')}>
+      <div className="flex flex-1 flex-col gap-4">
 
       {action}
       <PatientActions patientId={v.patient.id} name={v.patient.fullName} />
@@ -132,6 +128,7 @@ export function JourneyPanel({ v, order, screening, inLine, arrangeSlot, canDesk
         <button className="btn btn-sm" onClick={() => nav(`/patients/${v.patient.id}`)}>Profile</button>
         {v.encounterId && !left && <button className="btn btn-sm" onClick={() => openPrint({ title: 'Prescription', rx: v.encounterId })}><Icon name="print" className="h-3.5 w-3.5" />Rx</button>}
         {v.due?.length > 0 && <Chip tone="rose">{money(v.due.reduce((x: number, c: any) => x + c.amountPaise - (c.paidPaise ?? 0), 0))} due</Chip>}
+      </div>
       </div>
     </Drawer>);
 }
@@ -169,12 +166,4 @@ export function PatientActions({ patientId, name, more = [] }: { patientId: stri
     </div>);
 }
 
-/** A side drawer on the right edge: the page stays as it is and stays usable; tapping another patient switches the drawer. ✕ or Escape closes it. */
-function Drawer({ onClose, label, children }: { onClose: () => void; label: string; children: React.ReactNode }) {
-  const close = useRef(onClose); close.current = onClose;
-  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.modal-back')) close.current(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
-  return createPortal(
-    <aside aria-label={label} className="fixed inset-y-0 right-0 z-30 flex w-[min(440px,100vw)] flex-col gap-4 overflow-y-auto border-l border-line bg-surface p-5 anim-slide-in" style={{ boxShadow: '-24px 0 48px -32px rgba(16,32,24,.45)' }}>
-      {children}
-    </aside>, document.body);
-}
+
