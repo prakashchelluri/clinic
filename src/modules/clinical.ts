@@ -277,10 +277,14 @@ export function clinicalRoutes(app: FastifyInstance) {
     const procIds = [...new Set(e.recommendations.map((r: any) => r.procedureId).filter(Boolean))] as string[];
     const procNames = new Map((procIds.length ? await tx.select({ id: procedureCatalog.id, name: procedureCatalog.name }).from(procedureCatalog).where(and(eq(procedureCatalog.tenantId, t), inArray(procedureCatalog.id, procIds))) : []).map((x) => [x.id, x.name]));
     const recommendations = e.recommendations.map((r: any) => (r.procedureId && procNames.has(r.procedureId) ? { ...r, procedureName: procNames.get(r.procedureId) } : r));
+    // each medicine's generic under its brand (Dolo 650 → Paracetamol 650 mg), from the clinic's medicine list
+    const medIds = [...new Set(e.prescription.map((i: any) => i.medicineId).filter(Boolean))] as string[];
+    const generics = new Map((medIds.length ? await tx.select({ id: medicine.id, generic: medicine.generic }).from(medicine).where(and(eq(medicine.tenantId, t), inArray(medicine.id, medIds))) : []).map((x) => [x.id, x.generic]));
+    const prescription = e.prescription.map((i: any) => ({ ...i, generic: (i.medicineId && generics.get(i.medicineId)) || null }));
     const pr = printSettings(ten.settings);
     const local = Object.fromEntries(phrases.map((p) => [p, localPhrase(pr.lang, p, ten.settings)]).filter(([, v]) => v));
     // the private note and the safety overrides are never on paper; the diagnosis prints only for clinical roles (the desk reprints without it)
-    return { ...e, recommendations, data: { ...e.data, notes: undefined, overrides: undefined, ...(clinical(req.perms) ? {} : { assessment: undefined }) }, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, doctor: e.doctor ? { ...e.doctor, signatureUrl: (ten.settings as any)?.signatures?.[e.doctor.id] ?? null } : e.doctor, visit: v, labs, printRx: pr, pad: padConfig(ten.settings), local, vitalFields: Array.isArray(ten.settings?.vitalFields) ? ten.settings.vitalFields : [] };
+    return { ...e, prescription, recommendations, data: { ...e.data, notes: undefined, overrides: undefined, ...(clinical(req.perms) ? {} : { assessment: undefined }) }, clinic: { name: ten.name, ...(ten.settings.print ?? {}) }, doctor: e.doctor ? { ...e.doctor, signatureUrl: (ten.settings as any)?.signatures?.[e.doctor.id] ?? null } : e.doctor, visit: v, labs, printRx: pr, pad: padConfig(ten.settings), local, vitalFields: Array.isArray(ten.settings?.vitalFields) ? ten.settings.vitalFields : [] };
   });
 
   /** Worklists: open follow-ups and procedure recommendations with contact log. */

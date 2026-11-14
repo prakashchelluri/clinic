@@ -5,6 +5,13 @@ import { get } from '../api';
 import { joinList } from '../encounterDetail';
 import { ageText } from '../rxLine';
 
+const CELL = 'border border-gray-700 px-1.5 py-1 align-top';
+/** "Label: value" on its own line. */
+const Field = ({ label, children }: { label: string; children: React.ReactNode }) => <div className="mt-2"><b>{label}:</b> {children}</div>;
+/** A numbered list under a label; a second line in the patient's language when there is one. */
+const List = ({ label, items, local }: { label: string; items: string[]; local?: (s: string) => string | null }) => (
+  <div className="mt-2"><b>{label}:</b><ol className="ml-5 list-decimal">{items.map((x, k) => <li key={k}>{x}{local?.(x) && <div className="text-gray-700">{local(x)}</div>}</li>)}</ol></div>);
+
 /** A5 prescription. Fields follow the Telemedicine Practice Guidelines minimum: doctor, reg no, patient, date, items.
  *  What prints is the clinic's Print settings (sections on or off, language, out-of-range results only), not what shows on the pad. */
 export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: string; embed?: boolean; mode?: 'results' } = {}) {
@@ -38,7 +45,7 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
   const modules: any[] = results ? [] : Object.values(d.modules ?? {}).map((m: any) => ({ ...m, rows: (m?.rows ?? []).filter((r: any[]) => Array.isArray(r) && r.some((c) => String(c ?? '').trim())) })).filter((m: any) => m.rows.length && Array.isArray(m.columns));
   const canvases: any[] = results ? [] : (Array.isArray(d.canvases) ? d.canvases : []).filter((c: any) => c.showInRx && c.docId);
   const advice: string[] = String(d.plan?.advice ?? '').split('\n').map((x: string) => x.trim()).filter(Boolean);
-  const hist = p.history ?? {}; const histLine = ['conditions', 'drugAllergies', 'otherAllergies'].flatMap((k) => (hist[k] ?? []).map((x: any) => x.name)).join(', ');
+  const hist = p.history ?? {};
   // English always prints. The second line is in the patient's language, and a part with no translation stays in English there,
   // so no instruction is ever dropped (a clinic still set to the old "Telugu only" gets English + Telugu).
   const teOr = (s: string | null | undefined) => tel(s) ?? s ?? null;
@@ -46,6 +53,13 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
   // not finished yet: marked as a draft across the page and printed without a signature line
   const draft = e.status === 'draft';
   const age = ageText(p);
+  const time = new Date(e.completedAt ?? e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+  const conditions: string[] = (hist.conditions ?? []).map((x: any) => x.name);
+  // allergies always print (safety), from the history lists or the older free-text field
+  const allergies: string[] = [...(hist.drugAllergies ?? []), ...(hist.otherAllergies ?? [])].map((x: any) => x.name).filter(Boolean);
+  if (!allergies.length && p.allergies) allergies.push(p.allergies);
+  const followups = plans.filter((r: any) => r.kind === 'followup' && on('followup'));
+  const procs = plans.filter((r: any) => r.kind !== 'followup' && on('procedures'));
   return (
     <div className="relative mx-auto bg-white text-black p-8 print:p-6" style={{ width: '148mm', minHeight: '210mm', fontSize: '12px', fontFamily: 'Inter, sans-serif' }}>
       {draft && <div aria-label="Draft, not signed" className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden"><div className="whitespace-nowrap font-bold uppercase" style={{ transform: 'rotate(-35deg)', fontSize: '44px', color: 'rgba(200,0,0,0.18)', border: '4px solid rgba(200,0,0,0.18)', padding: '4px 16px' }}>Draft — not signed</div></div>}
@@ -54,34 +68,45 @@ export function PrintRx({ id: idProp, embed = false, mode: modeProp }: { id?: st
         <div className="flex items-start gap-3">{e.clinic.logoUrl && <img src={e.clinic.logoUrl} alt="" className="h-14 max-w-[120px] object-contain" />}<div><div className="text-xl font-bold" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>{e.clinic.name}</div><div>{e.clinic.address}</div>{e.clinic.phone && <div>Ph: {e.clinic.phone}</div>}</div></div>
         <div className="text-right">{e.doctor && <><div className="font-semibold">{e.doctor.name}</div><div>{e.doctor.qualification}</div><div>Reg. No. {e.doctor.regNo}</div></>}</div>
       </div>
-      <div className="flex justify-between py-2 border-b border-black">
-        <div><b>{p.fullName}</b> {age ? `· ${age}` : ''} {p.sex ? `· ${p.sex}` : ''}<div>ID {p.patientNo} · {p.phone ?? ''} · {p.locality ?? ''}</div></div>
-        <div className="text-right"><div>{date}</div><div>{results ? `Results review · Rx of ${new Date(e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : `OP ${e.visit?.opNumber}`}</div>{on('vitals') && vitals.length > 0 && <div>{vitals.map(([k, v]: [string, any]) => `${vLabel[k]?.[0] ?? k} ${v}${vLabel[k]?.[1] ?? ''}`).join(' · ')}</div>}</div>
+      {/* who and when: label and value, two columns, ruled above and below (Tatva's layout) */}
+      <div className="grid grid-cols-2 gap-x-6 py-2.5 border-b border-black" style={{ lineHeight: 1.6 }}>
+        <div><div><b>Patient name &amp; ID:</b> {p.fullName}, {p.patientNo}</div><div><b>Age / Gender:</b> {[age, p.sex].filter(Boolean).join(', ') || '—'}</div>{p.locality && <div><b>Address:</b> {p.locality}</div>}</div>
+        <div><div><b>Date &amp; time:</b> {date}{!results && time ? ` ${time}` : ''}</div><div><b>Mobile no.:</b> {p.phone ?? '—'}</div><div>{results ? <><b>Results review</b> of the Rx dated {new Date(e.completedAt ?? e.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</> : <><b>OP no.:</b> {e.visit?.opNumber ?? '—'}</>}</div></div>
       </div>
-      <div className="grid grid-cols-2 gap-x-4 py-2">
-        {on('symptoms') && syms.length > 0 && <div><b>C/o:</b> {syms.map((s) => line([s.name, s.since ? `since ${s.since}` : null, s.severity?.toLowerCase()])).join('; ')}{d.complaint?.site?.length ? ` · ${d.complaint.site.join(', ')}` : ''}</div>}
-        {on('diagnosis') && dxs.length > 0 && <div><b>Dx:</b> {dxs.map((x) => line([x.name, x.since ? `since ${x.since}` : null, x.severity?.toLowerCase(), x.status?.toLowerCase(), x.note])).join('; ')}</div>}
-        {on('exam') && (exam.length > 0 || d.exam?.findings || d.exam?.morphology?.length) && <div className="col-span-2"><b>O/e:</b> {line([exam.map((x: any) => line([x.name, x.note])).join('; '), (d.exam?.morphology ?? []).join(', '), d.exam?.distribution, d.exam?.findings])}</div>}
-        {(p.allergies || (on('history') && histLine)) && <div className="col-span-2">{p.allergies && <><b>Allergies:</b> {p.allergies}</>}{on('history') && histLine && <> · <b>History:</b> {histLine}</>}</div>}
+      <div className="pt-1">
+        {on('vitals') && vitals.length > 0 && <Field label="Vitals">{vitals.map(([k, v]: [string, any]) => `${vLabel[k]?.[0] ?? k} ${v}${vLabel[k]?.[1] ?? ''}`).join(' · ')}</Field>}
+        {on('symptoms') && syms.length > 0 && <Field label="Symptoms">{syms.map((s) => s.name + (s.since || s.severity ? ` (${line([s.since ? `since ${s.since}` : null, s.severity?.toLowerCase()])})` : '')).join(', ')}{d.complaint?.site?.length ? ` · Site: ${d.complaint.site.join(', ')}` : ''}</Field>}
+        {on('exam') && (exam.length > 0 || d.exam?.findings || d.exam?.morphology?.length) && <Field label="Examinations">{line([exam.map((x: any) => (x.note ? `${x.name} (${x.note})` : x.name)).join(', '), (d.exam?.morphology ?? []).join(', '), d.exam?.distribution, d.exam?.findings])}</Field>}
+        {((on('history') && conditions.length > 0) || allergies.length > 0) && <div className="mt-2"><b>Medical history:</b>
+          {on('history') && conditions.length > 0 && <div>Medical conditions: {conditions.join(', ')}</div>}
+          {allergies.length > 0 && <div>Allergies: <b>{allergies.join(', ')}</b></div>}</div>}
+        {on('diagnosis') && dxs.length > 0 && <Field label="Diagnosis">{dxs.map((x) => x.name + (x.since || x.severity || x.status || x.note ? ` (${line([x.since ? `since ${x.since}` : null, x.severity?.toLowerCase(), x.status?.toLowerCase(), x.note])})` : '')).join(', ')}</Field>}
       </div>
-      {on('medicines') && (!results || rxLines.length > 0) && <>
-        <div className="text-2xl mt-2" style={{ fontFamily: '"Source Serif 4", Georgia, serif' }}>℞{results && <span className="ml-2 align-middle text-[11px] font-sans text-gray-600">Added after the reports</span>}</div>
-        <table className="w-full mt-1"><tbody>
-          {rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : i.durationNote ?? null; const parts = [i.frequency, i.timing, days]; const teLine = localLine([...parts, i.instructions]); return (
-            <tr key={i.id} className="align-top"><td className="pr-2 py-1">{k + 1}.</td>
-              <td className="py-1"><b>{i.name}</b>{i.dose ? ` ${i.dose}` : ''}{i.qty ? <span className="float-right text-[11px] text-gray-600">× {i.qty}</span> : null}
-                {<div className="text-[11px]">{line([...parts, i.route && i.route !== 'oral' ? i.route : null])}{i.instructions ? ` — ${i.instructions}` : ''}</div>}
-                {teLine && <div className="text-[11px] text-gray-800">{teLine}</div>}</td></tr>); })}
-        </tbody></table>
-      </>}
-      {on('tests') && investigations.length > 0 && <div className="mt-3"><b>Investigations:</b> {investigations.map((r: any) => line([r.notes, d.plan?.testNotes?.[r.notes]])).join(', ')}</div>}
-      {on('results') && labs.length > 0 && <div className="mt-2"><b>Results{outOnly ? ' (out of range)' : ''}:</b> {labs.map((r: any) => `${r.test} ${r.value}${r.unit ? ` ${r.unit}` : ''}${r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''}`).join(' · ')}</div>}
-      {on('advice') && advice.length > 0 && <div className="mt-2"><b>Advice:</b> {advice.join(' · ')}{localLine(advice) && <div className="text-gray-800">{localLine(advice)}</div>}</div>}
-      {plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).length > 0 && <div className="mt-2">{plans.filter((r: any) => on(r.kind === 'followup' ? 'followup' : 'procedures')).map((r: any) => <div key={r.id}>• {r.kind === 'followup' ? `Review on ${r.dueOn ?? 'as advised'}${d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}` : `${r.procedure?.name ?? r.procedureName ?? 'Procedure'} advised${r.sittings ? ` (${r.sittings} sessions)` : ''}${r.notes ? ` — ${r.notes}` : ''}`}</div>)}</div>}
-      {d.plan?.notes && <div className="mt-2 whitespace-pre-line"><b>Notes:</b> {d.plan.notes}</div>}
-      {modules.map((m: any, k: number) => <div key={k} className="mt-2"><b>{m.name}:</b><table className="mt-0.5 w-full border-collapse text-[11.5px]"><thead><tr>{m.columns.map((c: string) => <th key={c} className="border-b border-gray-400 py-0.5 pr-2 text-left font-semibold">{c}</th>)}</tr></thead><tbody>{m.rows.map((r: string[], i: number) => <tr key={i}>{m.columns.map((c: string, j: number) => <td key={c} className="py-0.5 pr-2 align-top whitespace-pre-line">{r[j] ?? ''}</td>)}</tr>)}</tbody></table></div>)}
+      {on('medicines') && (!results || rxLines.length > 0) && <div className="mt-3">
+        <b>Medication (Rx):</b>{results && <span className="ml-2 text-[11px] text-gray-600">Added after the reports</span>}
+        <table className="mt-1 w-full border-collapse text-[11.5px]" style={{ tableLayout: 'fixed' }}>
+          <colgroup><col style={{ width: '7%' }} /><col style={{ width: '33%' }} /><col style={{ width: '13%' }} /><col style={{ width: '17%' }} /><col style={{ width: '12%' }} /><col style={{ width: '18%' }} /></colgroup>
+          <thead><tr>{['No.', 'Medicines', 'Dose', 'Frequency', 'Duration', 'Notes'].map((h) => <th key={h} className={`${CELL} text-left font-semibold`}>{h}</th>)}</tr></thead>
+          <tbody>{rxLines.map((i: any, k: number) => { const days = i.durationDays ? `${i.durationDays} days` : i.durationNote ?? null; const note = line([i.instructions, i.route && i.route !== 'oral' ? i.route : null]);
+            return (
+            <tr key={i.id}>
+              <td className={CELL}>{k + 1}</td>
+              <td className={CELL}><b>{i.name}</b>{i.generic && <div className="text-[10.5px] text-gray-600">{i.generic}</div>}</td>
+              <td className={CELL}>{i.dose || '—'}{i.qty ? <div className="text-[10.5px] text-gray-600">Qty {i.qty}</div> : null}</td>
+              <td className={CELL}>{i.frequency || '—'}{i.timing && <div>{i.timing}</div>}{localLine([i.frequency, i.timing]) && <div className="text-gray-700">{localLine([i.frequency, i.timing])}</div>}</td>
+              <td className={CELL}>{days || '—'}{tel(days) && <div className="text-gray-700">{tel(days)}</div>}</td>
+              <td className={CELL}>{note || '-'}{tel(i.instructions) && <div className="text-gray-700">{tel(i.instructions)}</div>}</td>
+            </tr>); })}</tbody>
+        </table></div>}
+      {on('tests') && investigations.length > 0 && <List label="Investigation" items={investigations.map((r: any) => line([r.notes, d.plan?.testNotes?.[r.notes]]))} />}
+      {on('results') && labs.length > 0 && <Field label={`Results${outOnly ? ' (out of range)' : ''}`}>{labs.map((r: any) => `${r.test} ${r.value}${r.unit ? ` ${r.unit}` : ''}${r.flag && r.flag !== 'normal' ? ` (${r.flag})` : ''}`).join(' · ')}</Field>}
+      {on('advice') && advice.length > 0 && <List label="Advices" items={advice} local={tel} />}
+      {procs.length > 0 && <List label="Procedures advised" items={procs.map((r: any) => `${r.procedure?.name ?? r.procedureName ?? 'Procedure'}${r.sittings ? ` (${r.sittings} sessions)` : ''}${r.notes ? ` — ${r.notes}` : ''}`)} />}
+      {d.plan?.notes && <Field label="Notes"><span className="whitespace-pre-line">{d.plan.notes}</span></Field>}
+      {modules.map((m: any, k: number) => <div key={k} className="mt-2"><b>{m.name}:</b><table className="mt-1 w-full border-collapse text-[11.5px]"><thead><tr>{m.columns.map((c: string) => <th key={c} className={`${CELL} text-left font-semibold`}>{c}</th>)}</tr></thead><tbody>{m.rows.map((r: string[], i: number) => <tr key={i}>{m.columns.map((c: string, j: number) => <td key={c} className={`${CELL} whitespace-pre-line`}>{r[j] ?? ''}</td>)}</tr>)}</tbody></table></div>)}
       {canvases.map((c: any) => <img key={c.id} src={`/api/documents/${c.docId}/file`} alt={c.name} className="mt-2 max-h-[70mm] max-w-full border border-gray-300" />)}
-      {on('referral') && d.referral?.to && <div className="mt-2"><b>Referred to:</b> {line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</div>}
+      {on('referral') && d.referral?.to && <Field label="Referred to">{line([d.referral.to, d.referral.speciality])}{d.referral.reason ? ` — ${d.referral.reason}` : ''}</Field>}
+      {followups.length > 0 && <div className="mt-3 inline-block rounded border border-gray-500 px-3 py-1.5">{followups.map((r: any) => <div key={r.id}><b>Follow-up:</b> {r.dueOn ? new Date(`${r.dueOn}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : 'as advised'}{d.plan?.followupNote ? ` — ${d.plan.followupNote}` : ''}</div>)}</div>}
       {(e.amendments ?? []).length > 0 && <div className="mt-3 border-t border-black pt-1 text-[11px]">{e.amendments.map((a: any, k: number) => <div key={k}><b>Amended on {new Date(a.at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}:</b> {a.reason}</div>)}</div>}
       <div className="mt-16 flex justify-between items-end"><div className="text-[10px] text-gray-600">{e.clinic.footer}</div>{draft ? <div className="text-[11px] font-semibold text-red-700">Draft — not signed</div> : <div className="w-48 text-center">{e.doctor?.signatureUrl && <img src={e.doctor.signatureUrl} alt="Doctor's signature" className="mx-auto mb-1 h-12 max-w-full object-contain" />}<div className="border-t border-black pt-1">Signature</div></div>}</div>
       {!embed && <button className="no-print btn mt-6" onClick={() => window.print()}>Print</button>}
