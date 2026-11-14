@@ -181,7 +181,8 @@ html[data-theme="dark"] { --fd-proc: #2DD4BF; }
 .fd-k-booked, .fd-k-proc { background: var(--color-surface); color: var(--color-ink); }
 .fd-k-waiting, .fd-k-intake, .fd-k-next { background: color-mix(in srgb, var(--color-clay) 10%, var(--color-surface)); color: var(--color-ink); }
 .fd-k-next { font-weight: 600; }
-.fd-k-doctor { background: color-mix(in srgb, var(--color-clay) 24%, var(--color-surface)); color: var(--color-ink); font-weight: 600; }
+/* with the doctor: solid, so it never reads as a pale "Here" card (the bold one is next in line) */
+.fd-k-doctor { background: var(--color-clay); color: #fff; font-weight: 600; }
 .fd-k-late, .fd-k-noshow { background: var(--color-surface); color: var(--color-muted); }
 /* seen / completed: light green, so the finished ones stand apart from the booked ones */
 .fd-k-done, .fd-k-tests { background: color-mix(in srgb, var(--color-sage) 9%, var(--color-surface)); color: var(--color-ink); }
