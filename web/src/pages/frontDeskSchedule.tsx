@@ -153,8 +153,11 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   if (!cols.length) return sheet(<div className="py-10 text-center text-muted">Pick a doctor or room in Show to see the {week ? 'week' : 'day'}.</div>);
 
   // one row per booking hour (windows that start together share a row); sittings sit in the row their start falls in
-  const allWs = cols.flatMap((c) => c.ws);
+  // a room column has the clinic's whole day: every doctor's booking hours that day, or 9 to 8 when nobody works it
+  const roomShown = cols.some((c) => c.room);
+  const allWs = roomShown ? [...cols.flatMap((c) => c.ws), ...days.flatMap((D: any) => D.windows ?? [])] : cols.flatMap((c) => c.ws);
   const rows = [...new Set(allWs.map((w) => w.startTime))].sort().map((s) => ({ start: s as string, end: allWs.find((w) => w.startTime === s)!.endTime as string }));
+  if (roomShown && !rows.length) for (let h = 9; h < 20; h++) rows.push({ start: `${String(h).padStart(2, '0')}:00`, end: `${String(h + 1).padStart(2, '0')}:00` });
   // a sitting outside the booking hours gets clock-hour rows (9–10 holds both 9:00 and 9:30 sittings), trimmed where a booking hour already starts
   const fmtM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   for (const p of cols.flatMap((c) => [...c.sits, ...(c.books ?? [])])) {
@@ -229,7 +232,8 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const pastSum = (() => { if (!calm) return ''; const all = rows.filter((r) => gone(day, r.end)).flatMap(chipsAt); const k = (...ks: Kind[]) => all.filter((x) => ks.includes(x.k)).length;
     return [k('done', 'tests') && `${k('done', 'tests')} completed`, k('late', 'noshow') && `${k('late', 'noshow')} didn't come`, k('cancelled') && `${k('cancelled')} cancelled`].filter(Boolean).join(' · ') || 'nobody'; })();
   const anchor = nowRow >= 0 ? nowRow : rows.findIndex((r) => toMin(r.start) > nowM);
-  const compact = (i: number, r: { start: string }) => calm && anchor >= 0 && i > anchor + 2 && !opened.has(r.start);
+  // an empty later hour is never folded: it shows its + Book places like any other hour
+  const compact = (i: number, r: { start: string; end: string }) => calm && anchor >= 0 && i > anchor + 2 && !opened.has(r.start) && chipsAt(r).some((y) => y.k !== 'cancelled');
   const freeAt = (r: { start: string }) => cols.reduce((n, c) => { const ws = c.ws.filter((w) => w.startTime === r.start); return n + (ws.length === 1 && !(ws[0].effectiveCapacity === 0 && ws[0].reductions?.length) ? Math.max(0, ws[0].free) : 0); }, 0);
   const lineOf = (r: { start: string; end: string }) => { const x = chipsAt(r).filter((y) => y.k !== 'cancelled'); const pr = x.filter((y) => y.proc).length; const b = x.length - pr; const f = kindF === 'proc' ? 0 : freeAt(r);
     return [b && `${b} booked`, pr && `${pr} procedure${pr === 1 ? '' : 's'}`, f && `${f} free`].filter(Boolean).join(' · ') || 'nothing booked'; };
@@ -250,7 +254,7 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               if (c.room) { const rid = week ? weekRoom : c.key; const canBook = !!onBook && cfg && rid !== '__none' && !gone(c.day, r.end);
                 return <div key={key} className={`fd-hc ${nowC}`}>{!chips.length && !canBook && <span className="fd-hcap">Free</span>}
                   {(chips.length > 0 || canBook) && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}
-                    {canBook && <button type="button" className="fd-pc fd-free" aria-label={`Book ${hourLabel(r.start, r.end)}`} onClick={() => setRoomAt({ at: { roomId: rid!, day: c.day, startTime: r.start, endTime: r.end } })}><span aria-hidden>+</span><span className="fd-bk">Book</span></button>}</div>}</div>; }
+                    {canBook && <button type="button" className="fd-pc fd-free" style={chips.length ? undefined : { gridColumn: '1 / -1' }} aria-label={`Book ${hourLabel(r.start, r.end)}`} onClick={() => setRoomAt({ at: { roomId: rid!, day: c.day, startTime: r.start, endTime: r.end } })}><span aria-hidden>+</span><span className="fd-bk">Book</span></button>}</div>}</div>; }
               if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'Not in')}</div>;
               const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
