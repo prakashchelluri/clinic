@@ -1,4 +1,3 @@
-import { SeenBy } from './Privacy';
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react-router';
@@ -241,7 +240,6 @@ function Timeline({ id }: { id: string }) {
           {sec === 'missed' && <Section title={<>Missed <span className="font-normal text-muted">· {missed.length}</span></>}>{missed.map((m: any) => <div key={m.refId} className="row"><div className="min-w-0 flex-1 text-sm"><b>{m.what}</b> · {fmtDate(m.day)} {m.time}{m.calls.length ? <div className="text-xs text-muted">{m.calls.map((c: any) => `${fmtDate(c.createdAt)} ${c.byName}: ${c.outcome.replace('_', ' ')}${c.note ? ` (${c.note})` : ''}`).join(' · ')}</div> : <div className="text-xs text-muted">No call logged yet.</div>}</div><Chip tone="rose">missed</Chip></div>)}</Section>}
         </div>
 
-      {can(perms, 'user.write') && <div className="px-1 text-xs text-muted"><SeenBy patientId={id} /></div>}
       {paying && <TakePayment patientId={id} patientName={p.fullName} onClose={() => setPaying(false)} />}
       {merging && <MergeDialog keep={p} onClose={() => setMerging(false)} />}
       {flagging && <FlagEditor patientId={id} flags={p.flags ?? {}} onClose={() => setFlagging(false)} />}

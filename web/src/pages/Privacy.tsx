@@ -203,9 +203,3 @@ function Changes({ before, after }: { before: any; after: any }) {
   );
 }
 
-/** "Seen by" on a patient's record: owner and admins. */
-export function SeenBy({ patientId }: { patientId: string }) {
-  const q = useQuery({ queryKey: ['seen-by', patientId], queryFn: () => get(`/patients/${patientId}/seen-by`) });
-  if (!q.data?.length) return null;
-  return <div className="text-xs text-muted">Seen by: {q.data.slice(0, 6).map((x: any, i: number) => <span key={i}>{i ? ' · ' : ''}<b className="text-ink-2">{x.name}</b> ({x.what.toLowerCase()}, {new Date(x.at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}{x.unusual ? <span className="text-amber"> · unusual</span> : ''})</span>)}</div>;
-}
