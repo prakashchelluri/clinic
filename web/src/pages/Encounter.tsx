@@ -493,7 +493,6 @@ export function Encounter() {
     if (parts.rx) addRxMany((x.prescription ?? []).map(strip));
     if (parts.advice && x.data?.plan?.advice) addAdvice(String(x.data.plan.advice).split('\n'));
     if (parts.tests) for (const r of (x.recommendations ?? []).filter((r: any) => r.kind === 'investigation' && r.notes)) addTestNamed(r.notes);
-    setSetNote(`Added from the visit of ${fmtDate(x.createdAt)}. Lines already on the pad were not added twice.`);
   };
   /** The type-anything bar: a line is filed where it belongs by matching the clinic's lists; when nothing matches, the doctor says where. */
   const smartAdd = (raw: string, as?: 'symptom' | 'diagnosis' | 'medicine' | 'test' | 'advice') => {
