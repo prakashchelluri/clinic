@@ -105,7 +105,7 @@ function Editor({ kind, cfg, initial, onClose }: { kind: TmplKind; cfg: any; ini
           <div><span className="label">{kind === 'complaint' ? 'Also counts as (other words for this complaint)' : 'Suggest when the complaint is'}</span><Words label="Complaints" value={linked.complaints ?? []} onChange={(v) => setLinked({ ...linked, complaints: v })} options={(qc.getQueryData<Tmpl[]>(['templates', 'complaint']) ?? []).map((t) => t.name)} placeholder="Rashes, Itching… press Enter" /></div>
           {kind !== 'complaint' && <div><span className="label">or the diagnosis is</span><Words label="Diagnoses" value={linked.diagnoses ?? []} onChange={(v) => setLinked({ ...linked, diagnoses: v })} options={dxOptions} placeholder="Scabies, Acne vulgaris… press Enter" /></div>}
           {kind !== 'complaint' && <div className="flex flex-wrap items-center gap-2"><span className="label !mb-0 mr-1">When suggested</span>
-            <button type="button" aria-pressed={mode === 'chip'} className={`toggle-opt ${mode === 'chip' ? 'on' : ''}`} onClick={() => setMode('chip')}>Show as a chip</button>
+            <button type="button" aria-pressed={mode === 'chip'} className={`toggle-opt ${mode === 'chip' ? 'on' : ''}`} onClick={() => setMode('chip')}>Suggest in the search list</button>
             <button type="button" aria-pressed={mode === 'auto'} className={`toggle-opt ${mode === 'auto' ? 'on' : ''}`} onClick={() => setMode('auto')}>Add for the doctor</button>
             <span className="text-xs text-muted">She can remove any line.</span></div>}
         </div>

@@ -101,22 +101,38 @@ function SectionTemplates({ kind, sub, what, sets, onPick, onSave, onClear, comp
 }
 
 /** The line at the foot of a card, Eka's "Start typing…": matches as you type, Enter adds the top match or what was typed. */
-function SearchLine({ placeholder, options = [], onAdd, invalid, autoFocus }: { placeholder: string; options?: string[]; onAdd: (t: string) => void; invalid?: boolean; autoFocus?: boolean }) {
-  const [v, setV] = useState(''); const [shut, setShut] = useState(false); const [sel, setSel] = useState(-1); const box = useRef<HTMLDivElement>(null);
+/** A set suggested in an empty search box: a template linked to this patient's complaint or diagnosis. */
+type SetHint = { label: string; hint?: string; pick: () => void };
+/** Search box of a pad section. Typing searches `options`. Clicked while empty (or ↓), it lists what the old Quick add chips offered:
+ *  sets suggested for this patient, then the usual picks (`common`). It never opens by itself, so a box that gets the cursor on load stays quiet. */
+function SearchLine({ placeholder, options = [], onAdd, invalid, autoFocus, sets = [], common = [], commonTitle = 'Common' }: { placeholder: string; options?: string[]; onAdd: (t: string) => void; invalid?: boolean; autoFocus?: boolean; sets?: SetHint[]; common?: string[]; commonTitle?: string }) {
+  const [v, setV] = useState(''); const [shut, setShut] = useState(false); const [open, setOpen] = useState(false); const [sel, setSel] = useState(-1); const box = useRef<HTMLDivElement>(null);
   const q = v.trim().toLowerCase();
-  const hits = q ? options.filter((o) => o.toLowerCase().includes(q)).slice(0, 8) : [];
   const add = (t: string) => { if (t.trim()) onAdd(t.trim()); setV(''); setSel(-1); };
+  type It = { key: string; label: string; hint?: string; group?: string; run: () => void };
+  const hits: It[] = q ? options.filter((o) => o.toLowerCase().includes(q)).slice(0, 8).map((o) => ({ key: o, label: o, run: () => add(o) })) : [];
+  const SUG = 8;
+  const sug: It[] = q || !open ? [] : [
+    ...sets.slice(0, SUG).map((x) => ({ key: `s:${x.label}`, label: x.label, hint: x.hint, group: 'Suggested for this patient', run: () => { x.pick(); setSel(-1); } })),
+    ...common.slice(0, Math.max(0, SUG - sets.length)).map((o) => ({ key: `c:${o}`, label: o, group: commonTitle, run: () => { onAdd(o); setSel(-1); } })),
+  ];
+  const items = q ? hits : sug;
   return (
     <div ref={box} className="relative mt-2" data-invalid={invalid || undefined}>
       <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
-      <input aria-label={placeholder} autoFocus={autoFocus} className={`input w-full !rounded-[8px] !py-2 !pl-9 ${invalid ? '!outline-2 !outline-rose/70' : ''}`} placeholder={placeholder} value={v} onChange={(e) => { setV(e.target.value); setShut(false); setSel(-1); }} data-search role="combobox" aria-expanded={hits.length > 0 && !shut}
+      <input aria-label={placeholder} autoFocus={autoFocus} className={`input w-full !rounded-[8px] !py-2 !pl-9 ${invalid ? '!outline-2 !outline-rose/70' : ''}`} placeholder={placeholder} value={v} data-search role="combobox" aria-expanded={items.length > 0 && !shut}
+        onClick={() => { setOpen(true); setShut(false); }} onBlur={() => setOpen(false)}
+        onChange={(e) => { setV(e.target.value); setShut(false); setSel(-1); }}
         onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; /* the pad's shortcuts */
-          if (e.key === 'ArrowDown' && hits.length) { e.preventDefault(); setShut(false); setSel((x) => Math.min(hits.length - 1, x + 1)); }
-          else if (e.key === 'ArrowUp' && hits.length) { e.preventDefault(); setSel((x) => Math.max(-1, x - 1)); }
-          else if (e.key === 'Enter') { e.preventDefault(); add(sel >= 0 && hits[sel] ? hits[sel] : hits[0] && hits[0].toLowerCase().startsWith(q) ? hits[0] : v); }
-          else if (e.key === 'Escape') { if (v) e.preventDefault(); setV(''); setSel(-1); } }} />
-      <Floating anchor={box} open={hits.length > 0 && !shut} onClose={() => setShut(true)} width={box.current?.offsetWidth ?? 320} align="left">
-        <div className="p-1" role="listbox" aria-label={placeholder}>{hits.map((o, k) => <button key={o} type="button" role="option" aria-selected={k === sel} className={`flex w-full rounded-[4px] px-2.5 py-2 text-left text-[13px] font-medium hover:bg-paper-2 ${k === sel ? 'bg-paper-2' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => add(o)}>{o}</button>)}</div>
+          if (e.key === 'ArrowDown') { if (!q && !open) { e.preventDefault(); setOpen(true); setShut(false); return; } if (items.length) { e.preventDefault(); setShut(false); setSel((x) => Math.min(items.length - 1, x + 1)); } }
+          else if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); setSel((x) => Math.max(-1, x - 1)); }
+          else if (e.key === 'Enter') { e.preventDefault(); if (sel >= 0 && items[sel]) items[sel].run(); else if (q) add(hits[0] && hits[0].label.toLowerCase().startsWith(q) ? hits[0].label : v); }
+          else if (e.key === 'Escape') { if (v || open) e.preventDefault(); setV(''); setSel(-1); setOpen(false); } }} />
+      <Floating anchor={box} open={items.length > 0 && !shut} onClose={() => { setShut(true); setOpen(false); }} width={box.current?.offsetWidth ?? 320} align="left">
+        <div className="p-1" role="listbox" aria-label={placeholder}>{items.map((o, k) => <Fragment key={o.key}>
+          {o.group && o.group !== items[k - 1]?.group && <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted first:pt-1">{o.group}</div>}
+          <button type="button" role="option" aria-selected={k === sel} className={`flex w-full items-center gap-2 rounded-[4px] px-2.5 py-2 text-left text-[13px] font-medium hover:bg-paper-2 ${k === sel ? 'bg-paper-2' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={o.run}>
+            <span className="min-w-0 flex-1 truncate">{o.label}</span>{o.hint && <span className="shrink-0 text-[11.5px] font-normal text-muted">{o.hint}</span>}</button></Fragment>)}</div>
       </Floating>
     </div>
   );
@@ -209,7 +225,7 @@ function DurationCell({ item, disabled, onChange }: { item: RxItem; disabled?: b
 }
 
 /** Advices as Tatva picks them: the search opens a list where a tick adds the line to the advices and an untick takes it off; a line not in the list is added as typed. */
-function AdvicePicker({ options, have, onToggle }: { options: string[]; have: string[]; onToggle: (x: string) => void }) {
+function AdvicePicker({ options, have, onToggle, sets = [] }: { options: string[]; have: string[]; onToggle: (x: string) => void; sets?: SetHint[] }) {
   const [q, setQ] = useState(''); const [open, setOpen] = useState(false); const box = useRef<HTMLDivElement>(null);
   const list = options.filter((o) => !q.trim() || o.toLowerCase().includes(q.trim().toLowerCase()));
   const add = (x: string) => { if (!have.includes(x)) onToggle(x); setQ(''); };
@@ -220,8 +236,10 @@ function AdvicePicker({ options, have, onToggle }: { options: string[]; have: st
       <input aria-label="Search advices" data-search className={`input w-full !rounded-[8px] !py-2 !pl-9 ${PH}`} placeholder="Search advices" value={q} role="combobox" aria-expanded={open}
         onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onKeyDown={(e) => { if (e.altKey || e.ctrlKey || e.metaKey) return; if (e.key === 'Enter') { e.preventDefault(); const x = custom ?? list.find((o) => !have.includes(o)); if (x) add(x); } else if (e.key === 'Escape') { setOpen(false); } }} />
-      <Floating anchor={box} open={open && (list.length > 0 || !!custom)} onClose={() => { setOpen(false); setQ(''); }} width={box.current?.offsetWidth ?? 360} align="left">
+      <Floating anchor={box} open={open && (list.length > 0 || !!custom || (!q && sets.length > 0))} onClose={() => { setOpen(false); setQ(''); }} width={box.current?.offsetWidth ?? 360} align="left">
         <div className="p-1.5">
+          {!q && sets.length > 0 && <><div className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted">Suggested for this patient</div>
+            {sets.map((x) => <button key={x.label} type="button" className="flex w-full items-center gap-2 rounded-[4px] px-2.5 py-1.5 text-left text-[13px] font-medium hover:bg-paper-2" onMouseDown={(e) => e.preventDefault()} onClick={x.pick}><span className="min-w-0 flex-1 truncate">{x.label}</span>{x.hint && <span className="text-[11.5px] font-normal text-muted">{x.hint}</span>}</button>)}</>}
           <div className="px-2 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted">{q ? 'Search results' : 'Advices'}</div>
           <div className="max-h-64 overflow-y-auto">
             {list.slice(0, 40).map((o) => <label key={o} className="flex cursor-pointer items-center gap-2 rounded-[4px] px-2.5 py-1.5 text-[13px] hover:bg-paper-2" onMouseDown={(e) => e.preventDefault()}>
@@ -285,6 +303,7 @@ export function Encounter() {
   const tpls = useQuery({ queryKey: ['rx-templates'], queryFn: () => get('/rx-templates'), enabled: isDoctor });
   const stock = useQuery({ queryKey: ['encounters-stock'], queryFn: () => get('/encounters-stock'), enabled: isDoctor, staleTime: 60_000 });
   const sets = useTemplates();
+  const freqRx = useQuery<{ name: string }[]>({ queryKey: ['encounters-frequent'], queryFn: () => get('/encounters-frequent'), enabled: isDoctor, staleTime: 300_000 });
   const padMods = usePadModules(isDoctor); const [modDrawer, setModDrawer] = useState<{ edit?: PadModule } | null>(null);
   const photos = usePhotos(enc.data?.patientId);
   const [data, setData] = useState<Record<string, any>>({});
@@ -621,6 +640,9 @@ export function Encounter() {
   const exams = asExam(data.exam); const setExams = (xs: ExamRow[]) => { setErrors((er) => er.filter((x) => !x.path.startsWith('exam.'))); setData((d) => ({ ...d, exam: { ...(d.exam ?? {}), items: xs } })); };
   const examNames = uniq([...examFields.flatMap((f) => f.options ?? []), ...EXAM_OPTIONS]);
   const legacyExam = Object.entries(data.exam ?? {}).filter(([k, v]) => k !== 'items' && (Array.isArray(v) ? v.length : v)).map(([, v]: any) => (Array.isArray(v) ? v.join(', ') : String(v))).join(' · ');
+  // an empty search box offers what Quick add used to: sets suggested for this patient (Settings › Templates › Suggest in the search list), then the usual picks
+  const setsFor = (kind: TmplKind): SetHint[] => (sets.data ?? []).filter((t) => t.kind === kind && t.mode === 'chip' && !appliedIds.includes(t.id) && suggests(t, cNames, dNames)).map((t) => ({ label: t.name, hint: 'Template', pick: () => setSetNote(applySet(t)) }));
+  const notHave = (xs: string[], have: (string | undefined | null)[]) => { const h = new Set(have.filter(Boolean).map((x) => norm(x!))); return uniq(xs).filter((x) => !h.has(norm(x))); };
   const addFinding = (t: string) => { const name = examNames.find((o) => o.toLowerCase() === t.trim().toLowerCase()) ?? t.trim(); if (name) addExam([{ name }]); };
   const cardActs = (k: string): ReactNode => { if (readOnly || !isDoctor) return undefined; const t = SECTION_TPL[k]; if (!t) return undefined;
     return <>{LOAD_PREV.has(k) && <LoadPrevious compact part={PART[k]} previous={previous} onLoad={loadPrevious} />}{<SectionTemplates compact kind={t[0]} sub={t[1]} what={t[2]} sets={sets.data ?? []} onPick={(x) => setSetNote(applySet(x))} onClear={t[3]} />}<SaveTemplate what={t[2]} onSave={() => saveSection(t[0])} />{t[3] && <button type="button" data-act="clear" className="btn btn-ghost !min-h-7 gap-1 !px-2 text-[12px] text-muted hover:text-rose" title={`Clear the ${t[2]}`} aria-label={`Clear the ${t[2]}`} onClick={t[3]}><Eraser className="h-3.5 w-3.5" aria-hidden />Clear</button>}</>; };
@@ -635,7 +657,7 @@ export function Encounter() {
           <select aria-label={`${s.name}: severity`} className="cell-in !w-32" value={s.severity ?? ''} disabled={readOnly} onChange={(ev) => setSyms(syms.map((x, j) => (j === i ? { ...x, severity: ev.target.value || undefined } : x)))}><option value="">Severity</option>{SEVERITIES.map((sv) => <option key={sv}>{sv}</option>)}</select>
           <input aria-label={`${s.name}: note`} className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Note" maxLength={120} value={s.note ?? ''} disabled={readOnly} onChange={(ev) => setSyms(syms.map((x, j) => (j === i ? { ...x, note: ev.target.value } : x)))} />
         </Row>)}
-        {!readOnly && <SearchLine placeholder="Start typing a symptom · “itching 2 weeks”" options={symField?.options ?? []} invalid={!!err('complaint', 'chief_complaint')} onAdd={(t) => smartAdd(t, 'symptom')} />}
+        {!readOnly && <SearchLine placeholder="Start typing a symptom · “itching 2 weeks”" options={symField?.options ?? []} invalid={!!err('complaint', 'chief_complaint')} onAdd={(t) => smartAdd(t, 'symptom')} sets={setsFor('symptom')} common={notHave(symField?.options ?? [], syms.map((x) => x.name))} />}
         {err('complaint', 'chief_complaint') && <div className="mt-1 text-xs text-rose">At least one symptom is required</div>}
       </div></Card>,
     diagnosis: <Card key="diagnosis" id="diagnosis" title="Diagnosis" required={canFinish && padOf('diagnosis').required} invalid={bad('diagnosis')} meta={isDoctor ? undefined : 'the doctor decides; leave it if unsure'} actions={cardActs('diagnosis')}>
@@ -646,7 +668,7 @@ export function Encounter() {
           <select aria-label={`${d.name}: status`} className="cell-in !w-36" value={d.status ?? ''} disabled={readOnly} onChange={(ev) => setDxs(dxs.map((x, j) => (j === i ? { ...x, status: ev.target.value || undefined } : x)))}><option value="">Status</option>{[...DX_STATUS, ...(d.status && !DX_STATUS.includes(d.status) ? [d.status] : [])].map((st) => <option key={st}>{st}</option>)}</select>
           <input aria-label={`${d.name}: notes`} className={`cell-in !flex-[2_1_140px] ${PH}`} placeholder="Notes" maxLength={120} value={d.note ?? ''} disabled={readOnly} onChange={(ev) => setDxs(dxs.map((x, j) => (j === i ? { ...x, note: ev.target.value || undefined } : x)))} />
         </Row>)}
-        {!readOnly && <SearchLine placeholder="Search diagnosis" options={uniq([...(dxField?.options ?? []), ...DX_OPTIONS])} invalid={!!err('assessment', 'diagnosis')} onAdd={(t) => smartAdd(t, 'diagnosis')} />}
+        {!readOnly && <SearchLine placeholder="Search diagnosis" options={uniq([...(dxField?.options ?? []), ...DX_OPTIONS])} invalid={!!err('assessment', 'diagnosis')} onAdd={(t) => smartAdd(t, 'diagnosis')} sets={setsFor('diagnosis')} common={notHave([...(dxField?.options ?? []), ...DX_OPTIONS], dxs.map((x) => x.name))} />}
         {err('assessment', 'diagnosis') && <div className="mt-1 text-xs text-rose">Diagnosis is required</div>}
         {otherFields('assessment', []).map((f: Field) => <div key={f.key} className="mt-2"><CompactField f={f} value={data.assessment?.[f.key]} onChange={(v) => set('assessment', f.key, v)} disabled={readOnly} /></div>)}
         {applied && !readOnly && <div className="mt-2 rounded-lg bg-amber-soft px-3 py-2 text-[12.5px] text-amber anim-fade-in">Filled from <b>{applied}</b>.{allergyWarnings.length ? ` Check: ${allergyWarnings.map(([n]) => n).join(', ')} may clash with the ${p.allergies} allergy.` : ''}<button type="button" className="font-semibold underline" onClick={clearLoaded}>Clear loaded</button></div>}
@@ -659,7 +681,7 @@ export function Encounter() {
         </Row>)}
         {/* an older visit's exam lists (before the rows): shown so nothing written is hidden */}
         {legacyExam && <div className="mt-1 text-[12.5px] text-muted">Earlier format: {legacyExam}</div>}
-        {!readOnly && <SearchLine placeholder="Search examinations" options={examNames} invalid={bad('exam')} onAdd={addFinding} />}
+        {!readOnly && <SearchLine placeholder="Search examinations" options={examNames} invalid={bad('exam')} onAdd={addFinding} sets={setsFor('finding')} common={notHave(examNames, exams.map((x) => x.name))} />}
       </div></Card>,
     medicines: isDoctor ? <Card key="medicines" id="medicines" title="Medications (Rx)" required={padOf('medicines').required} invalid={bad('medicines')} meta={rx.filter((i) => i.name).length ? `${rx.filter((i) => i.name).length} on the Rx` : undefined} actions={cardActs('medicines')}>
       {/* one table: a row per medicine, a column per detail, so the prescription reads across like the printed one */}
@@ -687,12 +709,12 @@ export function Encounter() {
             </tr>); })}</tbody>
         </table>
       </div>}
-      {!readOnly && <SearchLine placeholder='Search medicines by name · or type the line “itra 100 1-0-1 7d after food”' options={meds.map((m: any) => m.name)} invalid={bad('medicines')} onAdd={(t) => smartAdd(t, 'medicine')} />}
+      {!readOnly && <SearchLine placeholder='Search medicines by name · or type the line “itra 100 1-0-1 7d after food”' options={meds.map((m: any) => m.name)} invalid={bad('medicines')} onAdd={(t) => smartAdd(t, 'medicine')} sets={setsFor('medicine')} common={notHave((freqRx.data ?? []).map((x) => x.name), rx.map((x) => x.name))} commonTitle="Often prescribed" />}
       {leaflets.length > 0 && <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted"><span>{p.noWhatsapp ? 'Not sent: the patient asked for no WhatsApp — print it instead:' : 'Sent with the Rx on WhatsApp:'}</span>{leaflets.map((m: any) => <Chip key={m.id} tone="sage">{m.name}: how to use</Chip>)}</div>}
     </Card> : null,
     advice: isDoctor ? <Card key="advice" id="advice" title="Advices" meta="standard lines print in Telugu too" actions={cardActs('advice')}>
       {adviceLines.map((a) => <div key={a} className="rx-row"><label className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-[13px] font-semibold"><input type="checkbox" className="accent-ink" checked disabled={readOnly} aria-label={`Remove ${a}`} onChange={() => toggleAdvice(a)} />{a}</label></div>)}
-      {!readOnly && <AdvicePicker options={ADVICE} have={adviceLines} onToggle={toggleAdvice} />}
+      {!readOnly && <AdvicePicker options={ADVICE} have={adviceLines} onToggle={toggleAdvice} sets={setsFor('advice')} />}
     </Card> : null,
     tests: isDoctor ? <Card key="tests" id="tests" title="Investigation" actions={cardActs('tests')}>
       {tests.map((r) => <Row key={r.notes} label={r.notes ?? 'test'} onRemove={readOnly || r.status === 'done' ? null : () => setRecs(recs.filter((x) => x !== r))}>
@@ -700,7 +722,7 @@ export function Encounter() {
         <input aria-label={`${r.notes}: instruction`} className={`cell-in !flex-[2_1_200px] ${PH}`} placeholder="Instruction" maxLength={120} value={data.plan?.testNotes?.[r.notes!] ?? ''} disabled={readOnly} onChange={(ev) => set('plan', 'testNotes', { ...(data.plan?.testNotes ?? {}), [r.notes!]: ev.target.value || undefined })} />
         <span className="flex w-36 items-center gap-1.5 px-2">{r.status === 'done' && <Chip tone="sage">received</Chip>}{(() => { const d = r.id ? reportFor(myDocs, null, r.id) : null; return d ? <ReportLink doc={d} /> : null; })()}</span>
       </Row>)}
-      {!readOnly && <SearchLine placeholder="Search investigation" options={labNames} onAdd={addTest} />}
+      {!readOnly && <SearchLine placeholder="Search investigation" options={labNames} onAdd={addTest} sets={setsFor('tests')} common={notHave(labNames, tests.map((x) => x.notes))} />}
     </Card> : null,
     results: isDoctor ? <Card key="results" id="results" title="Lab results" meta="typed when reports arrive"><LabResultsCard patientId={p.id} encounterId={id!} recIds={recIds} params={cfg?.labParams ?? []} readOnly={readOnly} printOut={printOut} onPrintOut={(v) => set('labs', 'printOutOfRangeOnly', v)} docs={myDocs} /></Card> : null,
     followup: isDoctor ? <section key="followup" id="sec-followup" className="card !p-0 anim-fade-up"><div className="grid gap-4 p-4 md:grid-cols-[300px_minmax(0,1fr)]">
@@ -750,7 +772,8 @@ export function Encounter() {
           {recs.map((r, k) => r.kind !== 'procedure' || r.package ? null : procRow(r, k, false))}
         </>;
       })()}
-      {!readOnly && <SearchLine placeholder="Search procedures or packages" options={[...pkgs.map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).map((x: any) => x.name)]} onAdd={(t) => {
+      {!readOnly && <SearchLine placeholder="Search procedures or packages" options={[...pkgs.map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).map((x: any) => x.name)]} sets={setsFor('procedure')}
+        common={[...pkgs.filter((k) => !recs.some((r) => r.package?.id === k.id)).map((k) => `${k.name} (package)`), ...(cfg?.procedures ?? []).filter((x: any) => !recs.some((r) => r.kind === 'procedure' && r.procedureId === x.id)).map((x: any) => x.name)]} onAdd={(t) => {
         const k = pkgs.find((x) => `${x.name} (package)`.toLowerCase() === t.toLowerCase() || x.name.toLowerCase() === t.toLowerCase());
         if (k) {
           if (recs.some((r) => r.package?.id === k.id)) return toast('This package is already on the pad', 'info');
