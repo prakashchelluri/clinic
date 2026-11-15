@@ -166,8 +166,9 @@ function Reception() {
       <>A discount is given on that screen, never on the price (see Taking a payment).</>,
     ]}</Steps>
     <Tip>Paying ahead for sessions you may not use is normal. Unused sessions stay on the course. A refund of unused sessions is rare and only the owner can approve it, with a reason.</Tip>
-    <P>The <b>Procedures</b> page has three views. <b>Schedule</b> shows sessions by date. <b>Board</b> shows every plan as Advised, Started or Paid; tap a plan to see each session: when, who did it, and whether it was paid. <b>Plans to schedule</b> lists plans with no booked session.</P>
-    <P>To put a second doctor on a session as supervisor, open Schedule, choose the session, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
+    <P>The <b>Procedures</b> page has three tabs. <b>Today&rsquo;s sessions</b> shows today by the hour. <b>Week plan</b> shows a week of sessions by the hour, with their status. <b>All courses</b> lists every course and where it stands.</P>
+    <P>Every session has a doctor, and the doctor approves every session. A session the doctor books for themselves is approved at once. Any other booking is <b>Not sent</b>. Each week, open <b>Week plan</b>, check the next week and press <Btn>Send for doctor approval</Btn>. Each doctor sees only their own sessions under <b>Needs your attention</b> and can approve, move or send them back with a note. The patient gets the reminder only after approval. Once a week has been sent, a change in that week goes to the doctor straight away. A session booked for the current week also goes to the doctor straight away.</P>
+    <P>To put a second doctor on a session as supervisor, open the session on the Week plan and use <Btn>Change doctor</Btn> then <b>Supervised by</b>.</P>
 
     <H2 id="payments">Add bill / payment</H2>
     <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sessions paid ahead. It opens from the patient&rsquo;s profile, from Collect on the Calendar, and from a procedure course.</P>

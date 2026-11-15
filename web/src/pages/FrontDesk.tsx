@@ -14,6 +14,7 @@ import { chime, makeOnceWatcher } from '../chime';
 import { JourneyPanel, StageStrip } from './frontDeskJourney';
 import { DaySchedule } from './frontDeskSchedule';
 import { ProcedureDrawer } from '../procDrawer';
+import { WeekToSend } from '../procReview';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -272,6 +273,7 @@ export function FrontDesk() {
   return (
     <div className="fd flex min-h-0 flex-1 flex-col">
       <h1 className="sr-only">Calendar</h1>
+      {tab !== 'history' && can(perms, 'worklist.write') && <WeekToSend className="mb-3 no-print" />}
       {tab !== 'history' && !onSchedule && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
         {canDesk && <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} />}
         <span className="ml-auto" />

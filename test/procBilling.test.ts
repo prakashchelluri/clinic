@@ -14,6 +14,8 @@ const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
 const { domainEvent, patient: patientT } = await import('../src/db/schema.js');
 const { eq } = await import('drizzle-orm');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const as = async (email: string) => {
@@ -33,7 +35,7 @@ async function plan(owner: any, reception: any, name: string, phone: string, sit
   const rec = (await owner('GET', '/worklist?kind=procedure')).json().find((r: any) => r.patientId === p.id);
   return { peel, p, rec };
 }
-const book = async (reception: any, recId: string, at: string) => (await reception('POST', '/procedure-sessions', { recommendationId: recId, day: today(), startTime: at, minutes: 30, force: true })).json();
+const book = async (reception: any, recId: string, at: string) => (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: recId, day: today(), startTime: at, minutes: 30, force: true })).json();
 const sittingCharges = async (owner: any, pid: string) => (await owner('GET', `/patients/${pid}/timeline`)).json().charges.filter((c: any) => /Chemical peel session/.test(c.description));
 
 test('a sitting with no agreed course is billed once at the list price; cancelling it cancels the charge; rebooking bills once', async () => {

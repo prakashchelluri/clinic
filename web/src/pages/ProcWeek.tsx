@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, today, errText } from '../api';
 import { can } from '../App';
-import { Floating, Icon, Modal, Skeleton, ask, toast } from '../ui';
+import { Chip, Floating, Icon, Modal, Skeleton, ask, toast } from '../ui';
 import { ScheduleModal } from './Worklist';
 import { LoadError } from '../procBoard';
 import { ProcedureDrawer } from '../procDrawer';
@@ -59,7 +59,7 @@ export function ProcWeek() {
 
   const q = useQuery({ queryKey: ['psessions', 'week', mon], queryFn: () => get(`/procedure-sessions?from=${mon}&to=${days[5]}&active=1`), refetchInterval: 20000 });
   const wk = useQuery({ queryKey: ['pweek', mon], queryFn: () => get(`/procedure-weeks/${mon}`) });
-  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval. From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
+  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval.${r.noDoctor ? ` ${r.noDoctor} with no doctor stay Not sent: pick their doctor.` : ''} From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: () => { refreshProcedures(); toast('Noted: the patient said yes', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
   const all: any[] = q.data ?? [];
@@ -97,10 +97,14 @@ export function ProcWeek() {
   // what the week holds, and the Send review
   const booked = all.filter((s) => s.state === 'confirmed');
   const n = (a: string) => booked.filter((s) => s.approval === a).length;
+  // every session needs its doctor's approval: a Not sent one with a doctor goes in the Send; one with no doctor needs one picked first
   const drafts = booked.filter((s) => s.approval === 'draft');
-  const byDoc = [...new Set(drafts.map((s) => s.doctor ?? 'No doctor'))].map((name) => ({ name, list: drafts.filter((s) => (s.doctor ?? 'No doctor') === name) }));
+  const sendable = drafts.filter((s) => s.practitionerId);
+  const noDoc = drafts.filter((s) => !s.practitionerId);
+  const byDoc = [...new Set(sendable.map((s) => s.doctor ?? ''))].map((name) => ({ name, list: sendable.filter((s) => (s.doctor ?? '') === name) }));
   const asked = booked.filter((s) => s.approval === 'change');
-  const summary = !all.length ? 'Nothing booked this week yet' : [n('draft') && `${n('draft')} tentative`, n('sent') && `${n('sent')} with the doctor`, n('change') && `${n('change')} sent back`, n('approved') && `${n('approved')} approved`, all.filter((s: any) => s.autoBooked).length && `${all.filter((s: any) => s.autoBooked).length} booked by the plan, confirm with the patient`].filter(Boolean).join(' · ');
+  const byPlan = all.filter((s: any) => s.autoBooked && s.state === 'confirmed').length;
+  const sendWhy = sendable.length ? '' : noDoc.length ? `${noDoc.length} need a doctor first` : !booked.length ? 'Nothing booked this week' : n('sent') ? 'All sent, waiting for the doctors' : 'Nothing to send';
   const tapOk = (key: string) => !!tap && !check(tap, key);
 
   const opened = all.find((s) => s.id === openId);
@@ -126,8 +130,15 @@ export function ProcWeek() {
             <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next week" onClick={() => setMon(addDay(mon, 7))}><Icon name="chevR" className="h-4 w-4" /></button>
             {mon !== mondayOf(t) && <button type="button" className="btn btn-sm" onClick={() => setMon(mondayOf(t))}>This week</button>}
             <Floating anchor={rangeBtn} open={calOpen} onClose={() => setCalOpen(false)} width={292} align="left"><MiniCal mon={mon} onPick={(m) => { setMon(m); setCalOpen(false); }} /></Floating>
-            <span className="ml-auto text-[13.5px] text-muted">{summary}{wk.data?.sent && !n('draft') && all.length > 0 && mon > mondayOf(t) ? ' · changes reach the doctor straight away' : ''}</span>
-            {canWrite && drafts.length > 0 && <button type="button" className="btn btn-primary" onClick={() => setReview(true)}>Send {drafts.length} to the doctor</button>}
+            <span className="ml-auto flex flex-wrap items-center gap-1.5" aria-label="Where this week stands">
+              {n('draft') > 0 && <Chip tone="clay">{`Not sent ${n('draft')}`}</Chip>}
+              {n('sent') > 0 && <Chip tone="amber">{`With the doctor ${n('sent')}`}</Chip>}
+              {n('change') > 0 && <Chip tone="rose">{`Sent back ${n('change')}`}</Chip>}
+              {n('approved') > 0 && <Chip tone="sage">{`Approved ${n('approved')}`}</Chip>}
+              {byPlan > 0 && <Chip>{`Booked by the plan ${byPlan}`}</Chip>}
+            </span>
+            {canWrite && <button type="button" className="btn btn-primary" disabled={!drafts.length} title={sendWhy || undefined} onClick={() => setReview(true)}><Icon name="check" />{sendable.length ? `Send ${sendable.length} for doctor approval` : 'Send for doctor approval'}</button>}
+            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent && mon > mondayOf(t) && !noDoc.length ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
           </div>
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">
@@ -160,6 +171,10 @@ export function ProcWeek() {
 
       {review && <Modal title="Send for doctor approval?" subtitle={`Week of ${rangeText(mon)}`} onClose={() => setReview(false)} width="max-w-lg">
         <div className="space-y-3">
+          {noDoc.length > 0 && <div className="rounded-[10px] bg-amber-soft px-3.5 py-2.5 text-[13.5px] text-amber">
+            <b>Pick a doctor first · {noDoc.length}</b><span className="block text-[12.5px]">Every session needs its doctor's approval. These stay Not sent until a doctor is picked.</span>
+            {noDoc.map((s) => <div key={s.id} className="mt-1.5 flex items-center gap-2 text-ink"><span className="min-w-0 flex-1 truncate text-[13px]">{s.patient.fullName} · {s.procedure ?? 'Procedure'} · {fmt(s.day, { weekday: 'short' })} {t12(s.startTime)}</span><button className="btn btn-sm" onClick={() => setAssigning(s)}>Pick doctor</button></div>)}</div>}
+          {!byDoc.length && <div className="text-[13.5px] text-muted">Nothing can go yet: pick the doctors above.</div>}
           {byDoc.map((d) => (
             <div key={d.name} className="flex gap-4 border-t border-line pt-3 first:border-t-0 first:pt-0">
               <span className="min-w-[34px] text-right text-[26px] font-extrabold leading-none">{d.list.length}</span>
@@ -167,7 +182,7 @@ export function ProcWeek() {
             </div>))}
           <div className="text-[13px] text-muted">Each doctor sees only their own sessions, on Today under “Needs your attention”. After this, any change you make in this week reaches the doctor straight away.</div>
           <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setReview(false)}>Back</button>
-            <button className="btn btn-primary" disabled={send.isPending} onClick={() => send.mutate()}><Icon name="check" />{byDoc.length > 1 ? `Send to ${byDoc.length} doctors` : `Send to ${byDoc[0]?.name ?? 'the doctor'}`}</button></div>
+            <button className="btn btn-primary" disabled={send.isPending || !byDoc.length} onClick={() => send.mutate()}><Icon name="check" />{byDoc.length > 1 ? `Send to ${byDoc.length} doctors` : `Send to ${byDoc[0]?.name ?? 'the doctor'}`}</button></div>
         </div>
       </Modal>}
       {opened && <ProcedureDrawer id={opened.id} canAct={canWrite} extra={actions(opened)} onClose={() => setOpenId(null)} />}

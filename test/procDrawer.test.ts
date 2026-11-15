@@ -11,6 +11,8 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const as = async (email: string) => {
@@ -29,7 +31,7 @@ test('doctor: sitting details, start and mark done only; desk: any state', async
   const e = (await owner('POST', `/visits/${v.id}/encounter`, {})).json();
   await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] }, assessment: { diagnosis: [{ name: 'Melasma' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 3, notes: 'Glycolic 35%' }] });
   const rec = (await owner('GET', '/worklist?kind=procedure')).json().find((r: any) => r.patientId === p.id);
-  const ps = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, force: true })).json();
+  const ps = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, force: true })).json();
 
   const d = await doctor('GET', `/procedure-sessions/${ps.id}`);
   assert.equal(d.statusCode, 200, d.body);
@@ -44,7 +46,7 @@ test('doctor: sitting details, start and mark done only; desk: any state', async
   assert.equal((await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).statusCode, 200);
   assert.equal((await doctor('GET', `/procedure-sessions/${ps.id}`)).json().state, 'completed');
 
-  const ps2 = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '16:00', minutes: 30, force: true })).json();
+  const ps2 = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: rec.id, day: today(), startTime: '16:00', minutes: 30, force: true })).json();
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps2.id}`, { state: 'postponed', reason: 'patient travelling' })).statusCode, 200, 'the desk still changes any state');
   assert.equal((await (await as('pharmacy@demo.clinic'))('PATCH', `/procedure-sessions/${ps2.id}`, { state: 'in_progress' })).statusCode, 403);
 });

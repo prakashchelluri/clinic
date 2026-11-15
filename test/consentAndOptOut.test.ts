@@ -14,6 +14,8 @@ rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true });
 const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const login = async (email: string) => (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'demo1234', tenant: 'sahitya' } })).cookies.find((c) => c.name === 'cc_session')!.value;
@@ -39,7 +41,7 @@ test('consent: the patient signs on the tablet; the signature is their document 
   const { p, e } = await planned(O, R, 'Signs Tablet', '9848077001', peel.id);
   await O('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] }, assessment: { diagnosis: [{ name: 'Melasma' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 2 }] });
   const rec = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
-  const ps = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, force: true })).body;
+  const ps = (await R('POST', '/procedure-sessions', { practitionerId: await drMain(R), recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, force: true })).body;
   assert.equal((await R('GET', `/procedure-sessions/${ps.id}`)).body.consentNeeded, true);
 
   // another patient's signature is refused
@@ -65,7 +67,7 @@ test('consent: the patient signs on the tablet; the signature is their document 
   const { p: p2, e: e2 } = await planned(O, R, 'Paper Form', '9848077003', laser.id);
   await O('PATCH', `/encounters/${e2.id}`, { data: { complaint: { chief_complaint: ['Acne'] }, assessment: { diagnosis: [{ name: 'Acne' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: laser.id, sittings: 1 }] });
   const rec2 = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p2.id);
-  const ps2 = (await R('POST', '/procedure-sessions', { recommendationId: rec2.id, day: today(), startTime: '16:00', minutes: 30, force: true })).body;
+  const ps2 = (await R('POST', '/procedure-sessions', { practitionerId: await drMain(R), recommendationId: rec2.id, day: today(), startTime: '16:00', minutes: 30, force: true })).body;
   assert.equal((await R('PATCH', `/procedure-sessions/${ps2.id}`, { state: 'in_progress', consent: true })).status, 200);
   const s2 = (await R('GET', `/procedure-sessions/${ps2.id}`)).body;
   assert.equal(s2.consent.how, 'signed paper form filed'); assert.equal(s2.consent.documentId, undefined);

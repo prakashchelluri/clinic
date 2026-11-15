@@ -11,6 +11,8 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 async function as(email: string) {
@@ -59,7 +61,7 @@ test('the desk adds a procedure or a package, edits its sessions and validity, a
   const after = (await owner('GET', `/courses?patientId=${p.id}`)).body.find((c: any) => c.recommendationId === peelInPkg.id);
   assert.equal(after.totalPaise, before + peel.pricePaise); assert.equal(after.sittings, 3); assert.equal(after.validUntil, null);
   // a session booked cannot be taken away
-  const ps = (await desk('POST', '/procedure-sessions', { recommendationId: r1.id, day: today(), startTime: '18:00', minutes: 30, force: true })).body;
+  const ps = (await desk('POST', '/procedure-sessions', { practitionerId: await drMain(desk), recommendationId: r1.id, day: today(), startTime: '18:00', minutes: 30, force: true })).body;
   assert.ok(ps.id);
   assert.equal((await desk('PATCH', '/procedure-plans/edit', { plans: [{ id: r1.id, sittings: 0 }] })).status, 400);
   assert.equal((await desk('PATCH', '/procedure-plans/edit', { plans: [{ id: r1.id, sittings: 2 }] })).status, 200);

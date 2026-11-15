@@ -13,7 +13,7 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 const { migrate, applyRls, withTenant } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
-const { message } = await import('../src/db/schema.js');
+const { message, procedureSession } = await import('../src/db/schema.js');
 const { addDays } = await import('../src/lib/core.js');
 const { weekOf } = await import('../src/modules/procedures.js');
 const { eq } = await import('drizzle-orm');
@@ -111,4 +111,44 @@ test('week plan: draft, send, approve, change after sending, send back, own move
   assert.equal((await C('PATCH', `/procedure-sessions/${s1.id}`, { state: 'cancelled', reason: 'Unscheduled' })).status, 200);
   const back = (await C('GET', '/worklist?kind=procedure')).body.find((x: any) => x.id === a.rec.id);
   assert.equal(back.next, null); assert.equal(back.status, 'open');
+});
+
+test('every session needs a doctor, and only its own doctor booking it counts as approved', async () => {
+  const O = as(await login('owner@demo.clinic'));            // Dr. Main Doctor
+  const R = as(await login('reception@demo.clinic'));
+  const C = as(await login('procedures@demo.clinic'));
+  const peel = (await O('GET', '/config')).body.procedures.find((x: any) => x.name === 'Chemical peel');
+  const drMain = (await O('GET', '/config')).body.practitioners.find((x: any) => x.name === 'Dr. Main Doctor').id;
+  const p = (await O('POST', '/patients', { fullName: 'Needs A Doctor', phone: '9848012211' })).body;
+  const v = (await O('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
+  const e = (await O('POST', `/visits/${v.id}/encounter`, {})).body;
+  await O('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] }, assessment: { diagnosis: [{ name: 'Melasma' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 3, gapDays: 14 }] });
+  const rec = (await C('GET', '/worklist?kind=procedure')).body.find((x: any) => x.patientId === p.id);
+  const mon = addDays(weekOf(today()), 14); // a week nobody has sent yet
+
+  // the booking drawer is told the course's doctor, and no doctor is refused (booking, moving, changing the doctor)
+  assert.equal((await R('GET', `/procedure-sessions/slots?day=${mon}&procedureId=${peel.id}&recommendationId=${rec.id}`)).body.courseDoctorId, drMain);
+  const none = await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: mon, startTime: '10:00', minutes: 30, force: true });
+  assert.equal(none.status, 400); assert.equal(none.body.code, 'DOCTOR_REQUIRED');
+
+  // reception books it with the doctor: not approved, it waits to be sent with the week
+  const s = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: mon, startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  assert.equal(s.approval, 'draft');
+  assert.equal((await R('POST', `/procedure-sessions/${s.id}/assign`, { practitionerId: null })).body.code, 'DOCTOR_REQUIRED');
+  assert.equal((await R('POST', `/procedure-sessions/${s.id}/reschedule`, { day: mon, startTime: '11:00', minutes: 30, force: true })).body.code, 'DOCTOR_REQUIRED');
+
+  // the doctor booking their own session: approved at once
+  const own = (await O('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(mon, 1), startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  assert.equal(own.approval, 'approved');
+
+  // an old session with no doctor is never approved by default and is not sent; the send says how many wait for a doctor
+  const old = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(mon, 2), startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  await withTenant(p.tenantId, SYS, (tx) => tx.update(procedureSession).set({ practitionerId: null }).where(eq(procedureSession.id, old.id)));
+  assert.equal((await C('GET', `/procedure-weeks/${mon}`)).body.sent, false);
+  const sent = (await C('POST', `/procedure-weeks/${mon}/send`)).body;
+  assert.equal(sent.sent, 1); assert.equal(sent.noDoctor, 1);
+  assert.equal((await C('GET', `/procedure-sessions/${old.id}`)).body.approval, 'draft');
+  assert.equal((await C('GET', `/procedure-sessions/${s.id}`)).body.approval, 'sent');
+  // the coordinator picks the doctor: it goes to them straight away, as the week was sent
+  assert.equal((await C('POST', `/procedure-sessions/${old.id}/assign`, { practitionerId: drMain, force: true })).body.approval, 'sent');
 });

@@ -13,6 +13,8 @@ const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
 const { missingRequired, cleanValues, valuesLine } = await import('../src/lib/procForm.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const as = async (email: string) => {
@@ -66,7 +68,7 @@ test('form, session, pharmacy issue with no bill', async () => {
   const e = (await owner('POST', `/visits/${v.id}/encounter`, {})).json();
   await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: proc.id, sittings: 3 }] });
   const rec = (await owner('GET', '/worklist?kind=procedure')).json().find((r: any) => r.patientId === p.id);
-  const ps = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, force: true })).json();
+  const ps = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, force: true })).json();
 
   // Before can be filled before Start
   const early = await doctor('PUT', `/procedure-sessions/${ps.id}/form`, { values: { skin_type: 'IV', junk: 'x' } });
@@ -108,7 +110,7 @@ test('form, session, pharmacy issue with no bill', async () => {
   assert.equal((await doctor('PUT', `/procedure-sessions/${ps.id}/form`, { values: { skin_type: 'IV', fluence: 18, areas: ['Chin'] } })).json().missing.length, 0);
   const done = await doctor('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' });
   assert.equal(done.statusCode, 200, done.body);
-  const next = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '17:00', minutes: 30, force: true })).json();
+  const next = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: rec.id, day: today(), startTime: '17:00', minutes: 30, force: true })).json();
   const n = (await doctor('GET', `/procedure-sessions/${next.id}`)).json();
   assert.equal(n.earlier[0].id, ps.id); assert.equal(n.earlier[0].outcome.fluence, 18);
 });

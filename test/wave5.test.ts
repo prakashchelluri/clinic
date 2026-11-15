@@ -13,6 +13,8 @@ rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true });
 const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 type Call = (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) => Promise<{ status: number; body: any }>;
@@ -58,7 +60,7 @@ test('course: agree below list needs the discount permission, advance locks the 
 
   // two sittings come from the advance, the third is due on the day
   const done = async (n: number) => {
-    const ps = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: `1${n}:00`, minutes: 30, force: true })).body;
+    const ps = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: rec.id, day: today(), startTime: `1${n}:00`, minutes: 30, force: true })).body;
     assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200);
     assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200, 'completing twice invoices once');
   };

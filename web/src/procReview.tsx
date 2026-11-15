@@ -1,12 +1,33 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { get, post, errText } from './api';
+import { useNavigate } from 'react-router';
+import { get, post, errText, today } from './api';
 import { Icon, Modal, Skeleton, toast } from './ui';
 import { addDay, t12 } from './procBlocks';
 import { ScheduleModal } from './pages/Worklist';
 import { refreshProcedures } from './pages/ProcToday';
 
 const fmt = (d: string, o: Intl.DateTimeFormatOptions) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { ...o, timeZone: 'UTC' });
+
+/**
+ * For the desk and the coordinator: sessions this week or next that are not yet sent for the doctor's approval, with a link
+ * to that week's plan. Nothing shows when everything is sent.
+ */
+export function WeekToSend({ className = '' }: { className?: string }) {
+  const nav = useNavigate(); const t = today();
+  const mon = addDay(t, -((new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7)); const next = addDay(mon, 7);
+  const q = useQuery({ queryKey: ['psessions', 'tosend', mon], queryFn: () => get(`/procedure-sessions?from=${t}&to=${addDay(next, 5)}&active=1`), refetchInterval: 60000 });
+  const drafts = (q.data ?? []).filter((s: any) => s.state === 'confirmed' && s.approval === 'draft');
+  if (!drafts.length) return null;
+  const weeks = [mon, next].map((m) => ({ m, list: drafts.filter((s: any) => s.day >= m && s.day <= addDay(m, 6)) })).filter((w) => w.list.length);
+  return (
+    <div className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[10px] bg-amber-soft px-4 py-2.5 text-[13.5px] text-amber ${className}`} role="status">
+      <Icon name="bell" className="h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1">{weeks.map((w, i) => <span key={w.m}>{i > 0 && ' · '}<b>{w.m === mon ? 'This week' : 'Next week'}: {w.list.length} procedure session{w.list.length === 1 ? '' : 's'}</b> not sent for doctor approval</span>)}</span>
+      <button type="button" className="btn btn-sm" onClick={() => nav(`/worklist?tab=week&week=${weeks[0].m}`)}>Review and send</button>
+    </div>
+  );
+}
 
 /** For the doctor's Today: how many sittings wait for their approval. */
 export const useApprovals = (enabled: boolean) => useQuery({ queryKey: ['psessions', 'approvals'], queryFn: () => get('/procedure-approvals'), enabled, refetchInterval: 60000 });
