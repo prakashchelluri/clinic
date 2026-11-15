@@ -116,7 +116,7 @@ test('consultation fees take no discount; a doctor\'s treatment is invoiced once
   assert.equal(line.amountPaise, peel.pricePaise * 6 - 50000); assert.equal(line.discountPaise, 50000); assert.equal(line.status, 'due');
   const c = (await owner('GET', `/courses?patientId=${p.id}`)).body[0];
   assert.equal(c.totalPaise, peel.pricePaise * 6, 'list price × sittings'); assert.equal(c.invoiced, true); assert.ok(c.lockedAt);
-  assert.equal(c.stillToPayPaise, peel.pricePaise * 6 - 100000);
+  assert.equal(c.stillToPayPaise, peel.pricePaise * 6 - 50000 - 100000, 'the discount is not owed');
 });
 
 test('advance: taken with no bill, kept from an overpayment, used on a bill without counting twice, given back', async () => {

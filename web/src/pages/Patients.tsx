@@ -133,7 +133,7 @@ function Timeline({ id }: { id: string }) {
           {/* this patient's own next steps: check in today, or book a visit */}
           {can(perms, 'visit.write') && !p.mergedInto && <button className="btn btn-sm" onClick={() => nav(`/dashboard?arrive=1&patient=${id}&pname=${encodeURIComponent(p.fullName)}`)}><Icon name="door" className="h-3.5 w-3.5" />Check in</button>}
           {can(perms, 'appointment.write') && !p.mergedInto && <button className="btn btn-sm" onClick={() => nav(`/patients/${id}?book=1&patient=${id}&pname=${encodeURIComponent(p.fullName)}`)}><Icon name="calendar" className="h-3.5 w-3.5" />Book</button>}
-          {can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Generate invoice</button>}
+          {can(perms, 'payment.record') && sec !== 'bills' && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Generate invoice</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
           {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}

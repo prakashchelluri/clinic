@@ -16,6 +16,7 @@ export function moneyErr(e: any): string {
   if (c === 'ALREADY_REFUNDED') return 'This was already refunded.';
   if (c === 'PACKAGE_EXPIRED') return 'This package has expired: its sessions not done can only be refunded.';
   if (c === 'ALREADY_INVOICED') return 'This treatment is already on an invoice.';
+  if (c === 'A_PACKAGE_IS_INVOICED_WHOLE') return `The ${b.packageName ?? ''} package is invoiced whole: tick all its procedures.`;
   if (c === 'REASON_REQUIRED') return 'Say why there is a discount.';
   if (c === 'NO_DISCOUNT_ON_CONSULTATION') return 'Consultation fees take no discount.';
   if (c === 'NO_DISCOUNT_ON_PHARMACY') return 'Pharmacy bills take their discount at the counter.';
@@ -33,7 +34,7 @@ const MODE_NAME: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'car
 type Part = { method: 'cash' | 'upi' | 'card' | 'bank' | 'emi' | 'advance'; amount: string; reference: string; lender: string };
 const MODES: [Part['method'], string][] = [['upi', 'UPI'], ['cash', 'Cash'], ['card', 'Card'], ['emi', 'EMI'], ['bank', 'Bank']];
 type Unit = 'pct' | 'rs';
-type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number };
+type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number; group?: string };
 /** GST inside a price that includes it. */
 const gstIn = (paise: number, bp: number) => (bp ? paise - Math.round((paise * 10000) / (10000 + bp)) : 0);
 export const BILL_KEYS = ['timeline', 'frontdesk', 'daily', 'payments-awaiting', 'patients', 'courses', 'discount-asks', 'worklist', 'procedure-plans', 'clinic'];
@@ -66,7 +67,7 @@ export function TakePayment({ patientId, patientName, ahead, onlyBill, onClose }
   const bl = useQuery({ queryKey: ['bills', 'patient', patientId], queryFn: () => get(`/patients/${patientId}/bills`) });
   const ready = t.data && cs.data && asks.data && adv.data && bl.data;
   return (
-    <Modal title="Generate invoice" subtitle={`${patientName} · prices from the clinic price list, GST included`} onClose={onClose} width="max-w-6xl">
+    <Modal title={onlyBill ? "Collect payment" : "Generate invoice"} subtitle={`${patientName} · prices from the clinic price list, GST included`} onClose={onClose} width="max-w-6xl">
       {!ready ? <div className="text-sm text-muted">Loading…</div> : <BillForm patientId={patientId} patientName={patientName} ahead={ahead} onlyBill={onlyBill} invoiceNo={Object.fromEntries((bl.data?.bills ?? []).map((b: any) => [b.id, b.invoiceNo]))} tl={t.data} courses={cs.data} asks={asks.data} advPaise={adv.data.balancePaise} cfg={cfg} perms={perms} onClose={onClose} />}
     </Modal>
   );
@@ -90,7 +91,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     if (!total || total <= 0 || c?.expired) return null;
     return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(r.procedureId)}${pkgOf(r)} · ${n} session${n === 1 ? '' : 's'}${c?.invoicedPaise ? ', the rest' : ''}`,
       sub: `${c?.doneSittings ? `${c.doneSittings} of ${n} done · ` : ''}${r.package ? 'its share of the package price · ' : r.amountPaise > 0 ? 'custom price · ' : ''}the whole treatment; sessions are not billed again`,
-      unitPaise: total, qty: 1, maxQty: 1, on, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId) };
+      unitPaise: total, qty: 1, maxQty: 1, on, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId), group: r.package?.group };
   };
 
   /** A plan and, when it is part of a package with no course yet, the other procedures of that package: a package is invoiced as a whole. */
@@ -135,7 +136,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const [later, setLater] = useState(false); // bill now, nothing taken now
   // the patient's advance comes off the bill first (ticked by default); the rest is paid by the modes below
   const [useAdv, setUseAdv] = useState(true);
-  const advUse = useAdv && !later ? Math.min(advPaise, payable) : 0; const toPay = payable - advUse;
+  // the advance is the patient's money: it is used even when nothing new is paid now
+  const advUse = useAdv ? Math.min(advPaise, payable) : 0; const toPay = payable - advUse;
   const amt = (p: Part, i: number) => (p.amount === '' && parts.length === 1 && i === 0 ? toPay : toPaise(p.amount));
   const allAdv = advUse > 0 && toPay === 0; // the advance pays it all: no mode to pick
   const paidNew = later || allAdv ? 0 : parts.reduce((s, p, i) => s + amt(p, i), 0); const total = advUse + paidNew;
@@ -155,7 +157,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     mutationFn: () => post('/bills', {
       patientId, idempotencyKey: key, reason: why.trim(), extraDiscountPaise: extra_, keepExtraAsAdvance: keep && total > payable,
       lines: on.map((l) => ({ ...(l.kind === 'charge' ? { chargeId: l.id } : l.kind === 'proc' ? { procedureId: l.id, qty: l.qty } : l.kind === 'service' ? { serviceId: l.id, qty: l.qty } : { recommendationId: l.id }), discountPaise: lineOff(l) })),
-      parts: later ? [] : [...(advUse ? [{ method: 'advance', amountPaise: advUse }] : []), ...parts.map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0)],
+      parts: [...(advUse ? [{ method: 'advance', amountPaise: advUse }] : []), ...(later ? [] : parts).map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0)],
     }),
     onSuccess: (r: any) => {
       refresh(); qc.invalidateQueries({ queryKey: ['advance'] });
@@ -206,7 +208,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
           <tbody>{lines.length === 0 ? <tr><td colSpan={7} className="p-4 text-sm text-muted">Nothing is due. Search above to add an item, or just type an amount on the right to take an advance.</td></tr> : lines.map((l) => {
             const g = gross(l); const o = l.on ? lineOff(l) : 0;
             return <tr key={l.key} className={l.on ? '' : 'opacity-55'}>
-              <td className="pl-3"><input type="checkbox" className="accent-clay h-4 w-4" checked={l.on} aria-label={`Include ${l.what}`} onChange={(e) => setLine(l.key, { on: e.target.checked })} /></td>
+              <td className="pl-3"><input type="checkbox" className="accent-clay h-4 w-4" checked={l.on} aria-label={`Include ${l.what}`} onChange={(e) => { const on = e.target.checked; setLines((ls) => ls.map((x) => (x.key === l.key || (l.group && x.group === l.group) ? { ...x, on } : x))); }} /></td>
               <td className="min-w-0"><div className="text-sm font-medium">{l.what}</div><div className="text-xs text-muted">{l.sub}</div></td>
               <td className="text-right tabular-nums">{l.maxQty > 1 ? <span className="inline-flex items-center gap-1"><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label="One fewer" disabled={l.qty <= 1} onClick={() => setLine(l.key, { qty: l.qty - 1 })}>−</button><b>{l.qty}</b><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label="One more" disabled={l.qty >= l.maxQty} onClick={() => setLine(l.key, { qty: l.qty + 1 })}>+</button></span> : l.qty}</td>
               <td className="text-right tabular-nums">{money(l.unitPaise)}</td>
@@ -228,7 +230,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
         <div className="flex justify-between border-t border-line pt-2.5 text-base font-bold"><span>Payable</span><span className="tabular-nums">{money(payable)}</span></div>
         <div className="flex justify-between text-xs"><span className="text-muted">of which GST</span><span className="tabular-nums">{money(gst)}</span></div>
         {advPaise > 0 && payable > 0 && <>
-          <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" checked={useAdv} disabled={later} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
+          <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" checked={useAdv} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
           {advUse > 0 && <div className="flex justify-between font-bold"><span>To pay</span><span className="tabular-nums">{money(toPay)}</span></div>}
         </>}
         {off > 0 && <div className="text-xs text-muted">{pct}% off · {mayApprove ? 'you approve discounts yourself' : mayGive ? `your limit is ${cap}%` : 'every discount needs approval'}</div>}

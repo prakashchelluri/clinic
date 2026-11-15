@@ -137,7 +137,7 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
         </div>)}
         {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => setParts([...parts, { method: 'upi', amount: '', reference: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
         <div><label className="label" htmlFor="rb-why">Why</label><input id="rb-why" className="input" maxLength={200} placeholder="for example: procedure not done" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
-        <div className="rounded-xl bg-surface-2 p-3 text-center text-[15px]"><b className="text-rose">{money(total)}</b> will be refunded to the patient</div>
+        <div className="rounded-xl bg-surface-2 p-3 text-center text-[15px]"><b className="text-rose">{money(total)}</b> will be refunded to the patient<div className="mt-0.5 text-xs text-muted">The invoice goes down by the same amount; what is still due stays as it is.</div></div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{bad}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!bad || go.isPending} onClick={() => go.mutate()}>Refund the bill</button></div>
       </div>
     </Modal>
@@ -198,7 +198,7 @@ function Totals({ t, advance, onAdvance, line }: { t: any; advance?: number; onA
     return (
       <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl bg-surface-2/60 px-4 py-2.5">
         <Fig label={`Billed (${t.n})`} value={money(t.billedPaise)} />
-        <Fig label="Collected" value={money(t.paidPaise - t.refundedPaise)} tone="text-sage" />
+        <Fig label="Paid on invoices" value={money(t.paidPaise - t.refundedPaise)} tone="text-sage" />
         <Fig label={`Due (${t.withDue})`} value={money(t.duePaise)} tone={t.duePaise ? 'text-rose' : ''} />
         <Fig label={`Refunded (${t.withRefund})`} value={money(t.refundedPaise)} />
         {advance !== undefined && <Fig label="Advance" value={money(advance)} />}
@@ -208,7 +208,7 @@ function Totals({ t, advance, onAdvance, line }: { t: any; advance?: number; onA
   return (
     <div className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
       <Stat label={`Billed (${t.n})`} value={money(t.billedPaise)} sub={`${money(t.paidPaise)} paid`} />
-      <Stat label="Collected" value={money(t.paidPaise - t.refundedPaise)} tone="sage" sub={`After refunds · ${t.paidFully} paid fully`} />
+      <Stat label="Paid on invoices" value={money(t.paidPaise - t.refundedPaise)} tone="sage" sub={`After refunds${t.fromAdvancePaise ? ` · ${money(t.fromAdvancePaise)} from the advance` : ''} · ${t.paidFully} paid fully`} />
       <Stat label={`Due (${t.withDue})`} value={money(t.duePaise)} tone={t.duePaise ? 'clay' : ''} sub={t.duePaise ? 'Collect from the ⋯ menu' : 'nothing owed'} />
       <Stat label={`Refunded (${t.withRefund})`} value={money(t.refundedPaise)} sub={t.refundedPaise ? 'given back' : 'none'} />
       {advance !== undefined && <Stat label="Advance balance" value={money(advance)} sub={<>{onAdvance ? <button className="underline" onClick={onAdvance}>Add or give back</button> : 'to use on bills'}</>} />}

@@ -119,6 +119,13 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
         items.push({ what: `${proc?.n ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${c.sittings} session${c.sittings === 1 ? '' : 's'}${st.invoicedPaise ? ', the rest' : ''}`, gross: st.uninvoicedPaise, prior: 0, disc: l.discountPaise, canDiscount: true, courseId: c.id, isNew: true, tax: proc?.tax ?? 0, at: new Date().toISOString() });
       }
     }
+    // a package is invoiced whole: every procedure of it still to invoice goes on the same invoice
+    const onBill = new Set(items.map((i) => i.courseId).filter(Boolean));
+    for (const id of onBill) {
+      const c = await tx.select().from(course).where(eq(course.id, id!)).then((r) => r[0]); if (!c?.packageGroup) continue;
+      const sibs = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.patientId, b.patientId), eq(course.packageGroup, c.packageGroup)));
+      for (const s of sibs) if (!onBill.has(s.id) && (await standing(tx, t, s)).uninvoicedPaise > 0) throw new HttpError(400, 'A_PACKAGE_IS_INVOICED_WHOLE', { packageName: c.packageName });
+    }
 
     // the discount: per line, then the extra shared across the lines that can take one, in proportion
     const bad = items.find((i) => i.disc > 0 && !i.canDiscount); if (bad) throw new HttpError(400, bad.why!);

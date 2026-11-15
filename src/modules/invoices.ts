@@ -27,8 +27,9 @@ export async function billViews(tx: Tx, t: string, where: SQL, limit = 200) {
     const ls = lines.filter((c) => c.billId === b.id);
     const live = ls.filter((c) => !['cancelled', 'waived'].includes(c.status));
     const onLine = (id: string) => pays.filter((p) => p.chargeId === id);
-    const paid = ls.reduce((s, c) => s + onLine(c.id).filter((p) => p.amountPaise > 0).reduce((n, p) => n + p.amountPaise, 0), 0);
-    const refunded = -ls.reduce((s, c) => s + onLine(c.id).filter((p) => p.amountPaise < 0).reduce((n, p) => n + p.amountPaise, 0), 0) // older refunds, on the line
+    // a credit (the line lowered, its extra moved to the patient's advance, method 'advance') takes back what was paid; it is not a refund
+    const paid = ls.reduce((s, c) => s + onLine(c.id).filter((p) => p.amountPaise > 0 || p.method === 'advance').reduce((n, p) => n + p.amountPaise, 0), 0);
+    const refunded = -ls.reduce((s, c) => s + onLine(c.id).filter((p) => p.amountPaise < 0 && p.method !== 'advance').reduce((n, p) => n + p.amountPaise, 0), 0) // older refunds, on the line
       - pays.filter((p) => p.billId === b.id && !p.chargeId).reduce((n, p) => n + p.amountPaise, 0);
     const due = live.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - onLine(c.id).reduce((n, p) => n + p.amountPaise, 0) - (waiting.get(c.id) ?? 0)), 0);
     const waitingOff = live.reduce((s, c) => s + (waiting.get(c.id) ?? 0), 0);
@@ -36,7 +37,7 @@ export async function billViews(tx: Tx, t: string, where: SQL, limit = 200) {
     const status: BillStatus = !live.length ? 'cancelled' : refunded > 0 && refunded >= paid ? 'refunded' : due > 0 ? (paid > 0 ? 'part' : 'unpaid') : refunded > 0 ? 'part_refunded' : 'paid';
     return {
       id: b.id, invoiceNo: b.invoiceNo, createdAt: b.createdAt, patient: { id: b.patientId, fullName: name, phone, patientNo: no },
-      items: ls.map((c) => c.description), lines: ls, billedPaise: billed, discountPaise: discount, paidPaise: paid, duePaise: due, refundedPaise: refunded, waitingOffPaise: waitingOff, status,
+      items: ls.map((c) => c.description), lines: ls, billedPaise: billed, discountPaise: discount, paidPaise: paid, fromAdvancePaise: ls.reduce((s, c) => s + onLine(c.id).filter((p) => p.method === 'advance' && p.amountPaise > 0).reduce((n, p) => n + p.amountPaise, 0), 0), duePaise: due, refundedPaise: refunded, waitingOffPaise: waitingOff, status,
       pharmacy: ls.some((c) => c.description.startsWith('Pharmacy')), excluded: ls.length > 0 && ls.every((c) => !!c.excludedAt),
       receipts: [...new Set(pays.map((p) => p.receiptNo).filter(Boolean))] as string[],
     };
@@ -44,7 +45,7 @@ export async function billViews(tx: Tx, t: string, where: SQL, limit = 200) {
 }
 
 const totals = (bs: Awaited<ReturnType<typeof billViews>>) => ({
-  n: bs.length, billedPaise: bs.reduce((s, b) => s + b.billedPaise, 0), paidPaise: bs.reduce((s, b) => s + b.paidPaise, 0), duePaise: bs.reduce((s, b) => s + b.duePaise, 0), refundedPaise: bs.reduce((s, b) => s + b.refundedPaise, 0),
+  n: bs.length, billedPaise: bs.reduce((s, b) => s + b.billedPaise, 0), paidPaise: bs.reduce((s, b) => s + b.paidPaise, 0), fromAdvancePaise: bs.reduce((s, b) => s + b.fromAdvancePaise, 0), duePaise: bs.reduce((s, b) => s + b.duePaise, 0), refundedPaise: bs.reduce((s, b) => s + b.refundedPaise, 0),
   paidFully: bs.filter((b) => b.status === 'paid').length, withDue: bs.filter((b) => b.duePaise > 0).length, withRefund: bs.filter((b) => b.refundedPaise > 0).length,
 });
 
@@ -69,7 +70,7 @@ export function invoiceRoutes(app: FastifyInstance) {
     const groups = new Map<string, typeof pays>();
     for (const p of real.filter((x) => x.amountPaise > 0)) { const k = p.receiptNo ?? p.id; groups.set(k, [...(groups.get(k) ?? []), p]); }
     const activity = [
-      ...bs.map((b) => ({ type: 'invoice' as const, at: b.createdAt, id: b.id, invoiceNo: b.invoiceNo, items: b.items, amountPaise: b.billedPaise, paidPaise: b.paidPaise, duePaise: b.duePaise, refundedPaise: b.refundedPaise - (credit.get(b.invoiceNo) ?? 0), creditPaise: credit.get(b.invoiceNo) ?? 0,
+      ...bs.map((b) => ({ type: 'invoice' as const, at: b.createdAt, id: b.id, invoiceNo: b.invoiceNo, items: b.items, amountPaise: b.billedPaise, paidPaise: b.paidPaise, duePaise: b.duePaise, refundedPaise: b.refundedPaise, creditPaise: credit.get(b.invoiceNo) ?? 0,
         status: credit.get(b.invoiceNo) && !b.billedPaise ? 'credited' : b.status, fromAdvancePaise: fromAdv.get(b.invoiceNo) ?? 0 })),
       ...[...groups.values()].map((g) => ({ type: 'payment' as const, at: g[0].receivedAt, id: g[0].id, receiptNo: g[0].receiptNo, methods: [...new Set(g.map((p) => p.method))], reference: g.find((p) => p.reference)?.reference ?? null,
         amountPaise: g.reduce((s, p) => s + p.amountPaise, 0), invoices: [...new Set(g.map((p) => (p.chargeId ? billOf.get(p.chargeId) : undefined)).filter(Boolean))] as string[],
@@ -124,9 +125,21 @@ export function invoiceRoutes(app: FastifyInstance) {
     await assertDayOpen(tx, req.ctx); // the money leaves today
     const left = v.paidPaise - v.refundedPaise; const total = b.parts.reduce((s, p) => s + p.amountPaise, 0);
     if (total > left) throw new HttpError(400, 'MORE_THAN_PAID', { refundablePaise: left });
-    for (const p of b.parts) await tx.insert(payment).values({ tenantId: t, patientId: v.patient.id, billId: v.id, amountPaise: -p.amountPaise, method: p.method, reference: `Refund ${v.invoiceNo} · ${b.reason}`.slice(0, 200), receivedBy: req.ctx.userId });
-    if (total === left && v.duePaise === 0) // all of it back: the invoice no longer counts as billed
-      await tx.update(charge).set({ status: 'refunded', adjustmentReason: b.reason, adjustedBy: req.ctx.userId }).where(and(eq(charge.billId, v.id), inArray(charge.status, ['paid'])));
+    // money back for something not given: the refund comes off what was paid on the lines (newest first) and the lines go down by the same,
+    // so what is still due stays as it was and billed − received + refunded keeps adding up to the patient's balance
+    const net = new Map<string, number>(); for (const c of v.lines) net.set(c.id, (await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, c.id)))[0]?.n ?? 0);
+    const lines = [...v.lines].filter((c) => !['cancelled', 'waived'].includes(c.status)).reverse();
+    for (const p of b.parts) {
+      let rest = p.amountPaise;
+      for (const c of lines) {
+        const take = Math.min(rest, net.get(c.id) ?? 0, c.amountPaise); if (take <= 0) continue;
+        rest -= take; net.set(c.id, (net.get(c.id) ?? 0) - take); c.amountPaise -= take;
+        await tx.insert(payment).values({ tenantId: t, patientId: v.patient.id, chargeId: c.id, amountPaise: -take, method: p.method, reference: `Refund ${v.invoiceNo} · ${b.reason}`.slice(0, 200), receivedBy: req.ctx.userId });
+        await tx.update(charge).set({ amountPaise: c.amountPaise, adjustmentReason: `Refunded: ${b.reason}`.slice(0, 200), adjustedBy: req.ctx.userId }).where(eq(charge.id, c.id));
+        if (!rest) break;
+      }
+      if (rest > 0) await tx.insert(payment).values({ tenantId: t, patientId: v.patient.id, billId: v.id, amountPaise: -rest, method: p.method, reference: `Refund ${v.invoiceNo} · ${b.reason}`.slice(0, 200), receivedBy: req.ctx.userId });
+    }
     await emit(tx, req.ctx, 'bill.refunded', 'bill', v.id, { amountPaise: total, reason: b.reason, invoiceNo: v.invoiceNo });
     return { refundedPaise: total, invoiceNo: v.invoiceNo };
   });
