@@ -76,11 +76,11 @@ function Overview() {
     <Table head={['Word', 'What it means']} rows={[
       ['Checkout', 'The list of patients the doctor has finished with, who still need something from reception.'],
       ['Hand-off', 'A line on Checkout that only tells you where the patient pays next. It never stops you closing the visit.'],
-      ['Advised / Started / Paid', 'A procedure plan moves through these. Advised: the doctor suggested it. Started: sessions were paid ahead or done. Paid: every session is paid for.'],
+      ['Advised / Started / Paid', 'A procedure plan moves through these. Advised: the doctor suggested it. Started: invoiced or a session done. Paid: every session is paid for.'],
       ['Course', 'A procedure over several sessions, for example 6 chemical peels, at the standard price, a custom price the doctor sets on the Rx pad, or a clinic package price.'],
       ['Procedure form', 'What is recorded at each session of a procedure (Before, During, After) and the products it uses. The owner sets it up once under Settings › Procedures & packages › Form. The doctor fills it from Open form; fields marked * must be filled before Mark done.'],
       ['Procedure · No bill', 'A card on the pharmacy Counter: products a procedure session asked for. The pharmacist issues them from stock with no bill, because the procedure price covers them.'],
-      ['Advance', 'Money paid ahead for some sessions of a course. The price is locked from the first payment.'],
+      ['Advance', 'The patient\'s money not yet used on an invoice: paid more than was due, or what came back when unused sessions were cancelled. It comes off the next invoice (Use advance is ticked), or Refund gives it back.'],
       ['Test order', 'The tests the doctor asked for in one visit. The doctor reviews the order once, when every report is in.'],
       ['Completed', 'The doctor has reviewed the results, in the consultation or from Test reports. The desk can still add a report to it afterwards.'],
       ['Handle carefully', 'A flag with a written reason, shown beside the patient’s name. Read the reason before you speak to them.'],
@@ -122,7 +122,7 @@ function Reception() {
     <P>When the doctor finishes, the patient appears under <b>Checkout</b> with a count such as &ldquo;3 open&rdquo;. Work through the lines, then close the visit.</P>
     <Flow label="Checkout in order. Close visit is last.">
       <Step n={1} who="reception" title="Tests">Explain the tests to the patient, then tap <b>Explained</b>. Upload each report from the same side bar when it comes in.</Step>
-      <Step n={2} who="reception" title="Procedure">Tap <b>Quote and payment</b> to send the quote or take payment for sessions. Tap <b>Schedule</b> to book a session.</Step>
+      <Step n={2} who="reception" title="Procedure">Tap <b>Quote and payment</b> to send the quote or invoice the treatment. Tap <b>Schedule</b> to book a session.</Step>
       <Step n={3} who="reception" title="Review">Tap <b>Book visit</b>. The doctor&rsquo;s date is filled in.</Step>
       <Step n={4} who="reception" title="Close visit">Tap <b>Close visit</b> when nothing above is open.</Step>
     </Flow>
@@ -156,23 +156,28 @@ function Reception() {
     <Flow label="A procedure course from advice to the last session.">
       <Step n={1} who="doctor" title="Advised">The doctor suggests the procedure.</Step>
       <Step n={2} who="reception" title="Quote (optional)">Send or print a quote that is valid for 7, 15 or 30 days.</Step>
-      <Step n={3} who="reception" title="Pay ahead (optional)">The patient pays for some sessions now, on the same Add bill / payment screen.</Step>
-      <Step n={4} who="reception" title="Sessions">Each session is paid from the advance, or on the day.</Step>
+      <Step n={3} who="reception" title="Invoice">Generate invoice bills the whole treatment once, for example 6 sessions in one line. The patient pays any part now and the rest over the months.</Step>
+      <Step n={4} who="reception" title="Sessions">Sessions only use up the treatment: nothing more is billed. A treatment never invoiced is billed session by session on the day.</Step>
     </Flow>
     <Steps>{[
       <>Open the procedure from Checkout or the Courses list. The price comes from the price list; nobody types a price. If the clinic has a <b>package</b> (a fixed price for a number of sessions), tap it.</>,
       <>To send a quote, choose the validity and tap <Btn>Send on WhatsApp</Btn> or <Btn>Print</Btn>. The quote never shows consultation or medicine prices. A quote for a package keeps that price when the patient pays.</>,
-      <>If the patient wants to pay now, tap <Btn>Pay for sessions</Btn>. The Add bill / payment screen opens with the sessions: use <b>+</b> and <b>&minus;</b> to choose how many (for example 2 of 6). Sessions paid ahead are paid in full.</>,
+      <>Tap <Btn>Generate invoice</Btn>. The treatment is one line for all its sessions. Take what the patient pays now; the rest stays due on the patient.</>,
       <>A discount is given on that screen, never on the price (see Taking a payment).</>,
     ]}</Steps>
-    <Tip>Paying ahead for sessions you may not use is normal. Unused sessions stay on the course. A refund of unused sessions is rare and only the owner can approve it, with a reason.</Tip>
+    <Tip>If the patient stops, <b>Cancel</b> the procedure on the patient&rsquo;s Procedures. The invoice drops to the sessions done, and money paid for the rest moves to the patient&rsquo;s advance. <Btn>Refund</Btn> on Bills &amp; payments gives it back.</Tip>
     <P>The <b>Procedures</b> page has three views. <b>Schedule</b> shows sessions by date. <b>Board</b> shows every plan as Advised, Started or Paid; tap a plan to see each session: when, who did it, and whether it was paid. <b>Plans to schedule</b> lists plans with no booked session.</P>
     <P>To put a second doctor on a session as supervisor, open Schedule, choose the session, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
 
-    <H2 id="payments">Add bill / payment</H2>
-    <P>One screen for every rupee outside check-in and the pharmacy: invoices still due, items from the price list, and sessions paid ahead. It opens from the patient&rsquo;s profile, from Collect on the Calendar, and from a procedure course.</P>
+    <H2 id="payments">Bills &amp; payments</H2>
+    <P>Money belongs to the patient, not to a procedure. The patient&rsquo;s Bills &amp; payments tab shows Billed, Received, Refunded and what is Due (or held as Advance), then one list of invoices, payments, refunds and credits. It has three buttons:</P>
+    <Table head={['Button', 'What it does']} rows={[
+      ['Generate invoice', 'One invoice for everything ticked: treatments the doctor advised (each once, as a whole), items from the price list, and invoices still due. Take a payment now, part, or nothing.'],
+      ['Record payment', 'Money from the patient, not for one item. It clears the oldest dues first; whatever is left becomes the advance.'],
+      ['Refund', 'Gives money back from the patient\'s advance, with a reason. Owner or admin only (or someone the owner allowed).'],
+    ]} />
     <Steps>{[
-      <>Open <b>Patients</b>, find the patient, and tap <Btn>Add bill / payment</Btn>. Everything due is listed and ticked.</>,
+      <>Open <b>Patients</b>, find the patient, and tap <Btn>Generate invoice</Btn>. Everything due is listed and ticked; the doctor&rsquo;s treatments not invoiced yet are listed unticked.</>,
       <>To bill something new, pick it from <b>+ Add an item from the price list</b>.</>,
       <>A <b>discount</b> goes on a line or on the whole bill (Extra discount). Each has a <b>%</b> / <b>₹</b> switch. Say why. Consultation fees take no discount.</>,
       <>Within the clinic&rsquo;s discount limit it applies at once. Above it (or if you may not give discounts) the button says <Btn>Send discount for approval</Btn>: you can take the discounted amount now, and the rest waits. The owner sees it on Today under Needs your attention; if the owner says no, the difference becomes due.</>,

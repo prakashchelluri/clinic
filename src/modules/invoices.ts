@@ -55,6 +55,33 @@ export function invoiceRoutes(app: FastifyInstance) {
     return { bills: bs, totals: totals(bs) };
   });
 
+  /** The patient's account: billed, received, refunded, and what is due or held as advance; then one list of invoices, payments, refunds and credits.
+   *  Money moved inside the account (the advance used on an invoice, a credit) has method 'advance' and is never counted as received. */
+  route(app, 'get', '/patients/:id/account', 'fees.see', async (req, tx) => {
+    const t = req.ctx.tenantId; const pid = (req.params as any).id;
+    const bs = await billViews(tx, t, eq(bill.patientId, pid), 500);
+    const pays = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.patientId, pid))).orderBy(desc(payment.receivedAt)).limit(1000);
+    const billOf = new Map<string, string>(); for (const b of bs) for (const c of b.lines) billOf.set(c.id, b.invoiceNo);
+    const noOf = new Map(bs.map((b) => [b.id, b.invoiceNo]));
+    const real = pays.filter((p) => p.method !== 'advance' && (p.chargeId || p.advance || p.billId)); // money on an invoice or in the advance (sample history rows tied to nothing stay out)
+    const fromAdv = new Map<string, number>(); const credit = new Map<string, number>(); // per invoice: what the advance paid, and what went back to the advance (a credit, not money out)
+    for (const p of pays) if (p.method === 'advance' && !p.advance && p.chargeId) { const no = billOf.get(p.chargeId); if (!no) continue; const m = p.amountPaise > 0 ? fromAdv : credit; m.set(no, (m.get(no) ?? 0) + Math.abs(p.amountPaise)); }
+    const groups = new Map<string, typeof pays>();
+    for (const p of real.filter((x) => x.amountPaise > 0)) { const k = p.receiptNo ?? p.id; groups.set(k, [...(groups.get(k) ?? []), p]); }
+    const activity = [
+      ...bs.map((b) => ({ type: 'invoice' as const, at: b.createdAt, id: b.id, invoiceNo: b.invoiceNo, items: b.items, amountPaise: b.billedPaise, paidPaise: b.paidPaise, duePaise: b.duePaise, refundedPaise: b.refundedPaise - (credit.get(b.invoiceNo) ?? 0), creditPaise: credit.get(b.invoiceNo) ?? 0,
+        status: credit.get(b.invoiceNo) && !b.billedPaise ? 'credited' : b.status, fromAdvancePaise: fromAdv.get(b.invoiceNo) ?? 0 })),
+      ...[...groups.values()].map((g) => ({ type: 'payment' as const, at: g[0].receivedAt, id: g[0].id, receiptNo: g[0].receiptNo, methods: [...new Set(g.map((p) => p.method))], reference: g.find((p) => p.reference)?.reference ?? null,
+        amountPaise: g.reduce((s, p) => s + p.amountPaise, 0), invoices: [...new Set(g.map((p) => (p.chargeId ? billOf.get(p.chargeId) : undefined)).filter(Boolean))] as string[],
+        toAdvancePaise: g.filter((p) => p.advance).reduce((s, p) => s + p.amountPaise, 0) })),
+      ...real.filter((p) => p.amountPaise < 0).map((p) => ({ type: 'refund' as const, at: p.receivedAt, id: p.id, methods: [p.method], amountPaise: -p.amountPaise, note: p.reference, invoiceNo: p.billId ? noOf.get(p.billId) ?? null : null, fromAdvance: p.advance })),
+      ...pays.filter((p) => p.method === 'advance' && p.advance && p.amountPaise > 0).map((p) => ({ type: 'credit' as const, at: p.receivedAt, id: p.id, amountPaise: p.amountPaise, note: p.reference })),
+    ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const received = real.filter((p) => p.amountPaise > 0).reduce((s, p) => s + p.amountPaise, 0);
+    const refunded = -real.filter((p) => p.amountPaise < 0).reduce((s, p) => s + p.amountPaise, 0);
+    return { totals: { billedPaise: bs.reduce((s, b) => s + b.billedPaise, 0), receivedPaise: received, refundedPaise: refunded, duePaise: bs.reduce((s, b) => s + b.duePaise, 0), advancePaise: await advanceBalance(tx, t, pid) }, activity };
+  });
+
   /** Every invoice in a period (the clinic's billing list), searchable by patient, phone or invoice number. */
   route(app, 'get', '/bills', 'fees.see', async (req, tx) => {
     const q = req.query as any; const tz = req.ctx.timezone; const today = todayIn(tz);

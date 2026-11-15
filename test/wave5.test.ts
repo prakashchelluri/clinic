@@ -27,7 +27,7 @@ const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kol
 before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); app = await buildApp(); });
 after(async () => { await app.close(); });
 
-test('course: agree below list needs the discount permission, advance locks the price, sittings come from the advance, refund needs approval', async () => {
+test('course: fixed price, the package invoiced once and part paid, sessions bill nothing, Record payment keeps the extra as advance, Refund needs the permission', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
   const peel = (await owner('GET', '/config')).body.procedures.find((x: any) => x.name === 'Chemical peel');
   const p = (await reception('POST', '/patients', { fullName: 'Course Wave5', phone: '9848055511' })).body;
@@ -48,41 +48,39 @@ test('course: agree below list needs the discount permission, advance locks the 
   assert.equal((await owner('POST', '/courses', { recommendationId: rec.id })).status, 409, 'agreed once');
   const cid = agreed.body.id;
 
-  // advance for 2 of 6 sittings: price locks; EMI needs its code; cannot pay more than the course needs
-  assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 400000, method: 'emi', idempotencyKey: 'wave5-adv-0001' })).status, 400);
-  assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 1300000, method: 'cash', idempotencyKey: 'wave5-adv-0002' })).status, 400);
-  const adv = await reception('POST', `/courses/${cid}/advance`, { amountPaise: 400000, method: 'upi', reference: '8821', idempotencyKey: 'wave5-adv-0003' });
-  assert.equal(adv.status, 200); assert.match(adv.body.receiptNo, /^R-\d{4}-\d{2}-\d{4}$/);
-  assert.equal(adv.body.course.unusedSittings, 2); assert.ok(adv.body.course.lockedAt, 'price is locked from the first payment');
-  assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 400000, method: 'upi', reference: '8821', idempotencyKey: 'wave5-adv-0003' })).body.repeated, true, 'the same click twice takes nothing twice');
+  // the whole package on one invoice, part paid: EMI needs its code; more than is due is refused unless kept as advance
+  const inv = (body: any) => reception('POST', '/bills', { patientId: p.id, lines: [{ recommendationId: rec.id }], ...body });
+  assert.equal((await inv({ idempotencyKey: 'wave5-inv-0001', parts: [{ method: 'emi', amountPaise: 400000 }] })).status, 400);
+  assert.equal((await inv({ idempotencyKey: 'wave5-inv-0002', parts: [{ method: 'cash', amountPaise: 1300000 }] })).status, 400);
+  const first = await inv({ idempotencyKey: 'wave5-inv-0003', parts: [{ method: 'upi', amountPaise: 400000, reference: '8821' }] });
+  assert.equal(first.status, 200, JSON.stringify(first.body)); assert.match(first.body.receiptNo, /^R-\d{4}-\d{2}-\d{4}$/);
+  assert.equal(first.body.payablePaise, 1200000); assert.equal(first.body.balancePaise, 800000);
+  assert.equal((await inv({ idempotencyKey: 'wave5-inv-0003', parts: [{ method: 'upi', amountPaise: 400000, reference: '8821' }] })).body.repeated, true, 'the same click twice takes nothing twice');
+  assert.ok((await owner('GET', `/courses?patientId=${p.id}`)).body[0].lockedAt, 'invoiced: the price holds');
 
-  // two sittings come from the advance, the third is due on the day
+  // sessions done add nothing: the package's invoice carries the money
   const done = async (n: number) => {
     const ps = (await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: `1${n}:00`, minutes: 30, force: true })).body;
     assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200);
-    assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200, 'completing twice invoices once');
+    assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200, 'completing twice bills nothing twice');
   };
   await done(1); await done(2); await done(3);
   const tl = (await owner('GET', `/patients/${p.id}/timeline`)).body;
-  const sit = tl.charges.filter((c: any) => c.courseId === cid).sort((a: any, b: any) => a.description.localeCompare(b.description));
-  assert.equal(sit.length, 3);
-  assert.deepEqual(sit.map((c: any) => c.status), ['paid', 'paid', 'due']);
-  assert.deepEqual(sit.map((c: any) => c.prepaid), [true, true, false]);
-  assert.equal(tl.outstandingPaise, 200000, 'the third sitting is due on the day');
+  assert.equal(tl.charges.filter((c: any) => c.courseId === cid).length, 1, 'one line for the whole package');
+  assert.equal(tl.outstandingPaise, 800000);
 
-  // the third sitting is paid on the day with the normal take-payment
-  const due = sit[2];
-  assert.equal((await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [due.id], idempotencyKey: 'wave5-take-0001', parts: [{ method: 'cash', amountPaise: 200000 }] })).status, 200);
-
-  // refund of unused sittings: only with the refund permission, never more than is unused
+  // Record payment: more than is due, the rest becomes the patient's advance
+  const pay = await reception('POST', `/patients/${p.id}/payments`, { amountPaise: 900000, method: 'cash', idempotencyKey: 'wave5-pay-0001' });
+  assert.equal(pay.status, 200); assert.equal(pay.body.keptAsAdvancePaise, 100000);
   const c1 = (await owner('GET', `/courses?patientId=${p.id}`)).body[0];
-  assert.equal(c1.unusedPaise, 0); assert.equal(c1.doneSittings, 3);
-  assert.equal((await reception('POST', `/courses/${cid}/advance`, { amountPaise: 600000, method: 'cash', idempotencyKey: 'wave5-adv-0004' })).status, 200, 'pay for 3 more');
-  assert.equal((await reception('POST', `/courses/${cid}/refund`, { amountPaise: 200000, method: 'cash', reason: 'patient moved away' })).status, 403, 'the desk cannot approve a refund by default');
-  assert.equal((await owner('POST', `/courses/${cid}/refund`, { amountPaise: 700000, method: 'cash', reason: 'patient moved away' })).status, 400, 'more than is unused');
-  assert.equal((await owner('POST', `/courses/${cid}/refund`, { amountPaise: 400000, method: 'cash', reason: ' ' })).status, 400, 'a reason is needed');
-  const back = await owner('POST', `/courses/${cid}/refund`, { amountPaise: 400000, method: 'cash', reason: 'patient moved away' });
-  assert.equal(back.status, 200); assert.equal(back.body.unusedPaise, 200000); assert.equal(back.body.refundedPaise, 400000);
+  assert.equal(c1.stillToPayPaise, 0); assert.equal(c1.doneSittings, 3);
+
+  // Refund from the advance: only with the refund permission, never more than the advance, always with a reason
+  assert.equal((await reception('POST', `/patients/${p.id}/advance/refund`, { amountPaise: 100000, method: 'cash', reason: 'paid too much' })).status, 403, 'the desk cannot refund by default');
+  assert.equal((await owner('POST', `/patients/${p.id}/advance/refund`, { amountPaise: 100001, method: 'cash', reason: 'paid too much' })).status, 400, 'more than the advance');
+  assert.equal((await owner('POST', `/patients/${p.id}/advance/refund`, { amountPaise: 100000, method: 'cash', reason: ' ' })).status, 400, 'a reason is needed');
+  const back = await owner('POST', `/patients/${p.id}/advance/refund`, { amountPaise: 100000, method: 'cash', reason: 'paid too much' });
+  assert.equal(back.status, 200); assert.equal(back.body.balancePaise, 0);
 
   // a junior doctor has no access to procedures, so no courses either
   const junior = await as('assistant@demo.clinic');

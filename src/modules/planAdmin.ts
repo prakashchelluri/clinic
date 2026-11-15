@@ -6,6 +6,8 @@ import { z } from 'zod';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { course, encounter, procedureCatalog, procedureSession, recommendation, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { syncTreatment } from './courses.js';
+import { advanceBalance } from './bills.js';
 import { emit, todayIn } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { packagesOf, shares } from '../lib/packages.js';
@@ -78,6 +80,7 @@ export function planAdminRoutes(app: FastifyInstance) {
         set.sittings = newN;
         if (r.amountPaise != null && r.amountPaise > 0) set.amountPaise = Math.max(0, r.amountPaise + delta);
         if (c) await tx.update(course).set({ sittings: newN, totalPaise: Math.max(0, c.totalPaise + delta), listPaise: Math.max(c.totalPaise + delta, std * newN), standardPaise: std * newN || null }).where(eq(course.id, c.id));
+        if (c) await syncTreatment(tx, req.ctx, c.id, `Sessions changed to ${newN}`); // its invoice follows; anything paid above it goes to the advance
         const [{ doneN }] = await tx.select({ doneN: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, r.id), eq(procedureSession.state, 'completed')));
         if (newN <= doneN) set.status = 'done'; // the sessions left were taken off: it is finished
         else if (r.status === 'done') set.status = 'open'; // more sessions on a finished procedure: it runs again
@@ -90,7 +93,7 @@ export function planAdminRoutes(app: FastifyInstance) {
     return out;
   });
 
-  /** Cancel a procedure or a whole package: what is not done stops, booked sessions are cancelled. Money paid ahead is refunded with the course refund. */
+  /** Cancel a procedure or a whole package: what is not done stops, booked sessions are cancelled. The treatment's invoice drops to the sessions done; what was paid above that goes to the patient's advance (Refund gives it back). */
   route(app, 'post', '/procedure-plans/cancel', 'worklist.write', async (req, tx) => {
     const b = z.object({ ids: z.array(z.string().uuid()).min(1).max(10), reason: z.string().trim().min(3, 'Say why').max(200) }).strict().parse(req.body);
     const t = req.ctx.tenantId;
@@ -106,7 +109,15 @@ export function planAdminRoutes(app: FastifyInstance) {
     const booked = await tx.update(procedureSession).set({ state: 'cancelled', stateReason: b.reason })
       .where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, b.ids), eq(procedureSession.state, 'confirmed'))).returning({ id: procedureSession.id });
     await tx.update(recommendation).set({ status: 'cancelled', contactLog: sql`${recommendation.contactLog} || ${JSON.stringify([{ at: new Date().toISOString(), by: req.ctx.name, outcome: 'Cancelled', note: b.reason }])}::jsonb` }).where(inArray(recommendation.id, b.ids));
+    let toAdvance = 0;
+    for (const r of rs) { // the price becomes what was done; the invoice follows
+      const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, r.id))).then((y) => y[0]); if (!c) continue;
+      const [{ doneN }] = await tx.select({ doneN: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, r.id), eq(procedureSession.state, 'completed')));
+      if (doneN >= c.sittings) continue;
+      await tx.update(course).set({ totalPaise: Math.round((c.totalPaise / c.sittings) * doneN) }).where(eq(course.id, c.id));
+      const before = await advanceBalance(tx, t, r.patientId); await syncTreatment(tx, req.ctx, c.id, `Cancelled: ${b.reason}`); toAdvance += (await advanceBalance(tx, t, r.patientId)) - before;
+    }
     for (const r of rs) await emit(tx, req.ctx, 'recommendation.cancelled', 'recommendation', r.id, { reason: b.reason, bookingsCancelled: booked.length });
-    return { cancelled: rs.length, bookingsCancelled: booked.length };
+    return { cancelled: rs.length, bookingsCancelled: booked.length, toAdvancePaise: toAdvance };
   });
 }

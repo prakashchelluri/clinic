@@ -63,21 +63,28 @@ test('a sitting with no agreed course is billed once at the list price; cancelli
   assert.equal(ch.filter((c: any) => c.status !== 'cancelled').length, 1);
 });
 
-test('a prepaid sitting that is cancelled goes back to the advance', async () => {
+test('an invoiced treatment: its sessions are never billed again; cancelling it moves what paid for sessions not done to the advance', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
-  const { peel, p, rec } = await plan(owner, reception, 'Billing Prepaid', '9848055602', 2);
-  const c = (await owner('POST', '/courses', { recommendationId: rec.id })).json();
-  assert.equal((await reception('POST', `/courses/${c.id}/advance`, { amountPaise: peel.pricePaise, method: 'upi', reference: '1', idempotencyKey: 'procbilling-adv-1' })).statusCode, 200);
+  const { peel, p, rec } = await plan(owner, reception, 'Billing Invoiced', '9848055602', 2);
+  const total = peel.pricePaise * 2;
+  const inv = (await reception('POST', '/bills', { patientId: p.id, idempotencyKey: 'procbilling-inv-1', lines: [{ recommendationId: rec.id }], parts: [{ method: 'upi', amountPaise: total, reference: '1' }] })).json();
+  assert.equal(inv.payablePaise, total, 'the whole treatment on one invoice'); assert.equal(inv.balancePaise, 0);
   const ps = await book(reception, rec.id, '12:00');
-  assert.equal((await reception('GET', `/procedure-sessions?day=${today()}&detail=1`)).json().find((x: any) => x.id === ps.id).money.kind, 'prepaid');
+  assert.equal((await reception('GET', `/procedure-sessions?day=${today()}&detail=1`)).json().find((x: any) => x.id === ps.id).money.kind, 'paid');
   await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' });
-  assert.equal((await owner('GET', `/courses?patientId=${p.id}`)).json()[0].unusedPaise, 0);
-  await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'cancelled' });
-  assert.equal((await owner('GET', `/courses?patientId=${p.id}`)).json()[0].unusedPaise, peel.pricePaise, 'the advance is unused again');
-  const ps2 = await book(reception, rec.id, '13:00');
-  await reception('PATCH', `/procedure-sessions/${ps2.id}`, { state: 'completed' });
-  const live = (await sittingCharges(owner, p.id)).filter((x: any) => x.status !== 'cancelled');
-  assert.equal(live.length, 1); assert.equal(live[0].prepaid, true);
+  assert.equal((await sittingCharges(owner, p.id)).length, 0, 'a done session adds no charge');
+  const c = (await owner('GET', `/courses?patientId=${p.id}`)).json()[0];
+  assert.equal(c.invoiced, true); assert.equal(c.stillToPayPaise, 0); assert.equal(c.doneSittings, 1);
+  // stopped after one of two: the invoice drops to one session and the other's money becomes the patient's advance
+  const cancel = (await reception('POST', '/procedure-plans/cancel', { ids: [rec.id], reason: 'Patient stopped' })).json();
+  assert.equal(cancel.toAdvancePaise, peel.pricePaise);
+  const acc = (await owner('GET', `/patients/${p.id}/account`)).json();
+  assert.equal(acc.totals.advancePaise, peel.pricePaise); assert.equal(acc.totals.receivedPaise, 30000 + total, 'a credit is not money in');
+  assert.equal(acc.activity.find((a: any) => a.type === 'invoice' && a.items[0].startsWith('Chemical peel')).amountPaise, peel.pricePaise);
+  // Refund gives it back, from the advance
+  assert.equal((await owner('POST', `/patients/${p.id}/advance/refund`, { amountPaise: peel.pricePaise, method: 'upi', reason: 'Stopped the treatment' })).statusCode, 200);
+  const after = (await owner('GET', `/patients/${p.id}/account`)).json().totals;
+  assert.equal(after.advancePaise, 0); assert.equal(after.refundedPaise, peel.pricePaise);
 });
 
 test('sittings booked ahead get their own numbers', async () => {
@@ -111,23 +118,31 @@ test('Start needs consent on file: the first Start records it on the patient; la
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps2.id}`, { state: 'in_progress' })).statusCode, 200, 'no consent question the second time');
 });
 
-test('a partly used advance pays part of the next sitting; the rest is due', async () => {
+test('a treatment never invoiced is billed session by session; Generate invoice later bills only the rest; Record payment uses the advance', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
-  const { peel, p, rec } = await plan(owner, reception, 'Billing Partial', '9848055605', 2);
+  const { peel, p, rec } = await plan(owner, reception, 'Billing Partial', '9848055605', 3);
   const c = (await owner('POST', '/courses', { recommendationId: rec.id })).json();
-  const half = Math.round(peel.pricePaise / 2);
-  assert.equal((await reception('POST', `/courses/${c.id}/advance`, { amountPaise: peel.pricePaise + half, method: 'cash', idempotencyKey: 'procbilling-partial-1' })).statusCode, 200);
+  // money first, before anything is invoiced: it is the patient's advance
+  const pay = (await reception('POST', `/patients/${p.id}/payments`, { amountPaise: peel.pricePaise, method: 'cash', idempotencyKey: 'procbilling-partial-1' })).json();
+  assert.equal(pay.keptAsAdvancePaise, peel.pricePaise);
   const a = await book(reception, rec.id, '19:00');
+  assert.deepEqual((await reception('GET', `/procedure-sessions/${a.id}`)).json().money, { kind: 'due', amountPaise: c.perSittingPaise });
   await reception('PATCH', `/procedure-sessions/${a.id}`, { state: 'completed' });
+  let ch = await sittingCharges(owner, p.id);
+  assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, c.perSittingPaise); assert.equal(ch[0].status, 'due');
+  // the rest of the treatment on one invoice, the advance used on it
+  const inv = (await reception('POST', '/bills', { patientId: p.id, idempotencyKey: 'procbilling-partial-2', lines: [{ recommendationId: rec.id }], parts: [{ method: 'advance', amountPaise: peel.pricePaise }] })).json();
+  assert.equal(inv.payablePaise, c.totalPaise - c.perSittingPaise, 'only what was not invoiced');
+  assert.equal((await reception('POST', '/bills', { patientId: p.id, idempotencyKey: 'procbilling-partial-3', lines: [{ recommendationId: rec.id }] })).json().code, 'ALREADY_INVOICED');
   const b = await book(reception, rec.id, '19:30');
-  const before = (await reception('GET', `/procedure-sessions/${b.id}`)).json().money;
-  assert.deepEqual(before, { kind: 'due', amountPaise: c.perSittingPaise - half, prepaidPaise: half }, 'only the balance is due');
   await reception('PATCH', `/procedure-sessions/${b.id}`, { state: 'completed' });
-  const after = (await reception('GET', `/procedure-sessions/${b.id}`)).json().money;
-  assert.equal(after.kind, 'due'); assert.equal(after.amountPaise + after.prepaidPaise, c.totalPaise - c.perSittingPaise, 'the last sitting is the rest of the course');
-  assert.equal(after.prepaidPaise, half);
-  const course = (await owner('GET', `/courses?patientId=${p.id}`)).json()[0];
-  assert.equal(course.unusedPaise, 0, 'the advance is used up'); assert.equal(course.drawnPaise, peel.pricePaise + half);
-  const live = (await sittingCharges(owner, p.id)).filter((x: any) => x.status !== 'cancelled');
-  assert.equal(live.reduce((s: number, x: any) => s + x.amountPaise, 0), c.totalPaise, 'charges add up to the course price');
+  assert.equal((await sittingCharges(owner, p.id)).length, 1, 'no charge for a session of an invoiced treatment');
+  // Record payment clears the oldest dues first: the session charge, then the treatment invoice
+  const acc = (await owner('GET', `/patients/${p.id}/account`)).json();
+  const due = acc.totals.duePaise; assert.equal(due, c.totalPaise - peel.pricePaise);
+  const r = (await reception('POST', `/patients/${p.id}/payments`, { amountPaise: due, method: 'upi', reference: '55', idempotencyKey: 'procbilling-partial-4' })).json();
+  assert.equal(r.keptAsAdvancePaise, 0);
+  const t = (await owner('GET', `/patients/${p.id}/account`)).json().totals;
+  assert.equal(t.duePaise, 0); assert.equal(t.advancePaise, 0); assert.equal(t.receivedPaise, 30000 + c.totalPaise, 'every rupee counted once');
+  ch = await sittingCharges(owner, p.id); assert.equal(ch[0].status, 'paid');
 });

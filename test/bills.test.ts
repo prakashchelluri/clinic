@@ -95,7 +95,7 @@ test('a bill: price-list items, % and ₹ discounts, split modes, part payment; 
   assert.equal((await owner('POST', '/bills', { patientId: p.id, idempotencyKey: k, lines: [{ chargeId: half.id, discountPaise: 125000 }], reason: 'owner decided' })).body.repeated, true);
 });
 
-test('consultation fees take no discount; sittings paid ahead start the course at its fixed price and must be paid in full', async () => {
+test('consultation fees take no discount; a doctor\'s treatment is invoiced once, as a whole, and can be part paid', async () => {
   const owner = await as('owner@demo.clinic');
   const cfg = (await owner('GET', '/config')).body;
   const peel = cfg.procedures.find((x: any) => x.name === 'Chemical peel');
@@ -107,15 +107,16 @@ test('consultation fees take no discount; sittings paid ahead start the course a
   const e = (await owner('POST', `/visits/${v.id}/encounter`, {})).body;
   assert.equal((await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Pigmentation'] }, assessment: { diagnosis: [{ name: 'Melasma' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 6 }] })).status, 200);
   const rec = (await owner('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
-  const ahead = (b: any) => owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ recommendationId: rec.id, sittings: 2, ...b.line }], ...b });
-  assert.equal((await ahead({ parts: [{ method: 'cash', amountPaise: 100000 }] })).body.code, 'PAY_AHEAD_IN_FULL');
-  const r = await ahead({ line: { discountPaise: 50000 }, reason: 'second course', parts: [{ method: 'upi', amountPaise: peel.pricePaise * 2 - 50000, reference: '7788' }] });
+  // the whole treatment on one invoice, with a discount, part paid: the rest stays due on the patient
+  const r = await owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ recommendationId: rec.id, discountPaise: 50000 }], reason: 'second course', parts: [{ method: 'upi', amountPaise: 100000, reference: '7788' }] });
   assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.payablePaise, peel.pricePaise * 6 - 50000, 'list price × sessions, less the discount'); assert.equal(r.body.balancePaise, peel.pricePaise * 6 - 150000);
+  const tl = (await owner('GET', `/patients/${p.id}/timeline`)).body;
+  const line = tl.charges.find((c: any) => c.description.startsWith('Chemical peel · 6 sessions'));
+  assert.equal(line.amountPaise, peel.pricePaise * 6 - 50000); assert.equal(line.discountPaise, 50000); assert.equal(line.status, 'due');
   const c = (await owner('GET', `/courses?patientId=${p.id}`)).body[0];
-  assert.equal(c.totalPaise, peel.pricePaise * 6, 'list price × sittings');
-  assert.equal(c.creditPaise, 50000); assert.equal(c.unusedSittings, 2, 'the discount counts toward the sittings paid ahead');
-  assert.equal(c.refundablePaise, peel.pricePaise * 2 - 50000, 'the discount is never handed back as money');
-  assert.ok(c.lockedAt);
+  assert.equal(c.totalPaise, peel.pricePaise * 6, 'list price × sittings'); assert.equal(c.invoiced, true); assert.ok(c.lockedAt);
+  assert.equal(c.stillToPayPaise, peel.pricePaise * 6 - 100000);
 });
 
 test('advance: taken with no bill, kept from an overpayment, used on a bill without counting twice, given back', async () => {
