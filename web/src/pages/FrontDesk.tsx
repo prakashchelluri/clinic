@@ -14,7 +14,7 @@ import { chime, makeOnceWatcher } from '../chime';
 import { JourneyPanel, StageStrip } from './frontDeskJourney';
 import { DaySchedule } from './frontDeskSchedule';
 import { ProcedureDrawer } from '../procDrawer';
-import { WeekToSend } from '../procReview';
+import { addDay as addDaysIso } from '../procBlocks';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -187,6 +187,12 @@ export function FrontDesk() {
   const procsNow = ((calq.data?.procedures ?? []) as any[]).filter((p) => p.state === 'in_progress' || (p.state === 'confirmed' && Math.abs(toMin(p.startTime) - nowMin()) <= 60))
     .filter((p) => !f || norm(p.patient ?? '').includes(norm(f))).sort((x, y) => x.startTime.localeCompare(y.startTime));
   const head = (t: string, n?: number) => <div className="border-t border-line px-4 pb-1.5 pt-3 text-[12.5px] font-semibold text-muted first:border-t-0">{t}{n ? ` · ${n}` : ''}</div>;
+  // procedure sessions the desk still has to send for the doctor's approval (the same count as the Procedures menu badge)
+  const mc = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: can(perms, 'worklist.write'), refetchInterval: 30000 });
+  const toSend: { n: number; week: string | null } = mc.data?.toSend ?? { n: 0, week: null };
+  const weekName = (mon: string) => { const thisMon = addDaysIso(day, -((new Date(day + 'T00:00:00Z').getUTCDay() + 6) % 7));
+    const range = `${new Date(mon + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })} – ${new Date(addDaysIso(mon, 5) + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
+    return mon === thisMon ? `From this week · ${range}` : mon === addDaysIso(thisMon, 7) ? `From next week · ${range}` : `From the week of ${range}`; };
   const waitingPanel = (
     <aside className="flex flex-col gap-4">
       <section className="fd-sheet overflow-hidden">
@@ -218,6 +224,11 @@ export function FrontDesk() {
             <button key={v.id} type="button" className={`flex w-full items-center gap-2 border-t border-line px-3 py-2.5 text-left hover:bg-surface-2 ${selV?.id === v.id ? 'bg-surface-2' : ''}`} onClick={() => setPickV(v.id)}>
               <span className="fd-warn">!</span><span className="min-w-0"><span className="block truncate text-[14px] font-medium">{v.patient.fullName}</span>
                 <span className="block truncate text-[12px] text-muted">{[t.length && `Tests: ${t.map((r: any) => r.notes).filter(Boolean).join(', ') || t.length}`, pr.length && `Procedure: ${pr.map((r: any) => r.procedure ?? 'procedure').join(', ')}`, open.some((r: any) => r.kind === 'followup') && 'Review to book'].filter(Boolean).join(' · ')}</span></span></button>); })}</>}
+        {toSend.n > 0 && toSend.week && <>{head('Procedures for doctor approval', toSend.n)}
+          <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
+            <Icon name="syringe" className="fd-proc-ic h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-medium">{toSend.n} session{toSend.n === 1 ? '' : 's'} not sent</span><span className="block truncate text-[12px] text-muted">{weekName(toSend.week)}</span></span>
+            <button type="button" className="btn btn-sm shrink-0" onClick={() => nav(`/worklist?tab=week&week=${toSend.week}`)}>Review and send</button></div></>}
         {withDue.length > 0 && <>{head('To collect', withDue.length)}
           {withDue.map((v) => (
             <div key={v.id} className="flex items-center gap-2 border-t border-line px-3 py-2.5"><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{v.patient.fullName}</span>
@@ -273,7 +284,6 @@ export function FrontDesk() {
   return (
     <div className="fd flex min-h-0 flex-1 flex-col">
       <h1 className="sr-only">Calendar</h1>
-      {tab !== 'history' && can(perms, 'worklist.write') && <WeekToSend className="mb-3 no-print" />}
       {tab !== 'history' && !onSchedule && <div className="mb-3 flex flex-wrap items-center gap-2.5 no-print">
         {canDesk && <Segmented<'schedule' | 'table'> size="sm" value={view} onChange={setView} options={[{ value: 'schedule', label: 'Calendar' }, { value: 'table', label: 'List' }]} />}
         <span className="ml-auto" />

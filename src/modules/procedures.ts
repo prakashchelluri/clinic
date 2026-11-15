@@ -86,8 +86,7 @@ export const weekOf = (day: string) => addDays(day, -((new Date(day + 'T00:00:00
 /**
  * The doctor's say on a sitting someone books or moves. Its own doctor booking or moving it approves it. Anyone else's goes to
  * that doctor: straight away when its week was already sent (or is this week or earlier), otherwise it waits as a draft until
- * the coordinator sends the week. A sitting with no doctor (only ones booked before a doctor was required) stays a draft
- * and cannot be sent until someone picks its doctor.
+ * the coordinator sends the week. Every sitting has a doctor (required since 15 Nov 2026; older ones were given their course's).
  */
 export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string) {
   const now = new Date().toISOString();
@@ -392,10 +391,8 @@ export function procedureRoutes(app: FastifyInstance) {
     const wk = await tx.select().from(procedureWeek).where(and(eq(procedureWeek.tenantId, t), eq(procedureWeek.weekStart, start))).then((r) => r[0]);
     const rows = await tx.update(procedureSession).set({ approval: 'sent' })
       .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, start), lte(procedureSession.day, addDays(start, 6)), eq(procedureSession.approval, 'draft'), eq(procedureSession.state, 'confirmed'), sql`${procedureSession.practitionerId} is not null`)).returning({ id: procedureSession.id });
-    // a session with no doctor has nobody to approve it: it stays Not sent until the coordinator picks one
-    const [{ noDoctor }] = await tx.select({ noDoctor: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, start), lte(procedureSession.day, addDays(start, 6)), eq(procedureSession.approval, 'draft'), eq(procedureSession.state, 'confirmed'), sql`${procedureSession.practitionerId} is null`));
     await emit(tx, req.ctx, 'procedure_week.sent', 'procedure_week', wk.id, { start, sittings: rows.length });
-    return { start, sent: rows.length, noDoctor };
+    return { start, sent: rows.length };
   });
 
   /** The doctor's sittings waiting for their approval, with the rest of those weeks around them, the course behind each, and their leave. */

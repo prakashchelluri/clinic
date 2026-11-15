@@ -5,7 +5,7 @@ import { appointment, callback, course, encounter, message, patient, practitione
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
-import { HttpError, type Ctx } from '../lib/auth.js';
+import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { clinical } from './patients.js';
 import { dayBounds } from './billing.js';
@@ -149,7 +149,11 @@ export function followupRoutes(app: FastifyInstance) {
     const calls = (await build(tx, t, req.ctx.timezone, false)).filter((r) => { const d = r.lastCall?.callbackOn ?? r.dueOn ?? today; return d <= today && d >= addDays(today, -30); }).length;
     const [s] = await tx.select({ n: sql<number>`count(*)::int`, unconfirmed: sql<number>`count(*) filter (where ${procedureSession.state} = 'confirmed' and ${procedureSession.patientConfirmedAt} is null)::int` })
       .from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, today), inArray(procedureSession.state, ['confirmed', 'in_progress'])));
-    return { calls, sittings: s.n, unconfirmed: s.unconfirmed };
+    // for the desk and the coordinator: sessions still to send for the doctor's approval, and the first week they are in
+    const [d] = can(req.perms, 'worklist.write') ? await tx.select({ n: sql<number>`count(*)::int`, first: sql<string | null>`min(${procedureSession.day})::text` }).from(procedureSession)
+      .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, today), eq(procedureSession.state, 'confirmed'), eq(procedureSession.approval, 'draft'), sql`${procedureSession.practitionerId} is not null`)) : [{ n: 0, first: null }];
+    const week = d.first ? addDays(d.first, -((new Date(d.first + 'T00:00:00Z').getUTCDay() + 6) % 7)) : null;
+    return { calls, sittings: s.n, unconfirmed: s.unconfirmed, toSend: { n: d.n, week } };
   });
 
   /** One call attempt. Call later needs a date (a Sunday asks to be confirmed); Not interested needs a reason; No answer can send a short message. */

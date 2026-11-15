@@ -3,7 +3,6 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
 import { can } from '../App';
-import { WeekToSend } from '../procReview';
 import { ProcToday } from './ProcToday';
 import { ProcWeek } from './ProcWeek';
 import { CourseList, clashLabel } from '../procBoard';
@@ -13,6 +12,8 @@ type View = 'today' | 'week' | 'courses';
 /** Procedures: today's sittings by the hour, the week the coordinator plans and sends to the doctors, and every course on one board. */
 export function Worklist() {
   const [sp, setSp] = useSearchParams(); const { perms } = useOutletContext<any>();
+  // the Week plan tab counts the sessions still to send for the doctor's approval (the desk and the coordinator)
+  const mc = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: can(perms, 'worklist.write'), refetchInterval: 30000 });
   const tab = sp.get('tab');
   // older links: schedule = today, plans = week (Pending schedules), board = courses
   const view: View = tab === 'week' || tab === 'plans' ? 'week' : tab === 'courses' || tab === 'board' ? 'courses' : 'today';
@@ -20,8 +21,7 @@ export function Worklist() {
   return (
     <div>
       <PageHeader title="Procedures" />
-      {view !== 'week' && can(perms, 'worklist.write') && <WeekToSend className="mb-3" />}
-      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sessions" }, { value: 'week', label: 'Week plan' }, { value: 'courses', label: 'All courses' }]} />
+      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sessions" }, { value: 'week', label: 'Week plan', count: mc.data?.toSend?.n || undefined }, { value: 'courses', label: 'All courses' }]} />
       {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <CourseList />}
     </div>
   );

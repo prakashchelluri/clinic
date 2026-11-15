@@ -141,12 +141,19 @@ test('every session needs a doctor, and only its own doctor booking it counts as
   const own = (await O('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(mon, 1), startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
   assert.equal(own.approval, 'approved');
 
-  // an old session with no doctor is never approved by default and is not sent; the send says how many wait for a doctor
+  // the desk's to-do: the Procedures menu badge and the Action panel count what is not sent, and name the first week
+  const mc = (await R('GET', '/followups/menu-counts')).body.toSend;
+  assert.equal(mc.n, 1); assert.equal(mc.week, mon);
+  assert.equal((await O('GET', '/followups/menu-counts')).body.toSend.n, 1, 'the owner schedules too');
+  assert.equal((await as(await login('doctor2@demo.clinic'))('GET', '/followups/menu-counts')).body.toSend.n, 0, 'a doctor who does not schedule is not asked to send');
+
+  // a session with no doctor (none can be booked now) is never approved by default and is not sent to anybody
   const old = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(mon, 2), startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
   await withTenant(p.tenantId, SYS, (tx) => tx.update(procedureSession).set({ practitionerId: null }).where(eq(procedureSession.id, old.id)));
   assert.equal((await C('GET', `/procedure-weeks/${mon}`)).body.sent, false);
   const sent = (await C('POST', `/procedure-weeks/${mon}/send`)).body;
-  assert.equal(sent.sent, 1); assert.equal(sent.noDoctor, 1);
+  assert.equal(sent.sent, 1);
+  assert.equal((await R('GET', '/followups/menu-counts')).body.toSend.n, 0, 'sent: off the to-do');
   assert.equal((await C('GET', `/procedure-sessions/${old.id}`)).body.approval, 'draft');
   assert.equal((await C('GET', `/procedure-sessions/${s.id}`)).body.approval, 'sent');
   // the coordinator picks the doctor: it goes to them straight away, as the week was sent

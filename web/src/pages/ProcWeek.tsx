@@ -59,7 +59,7 @@ export function ProcWeek() {
 
   const q = useQuery({ queryKey: ['psessions', 'week', mon], queryFn: () => get(`/procedure-sessions?from=${mon}&to=${days[5]}&active=1`), refetchInterval: 20000 });
   const wk = useQuery({ queryKey: ['pweek', mon], queryFn: () => get(`/procedure-weeks/${mon}`) });
-  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval.${r.noDoctor ? ` ${r.noDoctor} with no doctor stay Not sent: pick their doctor.` : ''} From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
+  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval. From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: () => { refreshProcedures(); toast('Noted: the patient said yes', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
   const all: any[] = q.data ?? [];
@@ -97,14 +97,13 @@ export function ProcWeek() {
   // what the week holds, and the Send review
   const booked = all.filter((s) => s.state === 'confirmed');
   const n = (a: string) => booked.filter((s) => s.approval === a).length;
-  // every session needs its doctor's approval: a Not sent one with a doctor goes in the Send; one with no doctor needs one picked first
+  // every session has a doctor, who approves it: the Not sent ones go in the Send
   const drafts = booked.filter((s) => s.approval === 'draft');
   const sendable = drafts.filter((s) => s.practitionerId);
-  const noDoc = drafts.filter((s) => !s.practitionerId);
   const byDoc = [...new Set(sendable.map((s) => s.doctor ?? ''))].map((name) => ({ name, list: sendable.filter((s) => (s.doctor ?? '') === name) }));
   const asked = booked.filter((s) => s.approval === 'change');
   const byPlan = all.filter((s: any) => s.autoBooked && s.state === 'confirmed').length;
-  const sendWhy = sendable.length ? '' : noDoc.length ? `${noDoc.length} need a doctor first` : !booked.length ? 'Nothing booked this week' : n('sent') ? 'All sent, waiting for the doctors' : 'Nothing to send';
+  const sendWhy = sendable.length ? '' : !booked.length ? 'Nothing booked this week' : n('sent') ? 'All sent, waiting for the doctors' : 'Nothing to send';
   const tapOk = (key: string) => !!tap && !check(tap, key);
 
   const opened = all.find((s) => s.id === openId);
@@ -137,8 +136,8 @@ export function ProcWeek() {
               {n('approved') > 0 && <Chip tone="sage">{`Approved ${n('approved')}`}</Chip>}
               {byPlan > 0 && <Chip>{`Booked by the plan ${byPlan}`}</Chip>}
             </span>
-            {canWrite && <button type="button" className="btn btn-primary" disabled={!drafts.length} title={sendWhy || undefined} onClick={() => setReview(true)}><Icon name="check" />{sendable.length ? `Send ${sendable.length} for doctor approval` : 'Send for doctor approval'}</button>}
-            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent && mon > mondayOf(t) && !noDoc.length ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
+            {canWrite && <button type="button" className="btn btn-primary" disabled={!sendable.length} title={sendWhy || undefined} onClick={() => setReview(true)}><Icon name="check" />{sendable.length ? `Send ${sendable.length} for doctor approval` : 'Send for doctor approval'}</button>}
+            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent && mon > mondayOf(t) ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
           </div>
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">
@@ -171,10 +170,6 @@ export function ProcWeek() {
 
       {review && <Modal title="Send for doctor approval?" subtitle={`Week of ${rangeText(mon)}`} onClose={() => setReview(false)} width="max-w-lg">
         <div className="space-y-3">
-          {noDoc.length > 0 && <div className="rounded-[10px] bg-amber-soft px-3.5 py-2.5 text-[13.5px] text-amber">
-            <b>Pick a doctor first · {noDoc.length}</b><span className="block text-[12.5px]">Every session needs its doctor's approval. These stay Not sent until a doctor is picked.</span>
-            {noDoc.map((s) => <div key={s.id} className="mt-1.5 flex items-center gap-2 text-ink"><span className="min-w-0 flex-1 truncate text-[13px]">{s.patient.fullName} · {s.procedure ?? 'Procedure'} · {fmt(s.day, { weekday: 'short' })} {t12(s.startTime)}</span><button className="btn btn-sm" onClick={() => setAssigning(s)}>Pick doctor</button></div>)}</div>}
-          {!byDoc.length && <div className="text-[13.5px] text-muted">Nothing can go yet: pick the doctors above.</div>}
           {byDoc.map((d) => (
             <div key={d.name} className="flex gap-4 border-t border-line pt-3 first:border-t-0 first:pt-0">
               <span className="min-w-[34px] text-right text-[26px] font-extrabold leading-none">{d.list.length}</span>
