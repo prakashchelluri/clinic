@@ -126,20 +126,21 @@ async function conflicts(tx: Tx, t: string, day: string, start: string, end: str
 
 /**
  * The next sitting, booked by the plan when one is done: the gap after the day it was done, the same time, room and doctor.
- * If that is taken (or the doctor is away) it takes the nearest free time that day, else the next day; Sundays are skipped and it looks
+ * If that is taken (or the doctor is away) it takes the nearest free time that day, else the next day; a Sunday is skipped unless the doctor works Sundays, and it looks
  * a week ahead at most. Tentative (the coordinator confirms it with the patient in the week before); nothing is booked when nothing fits.
  */
 async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$inferSelect, gapDays: number) {
   const t = ctx.tenantId; const want = toMin(done.startTime);
   const rec = await tx.select({ practitionerId: recommendation.practitionerId, encounterId: recommendation.encounterId }).from(recommendation).where(eq(recommendation.id, done.recommendationId)).then((r) => r[0]);
   const doctor = done.practitionerId ?? (rec ? await courseDoctor(tx, rec) : null); // every session has a doctor; an old one without takes the course's
+  const worksSunday = doctor ? !!(await tx.select({ r: practitioner.routine }).from(practitioner).where(eq(practitioner.id, doctor)).then((r) => r[0]?.r?.days?.['0']?.length)) : false;
   const proc = done.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, done.procedureId)).then((r) => r[0]) : null;
   const def = sessionDef(proc, done.sittingNo + 1); // the next session as set up in Settings: its own length
   const span = def ? def.minutes + (proc?.bufferMinutes ?? 0) : toMin(done.endTime) - toMin(done.startTime);
   const first = addDays(done.day, gapDays);
   for (let k = 0; k < 7; k++) {
     const day = addDays(first, k);
-    if (new Date(day + 'T00:00:00Z').getUTCDay() === 0) continue; // Sunday
+    if (new Date(day + 'T00:00:00Z').getUTCDay() === 0 && !worksSunday) continue; // Sunday, when the doctor does not work it
     // the same start first, then the nearest half hour either side, inside the day
     const starts = [want, ...Array.from({ length: 22 }, (_, i) => want + (i % 2 ? -1 : 1) * 30 * (Math.floor(i / 2) + 1))].filter((m) => m >= 9 * 60 && m + span <= DAY_END);
     for (const m of starts) {
