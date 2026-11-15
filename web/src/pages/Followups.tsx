@@ -41,10 +41,13 @@ const when = (at: string) => `${fmtDate(at.slice(0, 10))}, ${fmtTime(at.replace(
 const status = (r: any) => {
   const c = r.lastCall; if (!c) return 'Not called';
   if (c.outcome === 'call_later' && c.callbackOn) return days(c.callbackOn) === 0 ? 'Call back today' : `Call back ${fmtDate(c.callbackOn)}`;
-  // "No answer · 2 attempts · 3:40 pm by Lakshmi": the next person sees it was tried, when and by whom
+  return `${OUT[c.outcome as Out] ?? c.outcome} · ${c.attempts} attempt${c.attempts === 1 ? '' : 's'}`;
+};
+/** On hover over the call status: when the last call was and who made it ("Last call 3:40 pm by Lakshmi") */
+const lastCallTip = (r: any) => {
+  const c = r.lastCall; if (!c) return undefined;
   const t = new Date(c.at.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'));
-  const at = t.toDateString() === new Date().toDateString() ? fmtTime(t.toISOString()) : when(c.at);
-  return `${OUT[c.outcome as Out] ?? c.outcome} · ${c.attempts} attempt${c.attempts === 1 ? '' : 's'} · ${at} by ${String(c.by).split(' (')[0]}`;
+  return `Last call ${t.toDateString() === new Date().toDateString() ? fmtTime(t.toISOString()) : when(c.at)} by ${String(c.by).split(' (')[0]}`;
 };
 
 /** Calls: who to ring on a day (or across a week), in one table by due date. A row opens the call in the side drawer. */
@@ -98,7 +101,7 @@ export function Calls() {
     { key: 'phone', label: 'Phone', csv: (r) => r.patient.phone, cell: (r) => r.patient.phone ? <span className="whitespace-nowrap tabular-nums">{r.patient.phone}</span> : <span className="text-muted">No phone</span> },
     { key: 'type', label: 'Type', sort: (r) => Number(isProc(r)), csv: (r) => isProc(r) ? 'Procedure' : 'Consultation', cell: (r) => <Chip tone={isProc(r) ? 'sage' : 'clay'}>{isProc(r) ? 'Procedure' : 'Consultation'}</Chip> },
     { key: 'reason', label: 'Reason', sort: (r) => reason(r), csv: (r) => `${reason(r)}: ${r.what}`, cell: (r) => <span className="whitespace-nowrap">{reason(r)}</span> },
-    { key: 'status', label: 'Call status', sort: (r) => -(r.lastCall?.attempts ?? 0), csv: (r) => status(r), cell: (r) => <span className={`whitespace-nowrap ${r.lastCall ? '' : 'text-muted'}`}>{status(r)}</span> },
+    { key: 'status', label: 'Call status', sort: (r) => -(r.lastCall?.attempts ?? 0), csv: (r) => status(r), cell: (r) => <span title={lastCallTip(r)} className={`whitespace-nowrap ${r.lastCall ? 'cursor-help' : 'text-muted'}`}>{status(r)}</span> },
     { key: 'act', label: '', fixed: true, align: 'right', className: 'dt-act', cell: (r) => (
       // the two everyday outcomes are buttons (No answer, and Book or Confirmed); the rest are in the menu and the drawer
       <span className="inline-flex items-center justify-end gap-1.5 whitespace-nowrap">
