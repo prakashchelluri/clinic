@@ -262,7 +262,9 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
               const names = chips.length > 0 && <div className="fd-hchips">{chips.map((p) => <Chip key={p.id} {...p} />)}</div>;
               if (c.room) return roomCell(c, r, key, nowC, chips);
               if (!wsAt.length) return <div key={key} className={`fd-hc ${chips.length ? '' : 'off'} ${nowC}`}>{names || (c.ws.length ? '' : 'Not in')}</div>;
-              const past = gone(c.day, r.end); const one = wsAt.length === 1 ? wsAt[0] : null; // "+ Book" and drop need one doctor's hour
+              // "+ Book" and drop need one doctor's hour; two windows of the same doctor and hour (never meant to happen) book into the freer one
+              const past = gone(c.day, r.end); const sameHour = wsAt.every((w) => w.practitionerId === wsAt[0].practitionerId && w.startTime === wsAt[0].startTime && w.endTime === wsAt[0].endTime);
+              const one = wsAt.length === 1 || sameHour ? [...wsAt].sort((a, b) => b.free - a.free)[0] : null;
               const shut = wsAt.every((w) => w.effectiveCapacity === 0 && w.reductions?.length);
               const canDrop = !!onBook && !!one && !past && !shut;
               // the doctor's own procedure in this hour sits in the grid like any booking

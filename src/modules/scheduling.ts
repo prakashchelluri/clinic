@@ -46,17 +46,25 @@ export async function ensureDaySessions(tx: Tx, t: string, day: string) {
   const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
   const withRoutine = docs.filter((d) => d.routine?.days?.[String(weekday(day))]?.length);
   if (!withRoutine.length) return;
-  const existing = await tx.select({ p: session.practitionerId, s: session.startTime, e: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day)));
-  const values: any[] = [];
-  for (const d of withRoutine) {
-    // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
-    const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
-    const r = d.routine as Routine; const len = r.windowMinutes || 60;
-    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < endMin(end); m += len) {
-      const e = Math.min(m + len, endMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
-      if (!mine.some(([s, x]) => s < e && x > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(e), capacity: r.capacity || 7, source: 'routine' });
+  const missing = async () => {
+    const existing = await tx.select({ p: session.practitionerId, s: session.startTime, e: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day)));
+    const values: any[] = [];
+    for (const d of withRoutine) {
+      // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
+      const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
+      const r = d.routine as Routine; const len = r.windowMinutes || 60;
+      for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < endMin(end); m += len) {
+        const e = Math.min(m + len, endMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
+        if (!mine.some(([s, x]) => s < e && x > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(e), capacity: r.capacity || 7, source: 'routine' });
+      }
     }
-  }
+    return values;
+  };
+  if (!(await missing()).length) return;
+  // Two screens opening the same day at once (the calendar asks for it several ways) must not both fill it: that left every
+  // hour twice, and an hour with two windows offers no "+ Book". One request fills the day; the other waits, then finds it full.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`day-windows:${t}:${day}`}))`);
+  const values = await missing();
   if (!values.length) return;
   const br = (await tx.select().from(branch).where(eq(branch.tenantId, t)))[0];
   await tx.insert(session).values(values.map((v) => ({ ...v, branchId: br.id })));
