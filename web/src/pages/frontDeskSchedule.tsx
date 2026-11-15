@@ -84,10 +84,9 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
   const roomList = rooms.map((r) => ({ key: `r:${r.id}`, label: r.name as string, on: roomOn(r.id) }));
   const [weekDoc, setWeekDoc] = useState<string | null>(null); // Week shows one doctor's week at a time; a tab per shown doctor picks whose
   const [pickOpen, setPickOpen] = useState(false); const pickBtn = useRef<HTMLButtonElement>(null);
-  const onD = docList.filter((c) => c.on), onR = roomList.filter((c) => c.on);
+  const onR = roomList.filter((c) => c.on);
   // what the closed button says: up to two names, else counts, so the bar stays one line
   const n = (k: number, one: string) => `${k} ${one}${k === 1 ? '' : 's'}`;
-  const summary = onD.length + onR.length === 0 ? 'Nothing' : onD.length + onR.length === 1 ? [...onD, ...onR][0].label : onD.length === docList.length && !onR.length ? 'All doctors' : [onD.length && n(onD.length, 'doctor'), onR.length && n(onR.length, 'room')].filter(Boolean).join(' · ');
   const tick = (c: { key: string; label: string; on: boolean }) => <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-[13.5px] hover:bg-paper-2"><input type="checkbox" className="accent-ink h-4 w-4" checked={c.on} onChange={(e) => setShown(c.key, e.target.checked)} />{c.label}</label>;
   const bar = (
     <div className="fd-sch-bar">
@@ -96,16 +95,17 @@ export function DaySchedule({ today, visitsToday, doctors, rooms, selectedId, ki
       <button type="button" className="btn btn-icon !h-8 !w-8" aria-label={week ? 'Next week' : 'Next day'} onClick={() => setDay(shift(day, step))}><Icon name="chevR" className="h-4 w-4" /></button>
       <Segmented<'day' | 'week'> size="sm" value={mode} onChange={(m) => { setMode(m); if (m === 'day') setDay(today); }} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }]} />
       {!week && !isToday && <button type="button" className="btn btn-sm" onClick={() => setDay(today)}>Back to today</button>}
+      {/* the doctors as pills: tap one to show or hide that doctor's column */}
+      {docList.length > 1 && <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Doctors">{docList.map((c) => <button key={c.key} type="button" aria-pressed={c.on} title={c.on ? 'Shown · tap to hide' : 'Hidden · tap to show'} className={`toggle-opt !px-3 !py-1 ${c.on ? 'on' : ''}`} onClick={() => setShown(c.key, !c.on)}>{c.label}</button>)}</div>}
       <span className="ml-auto" />
       {/* one Filter (v63): which visits, whose calendars, free slots; the button says what is narrowed */}
       <button ref={pickBtn} type="button" className="btn btn-sm max-w-[280px]" aria-haspopup="true" aria-expanded={pickOpen} onClick={() => setPickOpen(!pickOpen)}>
-        <Icon name="filter" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="min-w-0 truncate">{[kindF === 'consult' ? 'Consults' : kindF === 'proc' ? 'Procedures' : null, docList.length + roomList.length > 1 ? summary : null].filter(Boolean).join(' · ') || 'Filter'}</span>
+        <Icon name="filter" className="h-3.5 w-3.5 shrink-0 text-muted" /><span className="min-w-0 truncate">{[kindF === 'consult' ? 'Consults' : kindF === 'proc' ? 'Procedures' : null, onR.length ? (onR.length === 1 ? onR[0].label : n(onR.length, 'room')) : null].filter(Boolean).join(' · ') || 'Filter'}</span>
         <Icon name="chevR" className="h-3.5 w-3.5 shrink-0 rotate-90 text-muted" /></button>
       <Floating anchor={pickBtn} open={pickOpen} onClose={() => setPickOpen(false)} width={260}>
         <div className="max-h-[60vh] overflow-y-auto p-1.5">
           <div className="px-2.5 pb-1 pt-1.5 text-[12px] font-medium text-muted">Visits</div>
           {([['all', 'All visits'], ['consult', 'Consults only'], ['proc', 'Procedures only']] as const).map(([v, l]) => <label key={v} className="flex cursor-pointer items-center gap-2.5 rounded-[6px] px-2.5 py-2 text-[13.5px] hover:bg-paper-2"><input type="radio" name="fd-kind" className="accent-ink h-4 w-4" checked={kindF === v} onChange={() => setShown('kind', v)} />{l}</label>)}
-          {docList.length > 1 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Doctors</div>{docList.map(tick)}</>}
           {roomList.length > 0 && <><div className="mt-1 border-t border-line px-2.5 pb-1 pt-2.5 text-[12px] font-medium text-muted">Rooms</div>{roomList.map(tick)}</>}
           {onBook && <><div className="mt-1 border-t border-line" />{tick({ key: 'free', label: 'Show free slots', on: showFree })}</>}
         </div>
