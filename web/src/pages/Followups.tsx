@@ -41,7 +41,10 @@ const when = (at: string) => `${fmtDate(at.slice(0, 10))}, ${fmtTime(at.replace(
 const status = (r: any) => {
   const c = r.lastCall; if (!c) return 'Not called';
   if (c.outcome === 'call_later' && c.callbackOn) return days(c.callbackOn) === 0 ? 'Call back today' : `Call back ${fmtDate(c.callbackOn)}`;
-  return `${OUT[c.outcome as Out] ?? c.outcome}${c.attempts > 1 ? ` · ${c.attempts} tries` : ''}`;
+  // "No answer · 2 attempts · 3:40 pm by Lakshmi": the next person sees it was tried, when and by whom
+  const t = new Date(c.at.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'));
+  const at = t.toDateString() === new Date().toDateString() ? fmtTime(t.toISOString()) : when(c.at);
+  return `${OUT[c.outcome as Out] ?? c.outcome} · ${c.attempts} attempt${c.attempts === 1 ? '' : 's'} · ${at} by ${String(c.by).split(' (')[0]}`;
 };
 
 /** Calls: who to ring on a day (or across a week), in one table by due date. A row opens the call in the side drawer. */
