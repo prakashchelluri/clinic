@@ -103,7 +103,7 @@ export function ProcWeek() {
   const byDoc = [...new Set(sendable.map((s) => s.doctor ?? ''))].map((name) => ({ name, list: sendable.filter((s) => (s.doctor ?? '') === name) }));
   const asked = booked.filter((s) => s.approval === 'change');
   const byPlan = all.filter((s: any) => s.autoBooked && s.state === 'confirmed').length;
-  const sendWhy = sendable.length ? '' : !booked.length ? 'Nothing booked this week' : n('sent') ? 'All sent, waiting for the doctors' : 'Nothing to send';
+  const sendWhy = sendable.length ? '' : !booked.length ? 'Nothing booked this week' : n('sent') ? 'All sent, approval pending' : 'Nothing to send';
   const tapOk = (key: string) => !!tap && !check(tap, key);
 
   const opened = all.find((s) => s.id === openId);
@@ -131,7 +131,7 @@ export function ProcWeek() {
             <Floating anchor={rangeBtn} open={calOpen} onClose={() => setCalOpen(false)} width={292} align="left"><MiniCal mon={mon} onPick={(m) => { setMon(m); setCalOpen(false); }} /></Floating>
             <span className="ml-auto flex flex-wrap items-center gap-1.5" aria-label="Where this week stands">
               {n('draft') > 0 && <Chip tone="clay">{`Not sent ${n('draft')}`}</Chip>}
-              {n('sent') > 0 && <Chip tone="amber">{`With the doctor ${n('sent')}`}</Chip>}
+              {n('sent') > 0 && <Chip tone="amber">{`Approval pending ${n('sent')}`}</Chip>}
               {n('change') > 0 && <Chip tone="rose">{`Sent back ${n('change')}`}</Chip>}
               {n('approved') > 0 && <Chip tone="sage">{`Approved ${n('approved')}`}</Chip>}
               {byPlan > 0 && <Chip>{`Booked by the plan ${byPlan}`}</Chip>}
