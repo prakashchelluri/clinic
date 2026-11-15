@@ -124,7 +124,7 @@ function Overview({ d }: { d: any }) {
         <Stat key={k} label={l} delay={i * 30} tone={k === 'collectedPaise' ? 'sage' : ''} value={d.now[k] === null ? '–' : isMoney ? money(d.now[k]) : k === 'waitMin' ? `${d.now[k]} min` : d.now[k]}
           sub={<span className="text-xs"><Change now={d.now[k]} before={d.before[k]} lowerIsBetter={low} /></span>} />))}
     </div>
-    {d.now.collectedPaise !== null && <div className="text-xs text-muted">{d.doctor ? "Collected is what was paid for this doctor's consultations and sessions in these dates, less refunds. Pharmacy and course advances are not split by doctor." : <>Collected is the End of day figure: payments received in these dates, less refunds, pharmacy included. <Link className="underline" to="/accounts">Accounts</Link> has the full picture.</>}</div>}
+    {d.now.collectedPaise !== null && <div className="text-xs text-muted">{d.doctor ? "Collected is what was paid for this doctor's consultations and sessions in these dates, less refunds. Pharmacy, patient advances and whole-treatment invoices are not split by doctor." : <>Collected is the End of day figure: payments received in these dates, less refunds, pharmacy included. <Link className="underline" to="/accounts">Accounts</Link> has the full picture.</>}</div>}
     <Section title={<>Visits per day <span className="font-normal text-muted">· average {d.overview.averagePerDay}</span></>}>
       <Columns label="Visits per day" average={d.overview.averagePerDay} rows={d.overview.trend.map((x: any) => ({ key: x.day, label: span <= 14 ? fmtDate(x.day).split(' ')[0] : '', title: fmtDate(x.day), n: x.visits }))} />
     </Section>

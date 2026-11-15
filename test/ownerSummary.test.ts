@@ -30,7 +30,7 @@ test('owner summary: today equals End of day, a part-paid visit shows as due, re
   assert.equal(s.body.todayMoney.total.total, eod.money.total.total, 'the Clinic page and End of day show the same collected figure');
   assert.equal(s.body.week.at(-1).day, s.body.today, 'the week ends with today');
   assert.equal(s.body.week.at(-1).totalPaise, eod.money.total.total);
-  assert.ok(s.body.dues.totalPaise >= 30000 && s.body.dues.patients >= 1, 'the part-paid fee counts as money still due');
+  assert.ok(s.body.dues.totalPaise >= 20000 && s.body.dues.patients >= 1, 'the part-paid fee counts as money still due (only what is left: ₹300 fee − ₹100 paid)');
   assert.ok(Array.isArray(s.body.unclosed));
 
   assert.equal((await R('GET', '/owner/summary')).status, 403, 'reception does not see the owner figures');

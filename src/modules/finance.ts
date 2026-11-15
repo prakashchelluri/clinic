@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { appUser, charge, course, dayClose, expense, patient, payment, pharmacySale, procedureCatalog, stockBatch } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { chargeBalance } from '../lib/money.js';
 import { addDays, daysBetween, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { dayBounds } from './billing.js';
@@ -57,12 +58,13 @@ export function financeRoutes(app: FastifyInstance) {
     }
 
     // not in yet: owed by patients (any date), EMI the lender has not paid, and what went back or was let go in the range
-    const dueRows = await tx.select({ c: charge, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(charge).innerJoin(patient, eq(patient.id, charge.patientId))
+    const dueRows = await tx.select({ c: charge, bal: chargeBalance, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(charge).innerJoin(patient, eq(patient.id, charge.patientId))
       .where(and(eq(charge.tenantId, t), eq(charge.status, 'due'))).orderBy(asc(charge.createdAt));
     const owed = new Map<string, { patientId: string; name: string; phone: string | null; patientNo: string; totalPaise: number; since: string; items: string[] }>();
     for (const r of dueRows) {
+      if (r.bal <= 0) continue;
       const o = owed.get(r.c.patientId) ?? { patientId: r.c.patientId, name: r.name, phone: r.phone, patientNo: r.no, totalPaise: 0, since: todayIn(tz, new Date(r.c.createdAt)), items: [] };
-      o.totalPaise += r.c.amountPaise; o.items.push(r.c.description); owed.set(r.c.patientId, o);
+      o.totalPaise += r.bal; o.items.push(r.c.description); owed.set(r.c.patientId, o); // what is still owed on it, part payments taken off
     }
     const emi = (await tx.select({ n: sql<number>`count(*)::int`, total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int` }).from(payment)
       .where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt))))[0];

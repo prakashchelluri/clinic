@@ -113,7 +113,7 @@ test('invoice menu: cancel only unpaid, exclude from tax reports, discount cap (
 
   // receipt carries everything taken together
   const rc = (await reception('GET', `/receipts/${take.body.receiptNo}`)).body;
-  assert.equal(rc.totalPaise, 100000); assert.equal(rc.lines[0].description, 'Peel 2'); assert.equal(rc.patient.fullName, 'Menu Wave4');
+  assert.equal(rc.totalPaise, 100000); assert.match(rc.lines[0].description, /^INV-\d+ · Peel 2$/, 'the receipt names the invoice it paid'); assert.equal(rc.patient.fullName, 'Menu Wave4');
 
   // discount on the bill: within the cap with the permission it applies; the owner's own discount needs nobody
   const bill = (who: Call, disc: number, key: string, reason = 'known person') => who('POST', '/bills', { patientId: p.id, lines: [{ chargeId: c.id, discountPaise: disc }], reason, idempotencyKey: key });

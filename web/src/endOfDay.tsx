@@ -38,7 +38,7 @@ export function EndOfDay({ day }: { day: string }) {
           <div><div className="text-xs text-muted">The app says</div><div className="serif text-xl">{money(d.drawer.expectedCashPaise)}</div><div className="text-xs text-muted">cash taken, less {money(d.drawer.expensesCashPaise)} cash expenses</div></div>
           <div><label className="label" htmlFor="counted">Counted</label>{locked ? <div className="serif text-xl">{money(d.closed.cashCountedPaise)}</div> : <MoneyInput id="counted" value={counted} onChange={setCounted} />}</div>
           {cashDiff !== null && !locked && (cashDiff === 0 ? <Chip tone="sage">matches</Chip> : <Chip tone="amber">{cashDiff > 0 ? 'over' : 'short'} by {money(Math.abs(cashDiff))}</Chip>)}
-          {!locked && needNote('cash') && <div className="min-w-[220px] flex-1"><label className="label" htmlFor="n-cash">Why</label><input id="n-cash" className="input" maxLength={300} value={notes.cash ?? ''} onChange={(e) => setNotes({ ...notes, cash: e.target.value })} /></div>}
+          {!locked && needNote('cash') && <div className="min-w-[220px] flex-1"><label className="label" htmlFor="n-cash">Why the cash differs</label><input id="n-cash" className="input" maxLength={300} value={notes.cash ?? ''} onChange={(e) => setNotes({ ...notes, cash: e.target.value })} /></div>}
           {locked && d.closed.notes.cash && <div className="text-muted">Note: {d.closed.notes.cash}</div>}
         </div>
       </Section>

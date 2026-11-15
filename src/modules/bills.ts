@@ -37,7 +37,7 @@ export async function advanceBalance(tx: Tx, t: string, patientId: string) {
   return r?.n ?? 0;
 }
 
-type Item = { what: string; gross: number; prior: number; disc: number; canDiscount: boolean; why?: string; chargeId?: string; courseId?: string; at: string; tax?: number; isNew?: boolean };
+type Item = { what: string; gross: number; prior: number; disc: number; canDiscount: boolean; why?: string; chargeId?: string; courseId?: string; procedureId?: string; at: string; tax?: number; isNew?: boolean };
 type BillBody = z.infer<typeof Bill>;
 
 const paidOn = async (tx: Tx, ids: string[]) => {
@@ -80,7 +80,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     const t = req.ctx.tenantId; const ctx = req.ctx;
     const dup = await tx.select({ p: domainEvent.payload }).from(domainEvent).where(and(eq(domainEvent.tenantId, t), eq(domainEvent.type, 'bill.created'), sql`${domainEvent.payload}->>'key' = ${b.idempotencyKey}`)).limit(1);
     if (dup.length) return { ...(dup[0].p as any), repeated: true };
-    if (b.parts.length) await assertDayOpen(tx, ctx);
+    if (b.parts.some((p) => p.method !== 'advance')) await assertDayOpen(tx, ctx); // the advance used on a bill moves no money: allowed after the day is closed
     for (const p of b.parts) if (p.method === 'emi' && (!p.lender || !p.reference)) throw new HttpError(400, 'EMI_NEEDS_LENDER_AND_APPROVAL_CODE');
     const pt = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.id, b.patientId), eq(patient.tenantId, t))).then((r) => r[0]);
     if (!pt) throw new HttpError(404, 'PATIENT_NOT_FOUND');
@@ -103,10 +103,11 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
         const p = await tx.select().from(procedureCatalog).where(and(eq(procedureCatalog.id, l.procedureId), eq(procedureCatalog.tenantId, t))).then((r) => r[0]);
         if (!p) throw new HttpError(404, 'PROCEDURE_NOT_FOUND');
         if (!p.pricePaise) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
-        items.push({ what: l.qty > 1 ? `${p.name} × ${l.qty}` : p.name, gross: p.pricePaise * l.qty, prior: 0, disc: l.discountPaise, canDiscount: true, isNew: true, tax: p.taxRateBp, at: new Date().toISOString() });
+        items.push({ what: l.qty > 1 ? `${p.name} × ${l.qty}` : p.name, gross: p.pricePaise * l.qty, prior: 0, disc: l.discountPaise, canDiscount: true, isNew: true, tax: p.taxRateBp, procedureId: p.id, at: new Date().toISOString() });
       } else if (l.serviceId) {
         const s = await tx.select().from(service).where(and(eq(service.id, l.serviceId), eq(service.tenantId, t))).then((r) => r[0]);
         if (!s) throw new HttpError(404, 'SERVICE_NOT_FOUND');
+        if (s.feeCategoryId) throw new HttpError(400, 'CONSULTATION_AT_CHECK_IN'); // a visit type is charged at check-in, where its fee rules apply
         if (!s.pricePaise) throw new HttpError(400, 'NO_PRICE_ON_THE_PRICE_LIST');
         items.push({ what: l.qty > 1 ? `${s.name} × ${l.qty}` : s.name, gross: s.pricePaise * l.qty, prior: 0, disc: l.discountPaise, canDiscount: true, isNew: true, tax: 0, at: new Date().toISOString() });
       } else {
@@ -116,7 +117,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
         if (st.uninvoicedPaise <= 0) throw new HttpError(409, 'ALREADY_INVOICED');
         if (c.validUntil && c.validUntil < todayIn(ctx.timezone)) throw new HttpError(409, 'PACKAGE_EXPIRED', { validUntil: c.validUntil });
         const proc = c.procedureId ? await tx.select({ n: procedureCatalog.name, tax: procedureCatalog.taxRateBp }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]) : null;
-        items.push({ what: `${proc?.n ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${c.sittings} session${c.sittings === 1 ? '' : 's'}${st.invoicedPaise ? ', the rest' : ''}`, gross: st.uninvoicedPaise, prior: 0, disc: l.discountPaise, canDiscount: true, courseId: c.id, isNew: true, tax: proc?.tax ?? 0, at: new Date().toISOString() });
+        items.push({ what: `${proc?.n ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${c.sittings} session${c.sittings === 1 ? '' : 's'}${st.invoicedPaise ? ', the rest' : ''}`, gross: st.uninvoicedPaise, prior: 0, disc: l.discountPaise, canDiscount: true, courseId: c.id, procedureId: c.procedureId ?? undefined, isNew: true, tax: proc?.tax ?? 0, at: new Date().toISOString() });
       }
     }
     // a package is invoiced whole: every procedure of it still to invoice goes on the same invoice
@@ -147,7 +148,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     // new items become invoices; a discount that may be given now comes off at once
     let newBill: string | undefined; // everything added on this screen is one invoice
     for (const i of items) if (i.isNew) {
-      const [row] = await tx.insert(charge).values({ billId: newBill, tenantId: t, patientId: b.patientId, description: i.what, amountPaise: i.gross, taxRateBp: i.tax ?? 0, courseId: i.courseId ?? null, status: 'due' }).returning();
+      const [row] = await tx.insert(charge).values({ billId: newBill, tenantId: t, patientId: b.patientId, description: i.what, amountPaise: i.gross, taxRateBp: i.tax ?? 0, courseId: i.courseId ?? null, procedureId: i.procedureId ?? null, status: 'due' }).returning();
       if (i.courseId) await tx.update(course).set({ lockedAt: sql`coalesce(${course.lockedAt}, now())` }).where(eq(course.id, i.courseId)); // invoiced: the price holds
       i.chargeId = row.id; i.at = row.createdAt; newBill = row.billId ?? undefined;
     }
@@ -205,9 +206,10 @@ function moreBillRoutes(app: FastifyInstance) {
     await assertDayOpen(tx, req.ctx);
     const bal = await advanceBalance(tx, t, pid);
     if (b.amountPaise > bal) throw new HttpError(400, 'MORE_THAN_THE_ADVANCE', { balancePaise: bal });
-    const [row] = await tx.insert(payment).values({ tenantId: t, patientId: pid, advance: true, amountPaise: -b.amountPaise, method: b.method, reference: `Refund: ${b.reason}`.slice(0, 200), receivedBy: req.ctx.userId }).returning();
+    const receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone);
+    const [row] = await tx.insert(payment).values({ tenantId: t, patientId: pid, advance: true, amountPaise: -b.amountPaise, method: b.method, reference: `Refund: ${b.reason}`.slice(0, 200), receiptNo, receivedBy: req.ctx.userId }).returning();
     await emit(tx, req.ctx, 'advance.refunded', 'payment', row.id, { amountPaise: b.amountPaise, reason: b.reason, patientId: pid });
-    return { balancePaise: bal - b.amountPaise };
+    return { balancePaise: bal - b.amountPaise, receiptNo };
   });
 
   /** Discounts waiting for a decision (or one patient's, any state). Anyone who sees fees sees them; only an approver decides. */
@@ -215,7 +217,9 @@ function moreBillRoutes(app: FastifyInstance) {
     const q = req.query as any; const t = req.ctx.tenantId;
     const where = q.patientId ? and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, String(q.patientId))) : and(eq(discountAsk.tenantId, t), eq(discountAsk.status, 'pending'));
     const rows = await tx.select({ a: discountAsk, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(discountAsk).innerJoin(patient, eq(patient.id, discountAsk.patientId)).where(where).orderBy(discountAsk.createdAt).limit(100);
-    return rows.map((r) => ({ ...r.a, patient: { id: r.a.patientId, fullName: r.name, phone: r.phone, patientNo: r.no }, pct: Math.round((r.a.offPaise / Math.max(1, r.a.listPaise)) * 1000) / 10 }));
+    const ids = [...new Set(rows.flatMap((r) => r.a.lines.map((l) => l.chargeId).filter(Boolean)))] as string[];
+    const got = await paidOn(tx, ids);
+    return rows.map((r) => ({ ...r.a, paidPaise: r.a.lines.reduce((s, l) => s + (l.chargeId ? got.get(l.chargeId) ?? 0 : 0), 0) || r.a.paidPaise, patient: { id: r.a.patientId, fullName: r.name, phone: r.phone, patientNo: r.no }, pct: Math.round((r.a.offPaise / Math.max(1, r.a.listPaise)) * 1000) / 10 }));
   });
 
   /** Approve: the discount comes off the invoices (and the course). Say no: the amount stays due, as billed. */

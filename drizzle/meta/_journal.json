@@ -309,6 +309,13 @@
       "when": 1796400000000,
       "tag": "0043_patient_account",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1796500000000,
+      "tag": "0044_charge_procedure",
+      "breakpoints": true
     }
   ]
 }

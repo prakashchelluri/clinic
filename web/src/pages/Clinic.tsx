@@ -114,7 +114,7 @@ export function Clinic() {
               <span key={d.id + 'w'} className="border-t border-line py-2.5">{waiting.filter((v) => v.practitionerId === d.id).length}</span>,
               <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.collectedPaise !== null ? money(d.collectedPaise) : '—'}</span>])}
           </div>
-          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sessions, less refunds, from the same figures as End of day. Pharmacy and course advances are not split by doctor.</div>
+          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sessions, less refunds, from the same figures as End of day. Pharmacy, patient advances and whole-treatment invoices are not split by doctor.</div>
         </section>
       </div>
 

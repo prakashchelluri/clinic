@@ -101,7 +101,7 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
     const rec = await tx.select({ amountPaise: recommendation.amountPaise, sittings: recommendation.sittings }).from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
     const price = rec?.amountPaise ? Math.round(rec.amountPaise / Math.max(1, rec.sittings ?? 1)) : proc?.pricePaise;
     if (!price) return; // no price anywhere: nothing to bill
-    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${ps.sittingNo ?? 1}${rec?.amountPaise ? ' · custom price' : ''}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, status: 'due' }).returning();
+    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${ps.sittingNo ?? 1}${rec?.amountPaise ? ' · custom price' : ''}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, procedureId: ps.procedureId ?? null, status: 'due' }).returning();
     await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: price, listPrice: !rec?.amountPaise });
     await payFromAdvance(tx, ctx, row);
     return;
@@ -113,7 +113,7 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   const amount = isLast ? st.uninvoicedPaise : Math.min(st.perSittingPaise, st.uninvoicedPaise); // the last session takes the rounding
   if (amount <= 0) return;
   const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name, tax: procedureCatalog.taxRateBp }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]) : null;
-  const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${st.doneSittings} of ${c.sittings}${c.priceSource === 'doctor' ? ' · custom price' : ''}`, amountPaise: amount, taxRateBp: proc?.tax ?? 0, courseId: c.id, sessionId: ps.id, status: 'due' }).returning();
+  const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${st.doneSittings} of ${c.sittings}${c.priceSource === 'doctor' ? ' · custom price' : ''}`, amountPaise: amount, taxRateBp: proc?.tax ?? 0, courseId: c.id, sessionId: ps.id, procedureId: c.procedureId, status: 'due' }).returning();
   await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: c.id, amountPaise: amount });
   await payFromAdvance(tx, ctx, row);
 }

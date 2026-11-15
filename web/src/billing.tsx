@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from './api';
@@ -9,14 +9,15 @@ import { TakePayment, BILL_KEYS, moneyErr } from './takePayment';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const MODE: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', bank: 'Bank', emi: 'EMI', advance: 'Advance' };
-const STATUS: Record<string, [string, string]> = { paid: ['Paid fully', 'sage'], part: ['Part paid', 'amber'], unpaid: ['Unpaid', 'rose'], refunded: ['Refunded', ''], part_refunded: ['Part refunded', 'sky'], cancelled: ['Cancelled', ''], credited: ['Cancelled · credited', ''] };
+const STATUS: Record<string, [string, string]> = { paid: ['Paid fully', 'sage'], part: ['Part paid', 'amber'], unpaid: ['Unpaid', 'rose'], refunded: ['Refunded', ''], part_refunded: ['Part refunded', 'sky'], cancelled: ['Cancelled', ''], credited: ['Cancelled · credited', ''], waiting: ['Discount awaiting approval', 'amber'] };
 export const refreshBills = () => [...BILL_KEYS, 'bills', 'advance'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 const when = (at: string) => new Date(at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 /** The invoice as it prints: "Bill cum receipt" with the clinic, the patient, each line, the totals, and every payment and refund. */
 export function invoiceHtml(v: any) {
   const pct = (bp: number) => (bp ? `${bp / 100}%` : '—');
-  const pays = v.payments.filter((p: any) => !p.refund); const refunds = v.payments.filter((p: any) => p.refund);
+  const pays = v.payments.filter((p: any) => p.kind === 'paid' || p.kind === 'advance'); const refunds = v.payments.filter((p: any) => p.kind === 'refund'); const credits = v.payments.filter((p: any) => p.kind === 'credit');
+  const gross = pays.reduce((s: number, p: any) => s + p.amountPaise, 0);
   const st = STATUS[v.status]?.[0] ?? v.status; const g = !!v.clinic.gstin; // a Bill of Supply (no GSTIN) shows no tax
   return `<!doctype html><meta charset="utf-8"><title>${esc(v.invoiceNo)}</title><style>
   body{font:13px system-ui,-apple-system,Segoe UI,sans-serif;margin:28px;color:#17191A}h1{font-size:19px;margin:0}.s{color:#5F625E;font-size:12px}
@@ -29,14 +30,16 @@ export function invoiceHtml(v: any) {
   <div class="t">Bill cum Receipt</div>
   <div class="who"><div>Patient: <b>${esc(v.patient.fullName)}</b><br>Patient ID: ${esc(v.patient.patientNo)}<br>${v.patient.ageYears || v.patient.sex ? `Age / sex: ${esc([v.patient.ageYears ? v.patient.ageYears + 'y' : '', v.patient.sex ?? ''].filter(Boolean).join(', '))}<br>` : ''}${v.patient.phone ? 'Mobile: ' + esc(v.patient.phone) : ''}</div>
   <div class="r">Invoice no: <b>${esc(v.invoiceNo)}</b><br>Date: ${esc(when(v.createdAt))}<br>${v.receipts.length ? 'Receipt: ' + esc(v.receipts.join(', ')) + '<br>' : ''}Status: <b>${esc(st)}</b></div></div>
-  <table><tr><th>#</th><th>Item</th><th class="r">Price</th><th class="r">Discount</th>${g ? '<th class="r">GST</th>' : ''}<th class="r">Amount</th></tr>
-  ${v.rows.map((r: any, i: number) => `<tr><td>${i + 1}</td><td>${esc(r.description)}${['cancelled', 'waived'].includes(r.status) ? ` <span class="s">(${esc(r.status)})</span>` : ''}</td><td class="r">${esc(money(r.listPaise))}</td><td class="r">${r.discountPaise ? '−' + esc(money(r.discountPaise)) : '—'}</td>${g ? `<td class="r">${pct(r.taxRateBp)}</td>` : ''}<td class="r">${esc(money(r.amountPaise))}</td></tr>`).join('')}</table>
-  <div class="sum"><div><span>Subtotal</span><span>${esc(money(v.subtotalPaise))}</span></div><div><span>Discount</span><span>${v.discountPaise ? '−' + esc(money(v.discountPaise)) : '₹0'}</span></div>
+  <table><tr><th>#</th><th>Item</th><th class="r">Price</th><th class="r">Discount</th>${v.lessPaise ? '<th class="r">Credited / refunded</th>' : ''}${g ? '<th class="r">GST</th>' : ''}<th class="r">Amount</th></tr>
+  ${v.rows.map((r: any, i: number) => `<tr><td>${i + 1}</td><td>${esc(r.description)}${['cancelled', 'waived'].includes(r.status) ? ` <span class="s">(${esc(r.status)})</span>` : r.lessPaise && !r.amountPaise ? ' <span class="s">(not given: credited)</span>' : ''}</td><td class="r">${esc(money(r.listPaise))}</td><td class="r">${r.discountPaise ? '−' + esc(money(r.discountPaise)) : '—'}</td>${v.lessPaise ? `<td class="r">${r.lessPaise ? '−' + esc(money(r.lessPaise)) : '—'}</td>` : ''}${g ? `<td class="r">${pct(r.taxRateBp)}</td>` : ''}<td class="r">${esc(money(r.amountPaise))}</td></tr>`).join('')}</table>
+  <div class="sum"><div><span>Subtotal</span><span>${esc(money(v.subtotalPaise))}</span></div><div><span>Discount</span><span>${v.discountPaise ? '−' + esc(money(v.discountPaise)) : '₹0'}</span></div>${v.lessPaise ? `<div><span>Credited / refunded</span><span>−${esc(money(v.lessPaise))}</span></div>` : ''}
   ${g ? `<div><span>GST included</span><span>${esc(money(v.gstPaise))}</span></div>` : ''}<div class="b"><span>Total payable</span><span>${esc(money(v.billedPaise))}</span></div>
-  ${pays.map((p: any) => `<div class="s"><span>Paid ${esc(MODE[p.method] ?? p.method)}${p.reference ? ' · ' + esc(p.reference) : ''} · ${esc(fmtDate(p.at))}</span><span>${esc(money(p.amountPaise))}</span></div>`).join('')}
-  <div class="b g"><span>Total paid</span><span>${esc(money(v.paidPaise))}</span></div>
-  ${refunds.map((p: any) => `<div class="s red"><span>Refund ${esc(MODE[p.method] ?? p.method)} · ${esc(fmtDate(p.at))}</span><span>−${esc(money(-p.amountPaise))}</span></div>`).join('')}
-  ${v.duePaise ? `<div class="b red"><span>Due</span><span>${esc(money(v.duePaise))}</span></div>` : ''}</div>
+  ${pays.map((p: any) => `<div class="s"><span>${p.kind === 'advance' ? 'From the advance' : `Paid ${esc(MODE[p.method] ?? p.method)}${p.reference ? ' · ' + esc(p.reference) : ''}`}${p.receiptNo ? ' · ' + esc(p.receiptNo) : ''} · ${esc(fmtDate(p.at))}</span><span>${esc(money(p.amountPaise))}</span></div>`).join('')}
+  <div class="b g"><span>Total paid</span><span>${esc(money(gross))}</span></div>
+  ${credits.map((p: any) => `<div class="s"><span>Moved to the patient's advance · ${esc(fmtDate(p.at))}</span><span>−${esc(money(-p.amountPaise))}</span></div>`).join('')}
+  ${refunds.map((p: any) => `<div class="s red"><span>Refund ${esc(MODE[p.method] ?? p.method)}${p.receiptNo ? ' · ' + esc(p.receiptNo) : ''} · ${esc(fmtDate(p.at))}</span><span>−${esc(money(-p.amountPaise))}</span></div>`).join('')}
+  ${credits.length || refunds.length ? `<div class="b"><span>Net paid</span><span>${esc(money(v.paidPaise - v.refundedPaise))}</span></div>` : ''}
+  ${v.duePaise ? `<div class="b red"><span>Due</span><span>${esc(money(v.duePaise))}</span></div>` : ''}${v.waitingOffPaise ? `<div class="s"><span>Of which a discount awaiting approval</span><span>${esc(money(v.waitingOffPaise))}</span></div>` : ''}</div>
   <p class="s" style="margin-top:22px">${v.clinic.gstin ? 'Prices include GST.' : 'Not registered for GST, so no tax is charged on this bill.'} ${esc(v.clinic.print?.footer ?? '')}</p>`;
 }
 
@@ -53,9 +56,9 @@ export async function printInvoice(id: string) {
 export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, empty }: { bills: any[]; showPatient?: boolean; onView: (b: any) => void; onCollect?: (b: any) => void; onRefund?: (b: any) => void; empty: string }) {
   const { perms } = useOutletContext<any>();
   const mayRefund = can(perms, 'payment.refund'); const mayCollect = can(perms, 'payment.record');
-  const reasonFor = async (title: string) => { const a = await ask({ title, confirmLabel: 'Save', field: { label: 'Why', placeholder: 'At least 3 letters', required: true, maxLength: 200 } }); if (a && a.value.trim().length < 3) { toast('Say why in at least 3 letters', 'err'); return null; } return a?.value.trim() || null; };
-  const forLines = async (b: any, path: string, title: string, done: string, pick: (c: any) => boolean) => {
-    const why = await reasonFor(title); if (!why) return;
+  const reasonFor = async (title: string, confirmLabel = 'Save') => { const a = await ask({ title, confirmLabel, field: { label: 'Why', placeholder: 'At least 3 letters', required: true, maxLength: 200 } }); if (a && a.value.trim().length < 3) { toast('Say why in at least 3 letters', 'err'); return null; } return a?.value.trim() || null; };
+  const forLines = async (b: any, path: string, title: string, done: string, pick: (c: any) => boolean, confirmLabel?: string) => {
+    const why = await reasonFor(title, confirmLabel); if (!why) return;
     try { for (const c of b.lines.filter(pick)) await post(`/charges/${c.id}/${path}`, { reason: why }); refreshBills(); toast(done); } catch (e) { toast(errText(e), 'err'); }
   };
   if (!bills.length) return <Empty icon="rupee" title="No invoices" hint={empty} />;
@@ -76,12 +79,12 @@ export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, 
           <td className="pr-4" onClick={(e) => e.stopPropagation()}><span className="flex items-center justify-end gap-1">
             <button type="button" className="btn btn-ghost btn-sm !px-2" title="Print" aria-label={`Print ${b.invoiceNo}`} onClick={() => printInvoice(b.id)}><Icon name="print" className="h-4 w-4" /></button>
             <button type="button" className="btn btn-ghost btn-sm !px-2" title="View" aria-label={`View ${b.invoiceNo}`} onClick={() => onView(b)}><Icon name="eye" className="h-4 w-4" /></button>
-            <MoreMenu items={[
-              { label: `Collect ${money(b.duePaise)}`, hidden: !(mayCollect && onCollect && b.duePaise > 0), onClick: () => onCollect!(b) },
+            {(() => { const owing = b.duePaise - (b.waitingOffPaise ?? 0); const items = [
+              { label: `Collect ${money(owing)}`, hidden: !(mayCollect && onCollect && owing > 0), onClick: () => onCollect!(b) },
               { label: 'Refund', hidden: !(mayRefund && onRefund && b.paidPaise - b.refundedPaise > 0), danger: true, onClick: () => onRefund!(b) },
-              { label: 'Cancel invoice', hidden: !(mayRefund && b.status === 'unpaid'), danger: true, onClick: () => forLines(b, 'cancel', `Cancel ${b.invoiceNo}?`, 'Invoice cancelled', (c) => c.status === 'due') },
-              { label: 'Leave out of tax reports', hidden: !(mayRefund && !b.excluded && b.status !== 'cancelled'), onClick: () => forLines(b, 'exclude', `Leave ${b.invoiceNo} out of the tax reports?`, 'Left out of the tax reports', (c) => !c.excludedAt) },
-            ]} />
+              { label: 'Cancel invoice', hidden: !(mayRefund && b.status === 'unpaid'), danger: true, onClick: () => forLines(b, 'cancel', `Cancel ${b.invoiceNo}?`, 'Invoice cancelled', (c) => c.status === 'due', 'Cancel invoice') },
+              { label: 'Leave out of tax reports', hidden: !(mayRefund && !b.excluded && b.status !== 'cancelled'), onClick: () => forLines(b, 'exclude', `Leave ${b.invoiceNo} out of the tax reports?`, 'Left out of the tax reports', (c) => !c.excludedAt, 'Leave out') },
+            ]; return items.some((x) => !x.hidden) ? <MoreMenu items={items} /> : null; })()}
           </span></td>
         </tr>; })}</tbody>
     </table></div>
@@ -122,8 +125,8 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
   const [parts, setParts] = useState<RPart[]>([{ method: 'cash', amount: String(left / 100), reference: '' }]); const [why, setWhy] = useState('');
   const total = parts.reduce((s, p) => s + toPaise(p.amount), 0);
   const bad = total <= 0 ? 'Type the amount' : total > left ? `Only ${money(left)} was paid` : why.trim().length < 3 ? 'Say why' : '';
-  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/refund`, { parts: parts.filter((p) => toPaise(p.amount) > 0).map((p) => ({ method: p.method, amountPaise: toPaise(p.amount), reference: p.reference.trim() || undefined })), reason: why.trim() }),
-    onSuccess: () => { refreshBills(); toast(`${money(total)} refunded on ${b.invoiceNo}`); onClose(); },
+  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/refund`, { parts: parts.filter((p) => toPaise(p.amount) > 0).map((p) => ({ method: p.method, amountPaise: toPaise(p.amount), reference: p.method !== 'cash' ? p.reference.trim() || undefined : undefined })), reason: why.trim() }),
+    onSuccess: (r: any) => { refreshBills(); toast(`${money(total)} refunded on ${b.invoiceNo}`, 'ok', r?.receiptNo ? { label: 'Voucher', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); },
     onError: (e: any) => toast(e?.body?.code === 'MORE_THAN_PAID' ? `Only ${money(e.body.refundablePaise)} can be refunded` : moneyErr(e), 'err') });
   const set = (i: number, patch: Partial<RPart>) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   return (
@@ -221,14 +224,14 @@ type Act = { type: 'invoice' | 'payment' | 'refund' | 'credit'; at: string; id: 
 const TYPE: Record<Act['type'], [string, string]> = { invoice: ['Invoice', 'sky'], payment: ['Payment', 'sage'], refund: ['Refund', 'rose'], credit: ['Credit', 'amber'] };
 
 /** Record payment: money from the patient, not for one item. It clears the oldest dues first; the rest becomes the patient's advance. */
-export function RecordPayment({ patientId, patientName, dues, onClose }: { patientId: string; patientName: string; dues: { invoiceNo: string; duePaise: number }[]; onClose: () => void }) {
+export function RecordPayment({ patientId, patientName, dues, dayClosed, onClose }: { patientId: string; patientName: string; dues: { invoiceNo: string; duePaise: number }[]; dayClosed?: boolean; onClose: () => void }) {
   const owed = dues.reduce((s, d) => s + d.duePaise, 0);
   const [amount, setAmount] = useState(owed ? String(owed / 100) : ''); const [mode, setMode] = useState<(typeof MODES)[number]>('upi');
   const [ref, setRef] = useState(''); const [lender, setLender] = useState(''); const [key] = useState(() => crypto.randomUUID());
   const paise = toPaise(amount);
   let left = paise; const goes = dues.map((d) => { const take = Math.min(left, d.duePaise); left -= take; return { ...d, take }; }).filter((d) => d.take > 0);
-  const bad = paise <= 0 ? 'Type the amount' : mode === 'emi' && (!lender.trim() || !ref.trim()) ? 'EMI needs the lender and the approval code' : '';
-  const go = useMutation({ mutationFn: () => post(`/patients/${patientId}/payments`, { amountPaise: paise, method: mode, reference: ref.trim() || undefined, lender: lender.trim() || undefined, idempotencyKey: key }),
+  const bad = dayClosed ? 'Today has been closed: no money can be taken today' : paise <= 0 ? 'Type the amount' : mode === 'emi' && (!lender.trim() || !ref.trim()) ? 'EMI needs the lender and the approval code' : '';
+  const go = useMutation({ mutationFn: () => post(`/patients/${patientId}/payments`, { amountPaise: paise, method: mode, reference: mode !== 'cash' ? ref.trim() || undefined : undefined, lender: mode === 'emi' ? lender.trim() || undefined : undefined, idempotencyKey: key }),
     onSuccess: (r: any) => { refreshBills(); toast(`${money(paise)} from ${patientName.split(' ')[0]}${r.keptAsAdvancePaise ? ` · ${money(r.keptAsAdvancePaise)} to the advance` : ''}`, 'ok', r.receiptNo ? { label: 'Receipt', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); },
     onError: (e) => toast(moneyErr(e), 'err') });
   return (
@@ -251,12 +254,12 @@ export function RecordPayment({ patientId, patientName, dues, onClose }: { patie
 }
 
 /** Refund: money back to the patient from their advance, with a reason. Money on a treatment not given reaches the advance when its unused sessions are cancelled. */
-export function PatientRefund({ patientId, patientName, advancePaise, onClose }: { patientId: string; patientName: string; advancePaise: number; onClose: () => void }) {
+export function PatientRefund({ patientId, patientName, advancePaise, dayClosed, onClose }: { patientId: string; patientName: string; advancePaise: number; dayClosed?: boolean; onClose: () => void }) {
   const [amount, setAmount] = useState(advancePaise ? String(advancePaise / 100) : ''); const [mode, setMode] = useState<'cash' | 'upi' | 'card' | 'bank'>('upi'); const [why, setWhy] = useState('');
   const paise = toPaise(amount);
-  const bad = !advancePaise ? 'Nothing in the advance to give back' : paise <= 0 ? 'Type the amount' : paise > advancePaise ? `Only ${money(advancePaise)} is in the advance` : why.trim().length < 3 ? 'Say why' : '';
+  const bad = dayClosed ? 'Today has been closed: no money can be given back today' : !advancePaise ? 'Nothing in the advance to give back' : paise <= 0 ? 'Type the amount' : paise > advancePaise ? `Only ${money(advancePaise)} is in the advance` : why.trim().length < 3 ? 'Say why' : '';
   const go = useMutation({ mutationFn: () => post(`/patients/${patientId}/advance/refund`, { amountPaise: paise, method: mode, reason: why.trim() }),
-    onSuccess: () => { refreshBills(); toast(`Gave back ${money(paise)} to ${patientName.split(' ')[0]}`); onClose(); }, onError: (e) => toast(moneyErr(e), 'err') });
+    onSuccess: (r: any) => { refreshBills(); toast(`Gave back ${money(paise)} to ${patientName.split(' ')[0]}`, 'ok', r?.receiptNo ? { label: 'Voucher', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); }, onError: (e) => toast(moneyErr(e), 'err') });
   return (
     <Modal title="Refund" subtitle={`${patientName} · from the patient's advance`} onClose={onClose} width="max-w-md">
       <div className="space-y-3.5">
@@ -278,10 +281,11 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
   const [viewing, setViewing] = useState<string | null>(null); const [refundingBill, setRefundingBill] = useState<any>(null); const [collecting, setCollecting] = useState<any>(null);
   const [open, setOpen] = useState<null | 'invoice' | 'payment' | 'refund'>(null);
   const t = q.data?.totals; const rows: Act[] = q.data?.activity ?? [];
-  const dues = rows.filter((r) => r.type === 'invoice' && r.duePaise > 0).sort((a, b) => String(a.at).localeCompare(String(b.at))).map((r) => ({ invoiceNo: r.invoiceNo, duePaise: r.duePaise }));
+  const dues = rows.filter((r) => r.type === 'invoice' && r.duePaise > 0).sort((a, b) => String(a.at).localeCompare(String(b.at))).map((r) => ({ invoiceNo: r.invoiceNo, duePaise: r.duePaise - (r.waitingOffPaise ?? 0) })).filter((d) => d.duePaise > 0);
   const Fig = ({ label, value, tone = '' }: { label: string; value: string; tone?: string }) => <div><div className="text-[12.5px] text-muted">{label}</div><b className={`text-[18px] tabular-nums ${tone}`}>{value}</b></div>;
-  const balance = t ? (t.duePaise > 0 ? <Fig label="Due" value={money(t.duePaise)} tone="text-amber" /> : <Fig label="Advance" value={money(t.advancePaise)} tone={t.advancePaise ? 'text-sage' : ''} />) : null;
-  const detail = (r: Act) => r.type === 'invoice' ? <><div className="font-semibold">{r.invoiceNo} · {r.items.join(', ')}</div><div className="text-xs text-muted">{r.fromAdvancePaise ? `${money(r.fromAdvancePaise)} from the advance · ` : ''}{r.paidPaise ? `${money(r.paidPaise)} paid` : 'nothing paid yet'}{r.refundedPaise ? ` · ${money(r.refundedPaise)} refunded` : ''}{r.creditPaise ? ` · ${money(r.creditPaise)} moved to the advance` : ''}</div></>
+  const balance = t ? <>{(t.duePaise > 0 || !t.advancePaise) && <div><div className="text-[12.5px] text-muted">Due</div><b className={`text-[18px] tabular-nums ${t.duePaise ? 'text-amber' : ''}`}>{money(t.duePaise)}</b>{t.waitingOffPaise > 0 && <div className="text-xs text-muted">{money(t.waitingOffPaise)} of it is a discount awaiting approval</div>}</div>}
+    {(t.advancePaise > 0 || !t.duePaise) && <Fig label="Advance" value={money(t.advancePaise)} tone={t.advancePaise ? 'text-sage' : ''} />}</> : null;
+  const detail = (r: Act) => r.type === 'invoice' ? <><div className="font-semibold">{r.invoiceNo} · {r.items.join(', ')}</div><div className="text-xs text-muted">{r.fromAdvancePaise ? `${money(r.fromAdvancePaise)} from the advance · ` : ''}{!r.amountPaise && !r.creditPaise ? 'No charge' : r.paidPaise ? `${money(r.paidPaise)} paid` : 'nothing paid yet'}{r.waitingOffPaise ? ` · ${money(r.waitingOffPaise)} discount awaiting approval` : ''}{r.refundedPaise ? ` · ${money(r.refundedPaise)} refunded` : ''}{r.creditPaise ? ` · ${money(r.creditPaise)} moved to the advance` : ''}</div></>
     : r.type === 'payment' ? <><div>{r.receiptNo ?? 'Payment'} · {r.methods.map((m: string) => MODE[m] ?? m).join(' + ')}{r.reference ? ` · ${r.reference}` : ''}</div><div className="text-xs text-muted">{[r.invoices.length ? `Paid ${r.invoices.join(', ')}` : '', r.toAdvancePaise ? `${money(r.toAdvancePaise)} to the advance` : ''].filter(Boolean).join(' · ')}</div></>
     : r.type === 'refund' ? <><div>{MODE[r.methods[0]] ?? r.methods[0]}{r.invoiceNo ? ` · on ${r.invoiceNo}` : r.fromAdvance ? ' · from the advance' : ''}</div><div className="text-xs text-muted">{String(r.note ?? '').replace(/^Refund:?\s*/, '')}</div></>
     : <><div>Moved to the advance</div><div className="text-xs text-muted">{r.note}</div></>;
@@ -291,7 +295,7 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
         {t ? <><Fig label="Billed" value={money(t.billedPaise)} /><Fig label="Received" value={money(t.receivedPaise)} /><Fig label="Refunded" value={money(t.refundedPaise)} />{balance}</> : <span className="text-sm text-muted">Loading…</span>}
         <span className="flex-1" />
         <span className="flex flex-wrap gap-2">
-          {can(perms, 'payment.refund') && <button className="btn" disabled={!t?.advancePaise} title={t?.advancePaise ? undefined : 'Nothing in the advance'} onClick={() => setOpen('refund')}><Icon name="undo" className="h-4 w-4" />Refund</button>}
+          {can(perms, 'payment.refund') && <button className="btn" aria-label="Refund" disabled={!t?.advancePaise || q.data?.dayClosed} title={q.data?.dayClosed ? 'Today has been closed' : t?.advancePaise ? undefined : 'Nothing in the advance'} onClick={() => setOpen('refund')}><Icon name="undo" className="h-4 w-4" />Refund</button>}
           {can(perms, 'payment.record') && <button className="btn" onClick={() => setOpen('payment')}><Icon name="wallet" className="h-4 w-4" />Record payment</button>}
           {can(perms, 'payment.record') && <button className="btn btn-primary" onClick={() => setOpen('invoice')}><Icon name="plus" className="h-4 w-4" />Generate invoice</button>}
         </span>
@@ -308,6 +312,10 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
             <td className="pr-4" onClick={(e) => e.stopPropagation()}><span className="flex justify-end">{r.type === 'invoice' ? <MoreMenu items={[
               { label: 'View', onClick: () => setViewing(r.id) }, { label: 'Print', onClick: () => printInvoice(r.id) },
               { label: 'Refund on this invoice', hidden: !(can(perms, 'payment.refund') && r.paidPaise - r.refundedPaise > 0), danger: true, onClick: () => get(`/bills/${r.id}`).then(setRefundingBill, (e) => toast(errText(e), 'err')) },
+              { label: 'Cancel invoice', hidden: !(can(perms, 'payment.refund') && r.status === 'unpaid'), danger: true, onClick: async () => {
+                const a = await ask({ title: `Cancel ${r.invoiceNo}?`, confirmLabel: 'Cancel invoice', field: { label: 'Why', placeholder: 'At least 3 letters', required: true, maxLength: 200 } }); const why = a?.value.trim(); if (!why) return;
+                if (why.length < 3) { toast('Say why in at least 3 letters', 'err'); return; }
+                try { const v: any = await get(`/bills/${r.id}`); for (const c of v.lines.filter((c: any) => c.status === 'due')) await post(`/charges/${c.id}/cancel`, { reason: why }); refreshBills(); toast('Invoice cancelled'); } catch (e) { toast(errText(e), 'err'); } } },
             ]} /> : r.receiptNo ? <button type="button" className="btn btn-ghost btn-sm !px-2" aria-label={`Print receipt ${r.receiptNo}`} onClick={() => printReceipt(r.receiptNo)}><Icon name="print" className="h-4 w-4" /></button> : null}</span></td>
           </tr>)}</tbody>
         </table></div>)}
@@ -315,8 +323,8 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
       {refundingBill && <RefundBill bill={refundingBill} onClose={() => setRefundingBill(null)} />}
       {collecting && <TakePayment patientId={patientId} patientName={patientName} onlyBill={collecting.id} onClose={() => { setCollecting(null); refreshBills(); }} />}
       {open === 'invoice' && <TakePayment patientId={patientId} patientName={patientName} onClose={() => { setOpen(null); refreshBills(); }} />}
-      {open === 'payment' && <RecordPayment patientId={patientId} patientName={patientName} dues={dues} onClose={() => setOpen(null)} />}
-      {open === 'refund' && t && <PatientRefund patientId={patientId} patientName={patientName} advancePaise={t.advancePaise} onClose={() => setOpen(null)} />}
+      {open === 'payment' && <RecordPayment patientId={patientId} patientName={patientName} dues={dues} dayClosed={q.data?.dayClosed} onClose={() => setOpen(null)} />}
+      {open === 'refund' && t && <PatientRefund patientId={patientId} patientName={patientName} advancePaise={t.advancePaise} dayClosed={q.data?.dayClosed} onClose={() => setOpen(null)} />}
     </section>
   );
 }
@@ -325,8 +333,9 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
 export function Billing() {
   const today = new Date().toLocaleDateString('en-CA');
   const monthStart = today.slice(0, 8) + '01';
-  const [from, setFrom] = useState(today); const [to, setTo] = useState(today); const [term, setTerm] = useState('');
-  const q = useQuery({ queryKey: ['bills', 'clinic', from, to, term], queryFn: () => get(`/bills?from=${from}&to=${to}${term.trim() ? `&q=${encodeURIComponent(term.trim())}` : ''}`), placeholderData: (p: any) => p });
+  const [from, setFrom] = useState(today); const [to, setTo] = useState(today); const [term, setTerm] = useState(''); const [find, setFind] = useState('');
+  useEffect(() => { const h = setTimeout(() => setFind(term.trim()), 300); return () => clearTimeout(h); }, [term]); // one request when typing stops
+  const q = useQuery({ queryKey: ['bills', 'clinic', from, to, find], queryFn: () => get(`/bills?from=${from}&to=${to}${find ? `&q=${encodeURIComponent(find)}` : ''}`), placeholderData: (p: any) => p });
   const [viewing, setViewing] = useState<string | null>(null); const [refunding, setRefunding] = useState<any>(null); const [collecting, setCollecting] = useState<any>(null);
   const preset = (f: string, t: string) => { setFrom(f); setTo(t); };
   const d = q.data;
@@ -342,7 +351,7 @@ export function Billing() {
       {!d ? <div className="text-sm text-muted">Loading…</div> : <>
         <Totals t={d.totals} />
         <Section title={<>Invoices <span className="font-normal text-muted">· {d.bills.length}</span></>}>
-          <InvoiceTable bills={d.bills} showPatient onView={(b) => setViewing(b.id)} onCollect={setCollecting} onRefund={setRefunding} empty="No invoices in these dates." />
+          <InvoiceTable bills={d.bills} showPatient onView={(b) => setViewing(b.id)} onCollect={setCollecting} onRefund={setRefunding} empty={find ? `No invoices match “${find}” in these dates.` : 'No invoices in these dates.'} />
         </Section>
       </>}
       {viewing && <InvoiceView id={viewing} onClose={() => setViewing(null)} onCollect={(b) => { setViewing(null); setCollecting(b); }} onRefund={(b) => { setViewing(null); setRefunding(b); }} />}

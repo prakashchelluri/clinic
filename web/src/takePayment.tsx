@@ -15,6 +15,7 @@ export function moneyErr(e: any): string {
   if (c === 'DAY_CLOSED') return 'Today has been closed: no money can be taken or given back today.';
   if (c === 'ALREADY_REFUNDED') return 'This was already refunded.';
   if (c === 'PACKAGE_EXPIRED') return 'This package has expired: its sessions not done can only be refunded.';
+  if (c === 'CONSULTATION_AT_CHECK_IN') return 'Consultation fees are taken at check-in.';
   if (c === 'ALREADY_INVOICED') return 'This treatment is already on an invoice.';
   if (c === 'A_PACKAGE_IS_INVOICED_WHOLE') return `The ${b.packageName ?? ''} package is invoiced whole: tick all its procedures.`;
   if (c === 'REASON_REQUIRED') return 'Say why there is a discount.';
@@ -34,13 +35,13 @@ const MODE_NAME: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'car
 type Part = { method: 'cash' | 'upi' | 'card' | 'bank' | 'emi' | 'advance'; amount: string; reference: string; lender: string };
 const MODES: [Part['method'], string][] = [['upi', 'UPI'], ['cash', 'Cash'], ['card', 'Card'], ['emi', 'EMI'], ['bank', 'Bank']];
 type Unit = 'pct' | 'rs';
-type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number; group?: string };
+type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number; group?: string; procId?: string };
 /** GST inside a price that includes it. */
 const gstIn = (paise: number, bp: number) => (bp ? paise - Math.round((paise * 10000) / (10000 + bp)) : 0);
 export const BILL_KEYS = ['timeline', 'frontdesk', 'daily', 'payments-awaiting', 'patients', 'courses', 'discount-asks', 'worklist', 'procedure-plans', 'clinic'];
 const refresh = () => BILL_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 const num = (s: string) => Math.max(0, Number(s) || 0);
-const offOf = (gross: number, v: string, unit: Unit) => Math.min(gross, unit === 'pct' ? Math.round((gross * Math.min(100, num(v))) / 100) : toPaise(v));
+const offOf = (gross: number, v: string, unit: Unit) => Math.min(gross, unit === 'pct' ? Math.round((gross * Math.min(100, num(v))) / 10000) * 100 : toPaise(v)); // a % comes off in whole rupees
 
 /** % or ₹: one small switch, the same on every line and on the bill. */
 function UnitSwitch({ unit, onChange, label }: { unit: Unit; onChange: (u: Unit) => void; label: string }) {
@@ -49,7 +50,7 @@ function UnitSwitch({ unit, onChange, label }: { unit: Unit; onChange: (u: Unit)
 }
 function DiscountBox({ v, unit, onV, onUnit, label, disabled }: { v: string; unit: Unit; onV: (v: string) => void; onUnit: (u: Unit) => void; label: string; disabled?: boolean }) {
   return <span className="inline-flex items-center gap-1.5"><input className="input !h-9 !w-20 text-right tabular-nums" inputMode="decimal" autoComplete="off" aria-label={label} disabled={disabled} placeholder="0" value={v}
-    onChange={(e) => { let x = e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1'); if (unit === 'pct' && Number(x) > 100) x = '100'; onV(x.slice(0, 9)); }} /><UnitSwitch unit={unit} onChange={onUnit} label={`${label} in`} /></span>;
+    onChange={(e) => { let x = e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1'); x = x.replace(/(\.\d{2})\d+/, '$1'); if (unit === 'pct' && Number(x) > 100) x = '100'; onV(x.slice(0, 9)); }} /><UnitSwitch unit={unit} onChange={onUnit} label={`${label} in`} /></span>;
 }
 
 /**
@@ -65,19 +66,20 @@ export function TakePayment({ patientId, patientName, ahead, onlyBill, onClose }
   const asks = useQuery({ queryKey: ['discount-asks', patientId], queryFn: () => get(`/discount-asks?patientId=${patientId}`) });
   const adv = useQuery({ queryKey: ['advance', patientId], queryFn: () => get(`/patients/${patientId}/advance`) });
   const bl = useQuery({ queryKey: ['bills', 'patient', patientId], queryFn: () => get(`/patients/${patientId}/bills`) });
-  const ready = t.data && cs.data && asks.data && adv.data && bl.data;
+  const ready = t.data && cs.data && asks.data && adv.data && bl.data; const gstOn = !!cfg?.tenant?.settings?.gstin;
   return (
-    <Modal title={onlyBill ? "Collect payment" : "Generate invoice"} subtitle={`${patientName} · prices from the clinic price list, GST included`} onClose={onClose} width="max-w-6xl">
-      {!ready ? <div className="text-sm text-muted">Loading…</div> : <BillForm patientId={patientId} patientName={patientName} ahead={ahead} onlyBill={onlyBill} invoiceNo={Object.fromEntries((bl.data?.bills ?? []).map((b: any) => [b.id, b.invoiceNo]))} tl={t.data} courses={cs.data} asks={asks.data} advPaise={adv.data.balancePaise} cfg={cfg} perms={perms} onClose={onClose} />}
+    <Modal title={onlyBill ? "Collect payment" : "Generate invoice"} subtitle={`${patientName} · prices from the clinic price list${gstOn ? ', GST included' : ''}`} onClose={onClose} width="max-w-6xl">
+      {!ready ? <div className="text-sm text-muted">Loading…</div> : <BillForm patientId={patientId} patientName={patientName} ahead={ahead} onlyBill={onlyBill} invoiceNo={Object.fromEntries((bl.data?.bills ?? []).map((b: any) => [b.id, b.invoiceNo]))} tl={t.data} courses={cs.data} asks={asks.data} advPaise={adv.data.balancePaise} dayClosed={!!adv.data.dayClosed} cfg={cfg} perms={perms} onClose={onClose} />}
     </Modal>
   );
 }
 
-function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, courses, asks, advPaise, cfg, perms, onClose }: { patientId: string; patientName: string; ahead?: { recommendationId: string }; onlyBill?: string; invoiceNo: Record<string, string>; tl: any; courses: any[]; asks: any[]; advPaise: number; cfg: any; perms: string[]; onClose: () => void }) {
+function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, courses, asks, advPaise, dayClosed, cfg, perms, onClose }: { patientId: string; patientName: string; ahead?: { recommendationId: string }; onlyBill?: string; invoiceNo: Record<string, string>; tl: any; courses: any[]; asks: any[]; advPaise: number; dayClosed: boolean; cfg: any; perms: string[]; onClose: () => void }) {
+  const gstOn = !!cfg?.tenant?.settings?.gstin; // a clinic not registered for GST shows no tax
   const waiting = useMemo(() => { const m = new Map<string, number>(); for (const a of asks.filter((x) => x.status === 'pending')) for (const l of a.lines) m.set(l.chargeId ?? l.courseId, (m.get(l.chargeId ?? l.courseId) ?? 0) + l.offPaise); return m; }, [asks]);
   const paidOn = (id: string) => tl.payments.filter((p: any) => p.chargeId === id).reduce((s: number, p: any) => s + p.amountPaise, 0);
   const procs: any[] = (cfg?.procedures ?? []).filter((p: any) => p.pricePaise > 0);
-  const services: any[] = (cfg?.services ?? []).filter((s: any) => s.pricePaise > 0);
+  const services: any[] = (cfg?.services ?? []).filter((s: any) => s.pricePaise > 0 && !s.feeCategoryId); // visit types (consultations) are taken at check-in
   const taxOf = (procedureId: string) => cfg?.procedures?.find((p: any) => p.id === procedureId)?.taxRateBp ?? 0;
   const procName = (id: string) => cfg?.procedures?.find((p: any) => p.id === id)?.name ?? 'Procedure';
   const plans: any[] = tl.recommendations.filter((r: any) => r.kind === 'procedure' && r.procedureId && !['done', 'cancelled'].includes(r.status));
@@ -91,7 +93,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     if (!total || total <= 0 || c?.expired) return null;
     return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(r.procedureId)}${pkgOf(r)} · ${n} session${n === 1 ? '' : 's'}${c?.invoicedPaise ? ', the rest' : ''}`,
       sub: `${c?.doneSittings ? `${c.doneSittings} of ${n} done · ` : ''}${r.package ? 'its share of the package price · ' : r.amountPaise > 0 ? 'custom price · ' : ''}the whole treatment; sessions are not billed again`,
-      unitPaise: total, qty: 1, maxQty: 1, on, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId), group: r.package?.group };
+      unitPaise: total, qty: 1, maxQty: 1, on, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId), group: r.package?.group, procId: r.procedureId };
   };
 
   /** A plan and, when it is part of a package with no course yet, the other procedures of that package: a package is invoiced as a whole. */
@@ -133,7 +135,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const cap = Number(cfg?.tenant?.settings?.discountCapPct ?? 10);
   const mayGive = can(perms, 'discount.give'); const mayApprove = can(perms, 'discount.approve');
   const needsOk = off > 0 && (!mayGive || (pct > cap && !mayApprove));
-  const [later, setLater] = useState(false); // bill now, nothing taken now
+  const [later_, setLater] = useState(false); // bill now, nothing taken now
+  const later = later_ || dayClosed; // the day is closed: no money can be taken today
   // the patient's advance comes off the bill first (ticked by default); the rest is paid by the modes below
   const [useAdv, setUseAdv] = useState(true);
   // the advance is the patient's money: it is used even when nothing new is paid now
@@ -157,30 +160,32 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     mutationFn: () => post('/bills', {
       patientId, idempotencyKey: key, reason: why.trim(), extraDiscountPaise: extra_, keepExtraAsAdvance: keep && total > payable,
       lines: on.map((l) => ({ ...(l.kind === 'charge' ? { chargeId: l.id } : l.kind === 'proc' ? { procedureId: l.id, qty: l.qty } : l.kind === 'service' ? { serviceId: l.id, qty: l.qty } : { recommendationId: l.id }), discountPaise: lineOff(l) })),
-      parts: [...(advUse ? [{ method: 'advance', amountPaise: advUse }] : []), ...(later ? [] : parts).map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.reference.trim() || undefined, lender: p.lender.trim() || undefined })).filter((p) => p.amountPaise > 0)],
+      parts: [...(advUse ? [{ method: 'advance', amountPaise: advUse }] : []), ...(later ? [] : parts).map((p, i) => ({ method: p.method, amountPaise: amt(p, i), reference: p.method !== 'cash' ? p.reference.trim() || undefined : undefined, lender: p.method === 'emi' ? p.lender.trim() || undefined : undefined })).filter((p) => p.amountPaise > 0)],
     }),
     onSuccess: (r: any) => {
       refresh(); qc.invalidateQueries({ queryKey: ['advance'] });
-      const modes = [...new Set([...parts.filter((p, i) => amt(p, i) > 0).map((p) => MODE_NAME[p.method] ?? p.method), ...(advUse ? ['the advance'] : [])])].join(' + ');
       const first = patientName.split(' ')[0];
-      const head = r.paidPaise ? `${money(r.paidPaise)} ${modes} from ${first}` : `Bill saved for ${first}`;
+      const took = [...(later || allAdv ? [] : parts.map((p, i) => [amt(p, i), MODE_NAME[p.method] ?? p.method] as const).filter(([a]) => a > 0).map(([a, m]) => `${money(a)} ${m}`)), ...(advUse ? [`${money(advUse)} from the advance`] : [])];
+      const head = took.length ? `${took.join(' + ')} · ${first}` : `Bill saved for ${first}`;
       toast(`${head}${r.keptAsAdvancePaise ? ` · ${money(r.keptAsAdvancePaise)} kept as advance` : ''}${r.waitingForApproval ? ` · ${money(r.offPaise)} discount sent for approval` : ''}${r.balancePaise ? ` · ${money(r.balancePaise)} still due` : ''}`, 'ok', r.receiptNo ? { label: 'Receipt', run: () => printReceipt(r.receiptNo) } : undefined);
       onClose();
     },
-    onError: (e) => toast(moneyErr(e), 'err'),
+    onError: (e: any) => { toast(moneyErr(e), 'err'); if (e?.body?.code === 'ALREADY_INVOICED') { refresh(); qc.invalidateQueries({ queryKey: ['bills'] }); onClose(); } },
   });
 
   // what can be added, found by typing: this patient's treatments not invoiced yet, price-list procedures and services
   type Hit = { v: string; l: string; kind: string; p: number; taxBp: number };
   const hits: Hit[] = [
     ...plans.filter((r) => !lines.some((l) => l.key === `a:${r.id}`)).flatMap((r) => { const l = treatLine(r.id); return l ? [{ v: `a:${r.id}`, l: l.what, kind: 'this patient’s treatment', p: l.unitPaise, taxBp: l.taxBp }] : []; }),
-    ...procs.map((p) => ({ v: `p:${p.id}`, l: p.name, kind: 'procedure', p: p.pricePaise, taxBp: p.taxRateBp ?? 0 })),
+    ...procs.filter((p) => !lines.some((l) => l.kind === 'ahead' && l.procId === p.id) && !plans.some((r) => r.procedureId === p.id && treatLine(r.id))).map((p) => ({ v: `p:${p.id}`, l: p.name, kind: 'procedure', p: p.pricePaise, taxBp: p.taxRateBp ?? 0 })),
+    ...lines.filter((l) => l.kind === 'ahead' && !l.on).map((l) => ({ v: `t:${l.key}`, l: l.what, kind: 'this patient’s treatment, listed above', p: l.unitPaise, taxBp: l.taxBp })),
     ...services.map((s) => ({ v: `s:${s.id}`, l: s.name, kind: 'service', p: s.pricePaise, taxBp: 0 })),
   ];
   const term = q.trim().toLowerCase();
   const found = term ? hits.filter((h) => `${h.l} ${h.kind}`.toLowerCase().includes(term)).slice(0, 8) : [];
   const add = (v: string) => {
     setQ('');
+    if (v.startsWith('t:')) { const k = v.slice(2); const g = lines.find((l) => l.key === k)?.group; setLines((ls) => ls.map((x) => (x.key === k || (g && x.group === g) ? { ...x, on: true } : x))); return; }
     if (v.startsWith('p:') || v.startsWith('s:')) {
       const svc = v.startsWith('s:'); const x = (svc ? services : procs).find((y) => y.id === v.slice(2)); if (!x) return;
       setLines((ls) => [...ls, { key: `${v}:${ls.length}`, kind: svc ? 'service' : 'proc', id: x.id, what: x.name, sub: svc ? 'service, from the price list' : 'from the price list', unitPaise: x.pricePaise, qty: 1, maxQty: 20, on: true, dv: '', unit: 'pct', prior: 0, taxBp: svc ? 0 : x.taxRateBp ?? 0 }]);
@@ -199,25 +204,25 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
           {term && <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-line bg-surface shadow-lg" role="listbox" aria-label="Matching items">
             {found.length === 0 ? <div className="p-3 text-sm text-muted">Nothing on the price list matches “{q.trim()}”.</div> : found.map((h) => (
               <button key={h.v} type="button" role="option" aria-selected={false} className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-surface-2" onClick={() => add(h.v)}>
-                <span><b className="font-semibold">{h.l}</b> <span className="text-muted">· {h.kind}</span></span><span className="tabular-nums">{money(h.p)} <span className="text-xs text-muted">GST {h.taxBp / 100}%</span></span>
+                <span><b className="font-semibold">{h.l}</b> <span className="text-muted">· {h.kind}</span></span><span className="tabular-nums">{money(h.p)}{gstOn && <span className="text-xs text-muted"> GST {h.taxBp / 100}%</span>}</span>
               </button>))}
           </div>}
         </div>
         <div className="overflow-x-auto rounded-xl border border-line"><table className="table min-w-[700px]">
-          <thead><tr><th className="w-8 pl-3" /><th>Item</th><th className="text-right">Qty</th><th className="text-right">Price</th><th>Discount</th><th className="text-right">GST</th><th className="pr-3 text-right">Amount</th></tr></thead>
-          <tbody>{lines.length === 0 ? <tr><td colSpan={7} className="p-4 text-sm text-muted">Nothing is due. Search above to add an item, or just type an amount on the right to take an advance.</td></tr> : lines.map((l) => {
-            const g = gross(l); const o = l.on ? lineOff(l) : 0;
+          <thead><tr><th className="w-8 pl-3" /><th>Item</th><th className="text-right">Qty</th><th className="text-right">Price</th><th>Discount</th>{gstOn && <th className="text-right">GST</th>}<th className="pr-3 text-right">Amount</th></tr></thead>
+          <tbody>{lines.length === 0 ? <tr><td colSpan={gstOn ? 7 : 6} className="p-4 text-sm text-muted">Nothing is due. Search above to add an item, or just type an amount on the right to take an advance.</td></tr> : lines.map((l) => {
+            const g = gross(l); const o = l.on ? lineOff(l) + (!l.noDiscount && room ? Math.round((extra_ * (g - lineOff(l))) / room) : 0) : 0; // its own discount and its share of the extra
             return <tr key={l.key} className={l.on ? '' : 'opacity-55'}>
               <td className="pl-3"><input type="checkbox" className="accent-clay h-4 w-4" checked={l.on} aria-label={`Include ${l.what}`} onChange={(e) => { const on = e.target.checked; setLines((ls) => ls.map((x) => (x.key === l.key || (l.group && x.group === l.group) ? { ...x, on } : x))); }} /></td>
               <td className="min-w-0"><div className="text-sm font-medium">{l.what}</div><div className="text-xs text-muted">{l.sub}</div></td>
               <td className="text-right tabular-nums">{l.maxQty > 1 ? <span className="inline-flex items-center gap-1"><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label="One fewer" disabled={l.qty <= 1} onClick={() => setLine(l.key, { qty: l.qty - 1 })}>−</button><b>{l.qty}</b><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label="One more" disabled={l.qty >= l.maxQty} onClick={() => setLine(l.key, { qty: l.qty + 1 })}>+</button></span> : l.qty}</td>
               <td className="text-right tabular-nums">{money(l.unitPaise)}</td>
               <td>{l.noDiscount ? <span className="text-xs text-muted">{l.noDiscount}</span> : <DiscountBox v={l.dv} unit={l.unit} label={`Discount on ${l.what}`} disabled={!l.on} onV={(v) => setLine(l.key, { dv: v })} onUnit={(u) => setLine(l.key, { unit: u, dv: '' })} />}</td>
-              <td className="text-right tabular-nums">{l.taxBp ? `${l.taxBp / 100}%` : '—'}{l.taxBp > 0 && <div className="text-xs text-muted">{money(gstIn(g - o, l.taxBp))}</div>}</td>
+              {gstOn && <td className="text-right tabular-nums">{l.taxBp ? `${l.taxBp / 100}%` : '—'}{l.taxBp > 0 && <div className="text-xs text-muted">{money(gstIn(g - o, l.taxBp))}</div>}</td>}
               <td className="pr-3 text-right tabular-nums"><b>{money(g - o)}</b>{o > 0 && <div className="text-xs text-muted">−{money(o)} off</div>}</td>
             </tr>; })}</tbody>
         </table></div>
-        <div className="text-xs text-muted">Prices include GST. Consultation fees are taken at check-in; medicines at the pharmacy.</div>
+        <div className="text-xs text-muted">{gstOn ? 'Prices include GST. ' : ''}Consultation fees are taken at check-in; medicines at the pharmacy.</div>
         {off > 0 && <div><label className="label" htmlFor="bill-why">Reason for the discount</label><input id="bill-why" className="input" maxLength={200} placeholder="for example: staff family, second course" value={why} onChange={(e) => setWhy(e.target.value)} /></div>}
         {asks.some((a) => a.status === 'pending') && <div className="text-xs text-muted">Waiting for approval: {asks.filter((a) => a.status === 'pending').map((a) => `${money(a.offPaise)} off (${a.reason}), asked by ${a.askedBy}`).join(' · ')}</div>}
       </div>
@@ -228,7 +233,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
         <div className="flex items-center justify-between gap-2"><span className="text-muted">Extra discount</span><DiscountBox v={xv} unit={xUnit} label="Extra discount on the bill" disabled={!room} onV={setXv} onUnit={(u) => { setXUnit(u); setXv(''); }} /></div>
         {extra_ > 0 && <div className="flex justify-end text-xs text-muted">−{money(extra_)}</div>}
         <div className="flex justify-between border-t border-line pt-2.5 text-base font-bold"><span>Payable</span><span className="tabular-nums">{money(payable)}</span></div>
-        <div className="flex justify-between text-xs"><span className="text-muted">of which GST</span><span className="tabular-nums">{money(gst)}</span></div>
+        {gstOn && <div className="flex justify-between text-xs"><span className="text-muted">of which GST</span><span className="tabular-nums">{money(gst)}</span></div>}
         {advPaise > 0 && payable > 0 && <>
           <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" checked={useAdv} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
           {advUse > 0 && <div className="flex justify-between font-bold"><span>To pay</span><span className="tabular-nums">{money(toPay)}</span></div>}
@@ -236,7 +241,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
         {off > 0 && <div className="text-xs text-muted">{pct}% off · {mayApprove ? 'you approve discounts yourself' : mayGive ? `your limit is ${cap}%` : 'every discount needs approval'}</div>}
         {needsOk && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium text-ink" role="status">{pct}% off is above {mayGive ? `your limit of ${cap}%` : 'what you may give'}. The discount goes to the owner for approval. You can take {money(payable)} or less now; if the owner says no, {money(off)} becomes due.</div>}
 
-        <div className="flex items-center justify-between pt-2"><span className="label !mb-0">Paid now</span>{on.length > 0 && <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="accent-clay" checked={later} onChange={(e) => setLater(e.target.checked)} />Nothing now, pay later</label>}</div>
+        {dayClosed && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium" role="status">Today has been closed: no money can be taken. You can still save the bill and use the advance.</div>}
+        <div className="flex items-center justify-between pt-2"><span className="label !mb-0">Paid now</span>{on.length > 0 && !dayClosed && <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="accent-clay" checked={later_} onChange={(e) => setLater(e.target.checked)} />Nothing now, pay later</label>}</div>
         {!later && !allAdv && <div className="space-y-2">{parts.map((p, i) => (
           <div key={i} className="space-y-1.5 rounded-xl bg-surface p-2">
             <div className="flex flex-wrap items-center gap-1">{modes.map(([m, lb]) => <button key={m} type="button" aria-pressed={p.method === m} className={`toggle-opt !min-h-0 !px-2.5 !py-1 ${p.method === m ? 'on' : ''}`} onClick={() => setPart(i, { method: m })}>{lb}</button>)}

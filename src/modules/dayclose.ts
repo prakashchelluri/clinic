@@ -9,6 +9,7 @@ import { route } from '../lib/route.js';
 import { addDays, emit, todayIn } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { dayBounds } from './billing.js';
+import { chargeBalance } from '../lib/money.js';
 
 export const COUNT_KEYS = ['General', 'Review', 'Procedure', 'Procedure follow-up', 'Relatives and friends'] as const;
 type Bucket = { cash: number; upi: number; card: number; other: number; total: number };
@@ -44,13 +45,13 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
   // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
   // a refund of a whole invoice has no line of its own: it counts where the invoice's lines count
   const refundBills = [...new Set(pays.filter((x) => !x.p.chargeId && x.p.billId).map((x) => x.p.billId!))];
-  const billLines = refundBills.length ? await tx.select({ billId: charge.billId, visitId: charge.visitId, courseId: charge.courseId }).from(charge).where(inArray(charge.billId, refundBills)) : [];
+  const billLines = refundBills.length ? await tx.select({ billId: charge.billId, visitId: charge.visitId, courseId: charge.courseId, procedureId: charge.procedureId }).from(charge).where(inArray(charge.billId, refundBills)) : [];
   for (const { p, c, vDoc, sDoc, sale } of pays) {
     if (sale) continue; // a pharmacy bill's payment and refund rows mirror the sale; the sale and its returns below are what count, once
     if (p.method === 'advance') continue; // paid from the patient's advance: that money was counted the day the advance came in
 
     const bl = !c && p.billId ? billLines.find((x) => x.billId === p.billId) : undefined;
-    add(p.receivedAt, p.courseId || c?.courseId || bl?.courseId ? 'procedure' : c?.visitId || bl?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
+    add(p.receivedAt, p.courseId || c?.courseId || c?.procedureId || c?.sessionId || bl?.courseId || bl?.procedureId ? 'procedure' : c?.visitId || bl?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
     const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
@@ -127,7 +128,7 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const worked = await tx.select({ day: visit.day }).from(visit).where(and(eq(visit.tenantId, t), gte(visit.day, addDays(today, -14)), lt(visit.day, today))).groupBy(visit.day);
     const unclosed = [];
     for (const { day } of worked.sort((a, b) => a.day.localeCompare(b.day))) if (!closedOn.has(day)) { const f = day === yesterday ? y : await dayFigures(tx, t, tz, day); unclosed.push({ day, money: f.money }); }
-    const dues = await tx.select({ total: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId})::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
+    const dues = await tx.select({ total: sql<number>`coalesce(sum(${chargeBalance}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId}) filter (where ${chargeBalance} > 0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
     const emi = await tx.select({ total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int`, n: sql<number>`count(*)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt)));
     return {
       today, yesterday: { day: yesterday, money: y.money, closed: yc ? { by: yc.closedBy, at: yc.createdAt, cashDiffPaise: (yc.cashCountedPaise ?? 0) - ((yc.totals as any)?.drawer?.expectedCashPaise ?? 0), notes: yc.notes } : null },
@@ -166,8 +167,14 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const collected = async (a: string, b: string) => { if (!money) return null; const f = await dayFigures(tx, t, tz, a, b); return doc ? f.byDoctor[doc] ?? 0 : allMoney ? f.money.total.total : null; };
     const due = async (a: string, b: string) => {
       if (!money || (!allMoney && !doc)) return null;
-      const v = await tx.select({ n: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int` }).from(charge).innerJoin(visit, eq(visit.id, charge.visitId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
-      const s = await tx.select({ n: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int` }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(procedureSession.day, a, b), byDoc(procedureSession.practitionerId)));
+      // what is still owed (part payments taken off). The whole clinic: everything billed in the period. One doctor: their visits and sessions.
+      // ponytail: a treatment invoiced as a whole is not split by doctor; split it by the plan's doctor if the per-doctor figure needs it
+      if (allMoney && !doc) {
+        const all = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), gte(charge.createdAt, dayBounds(a, tz).start), lt(charge.createdAt, dayBounds(b, tz).end)));
+        return all[0]?.n ?? 0;
+      }
+      const v = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).innerJoin(visit, eq(visit.id, charge.visitId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
+      const s = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(procedureSession.day, a, b), byDoc(procedureSession.practitionerId)));
       return (v[0]?.n ?? 0) + (s[0]?.n ?? 0);
     };
     const period = async (a: string, b: string) => {

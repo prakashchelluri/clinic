@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, sql, gte, lt, lte, desc, isNull, inArray } from 'drizzle-orm';
-import { charge, payment, expense, visit, feeCategory, patient, tenant, appUser } from '../db/schema.js';
+import { and, eq, sql, gte, lt, lte, desc, isNull, inArray, notInArray } from 'drizzle-orm';
+import { bill, charge, course, payment, expense, visit, feeCategory, patient, tenant, appUser } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -159,6 +159,10 @@ export function billingRoutes(app: FastifyInstance) {
     if (c.status !== 'due' || (await paidOn(tx, c.id)) > 0) throw new HttpError(409, 'HAS_PAYMENTS_USE_REFUND');
     const [row] = await tx.update(charge).set({ status: 'cancelled', adjustmentReason: b.reason, adjustedBy: req.ctx.userId }).where(eq(charge.id, c.id)).returning();
     await emit(tx, req.ctx, 'charge.cancelled', 'charge', c.id, { reason: b.reason, amountPaise: c.amountPaise });
+    if (c.courseId) { // the treatment's only invoice gone: its price is free again until it is invoiced
+      const left = await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.courseId, c.courseId), notInArray(charge.status, ['cancelled', 'waived'])));
+      if (!left.length) await tx.update(course).set({ lockedAt: null }).where(eq(course.id, c.courseId));
+    }
     return row;
   });
   route(app, 'post', '/charges/:id/exclude', 'payment.refund', async (req, tx) => {
@@ -176,8 +180,16 @@ export function billingRoutes(app: FastifyInstance) {
       .where(and(eq(payment.tenantId, req.ctx.tenantId), eq(payment.receiptNo, (req.params as any).no))).orderBy(payment.receivedAt);
     if (!rows.length) throw new HttpError(404, 'NOT_FOUND');
     const ten = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any) => r[0]);
+    const billIds = [...new Set(rows.map((r) => r.c?.billId).filter(Boolean))] as string[];
+    const invoiceNos = new Map((billIds.length ? await tx.select({ id: bill.id, no: bill.invoiceNo }).from(bill).where(inArray(bill.id, billIds)) : []).map((b) => [b.id, b.no]));
     return { receiptNo: (req.params as any).no, at: rows[0].p.receivedAt, patient: { fullName: rows[0].pt.fullName, patientNo: rows[0].pt.patientNo }, clinic: { name: ten?.name, print: ten?.settings?.print ?? {} }, receivedBy: [...new Set(rows.map((r) => r.by).filter(Boolean))].join(', ') || '—', // who took the money, not who is printing
-      lines: rows.map((r) => ({ description: r.c?.description ?? (r.p.advance ? 'Advance' : r.p.courseId ? 'Sessions paid ahead' : 'Payment'), amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0, method: r.p.method, reference: r.p.reference, lender: r.p.lender })), totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0),
+      // one line per item and mode, naming the invoice it paid (a payment spread over an invoice's lines in two goes is still one line)
+      lines: [...rows.reduce((m, r) => {
+        const no = r.c?.billId ? invoiceNos.get(r.c.billId) : null;
+        const description = `${no ? `${no} · ` : ''}${r.c?.description ?? (r.p.advance ? (r.p.amountPaise < 0 ? 'Refund from the advance' : 'Advance') : 'Payment')}`;
+        const k = `${description}|${r.p.method}`; const l = m.get(k) ?? { description, amountPaise: 0, taxRateBp: r.c?.taxRateBp ?? 0, method: r.p.method, reference: r.p.reference, lender: r.p.lender };
+        l.amountPaise += r.p.amountPaise; return m.set(k, l);
+      }, new Map<string, any>()).values()], totalPaise: rows.reduce((s, r) => s + r.p.amountPaise, 0),
       tax: gstSummary(ten?.settings?.gstin, rows.map((r) => ({ amountPaise: r.p.amountPaise, taxRateBp: r.c?.taxRateBp ?? 0 }))) };
   });
 
