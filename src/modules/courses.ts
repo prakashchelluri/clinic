@@ -38,7 +38,7 @@ export async function syncTreatment(tx: Tx, ctx: Ctx, courseId: string, reason: 
   const want = Math.max(0, c.totalPaise - chs.filter((x) => x.id !== tr.id).reduce((s, x) => s + x.amountPaise + x.discountPaise, 0) - tr.discountPaise);
   if (want >= tr.amountPaise) return; // an issued invoice only ever goes down; sessions added later are billed on the next invoice ("the rest")
   const got = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, tr.id)));
-  await tx.update(charge).set({ amountPaise: want, adjustmentReason: reason, adjustedBy: ctx.userId, status: got >= want ? 'paid' : 'due' }).where(eq(charge.id, tr.id));
+  await tx.update(charge).set({ amountPaise: want, originalPaise: sql`coalesce(${charge.originalPaise}, ${charge.amountPaise} + ${charge.discountPaise})`, adjustmentReason: reason, adjustedBy: ctx.userId, status: got >= want ? 'paid' : 'due' }).where(eq(charge.id, tr.id));
   if (got > want) { // a credit: the extra leaves the invoice and becomes the patient's advance (no money moves, so method 'advance')
     const back = got - want; const base = { tenantId: t, patientId: c.patientId, method: 'advance', receivedBy: ctx.userId };
     await tx.insert(payment).values({ ...base, chargeId: tr.id, amountPaise: -back, reference: `Credit: ${reason}`.slice(0, 200) });

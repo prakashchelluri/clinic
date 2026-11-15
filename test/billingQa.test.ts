@@ -94,6 +94,20 @@ test('M9 + M12: a consultation is not billed from Generate invoice; a price-list
   assert.equal(after.procedure.total - before.procedure.total, hydra.pricePaise, 'under Procedures'); assert.equal(after.other.total, before.other.total, 'not under Other');
 });
 
+test('M3: after a part-paid treatment is cancelled, the printed invoice keeps the line\'s price and shows the credit, not a refund', async () => {
+  const owner = await as('owner@demo.clinic');
+  const { peel, p, rec } = await treatment(owner, 'QA Print', '9848077806', 4);
+  const total = peel.pricePaise * 4;
+  await owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ recommendationId: rec.id }], parts: [{ method: 'upi', amountPaise: 400000, reference: '9' }] });
+  assert.equal((await owner('POST', '/procedure-plans/cancel', { ids: [rec.id], reason: 'Moved away' })).statusCode, 200);
+  const bill = (await owner('GET', `/patients/${p.id}/bills`)).json().bills.find((b: any) => b.items[0].startsWith('Chemical'));
+  const v = (await owner('GET', `/bills/${bill.id}`)).json();
+  assert.equal(v.rows[0].listPaise, total, 'printed at the price it was billed at'); assert.equal(v.rows[0].amountPaise, 0);
+  assert.equal(v.payments.filter((x: any) => x.kind === 'credit').reduce((s: number, x: any) => s + x.amountPaise, 0), -400000, 'the credit');
+  assert.equal(v.payments.filter((x: any) => x.kind === 'refund').length, 0, 'not a refund');
+  balanced((await owner('GET', `/patients/${p.id}/account`)).json().totals);
+});
+
 test('low 10: cancelling a treatment\'s only invoice frees its price again', async () => {
   const owner = await as('owner@demo.clinic');
   const { p, rec } = await treatment(owner, 'QA Unlock', '9848077805', 2);

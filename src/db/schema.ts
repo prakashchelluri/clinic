@@ -475,6 +475,7 @@ export const charge = pgTable('charge', {
   courseId: uuid('course_id'),            // a sitting of a procedure course
   sessionId: uuid('session_id'),          // the sitting this invoice came from (one invoice per sitting)
   procedureId: uuid('procedure_id'),      // a procedure's charge (price list, treatment or session): counted under Procedures
+  originalPaise: integer('original_paise'), // the line's price before it was first lowered (cancelled sessions, a refund): what the invoice prints
   prepaid: boolean('prepaid').notNull().default(false), // paid from the course's advance
   billId: uuid('bill_id'),                 // the invoice this line is on; a trigger makes a new numbered bill when none is given
 });

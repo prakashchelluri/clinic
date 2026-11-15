@@ -113,6 +113,8 @@ export function invoiceRoutes(app: FastifyInstance) {
     const pays = await tx.select({ p: payment, by: appUser.name }).from(payment).leftJoin(appUser, eq(appUser.id, payment.receivedBy))
       .where(and(eq(payment.tenantId, t), or(inArray(payment.chargeId, cids.length ? cids : [NONE]), eq(payment.billId, v.id)))).orderBy(payment.receivedAt);
     const live = v.lines.filter((c) => !['cancelled', 'waived'].includes(c.status));
+    // a line at the price it was billed at: kept when it was first lowered, else its amount and discount and what came off it
+    const listOf = (c: typeof v.lines[number]) => c.originalPaise ?? c.amountPaise + c.discountPaise + less(c.id);
     const less = (id: string) => -pays.filter(({ p }) => p.chargeId === id && p.amountPaise < 0).reduce((s, { p }) => s + p.amountPaise, 0); // credited or refunded off the line
     // one entry per payment as the patient made it (a payment spread over several lines is one), credits and refunds apart
     const groups = new Map<string, any>();
@@ -124,8 +126,8 @@ export function invoiceRoutes(app: FastifyInstance) {
     }
     return { ...v, clinic: { name: ten?.name, print: (ten?.settings as any)?.print ?? {}, gstin: (ten?.settings as any)?.gstin ?? null },
       patient: { ...v.patient, ageYears: p?.ageYears, sex: p?.sex },
-      rows: v.lines.map((c) => ({ id: c.id, description: c.description, listPaise: c.amountPaise + c.discountPaise + less(c.id), discountPaise: c.discountPaise, lessPaise: less(c.id), discountReason: c.discountReason, taxRateBp: c.taxRateBp, amountPaise: c.amountPaise, status: c.status, reason: c.adjustmentReason, visitId: c.visitId, excludedAt: c.excludedAt })),
-      subtotalPaise: live.reduce((s, c) => s + c.amountPaise + c.discountPaise + less(c.id), 0), lessPaise: live.reduce((s, c) => s + less(c.id), 0),
+      rows: v.lines.map((c) => ({ id: c.id, description: c.description, listPaise: listOf(c), discountPaise: c.discountPaise, lessPaise: listOf(c) - c.discountPaise - c.amountPaise, discountReason: c.discountReason, taxRateBp: c.taxRateBp, amountPaise: c.amountPaise, status: c.status, reason: c.adjustmentReason, visitId: c.visitId, excludedAt: c.excludedAt })),
+      subtotalPaise: live.reduce((s, c) => s + listOf(c), 0), lessPaise: live.reduce((s, c) => s + listOf(c) - c.discountPaise - c.amountPaise, 0),
       creditPaise: -pays.filter(({ p }) => p.method === 'advance' && p.amountPaise < 0 && p.chargeId).reduce((s, { p }) => s + p.amountPaise, 0),
       gst: gstSummary((ten?.settings as any)?.gstin, live.map((c) => ({ amountPaise: c.amountPaise, taxRateBp: c.taxRateBp }))),
       gstPaise: live.reduce((s, c) => s + (c.taxRateBp ? c.amountPaise - Math.round((c.amountPaise * 10000) / (10000 + c.taxRateBp)) : 0), 0),
@@ -153,7 +155,7 @@ export function invoiceRoutes(app: FastifyInstance) {
         const take = Math.min(rest, net.get(c.id) ?? 0, c.amountPaise); if (take <= 0) continue;
         rest -= take; net.set(c.id, (net.get(c.id) ?? 0) - take); c.amountPaise -= take;
         await tx.insert(payment).values({ tenantId: t, patientId: v.patient.id, chargeId: c.id, amountPaise: -take, method: p.method, reference: `Refund ${v.invoiceNo} · ${b.reason}`.slice(0, 200), receiptNo, receivedBy: req.ctx.userId });
-        await tx.update(charge).set({ amountPaise: c.amountPaise, adjustmentReason: `Refunded: ${b.reason}`.slice(0, 200), adjustedBy: req.ctx.userId }).where(eq(charge.id, c.id));
+        await tx.update(charge).set({ amountPaise: c.amountPaise, originalPaise: sql`coalesce(${charge.originalPaise}, ${charge.amountPaise} + ${charge.discountPaise})`, adjustmentReason: `Refunded: ${b.reason}`.slice(0, 200), adjustedBy: req.ctx.userId }).where(eq(charge.id, c.id));
         if (c.courseId) await tx.update(course).set({ totalPaise: sql`greatest(${course.totalPaise} - ${take}, 0)` }).where(eq(course.id, c.courseId)); // not billed again as "the rest"
         if (!rest) break;
       }

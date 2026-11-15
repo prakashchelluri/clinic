@@ -22,7 +22,7 @@ function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | n
     <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line py-2.5 first:border-t-0"><span className="text-muted">{label}</span><div>{children}</div></div>);
   return (
     <div className="rounded-[10px] border border-line px-4 py-1 text-[14px]">
-      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· {money(c.perSittingPaise)} each</span>
+      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· about {money(Math.round(c.perSittingPaise / 100) * 100)} each</span>{c.listPaise > c.totalPaise && <div className="text-[13px] text-muted">{money(c.listPaise)} less {money(c.listPaise - c.totalPaise)} refunded or credited for sessions not given</div>}
         <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Custom price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? `Share of the ${c.packageName ?? 'clinic'} package${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : 'Standard price'}</div>
         {c.validUntil && <div className={`text-[13px] ${c.expired ? 'text-rose' : 'text-muted'}`}>{c.expired ? `Expired on ${day(c.validUntil)}: sessions not done can only be refunded` : `Valid till ${day(c.validUntil)}`}</div>}</Row>
       <Row label="Agreed">By the patient on {day(c.createdAt)}<div className="text-[13px] text-muted">{c.agreedBy ? `Recorded by ${c.agreedBy}` : ''}</div></Row>
