@@ -6,7 +6,7 @@
 //   negative with method 'advance' = taken off the line and put back in the patient's advance (never money out).
 // - Money only leaves the clinic from the advance (a refund, a negative advance row with a real mode, with a voucher number).
 // - A line's balance = its amount − credited − applied. The patient's balance = Σ balances − advance.
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { charge, creditLine, creditNote, payment } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import type { Ctx } from './auth.js';
@@ -94,6 +94,14 @@ export async function issueCredit(tx: Tx, ctx: Ctx, b: { billId: string; patient
 
 type Part = { method: string; amountPaise: number; reference?: string | null };
 
+/** Unsettled EMI that has moved off its invoice line into the patient's advance (a credit note or a refund on that line). */
+export async function emiInAdvance(tx: Tx, t: string, patientId: string) {
+  const rows = await tx.select({ emi: sql<number>`coalesce(sum(case when ${payment.method} = 'emi' and ${payment.settledAt} is null and ${payment.amountPaise} > 0 then ${payment.amountPaise} else 0 end),0)::int`,
+    net: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int` }).from(payment)
+    .where(and(eq(payment.tenantId, t), eq(payment.patientId, patientId), sql`${payment.chargeId} is not null`)).groupBy(payment.chargeId);
+  return rows.reduce((s, r) => s + Math.max(0, r.emi - Math.max(0, r.net)), 0);
+}
+
 /** A refund already made with this request key (a retry, a slow network, a second tab): its voucher, so it is not paid twice. */
 export async function refundDone(tx: Tx, t: string, key?: string | null) {
   if (!key) return null;
@@ -107,6 +115,11 @@ export async function refundFromAdvance(tx: Tx, ctx: Ctx, b: { patientId: string
   const t = ctx.tenantId; const bal = await advanceBalance(tx, t, b.patientId);
   const amountPaise = b.parts.reduce((s, p) => s + p.amountPaise, 0);
   if (amountPaise > bal) throw new HttpError(400, 'MORE_THAN_THE_ADVANCE', { balancePaise: bal });
+  // EMI the lender has not paid yet is not money the clinic holds. On each line paid by such EMI, whatever has left the line (to the advance)
+  // beyond the other money on it is that EMI: that much of the advance cannot go back until the lender pays.
+  const held = await emiInAdvance(tx, t, b.patientId);
+  const free = Math.max(0, bal - held);
+  if (amountPaise > free) throw new HttpError(400, 'EMI_NOT_SETTLED', { refundablePaise: free, emiPaise: held });
   const fy = fyOf(todayIn(ctx.timezone));
   const voucherNo = `RF-${fy}-${String(await nextNumber(tx, t, 'refund_no', `fy:${fy}`)).padStart(4, '0')}`;
   const rows = await tx.insert(payment).values(b.parts.map((p) => ({ tenantId: t, patientId: b.patientId, billId: b.billId ?? null, advance: true, amountPaise: -p.amountPaise, method: p.method,

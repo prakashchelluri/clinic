@@ -29,7 +29,7 @@ export async function standing(tx: Tx, t: string, c: Course) {
   const chs = await courseCharges(tx, t, c);
   const ids = chs.map((x) => x.id);
   const m = await lineMoney(tx, t, ids);
-  const cls = ids.length ? await tx.select({ sessions: creditLine.sessions, listPaise: creditLine.listPaise }).from(creditLine).where(and(eq(creditLine.tenantId, t), inArray(creditLine.chargeId, ids))) : [];
+  const cls = ids.length ? await tx.select({ chargeId: creditLine.chargeId, sessions: creditLine.sessions, listPaise: creditLine.listPaise }).from(creditLine).where(and(eq(creditLine.tenantId, t), inArray(creditLine.chargeId, ids))) : [];
   const invoicedPaise = chs.reduce((s, x) => s + x.amountPaise + x.discountPaise, 0); // as issued, at the course price
   const discountPaise = chs.reduce((s, x) => s + x.discountPaise, 0);
   const creditedPaise = chs.reduce((s, x) => s + m.credited(x.id), 0);
@@ -43,7 +43,9 @@ export async function standing(tx: Tx, t: string, c: Course) {
   const done = sum(await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))));
   const perSittingPaise = Math.round((netPaise + uninvoicedPaise) / Math.max(1, c.sittings));
   const treatment = chs.find((x) => !x.sessionId) ?? chs[0] ?? null;
-  return { ...c, perSittingPaise, invoicedPaise, uninvoicedPaise, invoicedSessions, uninvoicedSessions, listBilledPaise, netPaise, creditedPaise, invoiceId: treatment?.billId ?? null, invoiced: chs.length > 0,
+  // the invoice lines that bill sessions, newest first, with the sessions still on each and their amount: what taking sessions off would credit
+  const sessionLines = chs.filter((x) => (x.sessions ?? 0) > 0).map((x) => ({ sessions: (x.sessions ?? 0) - cls.filter((l) => l.chargeId === x.id).reduce((s, l) => s + l.sessions, 0), netPaise: x.amountPaise - m.credited(x.id) })).filter((x) => x.sessions > 0).reverse();
+  return { ...c, sessionLines, perSittingPaise, invoicedPaise, uninvoicedPaise, invoicedSessions, uninvoicedSessions, listBilledPaise, netPaise, creditedPaise, invoiceId: treatment?.billId ?? null, invoiced: chs.length > 0,
     advancePaise: paidPaise, paidPaise, refundedPaise: 0, drawnPaise: 0, unusedPaise: 0, paidOnDayPaise: 0, doneSittings: done, unusedSittings: 0, refundablePaise: 0,
     discountPaise, duePaise, stillToPayPaise: duePaise + uninvoicedPaise };
 }
@@ -57,20 +59,26 @@ export async function standing(tx: Tx, t: string, c: Course) {
 export async function creditSessions(tx: Tx, ctx: Ctx, c: Course, keep: number, reason: string) {
   const t = ctx.tenantId;
   const st = await standing(tx, t, c);
-  const invKeep = Math.min(st.invoicedSessions, keep); const removed = st.invoicedSessions - invKeep; const uninvKeep = keep - invKeep;
-  const listPer = st.invoicedSessions ? st.listBilledPaise / st.invoicedSessions : 0;
-  const listRemoved = removed ? st.listBilledPaise - Math.round(listPer * invKeep) : 0;
+  const removed = Math.max(0, st.invoicedSessions - keep); const uninvKeep = keep - Math.min(st.invoicedSessions, keep);
   const uninvPer = st.uninvoicedSessions ? st.uninvoicedPaise / st.uninvoicedSessions : 0;
-  await tx.update(course).set({ sittings: keep, totalPaise: Math.max(0, st.listBilledPaise - listRemoved + Math.round(uninvPer * uninvKeep)) }).where(eq(course.id, c.id)); // the sessions kept, at their price
-  let credit = removed && st.invoicedSessions ? st.netPaise - Math.round((st.netPaise / st.invoicedSessions) * invKeep) : 0;
-  if (credit <= 0) return 0;
-  const chs = (await courseCharges(tx, t, c)).reverse(); // newest line first
+  // each invoice line at its own price per session, the newest first: sessions added later (at the standard price) come off before the
+  // ones invoiced with the treatment, and a session already done keeps the price it was invoiced at
+  const chs = (await courseCharges(tx, t, c)).filter((x) => (x.sessions ?? 0) > 0).reverse();
   const m = await lineMoney(tx, t, chs.map((x) => x.id));
-  const byBill = new Map<string, { chargeId: string; amountPaise: number; what: string; sessions?: number; listPaise?: number }[]>();
-  let first = true;
-  for (const x of chs) { if (!credit) break; const take = Math.min(credit, x.amountPaise - m.credited(x.id)); if (take <= 0) continue;
-    byBill.set(x.billId!, [...(byBill.get(x.billId!) ?? []), { chargeId: x.id, amountPaise: take, what: `${x.description}: ${removed} session${removed === 1 ? '' : 's'} not given`, ...(first ? { sessions: removed, listPaise: listRemoved } : {}) }]);
-    credit -= take; first = false; }
+  const cls = chs.length ? await tx.select({ chargeId: creditLine.chargeId, sessions: creditLine.sessions, listPaise: creditLine.listPaise }).from(creditLine).where(and(eq(creditLine.tenantId, t), inArray(creditLine.chargeId, chs.map((x) => x.id)))) : [];
+  const byBill = new Map<string, { chargeId: string; amountPaise: number; what: string; sessions: number; listPaise: number }[]>();
+  let left = removed; let listRemoved = 0;
+  for (const x of chs) {
+    if (!left) break;
+    const mine = cls.filter((l) => l.chargeId === x.id);
+    const sessions = (x.sessions ?? 0) - mine.reduce((s, l) => s + l.sessions, 0); if (sessions <= 0) continue;
+    const net = x.amountPaise - m.credited(x.id); const list = x.amountPaise + x.discountPaise - mine.reduce((s, l) => s + l.listPaise, 0);
+    const k = Math.min(left, sessions);
+    const amount = k === sessions ? net : Math.round((net * k) / sessions); const listShare = k === sessions ? list : Math.round((list * k) / sessions);
+    left -= k; listRemoved += listShare;
+    if (amount > 0) byBill.set(x.billId!, [...(byBill.get(x.billId!) ?? []), { chargeId: x.id, amountPaise: amount, what: `${x.description}: ${k} session${k === 1 ? '' : 's'} not given`, sessions: k, listPaise: listShare }]);
+  }
+  await tx.update(course).set({ sittings: keep, totalPaise: Math.max(0, st.listBilledPaise - listRemoved + Math.round(uninvPer * uninvKeep)) }).where(eq(course.id, c.id)); // the sessions kept, at their price
   let moved = 0;
   for (const [billId, lines] of byBill) moved += (await issueCredit(tx, ctx, { billId, patientId: c.patientId, reason, lines })).toAdvancePaise;
   return moved;
@@ -159,6 +167,7 @@ export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommen
   const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
   if (c) {
     const st = await standing(tx, t, c);
+    if (st.invoiced && st.uninvoicedSessions > 0) return { kind: 'on_done', amountPaise: st.uninvoicedPaise }; // sessions added since: marking one done invoices them
     if (st.invoiced) return st.stillToPayPaise > 0 ? { kind: 'invoiced', amountPaise: st.stillToPayPaise } : { kind: 'paid', amountPaise: 0 };
     return { kind: 'on_done', amountPaise: st.uninvoicedPaise };
   }

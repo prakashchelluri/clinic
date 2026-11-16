@@ -12,7 +12,7 @@ type Money = { kind: 'invoiced' | 'on_done' | 'due' | 'paid' | 'none'; amountPai
 /** "On invoice", "₹2,500 due", "Paid" or "No price on the list", for a sitting row or the drawer. Nothing when the user cannot see fees. */
 export function MoneyChip({ m }: { m: Money }) {
   if (!m) return null;
-  return m.kind === 'invoiced' ? <Chip tone="sky">On invoice · {money(m.amountPaise)} to pay</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'on_done' ? <Chip>Not invoiced yet</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price on the list</Chip>;
+  return m.kind === 'invoiced' ? <Chip tone="sky">On invoice · {money(m.amountPaise)} to pay</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'on_done' ? <Chip>{money(m.amountPaise)} to invoice when done</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price on the list</Chip>;
 }
 /** Consent kept on the patient per procedure: "Consent on file" or "Consent needed". */
 type Consent = { consentNeeded?: boolean; consent?: { grantedAt: string; by: string; how?: string; documentId?: string } | null };
@@ -88,7 +88,7 @@ export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; proced
 /** Marking done makes the charge, so say what it will be first. */
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
   const m = s.money;
-  const pay = !m ? '' : m.kind === 'on_done' ? ` The treatment is not on an invoice yet: it is invoiced now, whole (${money(m.amountPaise)}).` : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'invoiced' ? ' It is on the treatment\'s invoice: nothing more is billed.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
+  const pay = !m ? '' : m.kind === 'on_done' ? ` ${money(m.amountPaise)} not invoiced yet is invoiced now; the patient's advance pays it first, as far as it goes.` : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'invoiced' ? ' It is on the treatment\'s invoice: nothing more is billed.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
   return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
 }
 

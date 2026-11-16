@@ -9,7 +9,7 @@ import { HttpError, can } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
 import { nextReceiptNo } from './billing.js';
 import { ensureCourse, standing } from './courses.js';
-import { advanceBalance, balancesOf, issueCredit, refundDone, refundFromAdvance, settle } from '../lib/money.js';
+import { advanceBalance, balancesOf, issueCredit, lineMoney, refundDone, refundFromAdvance, settle } from '../lib/money.js';
 export { advanceBalance } from '../lib/money.js';
 
 const Line = z.object({
@@ -88,6 +88,8 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     const chargeIds = b.lines.map((l) => l.chargeId).filter(Boolean) as string[];
     if (new Set(chargeIds).size !== chargeIds.length) throw new HttpError(400, 'SAME_INVOICE_TWICE');
     const paid = await paidOn(tx, chargeIds);
+    // money ever taken on a line (even if it later moved to the advance): a discount is only given before any money is taken
+    const tookMoney = new Set(chargeIds.length ? (await tx.select({ id: payment.chargeId }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, chargeIds), sql`${payment.amountPaise} > 0`))).map((r) => r.id!) : []);
     const left = await balancesOf(tx, t, chargeIds.length ? await tx.select({ id: charge.id, amountPaise: charge.amountPaise }).from(charge).where(and(eq(charge.tenantId, t), inArray(charge.id, chargeIds))) : []);
     for (const l of b.lines) {
       if (l.chargeId) {
@@ -95,7 +97,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
         if (!c) throw new HttpError(404, 'CHARGE_NOT_FOUND');
         const owing = (left.get(c.id) ?? 0) - (waiting.get(c.id) ?? 0);
         if (c.status !== 'due' || owing <= 0) throw new HttpError(409, 'NOTHING_DUE', { chargeId: c.id });
-        const why = c.visitId ? 'NO_DISCOUNT_ON_CONSULTATION' : c.description.startsWith('Pharmacy') ? 'NO_DISCOUNT_ON_PHARMACY' : (paid.get(c.id) ?? 0) > 0 ? 'DISCOUNT_ONLY_BEFORE_PAYMENT' : waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined;
+        const why = c.visitId ? 'NO_DISCOUNT_ON_CONSULTATION' : c.description.startsWith('Pharmacy') ? 'NO_DISCOUNT_ON_PHARMACY' : (paid.get(c.id) ?? 0) > 0 || tookMoney.has(c.id) ? 'DISCOUNT_ONLY_BEFORE_PAYMENT' : waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined;
         items.push({ what: c.description, gross: owing, prior: c.discountPaise, disc: l.discountPaise, canDiscount: !why, why, chargeId: c.id, billId: c.billId ?? undefined, at: c.createdAt, ln: c.lineNo ?? 0 });
       } else if (l.procedureId) {
         const p = await tx.select().from(procedureCatalog).where(and(eq(procedureCatalog.id, l.procedureId), eq(procedureCatalog.tenantId, t))).then((r) => r[0]);
@@ -135,7 +137,8 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
       let left = b.extraDiscountPaise;
       room.forEach((i, k) => { const share = k === room.length - 1 ? left : Math.round((b.extraDiscountPaise * (i.gross - i.disc)) / base / 100) * 100; i.disc += share; left -= share; }); // whole rupees per line; the last takes the rest
     }
-    for (const i of items) if (i.disc >= i.gross && i.disc > 0) throw new HttpError(400, 'DISCOUNT_MORE_THAN_THE_ITEM', { what: i.what });
+    for (const i of items) if (i.disc >= i.gross && i.disc > 0) // an item for free is not a discount; the bill-wide one says so as such
+      throw new HttpError(400, b.extraDiscountPaise > 0 ? 'EXTRA_DISCOUNT_TOO_BIG' : 'DISCOUNT_MORE_THAN_THE_ITEM', { what: i.what });
     const off = items.reduce((s, i) => s + i.disc, 0);
     if (off > 0 && b.reason.length < 3) throw new HttpError(400, 'REASON_REQUIRED');
     const ten = await tx.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
@@ -174,13 +177,17 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     if (fromAdvance) { const bal = await advanceBalance(tx, t, b.patientId); if (fromAdvance > bal) throw new HttpError(400, 'MORE_THAN_THE_ADVANCE', { balancePaise: bal }); }
     const extra = total - payable;
     if (extra > 0 && (!b.keepExtraAsAdvance || extra > total - fromAdvance)) throw new HttpError(400, 'MORE_THAN_DUE', { duePaise: payable }); // the advance never pays into itself
+    const emiIn = b.parts.filter((p) => p.method === 'emi').reduce((s, p) => s + p.amountPaise, 0);
+    if (emiIn > Math.max(0, payable - fromAdvance)) throw new HttpError(400, 'EMI_MORE_THAN_DUE', { duePaise: Math.max(0, payable - fromAdvance) }); // the lender pays for the bill, never into the advance
     if (!items.length && total <= 0) throw new HttpError(400, 'NOTHING_TO_BILL');
+    if (!items.some((i) => i.isNew) && off === 0 && total <= 0) throw new HttpError(400, 'NOTHING_TO_SAVE'); // only old dues ticked, nothing taken: nothing happens
     const targets = [...items].sort((x, y) => x.at.localeCompare(y.at) || (x.ln ?? 0) - (y.ln ?? 0)).map((i) => ({ i, room: i.gross - i.disc })); // oldest first, then in line order
     const receiptNo = total - fromAdvance ? await nextReceiptNo(tx, t, ctx.timezone) : null; // a receipt is for money handed over
     let seq = 0;
     const put = (v: Partial<typeof payment.$inferInsert> & { amountPaise: number; method: string }) => tx.insert(payment).values({ tenantId: t, patientId: b.patientId, receiptNo: v.method === 'advance' ? null : receiptNo, receivedBy: ctx.userId, idempotencyKey: `${b.idempotencyKey}#${seq++}`, ...v });
     // the advance is used first, so new money is what is left for the rest (and for any extra)
-    for (const part of [...b.parts].sort((x, y) => Number(y.method === 'advance') - Number(x.method === 'advance'))) {
+    const order = (m: string) => (m === 'advance' ? 0 : m === 'emi' ? 1 : 2); // the advance first, then EMI, so any extra is money handed over
+    for (const part of [...b.parts].sort((x, y) => order(x.method) - order(y.method))) {
       let rest = part.amountPaise;
       for (const g of targets) {
         if (!rest) break; if (!g.room) continue;
@@ -209,7 +216,7 @@ function moreBillRoutes(app: FastifyInstance) {
   });
 
   /** Discounts waiting for a decision (or one patient's, any state). Anyone who sees fees sees them; only an approver decides. */
-  route(app, 'get', '/discount-asks', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/discount-asks', 'fees.invoices', async (req, tx) => {
     const q = req.query as any; const t = req.ctx.tenantId;
     const where = q.patientId ? and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, String(q.patientId))) : and(eq(discountAsk.tenantId, t), eq(discountAsk.status, 'pending'));
     const rows = await tx.select({ a: discountAsk, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(discountAsk).innerJoin(patient, eq(patient.id, discountAsk.patientId)).where(where).orderBy(discountAsk.createdAt).limit(100);
@@ -228,9 +235,17 @@ function moreBillRoutes(app: FastifyInstance) {
     if (a.status !== 'pending') throw new HttpError(409, 'ALREADY_DECIDED', { status: a.status });
     if (b.action === 'approve') { // the invoice stays as issued: the approved discount is a credit note against it
       const live = (await tx.select().from(charge).where(and(eq(charge.tenantId, t), inArray(charge.id, a.lines.map((l) => l.chargeId).filter(Boolean) as string[])))).filter((c) => ['due', 'paid'].includes(c.status));
+      // never more than is still left of each line (part of it may have been taken off since the discount was asked for)
+      const lm = await lineMoney(tx, t, live.map((c) => c.id));
+      let given = 0;
       for (const billId of [...new Set(live.map((c) => c.billId!))]) {
-        await issueCredit(tx, req.ctx, { billId, patientId: a.patientId, reason: `Discount approved: ${a.reason}`,
-          lines: a.lines.filter((l) => live.some((c) => c.id === l.chargeId && c.billId === billId)).map((l) => ({ chargeId: l.chargeId!, amountPaise: l.offPaise, what: `Discount on ${l.what}` })) });
+        const lines = a.lines.map((l) => { const c = live.find((x) => x.id === l.chargeId && x.billId === billId); return c ? { chargeId: c.id, amountPaise: Math.min(l.offPaise, c.amountPaise - lm.credited(c.id)), what: `Discount on ${l.what}` } : null; })
+          .filter((l): l is { chargeId: string; amountPaise: number; what: string } => !!l && l.amountPaise > 0);
+        if (lines.length) { await issueCredit(tx, req.ctx, { billId, patientId: a.patientId, reason: `Discount approved: ${a.reason}`, lines }); given += lines.reduce((s, l) => s + l.amountPaise, 0); }
+      }
+      if (!given) { // nothing left to take a discount off: the request has nothing to decide
+        const [w] = await tx.update(discountAsk).set({ status: 'withdrawn', decidedBy: req.ctx.name, decidedAt: new Date().toISOString() }).where(eq(discountAsk.id, a.id)).returning();
+        return w;
       }
     }
     const [row] = await tx.update(discountAsk).set({ status: b.action === 'approve' ? 'approved' : 'rejected', decidedBy: req.ctx.name, decidedAt: new Date().toISOString() }).where(eq(discountAsk.id, a.id)).returning();

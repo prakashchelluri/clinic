@@ -18,6 +18,13 @@ function ValidTill({ date, none, onDate, onNone }: { date: string; none: boolean
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-ink" checked={none} onChange={(e) => onNone(e.target.checked)} />No expiry</label></div></div>);
 }
 
+/** What taking k invoiced sessions off a course credits: each invoice line at its own price per session, the newest first (as the server does). */
+function creditFor(c: any, k: number) {
+  let left = k; let sum = 0;
+  for (const l of c.sessionLines ?? []) { if (!left) break; const n = Math.min(left, l.sessions); sum += n === l.sessions ? l.netPaise : Math.round((l.netPaise * n) / l.sessions); left -= n; }
+  return sum;
+}
+
 const LIVE = (s: any) => ['confirmed', 'in_progress', 'completed'].includes(s.state);
 /** Edit a procedure or a package: valid till, and for each procedure its number of sessions (and its gap). Done and booked sessions stay. */
 export function EditPlanDrawer({ plans, sessions, courses, procName, onClose }: { plans: any[]; sessions: any[]; courses: any[]; procName: (r: any) => string; onClose: () => void }) {
@@ -33,8 +40,13 @@ export function EditPlanDrawer({ plans, sessions, courses, procName, onClose }: 
   const std = (r: any) => cfg?.procedures?.find((p: any) => p.id === r.procedureId)?.pricePaise ?? 0;
   const deltaOf = (r: any) => { const c = courses.find((x) => x.recommendationId === r.id); const oldN = c?.sittings ?? r.sittings ?? 1; const newN = ns[r.id];
     const total = c?.totalPaise ?? (r.amountPaise > 0 ? r.amountPaise : null);
-    const share = c?.invoiced ? c.perSittingPaise : total != null ? Math.round(total / oldN) : std(r); // invoiced: what a session was really charged, after discount and credits
-    return newN > oldN ? (newN - oldN) * std(r) : -(oldN - newN) * share; };
+    const share = total != null ? Math.round(total / oldN) : std(r);
+    if (newN > oldN) return (newN - oldN) * std(r);
+    if (!c?.invoiced) return -(oldN - newN) * share;
+    // invoiced: the sessions taken off come off at their own invoice line's price, the newest first (the same as the server);
+    // sessions not invoiced yet just leave the price
+    const inv = c.invoicedSessions ?? 0; const off = Math.max(0, inv - newN); const notInv = (oldN - newN) - off;
+    return -(creditFor(c, off) + (c.uninvoicedSessions ? Math.round((c.uninvoicedPaise / c.uninvoicedSessions) * notInv) : 0)); };
   const delta = plans.reduce((s, r) => s + deltaOf(r), 0);
   const changed = plans.filter((r) => ns[r.id] !== (courses.find((c) => c.recommendationId === r.id)?.sittings ?? r.sittings ?? 1) || gaps[r.id] !== String(r.gapDays ?? ''));
   const validChanged = none !== initNone || (!none && date !== (course0?.validUntil ?? plans[0].validUntil ?? (pk ? addMonthsTo(pk.validMonths) : '')));
@@ -83,7 +95,7 @@ export function CancelPlanDialog({ plans, sessions, courses, procName, onClose }
   const booked = plans.flatMap((r) => live(r).filter((s) => s.state === 'confirmed').map((s) => ({ ...s, proc: procName(r) })));
   // paid on each treatment's invoice, and what of it pays for sessions not done: that moves to the patient's advance on cancelling
   const paid = cs.reduce((s, c: any) => s + c.advancePaise, 0);
-  const back = cs.reduce((s, c: any) => s + (c.invoiced ? Math.max(0, c.paidPaise - c.perSittingPaise * c.doneSittings) : 0), 0); // what a session was really charged × the sessions done stays; the rest of what was paid moves
+  const back = cs.reduce((s, c: any) => s + (c.invoiced ? Math.max(0, c.paidPaise - (c.netPaise - creditFor(c, Math.max(0, (c.invoicedSessions ?? 0) - c.doneSittings)))) : 0), 0); // paid above what the sessions done now cost moves to the advance
   const mayRefund = can(perms, 'payment.refund') && back > 0;
   const [why, setWhy] = useState(''); const [refund, setRefund] = useState(false); const [mode, setMode] = useState<'upi' | 'cash' | 'card' | 'bank'>('upi');
   const go = useMutation({
@@ -99,7 +111,7 @@ export function CancelPlanDialog({ plans, sessions, courses, procName, onClose }
   return (
     <Modal title={`Cancel the ${pk ? `${pk.name} package` : procName(plans[0])}?`} onClose={onClose} width="max-w-lg">
       <div className="space-y-3 text-sm">
-        <p>{done} of {all} sessions are done; the {all - done} not done stop.{booked.length ? <> {booked.length === 1 ? 'The booking' : 'The bookings'} on {booked.map((s) => `${s.day} ${s.startTime ?? ''} (${s.proc}, session ${s.sittingNo})`).join(', ')} {booked.length === 1 ? 'is' : 'are'} cancelled.</> : null}</p>
+        <p>{done} of {all} sessions are done; the {all - done} not done stop.{booked.length ? <> {booked.length === 1 ? 'The booking' : 'The bookings'} on {booked.map((s) => `${new Date(s.day + 'T00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${s.startTime ? ` at ${s.startTime}` : ''} (${s.proc}, session ${s.sittingNo})`).join(', ')} {booked.length === 1 ? 'is' : 'are'} cancelled.</> : null}</p>
         {pk && <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5 text-[13px]">{plans.map((r) => <Fragment key={r.id}><span>{procName(r)}</span><span className="text-muted">{live(r).filter((x) => x.state === 'completed').length} of {r.sittings ?? 1} done</span></Fragment>)}</div>}
         {cs.length > 0 && <div className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 rounded-lg bg-paper-2 px-3 py-2.5"><span>Paid</span><b>{money(paid)}</b><span>For sessions not done: to the advance</span><b className="text-sage">{money(back)}</b></div>}
         <div><label className="label" htmlFor="cp-why">Reason</label><input id="cp-why" className="input" maxLength={200} placeholder="e.g. Patient moving to another city" value={why} onChange={(e) => setWhy(e.target.value)} /></div>

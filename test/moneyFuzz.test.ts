@@ -123,18 +123,39 @@ test('random money actions: every page agrees after every step', async () => {
       receptionDiscount: async () => { const rec = pick(recs); const c = (await O('GET', `/courses?patientId=${p.id}`)).body.find((x: any) => x.recommendationId === rec.id);
         const gross = c ? c.uninvoicedPaise : rec.amountPaise || peel.pricePaise * 4; if (!gross) return; const disc = Math.round(gross * 0.2 / 100) * 100;
         return R('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ recommendationId: rec.id, discountPaise: disc }], reason: 'Family friend', parts: r() < 0.5 ? [{ method: 'cash', amountPaise: gross - disc }] : [] }); },
-      decide: async () => { const a = (await O('GET', '/discount-asks')).body.find((x: any) => x.patientId === p.id); if (a) return O('POST', `/discount-asks/${a.id}/decide`, { action: pick(['approve', 'reject']) }); },
+      decide: async () => { const a = (await O('GET', '/discount-asks')).body.find((x: any) => x.patientId === p.id); if (!a) return; const res = await O('POST', `/discount-asks/${a.id}/decide`, { action: pick(['approve', 'reject']) }); assert.equal(res.status, 200, 'a discount request can always be decided'); return res; },
       priceList: async () => { const qty = 1 + Math.floor(r() * 2); return O('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ procedureId: hydra.id, qty }], parts: r() < 0.5 ? [{ method: 'cash', amountPaise: amt(hydra.pricePaise * qty) }] : [] }); },
-      recordPayment: async () => O('POST', `/patients/${p.id}/payments`, { amountPaise: amt(800000), method: pick(MODES), reference: '7', idempotencyKey: key() }),
+      recordPayment: async () => { const emi = r() < 0.25; const owed = (await O('GET', `/patients/${p.id}/account`)).body.totals.collectablePaise;
+        if (emi && !owed) return; const amount = emi ? Math.min(owed, amt(owed)) : amt(800000);
+        return O('POST', `/patients/${p.id}/payments`, { amountPaise: amount, method: emi ? 'emi' : pick(MODES), reference: '7', ...(emi ? { lender: 'Bajaj' } : {}), idempotencyKey: key() }); },
+      emiTooMuch: async () => { const owed = (await O('GET', `/patients/${p.id}/account`)).body.totals.collectablePaise;
+        const res = await O('POST', `/patients/${p.id}/payments`, { amountPaise: owed + 10000, method: 'emi', reference: '8', lender: 'Bajaj', idempotencyKey: key() });
+        assert.equal(res.status, 400, 'EMI above what is due is refused'); return res; },
+      settleEmi: async () => { const e = pick((await O('GET', '/payments/awaiting')).body.filter((x: any) => x.patient === p.fullName)) as any; if (e) return O('POST', `/payments/${e.id}/settle`, { feePaise: 0 }); },
       refundInvoice: async () => { const b = pick((await O('GET', `/patients/${p.id}/bills`)).body.bills.filter((x: any) => x.paidPaise > 0)); if (!b) return;
-        const lower = r() < 0.7; const live = b.lines.filter((c: any) => !['cancelled', 'waived'].includes(c.status)).map((c: any) => ({ id: c.id, room: c.amountPaise - (b.creditedOn[c.id] ?? 0) })).filter((c: any) => c.room > 0);
-        const target = pick(live) as any; if (lower && !target) return;
-        const amount = Math.min(b.paidPaise, lower ? target.room : b.paidPaise, amt(b.paidPaise));
-        return O('POST', `/bills/${b.id}/refund`, { parts: [{ method: pick(MODES), amountPaise: amount }], reason: 'Fuzz refund', lower, idempotencyKey: key(), ...(lower ? { lines: [{ chargeId: target.id, amountPaise: amount }] } : {}) }); },
+        const lower = r() < 0.7;
+        const live = b.lines.filter((c: any) => !['cancelled', 'waived'].includes(c.status)).map((c: any) => { const paid = b.paidOn[c.id] ?? 0; return { id: c.id, room: lower ? Math.min(paid, c.amountPaise - (b.creditedOn[c.id] ?? 0)) : paid }; }).filter((c: any) => c.room > 0);
+        const target = pick(live) as any; if (!target) return;
+        const amount = Math.min(target.room, amt(target.room));
+        const res = await O('POST', `/bills/${b.id}/refund`, { parts: [{ method: pick(MODES), amountPaise: amount }], reason: 'Fuzz refund', lower, idempotencyKey: key(), lines: [{ chargeId: target.id, amountPaise: amount }] });
+        if (res.status === 200) { const after = (await O('GET', `/bills/${b.id}`)).body; // a refund only takes money off the item it names
+          for (const c of b.lines) if (c.id !== target.id) assert.equal(after.paidOn[c.id] ?? 0, b.paidOn[c.id] ?? 0, `a refund took money off another item · ${b.invoiceNo}`); }
+        return res; },
+      takeItemOff: async () => { const b = pick((await O('GET', `/patients/${p.id}/bills`)).body.bills.filter((x: any) => x.status !== 'cancelled' && !x.pharmacy)); if (!b) return;
+        const c = pick(b.lines.filter((x: any) => !['cancelled', 'waived'].includes(x.status) && x.amountPaise - (b.creditedOn[x.id] ?? 0) > 0)) as any; if (!c) return;
+        const left = c.amountPaise - (b.creditedOn[c.id] ?? 0); const before = (await O('GET', `/patients/${p.id}/account`)).body.totals;
+        const res = await O('POST', `/bills/${b.id}/credit`, { lines: [{ chargeId: c.id, amountPaise: Math.min(left, amt(left)) }], reason: 'Fuzz not given', idempotencyKey: key() });
+        if (res.status === 200) assert.equal((await O('GET', `/patients/${p.id}/account`)).body.totals.refundedPaise, before.refundedPaise, 'taking an item off hands no money over');
+        return res; },
+      waivePaid: async () => { const b = pick((await O('GET', `/patients/${p.id}/bills`)).body.bills.filter((x: any) => x.paidPaise > 0 || x.creditedPaise > 0)); if (!b) return;
+        const c = b.lines.find((x: any) => (b.paidOn[x.id] ?? 0) > 0 || (b.creditedOn[x.id] ?? 0) > 0); if (!c) return;
+        const res = await O('POST', `/charges/${c.id}/adjust`, { kind: 'waived', reason: 'Fuzz waive' });
+        assert.equal(res.status, 409, 'a line with money or a credit note is never waived'); return res; },
       doubleRefund: async () => { const b = pick((await O('GET', `/patients/${p.id}/bills`)).body.bills.filter((x: any) => x.paidPaise >= 200)); if (!b) return;
-        const body = { parts: [{ method: 'cash', amountPaise: 100 }], reason: 'Fuzz retry', lower: false, idempotencyKey: key() };
-        const [a, c] = await Promise.all([O('POST', `/bills/${b.id}/refund`, body), O('POST', `/bills/${b.id}/refund`, body)]);
-        if (a.status === 200 && c.status === 200) assert.equal(a.body.receiptNo, c.body.receiptNo, 'the same refund sent twice at once is one refund');
+        const c = b.lines.find((x: any) => (b.paidOn[x.id] ?? 0) >= 100); if (!c) return;
+        const body = { parts: [{ method: 'cash', amountPaise: 100 }], lines: [{ chargeId: c.id, amountPaise: 100 }], reason: 'Fuzz retry', lower: false, idempotencyKey: key() };
+        const [a, d] = await Promise.all([O('POST', `/bills/${b.id}/refund`, body), O('POST', `/bills/${b.id}/refund`, body)]);
+        if (a.status === 200 && d.status === 200) assert.equal(a.body.receiptNo, d.body.receiptNo, 'the same refund sent twice at once is one refund');
         return a; },
       collectDiscount: async () => { const b = pick((await O('GET', `/patients/${p.id}/bills`)).body.bills.filter((x: any) => x.status === 'unpaid' && !x.pharmacy)); if (!b) return;
         const c = b.lines.find((x: any) => x.status === 'due' && !x.visitId); if (!c) return;
@@ -142,8 +163,11 @@ test('random money actions: every page agrees after every step', async () => {
       cutThenAddBack: async () => { const rec = pick(recs); const c = (await O('GET', `/courses?patientId=${p.id}`)).body.find((x: any) => x.recommendationId === rec.id); if (!c || c.sittings < 3) return;
         await O('PATCH', '/procedure-plans/edit', { plans: [{ id: rec.id, sittings: c.sittings - 2 }] });
         return O('PATCH', '/procedure-plans/edit', { plans: [{ id: rec.id, sittings: c.sittings - 1 }] }); },
-      refundAdvance: async () => { const adv = (await O('GET', `/patients/${p.id}/account`)).body.totals.advancePaise; if (!adv) return;
-        return O('POST', `/patients/${p.id}/advance/refund`, { amountPaise: Math.min(adv, amt(adv)), method: pick(MODES), reason: 'Fuzz give back', idempotencyKey: key() }); },
+      refundAdvance: async () => { const tt = (await O('GET', `/patients/${p.id}/account`)).body.totals; const adv = tt.advancePaise; if (!adv) return;
+        const amount = Math.min(adv, amt(adv));
+        const res = await O('POST', `/patients/${p.id}/advance/refund`, { amountPaise: amount, method: pick(MODES), reason: 'Fuzz give back', idempotencyKey: key() });
+        if (amount > adv - tt.emiHeldPaise) assert.equal(res.status, 400, 'EMI the lender has not paid is never given back'); // the oracle: never refund unsettled EMI
+        return res; },
       sessionDone: async () => { const rec = pick(recs); const s = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: nextTime(), minutes: 5, force: true })).body;
         if (s?.id) return R('PATCH', `/procedure-sessions/${s.id}`, { state: 'completed' }); },
       fewerSessions: async () => { const rec = pick(recs); const c = (await O('GET', `/courses?patientId=${p.id}`)).body.find((x: any) => x.recommendationId === rec.id); const n = c?.sittings ?? rec.sittings;

@@ -41,7 +41,7 @@ export function financeRoutes(app: FastifyInstance) {
     for (let d = from; d <= to; d = addDays(d, 1)) {
       const m = cur.days[d]; const ex = exByDay[d] ?? 0;
       if (!m && !ex && d !== today) continue;
-      days.push({ day: d, money: m ?? null, expensesPaise: ex, closed: closedOn.get(d) ?? null, today: d === today });
+      days.push({ day: d, money: m ?? null, alloc: cur.alloc[d] ?? null, expensesPaise: ex, closed: closedOn.get(d) ?? null, today: d === today });
     }
 
     // pharmacy margin: bills made in the range, against the purchase price of the batch each line came from
@@ -69,8 +69,10 @@ export function financeRoutes(app: FastifyInstance) {
     const emi = (await tx.select({ n: sql<number>`count(*)::int`, total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int` }).from(payment)
       .where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt))))[0];
     const refunds = (await tx.select({ p: payment, name: patient.fullName, what: charge.description }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId))
-      .where(and(eq(payment.tenantId, t), lt(payment.amountPaise, 0), gte(payment.receivedAt, start), lt(payment.receivedAt, end))).orderBy(asc(payment.receivedAt)))
-      .map((r) => ({ kind: 'refund', name: r.name, what: r.what ?? (r.p.courseId ? 'Course advance' : 'Payment'), method: r.p.method, day: todayIn(tz, new Date(r.p.receivedAt)), amountPaise: -r.p.amountPaise }));
+      .where(and(eq(payment.tenantId, t), lt(payment.amountPaise, 0), gte(payment.receivedAt, start), lt(payment.receivedAt, end),
+        sql`${payment.method} <> 'advance'`, // a move into or out of the advance is bookkeeping, not money out
+        sql`(${charge.description} is null or ${charge.description} not like 'Pharmacy%')`)).orderBy(asc(payment.receivedAt))) // pharmacy returns are counted from the sale below
+      .map((r) => ({ kind: 'refund', name: r.name, what: r.what ?? (r.p.receiptNo ? `Refund ${r.p.receiptNo}` : 'Refund'), method: r.p.method, day: todayIn(tz, new Date(r.p.receivedAt)), amountPaise: -r.p.amountPaise }));
     const pharmacyBack = (await tx.select({ s: pharmacySale, name: patient.fullName }).from(pharmacySale).innerJoin(patient, eq(patient.id, pharmacySale.patientId))
       .where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90)), lt(pharmacySale.createdAt, end))))
       .flatMap(({ s, name }) => (s.returns ?? []).filter((r) => r.at >= start && r.at < end).map((r) => ({ kind: 'refund', name: s.buyerName ?? name, what: `Pharmacy return, bill ${s.invoiceNo}`, method: r.method, day: todayIn(tz, new Date(r.at)), amountPaise: r.refundPaise })));

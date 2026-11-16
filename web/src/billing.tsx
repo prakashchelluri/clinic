@@ -41,6 +41,7 @@ export function invoiceHtml(v: any) {
   ${v.creditNotes.map((n: any) => `<div class="s"><span>Credit note ${esc(n.creditNo)} · ${esc(fmtDate(n.at))} · ${esc(n.reason)}</span><span>−${esc(money(n.totalPaise))}</span></div>`).join('')}
   ${v.creditedPaise ? `<div class="b"><span>Total after credit notes</span><span>${esc(money(v.netPaise))}</span></div>` : ''}
   ${v.payments.map((p: any) => `<div class="s"><span>${line(p)}</span><span>${p.amountPaise < 0 ? '−' : ''}${esc(money(Math.abs(p.amountPaise)))}</span></div>`).join('')}
+  ${(v.refunds ?? []).map((r: any) => `<div class="s red"><span>Given back to the patient · ${esc(r.voucherNo ?? 'refund')} · ${esc(r.methods.map((m: string) => MODE[m] ?? m).join(' + '))} · ${esc(fmtDate(r.at))}</span><span>${esc(money(r.amountPaise))}</span></div>`).join('')}
   <div class="b g"><span>Paid on this invoice</span><span>${esc(money(v.paidPaise))}</span></div>
   ${v.duePaise ? `<div class="b red"><span>Due</span><span>${esc(money(v.duePaise))}</span></div>` : ''}${v.waitingOffPaise ? `<div class="s"><span>Of which a discount awaiting approval</span><span>${esc(money(v.waitingOffPaise))}</span></div>` : ''}</div>`}
   <p class="s" style="margin-top:22px">${g ? 'Prices include GST.' : 'Not registered for GST, so no tax is charged on this bill.'} ${esc(v.clinic.print?.footer ?? '')}</p>`;
@@ -79,6 +80,7 @@ async function cancelInvoice(id: string, invoiceNo: string) {
 export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, empty }: { bills: any[]; showPatient?: boolean; onView: (b: any) => void; onCollect?: (b: any) => void; onRefund?: (b: any) => void; empty: string }) {
   const { perms } = useOutletContext<any>();
   const mayRefund = can(perms, 'payment.refund'); const mayCollect = can(perms, 'payment.record'); const mayExclude = can(perms, 'config.write'); // the owner: it changes the GST report
+  const [takingOff, setTakingOff] = useState<any>(null);
   const exclude = async (b: any) => {
     const a = await ask({ title: `Leave ${b.invoiceNo} out of the tax reports?`, confirmLabel: 'Leave out', cancelLabel: 'Keep in', field: { label: 'Why (at least 3 letters)', required: true, minLength: 3, maxLength: 200 } }); if (!a) return;
     try { for (const c of b.lines.filter((c: any) => !c.excludedAt)) await post(`/charges/${c.id}/exclude`, { reason: a.value }); refreshBills(); toast('Left out of the tax reports'); } catch (e) { toast(errText(e), 'err'); }
@@ -103,20 +105,22 @@ export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, 
             <button type="button" className="btn btn-ghost btn-sm !px-2" title="View" aria-label={`View ${b.invoiceNo}`} onClick={() => onView(b)}><Icon name="eye" className="h-4 w-4" /></button>
             {(() => { const items = [
               { label: `Collect ${money(b.collectablePaise)}`, hidden: !(mayCollect && onCollect && b.collectablePaise > 0), onClick: () => onCollect!(b) },
+              { label: 'Take item off (credit note)', hidden: !(mayRefund && !cancelled && b.billedPaise - b.creditedPaise > 0), onClick: () => get(`/bills/${b.id}`).then(setTakingOff, (e) => toast(errText(e), 'err')) },
               { label: 'Refund', hidden: !(mayRefund && onRefund && b.paidPaise > 0), danger: true, onClick: () => onRefund!(b) },
               { label: 'Cancel invoice', hidden: !(mayRefund && b.status === 'unpaid' && !b.creditedPaise), danger: true, onClick: () => cancelInvoice(b.id, b.invoiceNo) },
               { label: 'Leave out of tax reports', hidden: !(mayExclude && !b.excluded && !cancelled), onClick: () => exclude(b) },
             ]; return items.some((x) => !x.hidden) ? <MoreMenu items={items} /> : null; })()}
           </span></td>
         </tr>; })}</tbody>
-    </table></div>
+    </table>{takingOff && <TakeItemOff bill={takingOff} onClose={() => setTakingOff(null)} />}</div>
   );
 }
 
 /** View bill: the invoice as it prints on the right, what can be done with it on the left. */
 export function InvoiceView({ id, onClose, onCollect, onRefund }: { id: string; onClose: () => void; onCollect?: (b: any) => void; onRefund?: (b: any) => void }) {
   const { perms } = useOutletContext<any>();
-  const q = useQuery({ queryKey: ['bills', 'one', id], queryFn: () => get(`/bills/${id}`) }); const v: any = q.data;
+  const q = useQuery({ queryKey: ['bills', 'one', id], queryFn: () => get(`/bills/${id}`) }); const v: any = q.data; const [takingOff, setTakingOff] = useState<any>(null);
+  if (takingOff) return <TakeItemOff bill={takingOff} onClose={() => { setTakingOff(null); onClose(); }} />;
   const Row = ({ k, val, tone = '' }: { k: string; val: string; tone?: string }) => <div className="flex justify-between"><span className="text-muted">{k}</span><b className={`tabular-nums ${tone}`}>{val}</b></div>;
   return (
     <Modal title={v ? `Invoice ${v.invoiceNo}` : 'Invoice'} subtitle={v ? `${v.patient.fullName} · ${when(v.createdAt)}` : undefined} onClose={onClose} width="max-w-5xl">
@@ -127,6 +131,7 @@ export function InvoiceView({ id, onClose, onCollect, onRefund }: { id: string; 
             {v.receipts.map((r: string) => <button key={r} className="btn w-full justify-start" onClick={() => printReceipt(r)}><Icon name="print" className="h-4 w-4" />Print receipt {r}</button>)}
             {v.creditNotes.map((n: any) => <button key={n.id} className="btn w-full justify-start" onClick={() => printCreditNote(n.id)}><Icon name="print" className="h-4 w-4" />Print credit note {n.creditNo}</button>)}
             {can(perms, 'payment.record') && onCollect && v.collectablePaise > 0 && <button className="btn btn-primary w-full justify-start" onClick={() => onCollect(v)}><Icon name="rupee" className="h-4 w-4" />Collect {money(v.collectablePaise)}</button>}
+            {can(perms, 'payment.refund') && v.status !== 'cancelled' && v.billedPaise - v.creditedPaise > 0 && <button className="btn w-full justify-start" onClick={() => setTakingOff(v)}><Icon name="x" className="h-4 w-4" />Take item off (credit note)</button>}
             {can(perms, 'payment.refund') && onRefund && v.paidPaise > 0 && <button className="btn w-full justify-start" onClick={() => onRefund(v)}><Icon name="undo" className="h-4 w-4" />Refund</button>}
             <div className="space-y-0.5 rounded-xl bg-surface-2 p-3 text-sm">
               <Row k="Billed" val={money(v.billedPaise)} />
@@ -150,15 +155,16 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
   const acc = useQuery({ queryKey: ['bills', 'account', b.patient.id], queryFn: () => get(`/patients/${b.patient.id}/account`) }); const closed = !!acc.data?.dayClosed;
   const [parts, setParts] = useState<RPart[]>([{ method: 'cash', amount: '', reference: '' }]); const [why, setWhy] = useState(''); const [lower, setLower] = useState(true);
   const [key] = useState(() => crypto.randomUUID()); // one refund, however many times it is sent
-  // the items it comes off: each named, at its own GST (an invoice of one item needs nothing typed)
-  const items = (b.lines ?? []).filter((c: any) => !['cancelled', 'waived'].includes(c.status)).map((c: any) => ({ id: c.id, what: c.description, rate: c.taxRateBp, room: c.amountPaise - (b.creditedOn?.[c.id] ?? 0) })).filter((c: any) => c.room > 0);
+  // the items it comes off: only money paid on an item can be given back off it (an item not paid for is taken off with "Take item off")
+  const items = (b.lines ?? []).filter((c: any) => !['cancelled', 'waived'].includes(c.status)).map((c: any) => { const paid = b.paidOn?.[c.id] ?? 0; const leftOn = c.amountPaise - (b.creditedOn?.[c.id] ?? 0);
+    return { id: c.id, what: c.description, rate: b.taxGstin ? c.taxRateBp : 0, paid, room: lower ? Math.min(paid, leftOn) : paid }; }).filter((c: any) => c.room > 0);
   const [offs, setOffs] = useState<Record<string, string>>({});
   const total = parts.reduce((s, p) => s + toPaise(p.amount), 0);
-  const many = lower && items.length > 1; const itemsSum = many ? items.reduce((s: number, c: any) => s + toPaise(offs[c.id] ?? ''), 0) : total;
-  const overItem = many ? items.find((c: any) => toPaise(offs[c.id] ?? '') > c.room) : null;
-  const bad = closed ? 'Today has been closed: no money can be given back today' : total <= 0 ? 'Type the amount' : total > left ? `Only ${money(left)} was paid on this invoice`
-    : overItem ? `Only ${money(overItem.room)} is left of ${overItem.what}` : many && itemsSum !== total ? `The items add up to ${money(itemsSum)}, the refund is ${money(total)}` : why.trim().length < 3 ? 'Say why' : '';
-  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/refund`, { lower, idempotencyKey: key, ...(many ? { lines: items.filter((c: any) => toPaise(offs[c.id] ?? '') > 0).map((c: any) => ({ chargeId: c.id, amountPaise: toPaise(offs[c.id]) })) } : {}),
+  const many = items.length > 1; const itemsSum = many ? items.reduce((s: number, c: any) => s + toPaise(offs[c.id] ?? ''), 0) : total;
+  const overItem = many ? items.find((c: any) => toPaise(offs[c.id] ?? '') > c.room) : items[0] && total > items[0].room ? items[0] : null;
+  const bad = closed ? 'Today has been closed: no money can be given back today' : !items.length ? 'Nothing paid on this invoice can be given back' : total <= 0 ? 'Type the amount' : total > left ? `Only ${money(left)} was paid on this invoice`
+    : overItem ? `Only ${money(overItem.room)} was paid on ${overItem.what}` : many && itemsSum !== total ? `The items add up to ${money(itemsSum)}, the refund is ${money(total)}` : why.trim().length < 3 ? 'Say why' : '';
+  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/refund`, { lower, idempotencyKey: key, lines: many ? items.filter((c: any) => toPaise(offs[c.id] ?? '') > 0).map((c: any) => ({ chargeId: c.id, amountPaise: toPaise(offs[c.id]) })) : [{ chargeId: items[0]?.id, amountPaise: total }],
     parts: parts.filter((p) => toPaise(p.amount) > 0).map((p) => ({ method: p.method, amountPaise: toPaise(p.amount), reference: p.method !== 'cash' ? p.reference.trim() || undefined : undefined })), reason: why.trim() }),
     onSuccess: (r: any) => { refreshBills(); toast(`${money(total)} given back on ${b.invoiceNo}${r?.creditNo ? ` · credit note ${r.creditNo}` : ''}`, 'ok', r?.receiptNo ? { label: 'Voucher', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); },
     onError: (e: any) => toast(e?.body?.code === 'MORE_THAN_PAID' ? `Only ${money(e.body.refundablePaise)} can be refunded` : moneyErr(e), 'err') });
@@ -177,12 +183,38 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
         <div><label className="label" htmlFor="rb-why">Why</label><input id="rb-why" className="input" maxLength={200} placeholder="for example: procedure not done" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
         <label className="flex items-start gap-2 text-[13.5px]"><input type="checkbox" className="mt-0.5" checked={lower} onChange={(e) => setLower(e.target.checked)} aria-label="Take it off the invoice with a credit note" />
           <span><b>Take it off the invoice</b> with a credit note<span className="block text-xs text-muted">{lower ? 'For something not given: what is still due stays as it is.' : 'Unticked: the invoice stays, so this much is due again (money taken by mistake).'}</span></span></label>
-        {many && <div className="space-y-1.5 rounded-xl border border-line p-2.5"><div className="text-[12.5px] font-semibold text-muted">How much comes off each item</div>
-          {items.map((c: any) => <div key={c.id} className="flex items-center gap-2 text-sm"><span className="min-w-0 flex-1"><span className="font-medium">{c.what}</span><span className="block text-xs text-muted">up to {money(c.room)}{c.rate ? ` · GST ${c.rate / 100}%` : ''}</span></span>
+        {!many && items[0] && <div className="text-xs text-muted">Off {items[0].what}: {money(items[0].paid)} paid on it.</div>}
+        {many && <div className="space-y-1.5 rounded-xl border border-line p-2.5"><div className="text-[12.5px] font-semibold text-muted">How much is given back off each item</div>
+          {items.map((c: any) => <div key={c.id} className="flex items-center gap-2 text-sm"><span className="min-w-0 flex-1"><span className="font-medium">{c.what}</span><span className="block text-xs text-muted">{money(c.paid)} paid · up to {money(c.room)}{c.rate ? ` · GST ${c.rate / 100}%` : ''}</span></span>
             <MoneyInput className="w-32" value={offs[c.id] ?? ''} label={`Off ${c.what}`} onChange={(v) => setOffs((o) => ({ ...o, [c.id]: v }))} /></div>)}
           <div className="flex justify-between text-xs"><span className="text-muted">Items</span><b className={itemsSum === total ? 'text-sage' : 'text-amber'}>{money(itemsSum)} of {money(total)}</b></div></div>}
         <div className="rounded-xl bg-surface-2 p-3 text-center text-[15px]"><b className="text-rose">{money(total)}</b> will be given back, with a refund voucher</div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{bad}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!bad || go.isPending} onClick={() => go.mutate()}>Give back {money(total)}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Take items off an invoice, for something not given: a credit note, no money handed over. What was paid on them moves to the advance. */
+export function TakeItemOff({ bill: b, onClose }: { bill: any; onClose: () => void }) {
+  const [key] = useState(() => crypto.randomUUID()); const [why, setWhy] = useState(''); const [offs, setOffs] = useState<Record<string, string>>({});
+  const items = (b.lines ?? []).filter((c: any) => !['cancelled', 'waived'].includes(c.status)).map((c: any) => ({ id: c.id, what: c.description, rate: b.taxGstin ? c.taxRateBp : 0, paid: b.paidOn?.[c.id] ?? 0, left: c.amountPaise - (b.creditedOn?.[c.id] ?? 0) })).filter((c: any) => c.left > 0);
+  const total = items.reduce((s: number, c: any) => s + toPaise(offs[c.id] ?? ''), 0);
+  const over = items.find((c: any) => toPaise(offs[c.id] ?? '') > c.left);
+  const toAdv = items.reduce((s: number, c: any) => s + Math.max(0, c.paid - (c.left - toPaise(offs[c.id] ?? ''))), 0);
+  const bad = !total ? 'Type how much comes off' : over ? `Only ${money(over.left)} is left of ${over.what}` : why.trim().length < 3 ? 'Say why' : '';
+  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/credit`, { idempotencyKey: key, reason: why.trim(), lines: items.filter((c: any) => toPaise(offs[c.id] ?? '') > 0).map((c: any) => ({ chargeId: c.id, amountPaise: toPaise(offs[c.id]) })) }),
+    onSuccess: (r: any) => { refreshBills(); toast(`Credit note ${r.creditNo}: ${money(r.creditedPaise)} off ${b.invoiceNo}${r.toAdvancePaise ? ` · ${money(r.toAdvancePaise)} to the advance` : ''}`); onClose(); }, onError: (e) => toast(moneyErr(e), 'err') });
+  return (
+    <Modal title={`Take items off ${b.invoiceNo}`} subtitle={`${b.patient.fullName} · for something not given · no money is handed over`} onClose={onClose} width="max-w-lg">
+      <div className="space-y-3">
+        <div className="space-y-1.5 rounded-xl border border-line p-2.5">{items.map((c: any) => <div key={c.id} className="flex items-center gap-2 text-sm">
+          <span className="min-w-0 flex-1"><span className="font-medium">{c.what}</span><span className="block text-xs text-muted">{money(c.left)} on the invoice{c.paid ? ` · ${money(c.paid)} paid` : ' · not paid'}{c.rate ? ` · GST ${c.rate / 100}%` : ''}</span></span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOffs((o) => ({ ...o, [c.id]: String(c.left / 100) }))}>All of it</button>
+          <MoneyInput className="w-32" value={offs[c.id] ?? ''} label={`Off ${c.what}`} onChange={(v) => setOffs((o) => ({ ...o, [c.id]: v }))} /></div>)}</div>
+        <div><label className="label" htmlFor="ti-why">Why</label><input id="ti-why" className="input" maxLength={200} placeholder="for example: injection not given" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
+        <div className="rounded-xl bg-surface-2 p-3 text-center text-[14px]">A credit note takes <b>{money(total)}</b> off the invoice{toAdv ? <div className="mt-0.5 text-xs text-muted">{money(toAdv)} already paid moves to the patient's advance: Refund gives it back if they want the money.</div> : null}</div>
+        <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{bad}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!bad || go.isPending} onClick={() => go.mutate()}>Take {money(total)} off</button></div>
       </div>
     </Modal>
   );
@@ -200,8 +232,8 @@ function Totals({ t }: { t: any }) {
 }
 
 const MODES = ['upi', 'cash', 'card', 'bank', 'emi'] as const;
-type Act = { type: 'invoice' | 'payment' | 'refund' | 'credit'; at: string; id: string; [k: string]: any };
-const TYPE: Record<Act['type'], [string, string]> = { invoice: ['Invoice', 'sky'], payment: ['Payment', 'sage'], refund: ['Refund', 'rose'], credit: ['Credit note', 'amber'] };
+type Act = { type: 'invoice' | 'payment' | 'refund' | 'credit' | 'discount'; at: string; id: string; [k: string]: any };
+const TYPE: Record<Act['type'], [string, string]> = { invoice: ['Invoice', 'sky'], payment: ['Payment', 'sage'], refund: ['Refund', 'rose'], credit: ['Credit note', 'amber'], discount: ['Discount asked', ''] };
 
 /** Record payment: money from the patient, not for one item. It clears the oldest dues first; the rest becomes the patient's advance. */
 export function RecordPayment({ patientId, patientName, dues, dayClosed, onClose }: { patientId: string; patientName: string; dues: { invoiceNo: string; duePaise: number }[]; dayClosed?: boolean; onClose: () => void }) {
@@ -210,7 +242,7 @@ export function RecordPayment({ patientId, patientName, dues, dayClosed, onClose
   const [ref, setRef] = useState(''); const [lender, setLender] = useState(''); const [key] = useState(() => crypto.randomUUID());
   const paise = toPaise(amount);
   let left = paise; const goes = dues.map((d) => { const take = Math.min(left, d.duePaise); left -= take; return { ...d, take }; }).filter((d) => d.take > 0);
-  const bad = dayClosed ? 'Today has been closed: no money can be taken today' : paise <= 0 ? 'Type the amount' : mode === 'emi' && (!lender.trim() || !ref.trim()) ? 'EMI needs the lender and the approval code' : '';
+  const bad = dayClosed ? 'Today has been closed: no money can be taken today' : paise <= 0 ? 'Type the amount' : mode === 'emi' && paise > owed ? `EMI pays a bill: at most the ${money(owed)} due` : mode === 'emi' && (!lender.trim() || !ref.trim()) ? 'EMI needs the lender and the approval code' : (mode === 'upi' || mode === 'card') && !ref.trim() ? 'Type the UPI or card reference' : '';
   const save = async () => {
     if (left > 0 && !(await ask({ title: owed ? `${money(left)} more than is due` : `Take ${money(paise)} as advance?`, body: owed ? `${money(owed)} clears what is due; ${money(left)} goes to ${patientName.split(' ')[0]}'s advance, to use on the next bill or give back.` : 'Nothing is due: all of it goes to the advance.', confirmLabel: `Record ${money(paise)}` }))) return;
     go.mutate();
@@ -238,10 +270,12 @@ export function RecordPayment({ patientId, patientName, dues, dayClosed, onClose
 }
 
 /** Refund: money back to the patient from their advance, with a reason. Money on a treatment not given reaches the advance when its unused sessions are cancelled. */
-export function PatientRefund({ patientId, patientName, advancePaise, dayClosed, onClose }: { patientId: string; patientName: string; advancePaise: number; dayClosed?: boolean; onClose: () => void }) {
+export function PatientRefund({ patientId, patientName, advancePaise, emiHeldPaise = 0, dayClosed, onClose }: { patientId: string; patientName: string; advancePaise: number; emiHeldPaise?: number; dayClosed?: boolean; onClose: () => void }) {
+  const free = Math.max(0, advancePaise - emiHeldPaise);
   const [amount, setAmount] = useState(''); const [mode, setMode] = useState<'cash' | 'upi' | 'card' | 'bank'>('upi'); const [why, setWhy] = useState(''); const [ref, setRef] = useState('');
   const paise = toPaise(amount);
-  const bad = dayClosed ? 'Today has been closed: no money can be given back today' : !advancePaise ? 'Nothing in the advance to give back' : paise <= 0 ? 'Type the amount' : paise > advancePaise ? `Only ${money(advancePaise)} is in the advance` : why.trim().length < 3 ? 'Say why' : '';
+  const bad = dayClosed ? 'Today has been closed: no money can be given back today' : !advancePaise ? 'Nothing in the advance to give back' : paise <= 0 ? 'Type the amount' : paise > advancePaise ? `Only ${money(advancePaise)} is in the advance`
+    : paise > free ? `${money(emiHeldPaise)} of the advance is EMI the lender has not paid yet: at most ${money(free)} can go back now` : why.trim().length < 3 ? 'Say why' : '';
   const [key] = useState(() => crypto.randomUUID());
   const go = useMutation({ mutationFn: () => post(`/patients/${patientId}/advance/refund`, { idempotencyKey: key, amountPaise: paise, method: mode, reference: mode !== 'cash' ? ref.trim() || undefined : undefined, reason: why.trim() }),
     onSuccess: (r: any) => { refreshBills(); toast(`Gave back ${money(paise)} to ${patientName.split(' ')[0]}`, 'ok', r?.receiptNo ? { label: 'Voucher', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); }, onError: (e) => toast(moneyErr(e), 'err') });
@@ -264,7 +298,7 @@ export function PatientRefund({ patientId, patientName, advancePaise, dayClosed,
 export function BillingHistory({ patientId, patientName }: { patientId: string; patientName: string }) {
   const { perms } = useOutletContext<any>();
   const q = useQuery({ queryKey: ['bills', 'account', patientId], queryFn: () => get(`/patients/${patientId}/account`) });
-  const [viewing, setViewing] = useState<string | null>(null); const [refundingBill, setRefundingBill] = useState<any>(null); const [collecting, setCollecting] = useState<any>(null);
+  const [viewing, setViewing] = useState<string | null>(null); const [refundingBill, setRefundingBill] = useState<any>(null); const [takingOff, setTakingOff] = useState<any>(null); const [collecting, setCollecting] = useState<any>(null);
   const [open, setOpen] = useState<null | 'invoice' | 'payment' | 'refund'>(null);
   const t = q.data?.totals; const rows: Act[] = q.data?.activity ?? [];
   const dues = rows.filter((r) => r.type === 'invoice' && r.collectablePaise > 0).sort((a, b) => String(a.at).localeCompare(String(b.at))).map((r) => ({ invoiceNo: r.invoiceNo, duePaise: r.collectablePaise }));
@@ -274,11 +308,12 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
   const detail = (r: Act) => r.type === 'invoice' ? <><div className="font-semibold">{r.invoiceNo} · {r.items.join(', ')}</div><div className="text-xs text-muted">{[r.status === 'cancelled' ? 'Cancelled' : !r.amountPaise ? 'No charge' : r.paidPaise ? `${money(r.paidPaise)} paid` : 'nothing paid yet', r.fromAdvancePaise ? `${money(r.fromAdvancePaise)} of it from the advance` : '', r.creditedPaise ? `${money(r.creditedPaise)} credited` : '', r.waitingOffPaise ? `${money(r.waitingOffPaise)} discount awaiting approval` : ''].filter(Boolean).join(' · ')}</div></>
     : r.type === 'payment' ? <><div>{r.receiptNo ?? 'Payment'} · {r.modes.map((m: any) => `${MODE[m.method] ?? m.method}${m.reference ? ` ${m.reference}` : ''}`).join(' + ')}</div><div className="text-xs text-muted">{[r.invoices.length ? `Paid ${r.invoices.join(', ')}` : '', r.toAdvancePaise ? `${money(r.toAdvancePaise)} to the advance` : ''].filter(Boolean).join(' · ')}</div></>
     : r.type === 'refund' ? <><div>{r.receiptNo ?? 'Refund'} · {MODE[r.methods[0]] ?? r.methods[0]}{/^(.+?) · Refund:/.exec(String(r.note ?? ''))?.[1] ? ` ${/^(.+?) · Refund:/.exec(String(r.note))![1]}` : ''}{r.invoiceNo ? ` · on ${r.invoiceNo}` : ' · from the advance'}</div><div className="text-xs text-muted">{String(r.note ?? '').replace(/^.*Refund:?\s*(INV-\S+\s*·\s*)?/, '')}</div></>
+    : r.type === 'discount' ? <><div>Discount of {money(r.amountPaise)} not given</div><div className="text-xs text-muted">{r.note}</div></>
     : <><div>{r.creditNo}{r.invoiceNo ? ` · off ${r.invoiceNo}` : ''}</div><div className="text-xs text-muted">{r.note}</div></>;
   return (
     <section className="card-flat overflow-hidden anim-fade-up">
       <div className="flex flex-wrap items-center gap-x-7 gap-y-3 border-b border-line px-4 py-3.5">
-        {t ? <><Fig label="Billed" value={money(t.billedPaise)} /><Fig label="Received" value={money(t.receivedPaise)} />{t.refundedPaise > 0 && <Fig label="Refunded" value={money(t.refundedPaise)} />}{balance}</> : <span className="text-sm text-muted">Loading…</span>}
+        {t ? <><Fig label="Billed" value={money(t.billedPaise + t.creditedPaise)} />{t.creditedPaise > 0 && <Fig label="Credit notes" value={`−${money(t.creditedPaise)}`} />}<Fig label="Received" value={money(t.receivedPaise)} />{t.refundedPaise > 0 && <Fig label="Refunded" value={money(t.refundedPaise)} />}{balance}</> : <span className="text-sm text-muted">Loading…</span>}
         <span className="flex-1" />
         <span className="flex flex-wrap gap-2">
           {can(perms, 'payment.refund') && <button className="btn" aria-label="Refund" disabled={!t?.advancePaise || q.data?.dayClosed} title={q.data?.dayClosed ? 'Today has been closed' : t?.advancePaise ? undefined : 'Nothing in the advance'} onClick={() => setOpen('refund')}><Icon name="undo" className="h-4 w-4" />Refund</button>}
@@ -293,10 +328,11 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
             <td className="pl-4 whitespace-nowrap text-sm">{fmtDate(r.at)}</td>
             <td><Chip tone={TYPE[r.type][1] as any}>{TYPE[r.type][0]}</Chip></td>
             <td className="max-w-[420px] text-sm">{detail(r)}</td>
-            <td className="text-right font-semibold tabular-nums">{r.type === 'invoice' && r.status === 'cancelled' ? <s className="font-normal text-muted">{money(r.issuedPaise)}</s> : <>{r.type === 'refund' || r.type === 'credit' ? '−' : ''}{money(r.amountPaise)}</>}</td>
-            <td className="text-sm">{r.type === 'invoice' ? (r.status === 'waiting' ? <b className="text-amber">Discount awaiting approval</b> : r.duePaise ? <b className="text-amber">{money(r.duePaise)} due</b> : <span className="text-muted">{STATUS[r.status]?.[0] ?? r.status}</span>) : <span className="text-muted">{r.type === 'payment' && r.toAdvancePaise === r.amountPaise ? 'To the advance' : 'Done'}</span>}</td>
+            <td className="text-right font-semibold tabular-nums">{r.type === 'invoice' && r.status === 'cancelled' ? <s className="font-normal text-muted">{money(r.issuedPaise)}</s> : r.type === 'discount' ? <s className="font-normal text-muted">{money(r.amountPaise)}</s> : <>{r.type === 'refund' || r.type === 'credit' ? '−' : ''}{money(r.amountPaise)}</>}</td>
+            <td className="text-sm">{r.type === 'invoice' ? (r.status === 'waiting' ? <b className="text-amber">Discount awaiting approval</b> : r.duePaise ? <b className="text-amber">{money(r.duePaise)} due</b> : <span className="text-muted">{STATUS[r.status]?.[0] ?? r.status}</span>) : <span className="text-muted">{r.type === 'payment' && r.toAdvancePaise === r.amountPaise ? 'To the advance' : r.type === 'discount' ? 'Not given' : 'Done'}</span>}</td>
             <td className="pr-4" onClick={(e) => e.stopPropagation()}><span className="flex justify-end">{r.type === 'invoice' ? <MoreMenu items={[
               { label: 'View', onClick: () => setViewing(r.id) }, { label: 'Print', onClick: () => printInvoice(r.id) },
+              { label: 'Take item off (credit note)', hidden: !(can(perms, 'payment.refund') && r.status !== 'cancelled' && r.amountPaise - r.creditedPaise > 0), onClick: () => get(`/bills/${r.id}`).then(setTakingOff, (e) => toast(errText(e), 'err')) },
               { label: 'Refund on this invoice', hidden: !(can(perms, 'payment.refund') && r.paidPaise > 0), danger: true, onClick: () => get(`/bills/${r.id}`).then(setRefundingBill, (e) => toast(errText(e), 'err')) },
               { label: 'Cancel invoice', hidden: !(can(perms, 'payment.refund') && r.status === 'unpaid' && !r.creditedPaise), danger: true, onClick: () => cancelInvoice(r.id, r.invoiceNo) },
             ]} /> : r.type === 'credit' ? <button type="button" className="btn btn-ghost btn-sm !px-2" aria-label={`Print credit note ${r.creditNo}`} onClick={() => printCreditNote(r.id)}><Icon name="print" className="h-4 w-4" /></button> : r.receiptNo ? <button type="button" className="btn btn-ghost btn-sm !px-2" aria-label={`Print receipt ${r.receiptNo}`} onClick={() => printReceipt(r.receiptNo)}><Icon name="print" className="h-4 w-4" /></button> : null}</span></td>
@@ -304,10 +340,11 @@ export function BillingHistory({ patientId, patientName }: { patientId: string; 
         </table></div>)}
       {viewing && <InvoiceView id={viewing} onClose={() => setViewing(null)} onCollect={(b) => { setViewing(null); setCollecting(b); }} onRefund={(b) => { setViewing(null); setRefundingBill(b); }} />}
       {refundingBill && <RefundBill bill={refundingBill} onClose={() => setRefundingBill(null)} />}
+      {takingOff && <TakeItemOff bill={takingOff} onClose={() => setTakingOff(null)} />}
       {collecting && <TakePayment patientId={patientId} patientName={patientName} onlyBill={collecting.id} onClose={() => { setCollecting(null); refreshBills(); }} />}
       {open === 'invoice' && <TakePayment patientId={patientId} patientName={patientName} onClose={() => { setOpen(null); refreshBills(); }} />}
       {open === 'payment' && <RecordPayment patientId={patientId} patientName={patientName} dues={dues} dayClosed={q.data?.dayClosed} onClose={() => setOpen(null)} />}
-      {open === 'refund' && t && <PatientRefund patientId={patientId} patientName={patientName} advancePaise={t.advancePaise} dayClosed={q.data?.dayClosed} onClose={() => setOpen(null)} />}
+      {open === 'refund' && t && <PatientRefund patientId={patientId} patientName={patientName} advancePaise={t.advancePaise} emiHeldPaise={t.emiHeldPaise} dayClosed={q.data?.dayClosed} onClose={() => setOpen(null)} />}
     </section>
   );
 }

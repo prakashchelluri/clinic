@@ -129,7 +129,7 @@ function Summary({ d, vs, inT, outT, notIn, onDay, onCat, onDue, onSpend }: { d:
   for (const x of d.days) {
     const key = byMonth ? x.day.slice(0, 7) : x.day; let b = bars.find((y) => y.key === key);
     if (!b) { b = { key, label: byMonth ? fmt(x.day, { month: 'short' }) : fmt(x.day, { weekday: 'short', day: 'numeric' }), day: byMonth ? undefined : x.day, v: { consultation: 0, procedure: 0, pharmacy: 0, other: 0 }, t: 0 }; bars.push(b); }
-    for (const [s] of SOURCES) b.v[s] += Math.max(0, x.money?.[s].total ?? 0);
+    for (const [s] of SOURCES) b.v[s] += Math.max(0, (x.money?.[s].total ?? 0) + (x.alloc?.[s] ?? 0)); // advance money counted where it was used
     b.t += x.money?.total.total ?? 0;
   }
   const max = Math.max(1, ...bars.map((b) => SOURCES.reduce((n, [s]) => n + b.v[s], 0)));
@@ -320,7 +320,7 @@ function GstReport({ from, to, canExport }: { from: string; to: string; canExpor
         <Stat label="Taxable value" value={money(g.totals.taxablePaise)} sub="Tax Invoices less credit notes" />
         <Stat label="CGST" value={money(g.totals.cgstPaise)} delay={40} />
         <Stat label="SGST" value={money(g.totals.sgstPaise)} delay={80} />
-        <Stat label="Exempt (0%)" value={money(g.totals.exemptPaise)} sub={g.billsOfSupply.count ? `and ${g.billsOfSupply.count} Bill${g.billsOfSupply.count === 1 ? '' : 's'} of Supply, ${money(g.billsOfSupply.totalPaise)}` : 'no Bills of Supply'} delay={120} />
+        <Stat label="Exempt (0%)" value={money(g.totals.exemptPaise)} sub={g.billsOfSupply.count ? `and ${g.billsOfSupply.count} Bill${g.billsOfSupply.count === 1 ? '' : 's'} of Supply, ${money(g.billsOfSupply.totalPaise)}${g.billsOfSupply.creditedPaise ? ` after ${money(g.billsOfSupply.creditedPaise)} in credit notes` : ''}` : 'no Bills of Supply'} delay={120} />
       </div>
       <div className="card-flat overflow-x-auto"><table className="table min-w-[520px]"><thead><tr><th className="pl-4">Rate</th><th className="text-right">Taxable value</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="pr-4 text-right">Total</th></tr></thead>
         <tbody>{g.summary.length ? g.summary.map((x: any) => <tr key={x.rateBp}><td className="pl-4">{pct(x.rateBp)}</td><td className="text-right tabular-nums">{money(x.taxablePaise)}</td><td className="text-right tabular-nums">{money(x.cgstPaise)}</td><td className="text-right tabular-nums">{money(x.sgstPaise)}</td><td className="pr-4 text-right tabular-nums">{money(x.taxablePaise + x.cgstPaise + x.sgstPaise)}</td></tr>)

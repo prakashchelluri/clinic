@@ -27,13 +27,16 @@ export function visitType(code: string, name: string): (typeof COUNT_KEYS)[numbe
 /** A day's money by type and mode, the cash that should be in the drawer, and the visit counts: what the head receptionist reads against the paper diary. */
 // `to` makes it a range (the Dashboard); every money figure in the app comes from here so they always agree.
 // byDoctor: the same money by the doctor of the visit or sitting it paid for; pharmacy, course advances and anything else stay out (the rest of the total).
-export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; total: Bucket };
-export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), total: empty() });
+// refunds: money given back on a refund voucher, by the mode it left in (pharmacy returns stay under pharmacy, as before).
+export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; refunds: Bucket; total: Bucket };
+export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), refunds: empty(), total: empty() });
+type Alloc = { consultation: number; procedure: number; other: number };
 
 /** Money in over a range, each payment on the clinic's local day it came in: the one ledger End of day, Reports, Clinic and Accounts all read. */
 export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to = from) {
   const start = dayBounds(from, tz).start; const end = dayBounds(to, tz).end;
   const days: Record<string, Money> = {}; const total = emptyMoney(); const byDoctor: Record<string, number> = {};
+  const alloc: Record<string, Alloc> = {}; const allocTotal: Alloc = { consultation: 0, procedure: 0, other: 0 };
   const add = (at: string | Date, key: Exclude<keyof Money, 'total'>, method: string, amount: number) => {
     const m = (days[todayIn(tz, new Date(at))] ??= emptyMoney());
     put(m[key], method, amount); put(m.total, method, amount); put(total[key], method, amount); put(total.total, method, amount);
@@ -42,19 +45,20 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
     .leftJoin(visit, eq(visit.id, charge.visitId)).leftJoin(procedureSession, eq(procedureSession.id, charge.sessionId))
     .leftJoin(pharmacySale, and(eq(pharmacySale.tenantId, t), eq(pharmacySale.chargeId, payment.chargeId)))
     .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
-  // The patient's advance sits under "other". When it pays an invoice line, that much moves from "other" to what the line is (procedure,
-  // consultation) on that day; when money goes back from a line into the advance, it moves back. No money changes hands, so the day's total
-  // and its modes stay as they are. Deposits and refund vouchers are money in and out of the advance: "other".
-  const move = (at: string | Date, key: Exclude<keyof Money, 'total'>, amount: number) => {
-    if (key === 'other' || !amount) return; const m = (days[todayIn(tz, new Date(at))] ??= emptyMoney());
-    for (const b of [m, total]) { b[key].other += amount; b[key].total += amount; b.other.other -= amount; b.other.total -= amount; }
+  // Every row is money that changed hands, by the mode it moved in, so each row reconciles with the drawer and the bank:
+  // money in against a line counts under what the line is; deposits to the advance under "other"; refund vouchers under "refunds".
+  // The advance paying a line later moves no money, so it is not here; it is kept apart (alloc) for the Accounts chart, which shows what the
+  // money ended up paying for: that much moves from "other" to the line's kind on the day it is used (and back if it returns to the advance).
+  const allocate = (at: string | Date, key: keyof Alloc, amount: number) => {
+    if (key === 'other' || !amount) return; const a = (alloc[todayIn(tz, new Date(at))] ??= { consultation: 0, procedure: 0, other: 0 });
+    for (const b of [a, allocTotal]) { b[key] += amount; b.other -= amount; }
   };
   for (const { p, c, vDoc, sDoc, sale } of pays) {
     if (sale) continue; // a pharmacy bill's payment and refund rows mirror the sale; the sale and its returns below are what count, once
     const key = p.courseId || c?.courseId || c?.procedureId || c?.sessionId ? 'procedure' : c?.visitId ? 'consultation' : 'other';
     const doc = vDoc ?? sDoc;
-    if (p.method === 'advance') { if (c) { move(p.receivedAt, key, p.amountPaise); if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise; } continue; }
-    if (p.advance) { add(p.receivedAt, 'other', p.method, p.amountPaise); continue; } // into or out of the advance
+    if (p.method === 'advance') { if (c) { allocate(p.receivedAt, key, p.amountPaise); if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise; } continue; }
+    if (p.advance) { add(p.receivedAt, p.amountPaise < 0 ? 'refunds' : 'other', p.method, p.amountPaise); continue; } // a deposit, or a refund voucher
     add(p.receivedAt, key, p.method, p.amountPaise);
     if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
@@ -62,7 +66,7 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
   for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) add(s.createdAt, 'pharmacy', x.method, x.amountPaise);
   const allSales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90))));
   for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) add(r.at, 'pharmacy', r.method, -r.refundPaise);
-  return { days, total, byDoctor };
+  return { days, total, byDoctor, alloc, allocTotal };
 }
 
 export async function dayFigures(tx: Tx, t: string, tz: string, day: string, to = day) {

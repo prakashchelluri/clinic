@@ -220,12 +220,13 @@ export function patientRoutes(app: FastifyInstance) {
     // what is still owed: a part-paid invoice counts only its balance
     const lm = await lineMoney(tx, t, charges.map((c) => c.id));
     const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - lm.credited(c.id) - lm.applied(c.id)), 0);
-    const asks = can(req.perms, 'fees.see') ? await tx.select({ lines: discountAsk.lines }).from(discountAsk).where(and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, id), eq(discountAsk.status, 'pending'))) : [];
+    const acct = can(req.perms, 'fees.invoices'); // the patient's invoices and account: not for doctors by default
+    const asks = acct ? await tx.select({ lines: discountAsk.lines }).from(discountAsk).where(and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, id), eq(discountAsk.status, 'pending'))) : [];
     const waitingPaise = Math.min(due, asks.reduce((s, a) => s + a.lines.reduce((n, l) => n + (l.chargeId ? l.offPaise : 0), 0), 0)); // owed, but a discount on it is waiting for a decision
     const guardian = p.guardianId ? await tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }).from(patient).where(and(eq(patient.id, p.guardianId), eq(patient.tenantId, t))).then((r) => r[0] ?? null) : null;
     const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
     // roles without 'See fees and payments' see no prices, payments or amounts due
     const fees = can(req.perms, 'fees.see');
-    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, data: listData(e.data, clinical(req.perms)), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges.map((c) => ({ ...c, creditedPaise: lm.credited(c.id) })) : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0, waitingPaise };
+    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, data: listData(e.data, clinical(req.perms)), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: acct ? charges.map((c) => ({ ...c, creditedPaise: lm.credited(c.id) })) : [], payments: acct ? payments : [], outstandingPaise: acct ? due : 0, waitingPaise };
   });
 }

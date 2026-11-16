@@ -1,14 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, gte, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
-import { bill, charge, creditLine, creditNote, dayClose, discountAsk, patient, payment, tenant, appUser } from '../db/schema.js';
+import { bill, charge, creditLine, creditNote, dayClose, discountAsk, domainEvent, patient, payment, tenant, appUser } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
 import { dayBounds, gstSummary } from './billing.js';
-import { advanceBalance, issueCredit, refundDone, refundFromAdvance, settle, unapply } from '../lib/money.js';
+import { advanceBalance, emiInAdvance, issueCredit, refundDone, refundFromAdvance, settle, unapply } from '../lib/money.js';
 
 const NONE = '00000000-0000-4000-8000-000000000000';
 /** Today has been closed at the desk: no money can be taken or given back until tomorrow. */
@@ -53,6 +53,7 @@ export async function billViews(tx: Tx, t: string, where: SQL, limit = 200) {
       duePaise: due, waitingOffPaise: waitingOff, collectablePaise: Math.max(0, due - waitingOff), status,
       creditNotes: notes.map((n) => ({ id: n.id, creditNo: n.creditNo, at: n.createdAt, reason: n.reason, totalPaise: n.totalPaise })),
       creditedOn: Object.fromEntries(ls.map((c) => [c.id, creditedOn(c.id)])),
+      paidOn: Object.fromEntries(ls.map((c) => [c.id, applied(c.id)])), // money applied to each line: the most a refund can give back off it
       pharmacy: ls.some((c) => c.description.startsWith('Pharmacy')), excluded: ls.length > 0 && ls.every((c) => !!c.excludedAt),
       receipts: [...new Set(pays.filter((p) => p.amountPaise > 0 && p.method !== 'advance').map((p) => p.receiptNo).filter(Boolean))] as string[],
     };
@@ -67,14 +68,14 @@ const totals = (bs: Awaited<ReturnType<typeof billViews>>) => ({
 
 export function invoiceRoutes(app: FastifyInstance) {
   /** One patient's invoices, newest first, with the totals for the top of the Bills tab. */
-  route(app, 'get', '/patients/:id/bills', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/patients/:id/bills', 'fees.invoices', async (req, tx) => {
     const bs = await billViews(tx, req.ctx.tenantId, eq(bill.patientId, (req.params as any).id), 5000);
     return { bills: bs, totals: totals(bs) };
   });
 
   /** The patient's account. Billed (invoices less credit notes), received and refunded (real money only), what is due and what is held as advance;
    *  then one list: invoices, payments (one per receipt), credit notes, refunds (vouchers). It always adds up: billed − received + refunded = due − advance. */
-  route(app, 'get', '/patients/:id/account', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/patients/:id/account', 'fees.invoices', async (req, tx) => {
     const t = req.ctx.tenantId; const pid = (req.params as any).id;
     const bs = await billViews(tx, t, eq(bill.patientId, pid), 5000);
     const pays = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.patientId, pid))).orderBy(desc(payment.receivedAt)).limit(1000);
@@ -92,6 +93,9 @@ export function invoiceRoutes(app: FastifyInstance) {
         amountPaise: g.reduce((s, p) => s + p.amountPaise, 0), invoices: [...new Set(g.map((p) => (p.chargeId ? billOf.get(p.chargeId) : undefined)).filter(Boolean))] as string[],
         toAdvancePaise: g.filter((p) => p.advance).reduce((s, p) => s + p.amountPaise, 0) })),
       ...real.filter((p) => p.amountPaise < 0).map((p) => ({ type: 'refund' as const, at: p.receivedAt, id: p.id, methods: [p.method], amountPaise: -p.amountPaise, note: p.reference, receiptNo: p.receiptNo, invoiceNo: p.billId ? noOf.get(p.billId) ?? null : null })),
+      // a discount asked for and not given (said no, or its invoice cancelled): kept on the record
+      ...(await tx.select().from(discountAsk).where(and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, pid), inArray(discountAsk.status, ['rejected', 'withdrawn'])))).map((a) => ({ type: 'discount' as const,
+        at: a.decidedAt ?? a.createdAt, id: a.id, amountPaise: a.offPaise, note: `${a.status === 'rejected' ? `Not approved by ${a.decidedBy ?? 'the owner'}` : 'Withdrawn: its invoice was cancelled'} · ${a.reason} · asked by ${a.askedBy}`, invoiceNo: null as string | null })),
       ...notes.map((n) => ({ type: 'credit' as const, at: n.createdAt, id: n.id, creditNo: n.creditNo, amountPaise: n.totalPaise, note: n.reason, invoiceNo: noOf.get(n.billId) ?? null })),
     ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
     const received = real.filter((p) => p.amountPaise > 0).reduce((s, p) => s + p.amountPaise, 0);
@@ -99,12 +103,12 @@ export function invoiceRoutes(app: FastifyInstance) {
     const live = bs.filter((b) => b.status !== 'cancelled');
     return { totals: { billedPaise: live.reduce((s, b) => s + b.netPaise, 0), creditedPaise: live.reduce((s, b) => s + b.creditedPaise, 0), receivedPaise: received, refundedPaise: refunded,
       duePaise: bs.reduce((s, b) => s + b.duePaise, 0), waitingOffPaise: bs.reduce((s, b) => s + b.waitingOffPaise, 0), collectablePaise: bs.reduce((s, b) => s + b.collectablePaise, 0),
-      advancePaise: await advanceBalance(tx, t, pid), invoices: live.length },
+      advancePaise: await advanceBalance(tx, t, pid), emiHeldPaise: await emiInAdvance(tx, t, pid), invoices: live.length },
       activity, dayClosed: await dayIsClosed(tx, t, req.ctx.timezone) };
   });
 
   /** Every invoice in a period (the clinic's billing list), searchable by patient, phone or invoice number. */
-  route(app, 'get', '/bills', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/bills', 'fees.invoices', async (req, tx) => {
     const q = req.query as any; const tz = req.ctx.timezone; const today = todayIn(tz);
     const from = /^\d{4}-\d{2}-\d{2}$/.test(q.from ?? '') ? q.from : today; const to = /^\d{4}-\d{2}-\d{2}$/.test(q.to ?? '') ? q.to : from;
     const term = String(q.q ?? '').trim().slice(0, 60);
@@ -116,7 +120,7 @@ export function invoiceRoutes(app: FastifyInstance) {
   });
 
   /** One invoice as it prints: as it was issued (lines, discount, GST at the GSTIN of that day), then its credit notes and the money applied to it. */
-  route(app, 'get', '/bills/:id', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/bills/:id', 'fees.invoices', async (req, tx) => {
     const t = req.ctx.tenantId;
     const [v] = await billViews(tx, t, eq(bill.id, (req.params as any).id), 1);
     if (!v) throw new HttpError(404, 'NOT_FOUND');
@@ -141,11 +145,14 @@ export function invoiceRoutes(app: FastifyInstance) {
       subtotalPaise: live.reduce((s, c) => s + c.amountPaise + c.discountPaise, 0),
       gst: gstSummary(gstin, live.map((c) => ({ amountPaise: c.amountPaise, taxRateBp: c.taxRateBp }))),
       gstPaise: gstin ? live.reduce((s, c) => s + (c.taxRateBp ? c.amountPaise - Math.round((c.amountPaise * 10000) / (10000 + c.taxRateBp)) : 0), 0) : 0,
-      payments: [...groups.values()] };
+      payments: [...groups.values()],
+      // money given back on this invoice: the refund vouchers (it left from the advance, so it is not a payment on the invoice)
+      refunds: Object.values((await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.billId, v.id), eq(payment.advance, true), sql`${payment.amountPaise} < 0`, sql`${payment.method} <> 'advance'`)))
+        .reduce((m: Record<string, any>, p) => { const k = p.receiptNo ?? p.id; const g = m[k] ?? { voucherNo: p.receiptNo, at: p.receivedAt, amountPaise: 0, methods: [] as string[] }; g.amountPaise -= p.amountPaise; if (!g.methods.includes(p.method)) g.methods.push(p.method); m[k] = g; return m; }, {})) };
   });
 
   /** A credit note as it prints: what it comes off, how much, why, and where the money went. */
-  route(app, 'get', '/credit-notes/:id', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/credit-notes/:id', 'fees.invoices', async (req, tx) => {
     const t = req.ctx.tenantId;
     const n = await tx.select().from(creditNote).where(and(eq(creditNote.id, (req.params as any).id), eq(creditNote.tenantId, t))).then((r) => r[0]);
     if (!n) throw new HttpError(404, 'NOT_FOUND');
@@ -162,9 +169,32 @@ export function invoiceRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Money back on an invoice, for something not given (or taken by mistake). It always leaves from the patient's advance, with a voucher.
-   * With "take it off the invoice" (the usual case) a credit note takes the same amount off the items named (each at its own GST), so what is
-   * still due stays as it was; without, the invoice is unchanged and that much is due again. A request key makes a retry return the first refund.
+   * Take items off an invoice, for something not given: a credit note and no money handed over. What was already paid on those items
+   * moves to the patient's advance (to use on the next bill, or give back with Refund). The day need not be open: no money moves.
+   */
+  route(app, 'post', '/bills/:id/credit', 'payment.refund', async (req, tx) => {
+    const b = z.object({ reason: z.string().trim().min(3, 'Say why').max(200), idempotencyKey: z.string().min(8).max(80).optional(),
+      lines: z.array(z.object({ chargeId: z.string().uuid(), amountPaise: z.number().int().positive().max(100_000_000) })).min(1).max(20) }).parse(req.body);
+    const t = req.ctx.tenantId;
+    if (b.idempotencyKey) { const [d] = await tx.select({ p: domainEvent.payload }).from(domainEvent).where(and(eq(domainEvent.tenantId, t), eq(domainEvent.type, 'bill.credited'), sql`${domainEvent.payload}->>'key' = ${b.idempotencyKey}`)).limit(1);
+      if (d) return { ...(d.p as any), repeated: true }; }
+    const [v] = await billViews(tx, t, eq(bill.id, (req.params as any).id), 1);
+    if (!v) throw new HttpError(404, 'NOT_FOUND');
+    const live = v.lines.filter((c) => !['cancelled', 'waived'].includes(c.status));
+    const lines = b.lines.map((l) => { const c = live.find((x) => x.id === l.chargeId); if (!c) throw new HttpError(400, 'NOT_ON_THIS_INVOICE');
+      const left = c.amountPaise - (v.creditedOn[c.id] ?? 0); if (l.amountPaise > left) throw new HttpError(400, 'MORE_THAN_THE_LINE', { what: c.description, leftPaise: left });
+      return { chargeId: c.id, amountPaise: l.amountPaise, what: c.description }; });
+    const r = await issueCredit(tx, req.ctx, { billId: v.id, patientId: v.patient.id, reason: `Not given: ${b.reason}`, lines });
+    const out = { key: b.idempotencyKey ?? null, creditNo: r.creditNo, creditId: r.creditId, creditedPaise: r.totalPaise, toAdvancePaise: r.toAdvancePaise, invoiceNo: v.invoiceNo };
+    await emit(tx, req.ctx, 'bill.credited', 'bill', v.id, out);
+    return { ...out, repeated: false };
+  });
+
+  /**
+   * Money back on an invoice. It always leaves from the patient's advance, with a voucher, and only money that was paid on the items named:
+   * a refund never takes a payment off one item to give back for another. With "take it off the invoice" (the usual case) a credit note takes
+   * the same amount off those items, so what is still due stays as it was; without, the invoice is unchanged and that much is due again.
+   * A request key makes a retry return the first refund.
    */
   route(app, 'post', '/bills/:id/refund', 'payment.refund', async (req, tx) => {
     const b0 = z.object({ parts: z.array(z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().positive().max(100_000_000), reference: z.string().trim().max(60).optional() })).min(1).max(4),
@@ -178,21 +208,27 @@ export function invoiceRoutes(app: FastifyInstance) {
     await assertDayOpen(tx, req.ctx); // the money leaves today
     if (b.amountPaise > v.paidPaise) throw new HttpError(400, 'MORE_THAN_PAID', { refundablePaise: v.paidPaise });
     const live = v.lines.filter((c) => !['cancelled', 'waived'].includes(c.status));
-    let creditNo: string | null = null; let creditId: string | null = null; let moved = 0;
-    if (b.lower) { // the credit note, off the items named (an invoice of one item needs no naming)
-      const named = b.lines ?? (live.length === 1 ? [{ chargeId: live[0].id, amountPaise: b.amountPaise }] : null);
-      if (!named) throw new HttpError(400, 'SAY_WHICH_ITEM');
-      if (named.reduce((s, l) => s + l.amountPaise, 0) !== b.amountPaise) throw new HttpError(400, 'ITEMS_DO_NOT_ADD_UP', { amountPaise: b.amountPaise });
-      const lines = named.map((l) => { const c = live.find((x) => x.id === l.chargeId); if (!c) throw new HttpError(400, 'NOT_ON_THIS_INVOICE');
-        if (l.amountPaise > c.amountPaise - (v.creditedOn[c.id] ?? 0)) throw new HttpError(400, 'MORE_THAN_THE_LINE', { what: c.description, leftPaise: c.amountPaise - (v.creditedOn[c.id] ?? 0) });
-        return { chargeId: c.id, amountPaise: l.amountPaise, what: c.description }; });
-      const r = await issueCredit(tx, req.ctx, { billId: v.id, patientId: v.patient.id, reason: `Refunded: ${b.reason}`, lines }); creditNo = r.creditNo; creditId = r.creditId; moved = r.toAdvancePaise;
+    // the items it comes off (an invoice of one item needs no naming); each gives back at most what was paid on it
+    const named = b.lines ?? (live.length === 1 ? [{ chargeId: live[0].id, amountPaise: b.amountPaise }] : null);
+    if (!named) throw new HttpError(400, 'SAY_WHICH_ITEM');
+    if (named.reduce((s, l) => s + l.amountPaise, 0) !== b.amountPaise) throw new HttpError(400, 'ITEMS_DO_NOT_ADD_UP', { amountPaise: b.amountPaise });
+    const items = named.map((l) => { const c = live.find((x) => x.id === l.chargeId); if (!c) throw new HttpError(400, 'NOT_ON_THIS_INVOICE');
+      const paid = v.paidOn[c.id] ?? 0; if (l.amountPaise > paid) throw new HttpError(400, 'MORE_THAN_PAID_ON_THE_ITEM', { what: c.description, paidPaise: paid });
+      const left = c.amountPaise - (v.creditedOn[c.id] ?? 0); if (b.lower && l.amountPaise > left) throw new HttpError(400, 'MORE_THAN_THE_LINE', { what: c.description, leftPaise: left });
+      return { c, amountPaise: l.amountPaise }; });
+    let creditNo: string | null = null; let creditId: string | null = null;
+    const movedBefore = new Map<string, number>();
+    if (b.lower) {
+      const r = await issueCredit(tx, req.ctx, { billId: v.id, patientId: v.patient.id, reason: `Refunded: ${b.reason}`, lines: items.map((i) => ({ chargeId: i.c.id, amountPaise: i.amountPaise, what: i.c.description })) });
+      creditNo = r.creditNo; creditId = r.creditId;
     }
-    // whatever the credit did not already move: off the invoice's payments into the advance (the items named first, then the newest)
-    const order = [...live].sort((x, y) => Number(!!b.lines?.some((l) => l.chargeId === y.id)) - Number(!!b.lines?.some((l) => l.chargeId === x.id)) || (y.lineNo ?? 0) - (x.lineNo ?? 0));
-    const pays = await tx.select({ id: payment.chargeId, n: sql<number>`sum(${payment.amountPaise})::int` }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, live.map((c) => c.id)))).groupBy(payment.chargeId);
-    let need = Math.max(0, b.amountPaise - moved);
-    for (const c of order) { if (!need) break; const got = pays.find((x) => x.id === c.id)?.n ?? 0; const take = Math.min(need, got); if (take > 0) { await unapply(tx, req.ctx, c, take, `Refund on ${v.invoiceNo}: ${b.reason}`); need -= take; } }
+    // each item's money into the advance, as much as is being given back off it (the credit note may already have moved some)
+    const nowPaid = await tx.select({ id: payment.chargeId, n: sql<number>`sum(${payment.amountPaise})::int` }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, items.map((i) => i.c.id)))).groupBy(payment.chargeId);
+    for (const i of items) {
+      const already = (v.paidOn[i.c.id] ?? 0) - (nowPaid.find((x) => x.id === i.c.id)?.n ?? 0); // moved by the credit note
+      const take = Math.max(0, i.amountPaise - already); movedBefore.set(i.c.id, already);
+      if (take > 0) await unapply(tx, req.ctx, i.c, take, `Refund on ${v.invoiceNo}: ${b.reason}`);
+    }
     const out = await refundFromAdvance(tx, req.ctx, { patientId: v.patient.id, billId: v.id, parts: b.parts, reason: `${v.invoiceNo} · ${b.reason}`, key: b.idempotencyKey, creditId });
     await settle(tx, t, live.map((c) => c.id));
     await emit(tx, req.ctx, 'bill.refunded', 'bill', v.id, { amountPaise: b.amountPaise, reason: b.reason, invoiceNo: v.invoiceNo, creditNo, voucherNo: out.voucherNo });
@@ -226,12 +262,12 @@ export function invoiceRoutes(app: FastifyInstance) {
     const summary = [...net.values()].sort((a, b) => a.rateBp - b.rateBp);
     return { from: q.from, to: q.to, summary, totals: { taxablePaise: summary.filter((r) => r.rateBp).reduce((s, r) => s + r.taxablePaise, 0), exemptPaise: summary.filter((r) => !r.rateBp).reduce((s, r) => s + r.taxablePaise, 0),
         cgstPaise: summary.reduce((s, r) => s + r.cgstPaise, 0), sgstPaise: summary.reduce((s, r) => s + r.sgstPaise, 0) },
-      invoices, credits, billsOfSupply: { count: supply.length, totalPaise: supply.reduce((s, b) => s + b.billedPaise, 0) },
+      invoices, credits, billsOfSupply: { count: supply.length, totalPaise: supply.reduce((s, b) => s + b.netPaise, 0), creditedPaise: supply.reduce((s, b) => s + b.creditedPaise, 0) },
       leftOut: left.map((b) => ({ id: b.id, invoiceNo: b.invoiceNo, at: b.createdAt, patient: b.patient.fullName, totalPaise: b.billedPaise, reason: b.lines.find((c: any) => c.excludedReason)?.excludedReason ?? null })) };
   });
 
   /** The patient's advance: what is left, and every deposit, use and refund. */
-  route(app, 'get', '/patients/:id/advance', 'fees.see', async (req, tx) => {
+  route(app, 'get', '/patients/:id/advance', 'fees.invoices', async (req, tx) => {
     const t = req.ctx.tenantId; const pid = (req.params as any).id;
     const rows = await tx.select().from(payment).where(and(eq(payment.tenantId, t), eq(payment.patientId, pid), eq(payment.advance, true))).orderBy(desc(payment.receivedAt)).limit(200);
     return { balancePaise: await advanceBalance(tx, t, pid), dayClosed: await dayIsClosed(tx, t, req.ctx.timezone),

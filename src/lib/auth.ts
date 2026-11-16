@@ -19,8 +19,8 @@ export const DEFAULT_ROLES: Record<string, string[]> = {
   admin: ['config.*', 'user.*', 'message.broadcast', 'report.*', 'finance.*', 'expense.*', 'patient.*', 'appointment.*', 'visit.*', 'payment.*', 'fees.*', 'day.close', 'document.read'],
   doctor: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'appointment.write', 'visit.read', 'visit.write', 'visit.queue', 'encounter.*', 'worklist.read', 'report.read', 'document.*'],
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
-  receptionist: ['fees.see', 'patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
-  coordinator: ['fees.see', 'patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
+  receptionist: ['fees.see', 'fees.invoices', 'patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
+  coordinator: ['fees.see', 'fees.invoices', 'patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
   pharmacist: ['patient.read', 'pharmacy.*', 'stock.read', 'stock.write', 'document.read'], // medicines only: no clinic billing, no patient payments (16 Nov 2026)
   superadmin: ['platform.*'],
 };
@@ -57,6 +57,7 @@ export const PERMISSIONS: { key: string; group: string; label: string; hint: str
   { key: 'payment.waive', group: 'Money', label: 'Waive or adjust charges', hint: '' },
   { key: 'payment.refund', group: 'Money', label: 'Cancel a paid visit / refund', hint: 'Owner and admin by default' },
   { key: 'fees.see', group: 'Money', label: 'See fees and payments', hint: 'Off for junior doctors: prices, amounts due and revenue are hidden' },
+  { key: 'fees.invoices', group: 'Money', label: 'See invoices and patient accounts', hint: 'Billing page and each patient\'s Bills & payments. Off for doctors by default (16 Nov 2026)' },
   { key: 'discount.give', group: 'Money', label: 'Give procedure discounts', hint: 'Up to the clinic limit; above it the discount waits for approval' },
   { key: 'discount.approve', group: 'Money', label: 'Approve discounts above the limit', hint: 'Owner by default' },
   { key: 'refund.course', group: 'Money', label: 'Approve refunds of unused prepaid sessions', hint: 'Owner by default' },

@@ -101,7 +101,7 @@ function Timeline({ id }: { id: string }) {
   // vitals as the desk took them at check-in, one column per visit (the last three that have any)
   const vf = enabledVitals(cfg?.tenant?.settings);
   const vCols = (visits as any[]).filter((v) => vf.some((f) => v.details?.[f.key] !== undefined && v.details[f.key] !== null && v.details[f.key] !== '')).slice(0, 3);
-  const showBills = can(perms, 'fees.see') || can(perms, 'payment.record');
+  const showBills = can(perms, 'fees.invoices'); // invoices and the patient's account: not for doctors by default
   const SECS: [Sec, number | undefined][] = [
     ['visits', encounters.length || undefined], ['reports', reports.length || undefined], ['photos', photos.length || undefined], ['plans', procPlans.length || undefined],
     ...(showBills ? [['bills', new Set(charges.map((c: any) => c.billId)).size || undefined] as [Sec, number | undefined]] : []),

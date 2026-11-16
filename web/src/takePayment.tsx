@@ -28,6 +28,12 @@ export function moneyErr(e: any): string {
   if (c === 'NO_PRICE_ON_THE_PRICE_LIST') return 'This has no price on the price list. Set it in Settings › Consultation types or Procedures & packages.';
   if (c === 'MORE_THAN_THE_ADVANCE') return `Only ${money(b.balancePaise)} is left in the advance.`;
   if (c === 'NOTHING_TO_BILL') return 'Add an item, or type an amount to take as advance.';
+  if (c === 'EMI_MORE_THAN_DUE') return `EMI pays a bill: at most the ${money(b.duePaise)} due. Take any extra in another mode.`;
+  if (c === 'EMI_NOT_SETTLED') return `${money(b.emiPaise)} of the advance is EMI the lender has not paid yet: at most ${money(b.refundablePaise)} can go back now.`;
+  if (c === 'HAS_MONEY_USE_A_CREDIT_NOTE') return 'Money or a credit note is already on this line: use Take item off instead.';
+  if (c === 'MORE_THAN_PAID_ON_THE_ITEM') return `Only ${money(b.paidPaise)} was paid on ${b.what}. To take an unpaid item off, use Take item off.`;
+  if (c === 'EXTRA_DISCOUNT_TOO_BIG') return 'The discount on the bill is too big: every item must still cost something.';
+  if (c === 'NOTHING_TO_SAVE') return 'Nothing to save: take money, add an item, or give a discount.';
   if (c === 'FEE_MORE_THAN_PAYMENT') return 'The fee is more than the EMI amount. Check what the lender kept.';
   if (c === 'SAY_WHICH_ITEM') return 'Say how much comes off each item.';
   if (c === 'ITEMS_DO_NOT_ADD_UP') return 'The amounts off the items must add up to the refund.';
@@ -43,7 +49,7 @@ type Unit = 'pct' | 'rs';
 type Line = { key: string; kind: 'charge' | 'proc' | 'service' | 'ahead'; id: string; what: string; sub: string; unitPaise: number; qty: number; maxQty: number; capPaise?: number; on: boolean; dv: string; unit: Unit; noDiscount?: string; prior: number; taxBp: number; group?: string; procId?: string };
 /** GST inside a price that includes it. */
 const gstIn = (paise: number, bp: number) => (bp ? paise - Math.round((paise * 10000) / (10000 + bp)) : 0);
-export const BILL_KEYS = ['timeline', 'frontdesk', 'daily', 'payments-awaiting', 'patients', 'courses', 'discount-asks', 'worklist', 'procedure-plans', 'clinic'];
+export const BILL_KEYS = ['timeline', 'frontdesk', 'daily', 'payments-awaiting', 'patients', 'courses', 'discount-asks', 'worklist', 'procedure-plans', 'clinic', 'finance', 'dayclose', 'gst', 'owner-summary'];
 const refresh = () => BILL_KEYS.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 const num = (s: string) => Math.max(0, Number(s) || 0);
 const offOf = (gross: number, v: string, unit: Unit) => Math.min(gross, unit === 'pct' ? Math.round((gross * Math.min(100, num(v))) / 10000) * 100 : toPaise(v)); // a % comes off in whole rupees
@@ -57,7 +63,7 @@ function DiscountBox({ v, unit, onV, onUnit, label, disabled, maxPaise }: { v: s
   return <span className="inline-flex flex-col items-end gap-1 xl:flex-row xl:items-center xl:gap-1.5"><input className="input !h-9 !w-16 text-right tabular-nums xl:!w-20" inputMode={unit === 'pct' ? 'decimal' : 'numeric'} autoComplete="off" aria-label={label} disabled={disabled} placeholder="0" value={v}
     onChange={(e) => {
       let x = unit === 'rs' ? e.target.value.split('.')[0].replace(/\D/g, '') : e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1').replace(/(\.\d{2})\d+/, '$1'); // ₹ in whole rupees
-      if (unit === 'pct' && Number(x) > 100) x = '100'; if (unit === 'rs' && Number(x) * 100 > maxPaise) x = String(Math.floor(maxPaise / 100)); // never more than the item
+      if (unit === 'pct' && Number(x) >= 100) x = '99.99'; // an item for free is not a discount if (unit === 'rs' && Number(x) * 100 > maxPaise) x = String(Math.floor(maxPaise / 100)); // never more than the item
       onV(x.slice(0, 9)); }} /><UnitSwitch unit={unit} onChange={onUnit} label={`${label} in`} /></span>;
 }
 
@@ -112,9 +118,9 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   };
   const [lines, setLines] = useState<Line[]>(() => {
     const due: Line[] = tl.charges.filter((c: any) => c.status === 'due').map((c: any) => {
-      const paid = paidOn(c.id); const credited = c.creditedPaise ?? 0; const owing = c.amountPaise - credited - paid - (waiting.get(c.id) ?? 0);
+      const paid = paidOn(c.id); const credited = c.creditedPaise ?? 0; const tookMoney = tl.payments.some((p: any) => p.chargeId === c.id && p.amountPaise > 0); const owing = c.amountPaise - credited - paid - (waiting.get(c.id) ?? 0);
       if (owing <= 0) return null;
-      const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 || credited > 0 ? 'Part paid: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
+      const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 || credited > 0 || tookMoney ? 'Money was taken on it: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
       return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${credited ? ` · ${money(credited)} credited` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
     }).filter(Boolean);
     const a = ahead ? withPackage(ahead.recommendationId) : [];
@@ -139,7 +145,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const off = lineOffs + extra_; const payable = sub - off;
   const withOff = on.filter((l) => !l.noDiscount && (lineOff(l) > 0 || extra_ > 0));
   const listSum = withOff.reduce((s, l) => s + gross(l) + l.prior, 0);
-  const pct = listSum ? Math.round(((off + withOff.reduce((s, l) => s + l.prior, 0)) / listSum) * 1000) / 10 : 0;
+  const pctExact = listSum ? ((off + withOff.reduce((s, l) => s + l.prior, 0)) / listSum) * 100 : 0;
+  const pct = Math.round(pctExact * 10) / 10; const pctShown = Math.floor(pctExact * 10) / 10; // the limit check matches the server; what is shown never rounds up to 100%
   const cap = Number(cfg?.tenant?.settings?.discountCapPct ?? 10);
   const mayGive = can(perms, 'discount.give'); const mayApprove = can(perms, 'discount.approve');
   const needsOk = off > 0 && (!mayGive || (pct > cap && !mayApprove));
@@ -154,18 +161,24 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const allAdv = advUse > 0 && toPay === 0; // the advance pays it all: no mode to pick
   const paidNew = later || allAdv ? 0 : parts.reduce((s, p, i) => s + amt(p, i), 0); const total = advUse + paidNew;
   const tooBig = on.find((l) => !l.noDiscount && lineOff(l) >= gross(l) && lineOff(l) > 0);
+  const extraTooBig = () => extra_ > 0 && on.some((l) => !l.noDiscount && lineOff(l) + (shares.get(l.key) ?? 0) >= gross(l)); // the bill-wide discount would make an item free
   const fromAdv = advUse;
   const extra = Math.max(0, total - payable); // more than the bill: kept as advance when ticked
   // the extra discount shared out the way the server does it: in proportion, whole rupees per line, the last line takes the rest
   const shares = new Map<string, number>(); { const rl = on.filter((l) => !l.noDiscount); let rest = extra_; rl.forEach((l, k) => { const sh = k === rl.length - 1 ? rest : room ? Math.round((extra_ * (gross(l) - lineOff(l))) / room / 100) * 100 : 0; shares.set(l.key, sh); rest -= sh; }); }
   const gst = on.reduce((s, l) => { const after = gross(l) - lineOff(l); return s + gstIn(after - (shares.get(l.key) ?? 0), l.taxBp); }, 0);
+  const anyNew = on.some((l) => l.kind !== 'charge');
   const problem = !on.length && total <= 0 ? 'Tick or add an item, or type an amount to take as advance'
+    : !anyNew && off === 0 && total <= 0 ? 'Nothing to save: these are already on invoices. Take money, add an item, or give a discount'
+    : parts.some((p, i) => !later && !allAdv && (p.method === 'upi' || p.method === 'card') && amt(p, i) > 0 && !p.reference.trim()) ? 'Type the UPI or card reference'
     : tooBig ? `The discount is the whole of ${tooBig.what}`
+    : extraTooBig() ? 'The discount on the bill is too big: every item must still cost something'
     : off > 0 && why.trim().length < 3 ? 'Say why there is a discount'
     : fromAdv > advPaise ? `Only ${money(advPaise)} is left in the advance`
     : extra > 0 && !keep ? `That is ${money(extra)} more than is payable`
     : extra > total - fromAdv ? 'The advance cannot pay into itself: take less from the advance'
-    : parts.some((p, i) => !later && p.method === 'emi' && amt(p, i) > 0 && (!p.lender.trim() || !p.reference.trim())) ? 'EMI needs the lender and the approval code' : '';
+    : parts.some((p, i) => !later && p.method === 'emi' && amt(p, i) > 0 && (!p.lender.trim() || !p.reference.trim())) ? 'EMI needs the lender and the approval code'
+    : !later && parts.reduce((s, p, i) => s + (p.method === 'emi' ? amt(p, i) : 0), 0) > toPay ? `EMI pays the bill: at most ${money(toPay)}` : '';
 
   const busy = useRef(false);
   const save = () => { if (busy.current) return; busy.current = true; go.mutate(undefined, { onSettled: () => { busy.current = false; } }); };
@@ -205,6 +218,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
       if (have) { setLine(have.key, { on: true, qty: Math.min(have.maxQty, have.qty + (have.on ? 1 : 0)) }); return; } // already on the bill: one more
       // already billed and not paid yet: say so, so it is not billed twice by mistake
       const open = svc ? null : tl.charges.find((c: any) => c.status === 'due' && c.procedureId === x.id);
+      const onCourse = svc ? null : plans.find((r) => r.procedureId === x.id); // a treatment of this procedure is planned: its sessions are on the treatment's invoice
+      if (onCourse && !open) toast(`${x.name} is part of this patient's treatment (${onCourse.sittings ?? 1} sessions). Its sessions are billed on the treatment, not again here, unless this is extra.`, 'info');
       if (open) toast(`${x.name} is already on ${invoiceNo[open.billId] ?? 'an invoice'}, not paid yet. Collect that one instead if it is the same.`, 'info');
       setLines((ls) => [...ls, { key: `${v}:${ls.length}`, kind: svc ? 'service' : 'proc', id: x.id, what: x.name, sub: svc ? 'service, from the price list' : open ? `from the price list · already on ${invoiceNo[open.billId] ?? 'an invoice'}, unpaid` : 'from the price list', unitPaise: x.pricePaise, qty: 1, maxQty: 20, on: true, dv: '', unit: 'pct', prior: 0, taxBp: svc ? 0 : x.taxRateBp ?? 0 }]);
     } else { const ls0 = withPackage(v.split(':')[1]).filter((l) => !lines.some((x) => x.key === l.key)); if (ls0.length) setLines((ls) => [...ls, ...ls0]); else toast('This treatment is already on an invoice', 'info'); }
@@ -258,8 +273,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
           <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" aria-label="Use advance" checked={useAdv} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
           {advUse > 0 && <div className="flex justify-between font-bold"><span>To pay</span><span className="tabular-nums">{money(toPay)}</span></div>}
         </>}
-        {off > 0 && <div className="text-xs text-muted">{pct}% off · {mayApprove ? 'you approve discounts yourself' : mayGive ? `your limit is ${cap}%` : 'every discount needs approval'}</div>}
-        {needsOk && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium text-ink" role="status">{pct}% off is above {mayGive ? `your limit of ${cap}%` : 'what you may give'}. The discount goes to the owner for approval. You can take {money(payable)} or less now; if the owner says no, {money(off)} becomes due.</div>}
+        {off > 0 && <div className="text-xs text-muted">{pctShown}% off · {mayApprove ? 'you approve discounts yourself' : mayGive ? `your limit is ${cap}%` : 'every discount needs approval'}</div>}
+        {needsOk && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium text-ink" role="status">{pctShown}% off is above {mayGive ? `your limit of ${cap}%` : 'what you may give'}. The discount goes to the owner for approval. You can take {money(payable)} or less now; if the owner says no, {money(off)} becomes due.</div>}
 
         {dayClosed && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium" role="status">Today has been closed: no money can be taken. You can still save the bill and use the advance.</div>}
         <div className="flex items-center justify-between pt-2"><span className="label !mb-0">Paid now</span>{on.length > 0 && !dayClosed && <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="accent-clay" aria-label="Nothing now, pay later" checked={later_} onChange={(e) => setLater(e.target.checked)} />Nothing now, pay later</label>}</div>
@@ -271,7 +286,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
             {p.method !== 'cash' && p.method !== 'advance' && <input className="input" maxLength={60} aria-label={p.method === 'emi' ? 'Approval code' : 'Reference'} placeholder={p.method === 'emi' ? 'Approval code' : p.method === 'upi' ? 'Ref, last 4 digits' : 'Reference'} value={p.reference} onChange={(e) => setPart(i, { reference: e.target.value })} />}
             {p.method === 'emi' && <input className="input" maxLength={60} aria-label="Lender" placeholder="Lender, for example Bajaj Finserv" value={p.lender} onChange={(e) => setPart(i, { lender: e.target.value })} />}
           </div>))}
-          {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => setParts([...parts.map((p, i) => (i === 0 && parts.length === 1 && p.amount === '' && toPay > 0 ? { ...p, amount: String(toPay / 100) } : p)), { method: 'cash', amount: '', reference: '', lender: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
+          {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => { const filled = parts.map((p, i) => (i === 0 && parts.length === 1 && p.amount === '' && toPay > 0 ? { ...p, amount: String(toPay / 100) } : p)); const rest = Math.max(0, toPay - filled.reduce((s, p) => s + toPaise(p.amount), 0)); setParts([...filled, { method: 'cash', amount: rest ? String(rest / 100) : '', reference: '', lender: '' }]); }}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
         </div>}
         <div className="flex justify-between border-t border-line pt-2.5 font-bold"><span>Paying now</span><span className="tabular-nums">{money(paidNew)}</span></div>
         <div className="flex justify-between"><span className="text-muted">Stays due</span><span className="tabular-nums font-semibold text-amber">{money(Math.max(0, payable - total))}</span></div>

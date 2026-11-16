@@ -48,7 +48,7 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
   for (const s of slots.data?.slots ?? []) (byRoom[s.room] ??= []).push(s);
   const existing = useQuery({ queryKey: ['psessions', rec.id], queryFn: () => get(`/procedure-sessions?recommendationId=${rec.id}`) });
   return (
-    <Drawer title={`${sitting ? 'Reschedule' : 'Schedule'} · ${proc?.name ?? 'procedure'}`} subtitle={`${rec.patient.fullName} · ${rec.patient.phone ?? ''}${rec.sittings ? ` · ${rec.sittings} ${rec.sittings === 1 ? 'sitting' : 'sittings'} planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
+    <Drawer title={`${sitting ? 'Reschedule' : 'Schedule'} · ${proc?.name ?? 'procedure'}`} subtitle={`${[rec.patient.fullName, rec.patient.phone].filter(Boolean).join(' · ')}${rec.sittings ? ` · ${rec.sittings} ${rec.sittings === 1 ? 'session' : 'sessions'} planned` : ''}${slots.data?.requiredCapability ? ` · needs a room with “${slots.data.requiredCapability}”` : ''}`} onClose={onClose} width="max-w-3xl">
       <div className="space-y-4">
         {(existing.data ?? []).length > 0 && <div className="text-xs text-muted flex flex-wrap gap-1.5 items-center">Previous sessions: {existing.data.map((s: any) => <Chip key={s.id} tone={s.state === 'completed' ? 'sage' : s.state === 'confirmed' ? 'sky' : ''}>{fmtDate(s.day)} · {({ confirmed: 'Booked', in_progress: 'In room', completed: 'Done', missed: 'No show', cancelled: 'Cancelled', postponed: 'Postponed' } as Record<string, string>)[s.state] ?? s.state}</Chip>)}</div>}
         <div className="grid grid-cols-3 gap-3">

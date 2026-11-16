@@ -71,7 +71,10 @@ test('refund needs its own permission; junior doctors see no fees', async () => 
   const c = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel', amountPaise: 100000 })).body;
   await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [c.id], idempotencyKey: 'wave4-refund-01', parts: [{ method: 'cash', amountPaise: 100000 }] });
   assert.equal((await reception('POST', `/charges/${c.id}/adjust`, { kind: 'refunded', reason: 'patient declined' })).status, 403, 'the desk cannot refund by default');
-  assert.equal((await reception('POST', `/charges/${c.id}/adjust`, { kind: 'waived', reason: 'known person' })).status, 200, 'a waiver keeps its own permission');
+  const paidWaive = await reception('POST', `/charges/${c.id}/adjust`, { kind: 'waived', reason: 'known person' });
+  assert.equal(paidWaive.status, 409, 'a paid line is never waived: that is a credit note'); assert.equal(paidWaive.body.code, 'HAS_MONEY_USE_A_CREDIT_NOTE');
+  const unpaid = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel unpaid', amountPaise: 50000 })).body;
+  assert.equal((await reception('POST', `/charges/${unpaid.id}/adjust`, { kind: 'waived', reason: 'known person' })).status, 200, 'a waiver of an unpaid fee keeps its own permission');
   const c2 = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel 2', amountPaise: 100000 })).body;
   assert.equal((await owner('POST', `/charges/${c2.id}/adjust`, { kind: 'refunded', reason: 'patient declined' })).status, 200);
 

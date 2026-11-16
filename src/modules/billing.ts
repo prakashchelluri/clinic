@@ -86,6 +86,10 @@ export function billingRoutes(app: FastifyInstance) {
       await emit(tx, req.ctx, 'charge.refunded', 'charge', id, { reason: body.reason, amountPaise: room, creditNo: cr.creditNo });
       return { ...cur, creditNo: cr.creditNo };
     }
+    // waive: let go of a fee nobody has paid. A line with money or a credit note on it is changed only by a credit note (Take item off).
+    const wm = await lineMoney(tx, t, [id]);
+    if (cur.status !== 'due' || wm.applied(id) !== 0 || wm.credited(id) !== 0 || (await tx.select({ id: payment.id }).from(payment).where(eq(payment.chargeId, id)).limit(1)).length) throw new HttpError(409, 'HAS_MONEY_USE_A_CREDIT_NOTE');
+    await assertDayOpen(tx, req.ctx);
     const [row] = await tx.update(charge).set({ status: body.kind, adjustmentReason: body.reason, adjustedBy: req.ctx.userId }).where(eq(charge.id, id)).returning();
     await emit(tx, req.ctx, `charge.${body.kind}`, 'charge', row.id, { reason: body.reason, amountPaise: row.amountPaise });
     return row;
@@ -181,7 +185,7 @@ export function billingRoutes(app: FastifyInstance) {
   // Discounts are given on the bill (POST /bills), where above the clinic limit they wait for an approver.
   /** Everything taken in one go, for printing. */
   route(app, 'get', '/receipts/:no', 'payment.record', async (req, tx) => {
-    if (!can(req.perms, 'fees.see')) throw new HttpError(403, 'FORBIDDEN:fees.see');
+    if (!can(req.perms, 'fees.invoices')) throw new HttpError(403, 'FORBIDDEN:fees.invoices');
     const rows = await tx.select({ p: payment, c: charge, pt: patient, by: appUser.name }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId)).leftJoin(appUser, eq(appUser.id, payment.receivedBy))
       .where(and(eq(payment.tenantId, req.ctx.tenantId), eq(payment.receiptNo, (req.params as any).no))).orderBy(payment.receivedAt);
     if (!rows.length) throw new HttpError(404, 'NOT_FOUND');
