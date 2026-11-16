@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from './api';
@@ -48,9 +48,12 @@ function UnitSwitch({ unit, onChange, label }: { unit: Unit; onChange: (u: Unit)
   return <span className="inline-flex shrink-0 rounded-lg bg-surface-2 p-0.5" role="group" aria-label={label}>{(['pct', 'rs'] as Unit[]).map((u) =>
     <button key={u} type="button" aria-pressed={unit === u} className={`h-7 min-w-7 rounded-md px-1.5 text-[13px] font-bold ${unit === u ? 'bg-surface text-ink shadow-sm' : 'text-muted'}`} onClick={() => onChange(u)}>{u === 'pct' ? '%' : '₹'}</button>)}</span>;
 }
-function DiscountBox({ v, unit, onV, onUnit, label, disabled }: { v: string; unit: Unit; onV: (v: string) => void; onUnit: (u: Unit) => void; label: string; disabled?: boolean }) {
-  return <span className="inline-flex items-center gap-1.5"><input className="input !h-9 !w-20 text-right tabular-nums" inputMode="decimal" autoComplete="off" aria-label={label} disabled={disabled} placeholder="0" value={v}
-    onChange={(e) => { let x = e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1'); x = x.replace(/(\.\d{2})\d+/, '$1'); if (unit === 'pct' && Number(x) > 100) x = '100'; onV(x.slice(0, 9)); }} /><UnitSwitch unit={unit} onChange={onUnit} label={`${label} in`} /></span>;
+function DiscountBox({ v, unit, onV, onUnit, label, disabled, maxPaise }: { v: string; unit: Unit; onV: (v: string) => void; onUnit: (u: Unit) => void; label: string; disabled?: boolean; maxPaise: number }) {
+  return <span className="inline-flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-1.5"><input className="input !h-9 !w-16 text-right tabular-nums sm:!w-20" inputMode={unit === 'pct' ? 'decimal' : 'numeric'} autoComplete="off" aria-label={label} disabled={disabled} placeholder="0" value={v}
+    onChange={(e) => {
+      let x = unit === 'rs' ? e.target.value.split('.')[0].replace(/\D/g, '') : e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1').replace(/(\.\d{2})\d+/, '$1'); // ₹ in whole rupees
+      if (unit === 'pct' && Number(x) > 100) x = '100'; if (unit === 'rs' && Number(x) * 100 > maxPaise) x = String(Math.floor(maxPaise / 100)); // never more than the item
+      onV(x.slice(0, 9)); }} /><UnitSwitch unit={unit} onChange={onUnit} label={`${label} in`} /></span>;
 }
 
 /**
@@ -104,10 +107,10 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   };
   const [lines, setLines] = useState<Line[]>(() => {
     const due: Line[] = tl.charges.filter((c: any) => c.status === 'due').map((c: any) => {
-      const paid = paidOn(c.id); const owing = c.amountPaise - paid - (waiting.get(c.id) ?? 0);
+      const paid = paidOn(c.id); const credited = c.creditedPaise ?? 0; const owing = c.amountPaise - credited - paid - (waiting.get(c.id) ?? 0);
       if (owing <= 0) return null;
-      const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 ? 'Part paid: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
-      return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
+      const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 || credited > 0 ? 'Part paid: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
+      return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${credited ? ` · ${money(credited)} credited` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
     }).filter(Boolean);
     const a = ahead ? withPackage(ahead.recommendationId) : [];
     // the doctor's treatments not invoiced yet are listed, unticked: tick what goes on this invoice
@@ -140,7 +143,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   // the patient's advance comes off the bill first (ticked by default); the rest is paid by the modes below
   const [useAdv, setUseAdv] = useState(true);
   // the advance is the patient's money: it is used even when nothing new is paid now
-  const advUse = useAdv ? Math.min(advPaise, payable) : 0; const toPay = payable - advUse;
+  const typed = later ? 0 : parts.reduce((s, p) => s + (p.amount === '' ? 0 : toPaise(p.amount)), 0); // money typed in the modes: the advance covers only the rest
+  const advUse = useAdv ? Math.min(advPaise, Math.max(0, payable - typed)) : 0; const toPay = payable - advUse;
   const amt = (p: Part, i: number) => (p.amount === '' && parts.length === 1 && i === 0 ? toPay : toPaise(p.amount));
   const allAdv = advUse > 0 && toPay === 0; // the advance pays it all: no mode to pick
   const paidNew = later || allAdv ? 0 : parts.reduce((s, p, i) => s + amt(p, i), 0); const total = advUse + paidNew;
@@ -156,6 +160,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     : extra > total - fromAdv ? 'The advance cannot pay into itself: take less from the advance'
     : parts.some((p, i) => !later && p.method === 'emi' && amt(p, i) > 0 && (!p.lender.trim() || !p.reference.trim())) ? 'EMI needs the lender and the approval code' : '';
 
+  const busy = useRef(false);
+  const save = () => { if (busy.current) return; busy.current = true; go.mutate(undefined, { onSettled: () => { busy.current = false; } }); };
   const go = useMutation({
     mutationFn: () => post('/bills', {
       patientId, idempotencyKey: key, reason: why.trim(), extraDiscountPaise: extra_, keepExtraAsAdvance: keep && total > payable,
@@ -188,9 +194,13 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
     if (v.startsWith('t:')) { const k = v.slice(2); const g = lines.find((l) => l.key === k)?.group; setLines((ls) => ls.map((x) => (x.key === k || (g && x.group === g) ? { ...x, on: true } : x))); return; }
     if (v.startsWith('p:') || v.startsWith('s:')) {
       const svc = v.startsWith('s:'); const x = (svc ? services : procs).find((y) => y.id === v.slice(2)); if (!x) return;
+      const have = lines.find((l) => l.kind === (svc ? 'service' : 'proc') && l.id === x.id);
+      if (have) { setLine(have.key, { on: true, qty: Math.min(have.maxQty, have.qty + (have.on ? 1 : 0)) }); return; } // already on the bill: one more
       setLines((ls) => [...ls, { key: `${v}:${ls.length}`, kind: svc ? 'service' : 'proc', id: x.id, what: x.name, sub: svc ? 'service, from the price list' : 'from the price list', unitPaise: x.pricePaise, qty: 1, maxQty: 20, on: true, dv: '', unit: 'pct', prior: 0, taxBp: svc ? 0 : x.taxRateBp ?? 0 }]);
     } else { const ls0 = withPackage(v.split(':')[1]).filter((l) => !lines.some((x) => x.key === l.key)); if (ls0.length) setLines((ls) => [...ls, ...ls0]); else toast('This treatment is already on an invoice', 'info'); }
   };
+  // quantity: in its own column, or under the item's name on a phone
+  const stepper = (l: Line) => <span className="inline-flex items-center gap-1"><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label={`One fewer ${l.what}`} disabled={l.qty <= 1} onClick={() => setLine(l.key, { qty: l.qty - 1 })}>−</button><b className="tabular-nums">{l.qty}</b><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label={`One more ${l.what}`} disabled={l.qty >= l.maxQty} onClick={() => setLine(l.key, { qty: l.qty + 1 })}>+</button></span>;
   const setPart = (i: number, patch: Partial<Part>) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const modes = MODES;
 
@@ -208,41 +218,41 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
               </button>))}
           </div>}
         </div>
-        <div className="overflow-x-auto rounded-xl border border-line"><table className="table min-w-[700px]">
-          <thead><tr><th className="w-8 pl-3" /><th>Item</th><th className="text-right">Qty</th><th className="text-right">Price</th><th>Discount</th>{gstOn && <th className="text-right">GST</th>}<th className="pr-3 text-right">Amount</th></tr></thead>
+        <div className="overflow-x-auto rounded-xl border border-line"><table className="table sm:min-w-[700px]">
+          <thead><tr><th className="w-8 pl-3" /><th>Item</th><th className="hidden text-right sm:table-cell">Qty</th><th className="hidden text-right sm:table-cell">Price</th><th>Discount</th>{gstOn && <th className="text-right">GST</th>}<th className="pr-3 text-right">Amount</th></tr></thead>
           <tbody>{lines.length === 0 ? <tr><td colSpan={gstOn ? 7 : 6} className="p-4 text-sm text-muted">Nothing is due. Search above to add an item, or just type an amount on the right to take an advance.</td></tr> : lines.map((l) => {
             const g = gross(l); const o = l.on ? lineOff(l) + (!l.noDiscount && room ? Math.round((extra_ * (g - lineOff(l))) / room) : 0) : 0; // its own discount and its share of the extra
             return <tr key={l.key} className={l.on ? '' : 'opacity-55'}>
               <td className="pl-3"><input type="checkbox" className="accent-clay h-4 w-4" checked={l.on} aria-label={`Include ${l.what}`} onChange={(e) => { const on = e.target.checked; setLines((ls) => ls.map((x) => (x.key === l.key || (l.group && x.group === l.group) ? { ...x, on } : x))); }} /></td>
-              <td className="min-w-0"><div className="text-sm font-medium">{l.what}</div><div className="text-xs text-muted">{l.sub}</div></td>
-              <td className="text-right tabular-nums">{l.maxQty > 1 ? <span className="inline-flex items-center gap-1"><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label="One fewer" disabled={l.qty <= 1} onClick={() => setLine(l.key, { qty: l.qty - 1 })}>−</button><b>{l.qty}</b><button type="button" className="btn btn-ghost btn-sm !px-2" aria-label="One more" disabled={l.qty >= l.maxQty} onClick={() => setLine(l.key, { qty: l.qty + 1 })}>+</button></span> : l.qty}</td>
-              <td className="text-right tabular-nums">{money(l.unitPaise)}</td>
-              <td>{l.noDiscount ? <span className="text-xs text-muted">{l.noDiscount}</span> : <DiscountBox v={l.dv} unit={l.unit} label={`Discount on ${l.what}`} disabled={!l.on} onV={(v) => setLine(l.key, { dv: v })} onUnit={(u) => setLine(l.key, { unit: u, dv: '' })} />}</td>
+              <td className="min-w-0"><div className="text-sm font-medium">{l.what}</div><div className="text-xs text-muted">{l.sub}<span className="sm:hidden"> · {money(l.unitPaise)} each</span></div>{l.maxQty > 1 && <div className="sm:hidden">{stepper(l)}</div>}</td>
+              <td className="hidden text-right tabular-nums sm:table-cell">{l.maxQty > 1 ? stepper(l) : l.qty}</td>
+              <td className="hidden text-right tabular-nums sm:table-cell">{money(l.unitPaise)}</td>
+              <td>{l.noDiscount ? <span className="text-xs text-muted">{l.noDiscount}</span> : <DiscountBox v={l.dv} unit={l.unit} label={`Discount on ${l.what}`} disabled={!l.on} maxPaise={Math.max(0, g - 100)} onV={(v) => setLine(l.key, { dv: v })} onUnit={(u) => setLine(l.key, { unit: u, dv: '' })} />}</td>
               {gstOn && <td className="text-right tabular-nums">{l.taxBp ? `${l.taxBp / 100}%` : '—'}{l.taxBp > 0 && <div className="text-xs text-muted">{money(gstIn(g - o, l.taxBp))}</div>}</td>}
               <td className="pr-3 text-right tabular-nums"><b>{money(g - o)}</b>{o > 0 && <div className="text-xs text-muted">−{money(o)} off</div>}</td>
             </tr>; })}</tbody>
         </table></div>
         <div className="text-xs text-muted">{gstOn ? 'Prices include GST. ' : ''}Consultation fees are taken at check-in; medicines at the pharmacy.</div>
-        {off > 0 && <div><label className="label" htmlFor="bill-why">Reason for the discount</label><input id="bill-why" className="input" maxLength={200} placeholder="for example: staff family, second course" value={why} onChange={(e) => setWhy(e.target.value)} /></div>}
+        <div className={off > 0 ? '' : 'invisible'} aria-hidden={off > 0 ? undefined : true}><label className="label" htmlFor="bill-why">Reason for the discount</label><input id="bill-why" className="input" maxLength={200} tabIndex={off > 0 ? undefined : -1} placeholder="for example: staff family, second course" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
         {asks.some((a) => a.status === 'pending') && <div className="text-xs text-muted">Waiting for approval: {asks.filter((a) => a.status === 'pending').map((a) => `${money(a.offPaise)} off (${a.reason}), asked by ${a.askedBy}`).join(' · ')}</div>}
       </div>
 
       <aside className="space-y-2.5 rounded-2xl bg-surface-2 p-4 text-sm">
         <div className="flex justify-between"><span className="text-muted">Subtotal</span><span className="tabular-nums font-semibold">{money(sub)}</span></div>
         <div className="flex justify-between"><span className="text-muted">Line discounts</span><span className="tabular-nums font-semibold">{lineOffs ? `−${money(lineOffs)}` : money(0)}</span></div>
-        <div className="flex items-center justify-between gap-2"><span className="text-muted">Extra discount</span><DiscountBox v={xv} unit={xUnit} label="Extra discount on the bill" disabled={!room} onV={setXv} onUnit={(u) => { setXUnit(u); setXv(''); }} /></div>
+        <div className="flex items-center justify-between gap-2"><span className="text-muted">Extra discount</span><DiscountBox v={xv} unit={xUnit} label="Extra discount on the bill" disabled={!room} maxPaise={Math.max(0, room - 100)} onV={setXv} onUnit={(u) => { setXUnit(u); setXv(''); }} /></div>
         {extra_ > 0 && <div className="flex justify-end text-xs text-muted">−{money(extra_)}</div>}
         <div className="flex justify-between border-t border-line pt-2.5 text-base font-bold"><span>Payable</span><span className="tabular-nums">{money(payable)}</span></div>
         {gstOn && <div className="flex justify-between text-xs"><span className="text-muted">of which GST</span><span className="tabular-nums">{money(gst)}</span></div>}
         {advPaise > 0 && payable > 0 && <>
-          <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" checked={useAdv} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
+          <label className="flex items-center justify-between gap-2"><span className="flex items-center gap-2"><input type="checkbox" className="accent-clay" aria-label="Use advance" checked={useAdv} onChange={(e) => setUseAdv(e.target.checked)} />Use advance <span className="text-xs text-muted">({money(advPaise)} available)</span></span><span className="tabular-nums font-semibold text-sage">{advUse ? `−${money(advUse)}` : money(0)}</span></label>
           {advUse > 0 && <div className="flex justify-between font-bold"><span>To pay</span><span className="tabular-nums">{money(toPay)}</span></div>}
         </>}
         {off > 0 && <div className="text-xs text-muted">{pct}% off · {mayApprove ? 'you approve discounts yourself' : mayGive ? `your limit is ${cap}%` : 'every discount needs approval'}</div>}
         {needsOk && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium text-ink" role="status">{pct}% off is above {mayGive ? `your limit of ${cap}%` : 'what you may give'}. The discount goes to the owner for approval. You can take {money(payable)} or less now; if the owner says no, {money(off)} becomes due.</div>}
 
         {dayClosed && <div className="rounded-xl bg-amber/15 p-2.5 text-[13px] font-medium" role="status">Today has been closed: no money can be taken. You can still save the bill and use the advance.</div>}
-        <div className="flex items-center justify-between pt-2"><span className="label !mb-0">Paid now</span>{on.length > 0 && !dayClosed && <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="accent-clay" checked={later_} onChange={(e) => setLater(e.target.checked)} />Nothing now, pay later</label>}</div>
+        <div className="flex items-center justify-between pt-2"><span className="label !mb-0">Paid now</span>{on.length > 0 && !dayClosed && <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" className="accent-clay" aria-label="Nothing now, pay later" checked={later_} onChange={(e) => setLater(e.target.checked)} />Nothing now, pay later</label>}</div>
         {!later && !allAdv && <div className="space-y-2">{parts.map((p, i) => (
           <div key={i} className="space-y-1.5 rounded-xl bg-surface p-2">
             <div className="flex flex-wrap items-center gap-1">{modes.map(([m, lb]) => <button key={m} type="button" aria-pressed={p.method === m} className={`toggle-opt !min-h-0 !px-2.5 !py-1 ${p.method === m ? 'on' : ''}`} onClick={() => setPart(i, { method: m })}>{lb}</button>)}
@@ -255,8 +265,8 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
         </div>}
         <div className="flex justify-between border-t border-line pt-2.5 font-bold"><span>Paying now</span><span className="tabular-nums">{money(paidNew)}</span></div>
         <div className="flex justify-between"><span className="text-muted">Stays due</span><span className="tabular-nums font-semibold text-amber">{money(Math.max(0, payable - total))}</span></div>
-        {extra > 0 && <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" className="accent-clay" checked={keep} onChange={(e) => setKeep(e.target.checked)} />{on.length ? `Keep the extra ${money(extra)} as advance` : `Take ${money(extra)} as advance`}</label>}
-        <button className="btn btn-primary mt-2 w-full" disabled={!!problem || go.isPending} onClick={() => go.mutate()}><Icon name="check" />{!on.length ? `Take ${money(total)} as advance` : needsOk ? `Send discount for approval${total ? ` · take ${money(total)}` : ''}` : paidNew ? `Collect ${money(paidNew)}` : advUse ? `Pay ${money(advUse)} from advance` : 'Save the bill'}</button>
+        {extra > 0 && <label className="flex items-center gap-2 text-[13px]"><input type="checkbox" className="accent-clay" aria-label="Keep the extra as advance" checked={keep} onChange={(e) => setKeep(e.target.checked)} />{on.length ? `Keep the extra ${money(extra)} as advance` : `Take ${money(extra)} as advance`}</label>}
+        <button className="btn btn-primary mt-2 w-full" disabled={!!problem || go.isPending} onClick={save}><Icon name="check" />{!on.length ? `Take ${money(total)} as advance` : needsOk ? `Send discount for approval${total ? ` · take ${money(total)}` : ''}` : paidNew ? `Collect ${money(paidNew)}` : advUse ? `Pay ${money(advUse)} from advance` : 'Save the bill'}</button>
         <div className="text-center text-xs text-muted" role="status">{problem || (extra > 0 ? `${money(extra)} goes to the advance` : total < payable ? `${money(payable - total)} stays due on the bill` : fromAdv === total && total > 0 ? 'Paid from the advance: no receipt' : 'One receipt for everything')}</div>
       </aside>
     </div>
@@ -285,7 +295,7 @@ export function EmiAwaiting() {
 export function DiscountAsks() {
   const q = useQuery({ queryKey: ['discount-asks', 'pending'], queryFn: () => get('/discount-asks'), refetchInterval: 60000 });
   const decide = useMutation({ mutationFn: (b: { id: string; action: 'approve' | 'reject' }) => post(`/discount-asks/${b.id}/decide`, { action: b.action }),
-    onSuccess: (r: any) => { refresh(); toast(r.status === 'approved' ? 'Discount approved: the bill is lower now' : 'Said no: the full amount stays due'); }, onError: (e) => toast(moneyErr(e), 'err') });
+    onSuccess: (r: any) => { refresh(); toast(r.status === 'approved' ? 'Discount approved: a credit note takes it off the invoice' : 'Said no: the full amount stays due'); }, onError: (e) => toast(moneyErr(e), 'err') });
   const rows: any[] = q.data ?? [];
   return <>{rows.map((a) => <div key={a.id} className="row flex-wrap">
     <span className="flex h-11 min-w-14 items-center justify-center rounded-xl bg-amber/15 px-2 text-[15px] font-extrabold tabular-nums">{a.pct}%</span>

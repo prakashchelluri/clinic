@@ -9,7 +9,7 @@ import { Drawer, Icon, NoAccess, PageHeader, Segmented, Skeleton, Stat, Tabs, mo
 
 type Period = 'today' | 'month' | 'last' | 'pick';
 type Tab = 'sum' | 'days' | 'spend' | 'due';
-const SOURCES = [['consultation', 'Consultations', 'fees taken at check-in'], ['procedure', 'Procedures', 'sessions and course advances'], ['pharmacy', 'Pharmacy', 'medicine sales, less returns'], ['other', 'Other', 'anything not tied to a visit or a session']] as const;
+const SOURCES = [['consultation', 'Consultations', 'fees taken at check-in'], ['procedure', 'Procedures', 'treatments and price-list procedures'], ['pharmacy', 'Pharmacy', 'medicine sales, less returns'], ['other', 'Other', 'anything not tied to a visit or a session']] as const;
 // one shade per source, told apart by lightness as well as colour; works in both themes
 const SHADE: Record<string, string> = { consultation: 'bg-muted', procedure: 'bg-clay', pharmacy: 'bg-line-2', other: 'bg-paper-2' };
 const MODES = [['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['other', 'EMI and other']] as const;

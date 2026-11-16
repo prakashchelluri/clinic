@@ -21,20 +21,19 @@ export function RefundDialog({ title, body, confirmLabel, onClose }: { title: st
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const MODE: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', bank: 'Bank', emi: 'EMI' };
 
-/** Opens the receipt for everything taken in one go in its own window and prints it. With a GSTIN it is a Tax Invoice with CGST/SGST per rate; without one, a Bill of Supply with no tax lines. */
+/** Opens the receipt for everything taken in one go (or the voucher for money given back) in its own window and prints it. Tax is on the invoice, not here. */
 export async function printReceipt(no: string) {
   try {
     const r: any = await get(`/receipts/${encodeURIComponent(no)}`);
     const w = window.open('', '_blank', 'width=420,height=640'); if (!w) return toast('Allow pop-ups to print the receipt', 'err');
     const when = new Date(r.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-    const tax = r.tax ?? { gstin: null, title: 'Bill of Supply', rates: [] }; const pct = (bp: number) => (bp ? `${bp / 100}%` : 'Exempt');
-    const taxTable = tax.gstin ? `<table><tr><td class="s">GST rate</td><td class="s r">Taxable value</td><td class="s r">CGST</td><td class="s r">SGST</td></tr>${tax.rates.map((x: any) => `<tr><td>${pct(x.rateBp)}</td><td class="r">${esc(money(x.taxablePaise))}</td><td class="r">${esc(money(x.cgstPaise))}</td><td class="r">${esc(money(x.sgstPaise))}</td></tr>`).join('')}</table>` : '';
-    w.document.write(`<!doctype html><title>${esc(tax.title)} ${esc(r.receiptNo)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:5px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
-      ${r.clinic.print?.logoUrl ? `<img src="${esc(r.clinic.print?.logoUrl)}" alt="" style="display:block;height:44px;max-width:150px;object-fit:contain;margin-bottom:6px">` : ''}<h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}${tax.gstin ? ' · GSTIN ' + esc(tax.gstin) : ''}</div>
-      <p><b>${esc(tax.title)} · Receipt ${esc(r.receiptNo)}</b><br><span class="s">${esc(when)} · ${esc(r.patient.fullName)} (${esc(r.patient.patientNo)})</span></p>
-      <table>${r.lines.map((l: any) => `<tr><td>${esc(l.description)}<div class="s">${tax.gstin ? 'GST ' + pct(l.taxRateBp ?? 0) + ' · ' : ''}${esc(MODE[l.method] ?? l.method)}${l.lender ? ' · ' + esc(l.lender) : ''}${l.reference ? ' · ' + esc(l.reference) : ''}</div></td><td class="r">${esc(money(l.amountPaise))}</td></tr>`).join('')}
-      <tr><td><b>Total paid</b></td><td class="r"><b>${esc(money(r.totalPaise))}</b></td></tr></table>${taxTable}
-      <p class="s">${tax.gstin ? 'Prices include GST.' : 'Not registered for GST, so no tax is charged on this bill.'} Received by ${esc(r.receivedBy)}. ${esc(r.clinic.print?.footer ?? '')}</p><script>window.onload=function(){window.print()}<\/script>`);
+    const title = r.voucher ? 'Refund voucher' : 'Receipt'; const sign = r.voucher ? -1 : 1;
+    w.document.write(`<!doctype html><title>${title} ${esc(r.receiptNo)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:5px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
+      ${r.clinic.print?.logoUrl ? `<img src="${esc(r.clinic.print?.logoUrl)}" alt="" style="display:block;height:44px;max-width:150px;object-fit:contain;margin-bottom:6px">` : ''}<h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}</div>
+      <p><b>${title} ${esc(r.receiptNo)}</b><br><span class="s">${esc(when)} · ${esc(r.patient.fullName)} (${esc(r.patient.patientNo)})</span></p>
+      <table>${r.lines.map((l: any) => `<tr><td>${esc(l.description)}<div class="s">${esc(MODE[l.method] ?? l.method)}${l.lender ? ' · ' + esc(l.lender) : ''}${l.reference ? ' · ' + esc(l.reference) : ''}</div></td><td class="r">${esc(money(sign * l.amountPaise))}</td></tr>`).join('')}
+      <tr><td><b>${r.voucher ? 'Total given back' : 'Total paid'}</b></td><td class="r"><b>${esc(money(sign * r.totalPaise))}</b></td></tr></table>
+      <p class="s">${r.voucher ? 'Given back' : 'Received'} by ${esc(r.receivedBy)}. ${esc(r.clinic.print?.footer ?? '')}</p><script>window.onload=function(){window.print()}<\/script>`);
     w.document.close();
   } catch (e) { toast(errText(e), 'err'); }
 }

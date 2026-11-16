@@ -6,8 +6,7 @@ import { z } from 'zod';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { course, encounter, procedureCatalog, procedureSession, recommendation, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
-import { syncTreatment } from './courses.js';
-import { advanceBalance } from './bills.js';
+import { creditSessions } from './courses.js';
 import { emit, todayIn } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { packagesOf, shares } from '../lib/packages.js';
@@ -66,7 +65,7 @@ export function planAdminRoutes(app: FastifyInstance) {
       if (x.gapDays !== undefined) set.gapDays = x.gapDays || null;
       if (b.noExpiry !== undefined || b.validUntil !== undefined) { set.noExpiry = !!b.noExpiry; set.validUntil = b.noExpiry ? null : b.validUntil ?? null; }
       const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, r.id))).then((y) => y[0]);
-      let delta = 0;
+      let delta = 0; let toAdvance = 0;
       if (x.sittings !== undefined && x.sittings !== (r.sittings ?? 1)) {
         const oldN = c?.sittings ?? r.sittings ?? 1; const newN = x.sittings;
         const [{ used }] = await tx.select({ used: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession)
@@ -79,8 +78,8 @@ export function planAdminRoutes(app: FastifyInstance) {
         if (newN < oldN && total != null && newN === 0) delta = -total;
         set.sittings = newN;
         if (r.amountPaise != null && r.amountPaise > 0) set.amountPaise = Math.max(0, r.amountPaise + delta);
+        if (c && newN < oldN) toAdvance = await creditSessions(tx, req.ctx, c, newN, `Sessions changed to ${newN}`); // off its invoice as a credit note, at what a session was really charged
         if (c) await tx.update(course).set({ sittings: newN, totalPaise: Math.max(0, c.totalPaise + delta), listPaise: Math.max(c.totalPaise + delta, std * newN), standardPaise: std * newN || null }).where(eq(course.id, c.id));
-        if (c) await syncTreatment(tx, req.ctx, c.id, `Sessions changed to ${newN}`); // its invoice follows; anything paid above it goes to the advance
         const [{ doneN }] = await tx.select({ doneN: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, r.id), eq(procedureSession.state, 'completed')));
         if (newN <= doneN) set.status = 'done'; // the sessions left were taken off: it is finished
         else if (r.status === 'done') set.status = 'open'; // more sessions on a finished procedure: it runs again
@@ -88,7 +87,7 @@ export function planAdminRoutes(app: FastifyInstance) {
       if (c && set.noExpiry !== undefined) await tx.update(course).set({ validUntil: set.noExpiry ? null : set.validUntil ?? c.validUntil }).where(eq(course.id, c.id));
       const [row] = Object.keys(set).length ? await tx.update(recommendation).set(set).where(eq(recommendation.id, r.id)).returning() : [r];
       await emit(tx, req.ctx, 'recommendation.edited', 'recommendation', r.id, { sittings: x.sittings, gapDays: x.gapDays, validUntil: set.validUntil, noExpiry: set.noExpiry, priceChangePaise: delta });
-      out.push({ ...row, priceChangePaise: delta });
+      out.push({ ...row, priceChangePaise: delta, toAdvancePaise: toAdvance });
     }
     return out;
   });
@@ -114,8 +113,7 @@ export function planAdminRoutes(app: FastifyInstance) {
       const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, r.id))).then((y) => y[0]); if (!c) continue;
       const [{ doneN }] = await tx.select({ doneN: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, r.id), eq(procedureSession.state, 'completed')));
       if (doneN >= c.sittings) continue;
-      await tx.update(course).set({ totalPaise: Math.round((c.totalPaise / c.sittings) * doneN) }).where(eq(course.id, c.id));
-      const before = await advanceBalance(tx, t, r.patientId); await syncTreatment(tx, req.ctx, c.id, `Cancelled: ${b.reason}`); toAdvance += (await advanceBalance(tx, t, r.patientId)) - before;
+      toAdvance += await creditSessions(tx, req.ctx, c, doneN, `Cancelled: ${b.reason}`);
     }
     for (const r of rs) await emit(tx, req.ctx, 'recommendation.cancelled', 'recommendation', r.id, { reason: b.reason, bookingsCancelled: booked.length });
     return { cancelled: rs.length, bookingsCancelled: booked.length, toAdvancePaise: toAdvance };

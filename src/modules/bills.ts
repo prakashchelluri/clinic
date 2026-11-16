@@ -9,6 +9,8 @@ import { HttpError, can } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
 import { nextReceiptNo } from './billing.js';
 import { ensureCourse, standing } from './courses.js';
+import { advanceBalance, balancesOf, issueCredit, refundFromAdvance, settle } from '../lib/money.js';
+export { advanceBalance } from '../lib/money.js';
 
 const Line = z.object({
   chargeId: z.string().uuid().optional(),         // an invoice already due
@@ -31,11 +33,6 @@ const Bill = z.object({
   idempotencyKey: z.string().min(8).max(80),
 });
 
-/** What is left of the patient's advance: money in, less what bills used and what was given back. */
-export async function advanceBalance(tx: Tx, t: string, patientId: string) {
-  const [r] = await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.patientId, patientId), eq(payment.advance, true)));
-  return r?.n ?? 0;
-}
 
 type Item = { what: string; gross: number; prior: number; disc: number; canDiscount: boolean; why?: string; chargeId?: string; courseId?: string; procedureId?: string; at: string; tax?: number; isNew?: boolean };
 type BillBody = z.infer<typeof Bill>;
@@ -62,8 +59,8 @@ export function billRoutes(app: FastifyInstance) {
     const p = z.object({ amountPaise: z.number().int().positive().max(100_000_000), method: z.enum(['cash', 'upi', 'card', 'bank', 'emi']), reference: z.string().trim().max(60).optional(), lender: z.string().trim().max(60).optional(), idempotencyKey: z.string().min(8).max(80) }).parse(req.body);
     const t = req.ctx.tenantId; const pid = (req.params as any).id;
     const dues = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.patientId, pid), eq(charge.status, 'due'))).orderBy(charge.createdAt);
-    const paid = await paidOn(tx, dues.map((c) => c.id)); const waiting = await waitingOff(tx, t, pid);
-    const open = dues.filter((c) => c.amountPaise - (paid.get(c.id) ?? 0) - (waiting.get(c.id) ?? 0) > 0);
+    const bal = await balancesOf(tx, t, dues); const waiting = await waitingOff(tx, t, pid);
+    const open = dues.filter((c) => (bal.get(c.id) ?? 0) - (waiting.get(c.id) ?? 0) > 0);
     return takeBill(req, tx, { patientId: pid, lines: open.map((c) => ({ chargeId: c.id, qty: 1, sittings: 1, discountPaise: 0 })), extraDiscountPaise: 0, reason: '', keepExtraAsAdvance: true, idempotencyKey: p.idempotencyKey,
       parts: [{ method: p.method, amountPaise: p.amountPaise, reference: p.reference, lender: p.lender }] });
   });
@@ -91,13 +88,14 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     const chargeIds = b.lines.map((l) => l.chargeId).filter(Boolean) as string[];
     if (new Set(chargeIds).size !== chargeIds.length) throw new HttpError(400, 'SAME_INVOICE_TWICE');
     const paid = await paidOn(tx, chargeIds);
+    const left = await balancesOf(tx, t, chargeIds.length ? await tx.select({ id: charge.id, amountPaise: charge.amountPaise }).from(charge).where(and(eq(charge.tenantId, t), inArray(charge.id, chargeIds))) : []);
     for (const l of b.lines) {
       if (l.chargeId) {
         const c = await tx.select().from(charge).where(and(eq(charge.id, l.chargeId), eq(charge.tenantId, t), eq(charge.patientId, b.patientId))).then((r) => r[0]);
         if (!c) throw new HttpError(404, 'CHARGE_NOT_FOUND');
-        const owing = c.amountPaise - (paid.get(c.id) ?? 0) - (waiting.get(c.id) ?? 0);
+        const owing = (left.get(c.id) ?? 0) - (waiting.get(c.id) ?? 0);
         if (c.status !== 'due' || owing <= 0) throw new HttpError(409, 'NOTHING_DUE', { chargeId: c.id });
-        const why = c.visitId ? 'NO_DISCOUNT_ON_CONSULTATION' : c.description.startsWith('Pharmacy') ? 'NO_DISCOUNT_ON_PHARMACY' : (paid.get(c.id) ?? 0) > 0 ? 'DISCOUNT_ONLY_BEFORE_PAYMENT' : waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined;
+        const why = c.visitId ? 'NO_DISCOUNT_ON_CONSULTATION' : c.description.startsWith('Pharmacy') ? 'NO_DISCOUNT_ON_PHARMACY' : (paid.get(c.id) ?? 0) > 0 || owing + (waiting.get(c.id) ?? 0) < c.amountPaise ? 'DISCOUNT_ONLY_BEFORE_PAYMENT' : waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined;
         items.push({ what: c.description, gross: owing, prior: c.discountPaise, disc: l.discountPaise, canDiscount: !why, why, chargeId: c.id, at: c.createdAt });
       } else if (l.procedureId) {
         const p = await tx.select().from(procedureCatalog).where(and(eq(procedureCatalog.id, l.procedureId), eq(procedureCatalog.tenantId, t))).then((r) => r[0]);
@@ -188,9 +186,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
       }
       if (rest > 0) await put({ advance: true, amountPaise: rest, method: part.method, reference: part.reference ?? null, lender: part.lender ?? null }); // kept as advance
     }
-    const ids = items.map((i) => i.chargeId!);
-    const nowPaid = await paidOn(tx, ids);
-    for (const c of ids.length ? await tx.select().from(charge).where(inArray(charge.id, ids)) : []) if ((nowPaid.get(c.id) ?? 0) >= c.amountPaise) await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, c.id));
+    await settle(tx, t, items.map((i) => i.chargeId!));
     if (askId) await tx.update(discountAsk).set({ paidPaise: total }).where(eq(discountAsk.id, askId));
     const out = { key: b.idempotencyKey, receiptNo, paidPaise: total, payablePaise: payable, balancePaise: Math.max(0, payable - total), keptAsAdvancePaise: Math.max(0, total - payable), advancePaise: await advanceBalance(tx, t, b.patientId), offPaise: off, pct, capPct: cap, askId, waitingForApproval: ask };
     await emit(tx, ctx, 'bill.created', 'patient', b.patientId, out);
@@ -201,15 +197,10 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
 function moreBillRoutes(app: FastifyInstance) {
   /** Give back what is left of the advance: money out today, with a reason, by someone who may refund. */
   route(app, 'post', '/patients/:id/advance/refund', 'payment.refund', async (req, tx) => {
-    const b = z.object({ amountPaise: z.number().int().positive().max(100_000_000), method: z.enum(['cash', 'upi', 'card', 'bank']), reason: z.string().trim().min(3, 'Say why').max(200) }).parse(req.body);
-    const t = req.ctx.tenantId; const pid = (req.params as any).id;
+    const b = z.object({ amountPaise: z.number().int().positive().max(100_000_000), method: z.enum(['cash', 'upi', 'card', 'bank']), reference: z.string().trim().max(60).optional(), reason: z.string().trim().min(3, 'Say why').max(200) }).parse(req.body);
     await assertDayOpen(tx, req.ctx);
-    const bal = await advanceBalance(tx, t, pid);
-    if (b.amountPaise > bal) throw new HttpError(400, 'MORE_THAN_THE_ADVANCE', { balancePaise: bal });
-    const receiptNo = await nextReceiptNo(tx, t, req.ctx.timezone);
-    const [row] = await tx.insert(payment).values({ tenantId: t, patientId: pid, advance: true, amountPaise: -b.amountPaise, method: b.method, reference: `Refund: ${b.reason}`.slice(0, 200), receiptNo, receivedBy: req.ctx.userId }).returning();
-    await emit(tx, req.ctx, 'advance.refunded', 'payment', row.id, { amountPaise: b.amountPaise, reason: b.reason, patientId: pid });
-    return { balancePaise: bal - b.amountPaise, receiptNo };
+    const r = await refundFromAdvance(tx, req.ctx, { patientId: (req.params as any).id, parts: [{ amountPaise: b.amountPaise, method: b.method, reference: b.reference }], reason: b.reason });
+    return { balancePaise: r.balancePaise, receiptNo: r.voucherNo };
   });
 
   /** Discounts waiting for a decision (or one patient's, any state). Anyone who sees fees sees them; only an approver decides. */
@@ -229,14 +220,11 @@ function moreBillRoutes(app: FastifyInstance) {
     const a = await tx.select().from(discountAsk).where(and(eq(discountAsk.id, (req.params as any).id), eq(discountAsk.tenantId, t))).then((r) => r[0]);
     if (!a) throw new HttpError(404, 'NOT_FOUND');
     if (a.status !== 'pending') throw new HttpError(409, 'ALREADY_DECIDED', { status: a.status });
-    if (b.action === 'approve') {
-      for (const l of a.lines) {
-        if (l.courseId) { await tx.update(course).set({ creditPaise: sql`${course.creditPaise} + ${l.offPaise}` }).where(eq(course.id, l.courseId)); continue; }
-        const c = await tx.select().from(charge).where(eq(charge.id, l.chargeId!)).then((r) => r[0]);
-        if (!c || c.status !== 'due') continue; // cancelled or waived meanwhile: nothing to take it off
-        const amount = c.amountPaise - l.offPaise; const got = (await paidOn(tx, [c.id])).get(c.id) ?? 0;
-        if (got > amount) throw new HttpError(409, 'ALREADY_PAID_MORE', { chargeId: c.id });
-        await tx.update(charge).set({ amountPaise: amount, discountPaise: c.discountPaise + l.offPaise, discountReason: a.reason, ...(got >= amount ? { status: 'paid' } : {}) }).where(eq(charge.id, c.id));
+    if (b.action === 'approve') { // the invoice stays as issued: the approved discount is a credit note against it
+      const live = (await tx.select().from(charge).where(and(eq(charge.tenantId, t), inArray(charge.id, a.lines.map((l) => l.chargeId).filter(Boolean) as string[])))).filter((c) => ['due', 'paid'].includes(c.status));
+      for (const billId of [...new Set(live.map((c) => c.billId!))]) {
+        await issueCredit(tx, req.ctx, { billId, patientId: a.patientId, reason: `Discount approved: ${a.reason}`,
+          lines: a.lines.filter((l) => live.some((c) => c.id === l.chargeId && c.billId === billId)).map((l) => ({ chargeId: l.chargeId!, amountPaise: l.offPaise, what: `Discount on ${l.what}` })) });
       }
     }
     const [row] = await tx.update(discountAsk).set({ status: b.action === 'approve' ? 'approved' : 'rejected', decidedBy: req.ctx.name, decidedAt: new Date().toISOString() }).where(eq(discountAsk.id, a.id)).returning();

@@ -5,7 +5,7 @@ import { Link, useNavigate, useOutletContext, useParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, put, qc, today, errText, useConfig } from '../api';
 import { can } from '../App';
-import { BackButton, Chip, Icon, Skeleton, ask, toast, fmtDate } from '../ui';
+import { BackButton, Chip, Icon, Skeleton, ask, toast, fmtDate, money } from '../ui';
 import { ConsentDialog, ConsentChip, ConsentNote, confirmDone } from '../procDrawer';
 import { PhotoCapture, usePhotos } from '../photos';
 import { FieldInput, missingRequired, showValue, spanOf, type FormField, type FormSchema } from '../procForm';
@@ -44,10 +44,10 @@ export function ProcSessionPage() {
   useEffect(() => () => window.clearTimeout(timer.current), []);
   useEffect(() => { if (state === 'saved') return; const w = (e: BeforeUnloadEvent) => e.preventDefault(); window.addEventListener('beforeunload', w); return () => window.removeEventListener('beforeunload', w); }, [state]);
 
-  const refresh = () => ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist', 'pharmacy', 'plan-form'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  const refresh = () => ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist', 'pharmacy', 'plan-form', 'timeline', 'bills', 'courses', 'advance', 'procedure-plans'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
   const [signing, setSigning] = useState(false);
   const setStateM = useMutation({ mutationFn: (b: any) => patch(`/procedure-sessions/${id}`, b),
-    onSuccess: (_r, b: any) => { setSigning(false); refresh(); toast(b.state === 'completed' ? 'Session marked done' : 'Session started'); }, onError: (e) => toast(errText(e), 'err') });
+    onSuccess: (_r, b: any) => { setSigning(false); refresh(); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'on_done' ? ` · treatment invoiced, ${money(s.money.amountPaise)}` : ''}` : 'Session started'); }, onError: (e) => toast(errText(e), 'err') });
   const missing = schema && vals ? missingRequired(schema, vals) : [];
   const waiting = (s?.supplies ?? []).filter((a: any) => a.status === 'asked');
   const markDone = async () => {

@@ -32,17 +32,19 @@ export function EditPlanDrawer({ plans, sessions, courses, procName, onClose }: 
   const minOf = (r: any) => Math.max(1, ...live(r).map((s) => s.sittingNo));
   const std = (r: any) => cfg?.procedures?.find((p: any) => p.id === r.procedureId)?.pricePaise ?? 0;
   const deltaOf = (r: any) => { const c = courses.find((x) => x.recommendationId === r.id); const oldN = c?.sittings ?? r.sittings ?? 1; const newN = ns[r.id];
-    const total = c?.totalPaise ?? (r.amountPaise > 0 ? r.amountPaise : null); const share = total != null ? Math.round(total / oldN) : std(r);
+    const total = c?.totalPaise ?? (r.amountPaise > 0 ? r.amountPaise : null);
+    const share = c?.invoiced ? c.perSittingPaise : total != null ? Math.round(total / oldN) : std(r); // invoiced: what a session was really charged, after discount and credits
     return newN > oldN ? (newN - oldN) * std(r) : -(oldN - newN) * share; };
   const delta = plans.reduce((s, r) => s + deltaOf(r), 0);
   const changed = plans.filter((r) => ns[r.id] !== (courses.find((c) => c.recommendationId === r.id)?.sittings ?? r.sittings ?? 1) || gaps[r.id] !== String(r.gapDays ?? ''));
   const validChanged = none !== initNone || (!none && date !== (course0?.validUntil ?? plans[0].validUntil ?? (pk ? addMonthsTo(pk.validMonths) : '')));
-  const total = plans.reduce((s, r) => s + (courses.find((c) => c.recommendationId === r.id)?.totalPaise ?? (r.amountPaise > 0 ? r.amountPaise : std(r) * (r.sittings ?? 1))), 0);
+  const total = plans.reduce((s, r) => { const c = courses.find((x) => x.recommendationId === r.id); return s + (c ? (c.invoiced ? c.netPaise + c.uninvoicedPaise : c.totalPaise) : r.amountPaise > 0 ? r.amountPaise : std(r) * (r.sittings ?? 1)); }, 0);
   const doneN = plans.reduce((s, r) => s + live(r).filter((x) => x.state === 'completed').length, 0); const allN = plans.reduce((s, r) => s + ns[r.id], 0);
   const save = useMutation({
     mutationFn: () => api('PATCH', '/procedure-plans/edit', { plans: (validChanged ? plans : changed).map((r) => ({ id: r.id, ...(ns[r.id] !== (courses.find((c) => c.recommendationId === r.id)?.sittings ?? r.sittings ?? 1) ? { sittings: ns[r.id] } : {}), ...(gaps[r.id] !== String(r.gapDays ?? '') ? { gapDays: Number(gaps[r.id]) || 0 } : {}) })),
       ...(validChanged ? { noExpiry: none, ...(none ? {} : { validUntil: date }) } : {}) }),
-    onSuccess: () => { refresh(); toast(delta ? `Saved · ${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}` : 'Saved'); onClose(); },
+    onSuccess: (rows: any) => { refresh(); ['bills', 'advance'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); const moved = (Array.isArray(rows) ? rows : []).reduce((s: number, x: any) => s + (x.toAdvancePaise ?? 0), 0);
+      toast(`Saved${delta ? ` · ${delta > 0 ? '+' : '−'}${money(Math.abs(delta))}` : ''}${moved ? ` · ${money(moved)} moved to the advance` : ''}`); onClose(); },
     onError: (e) => toast(say(e), 'err'),
   });
   return (
@@ -65,7 +67,7 @@ export function EditPlanDrawer({ plans, sessions, courses, procName, onClose }: 
                 <button type="button" className="btn btn-sm btn-ghost" disabled={n >= 60} onClick={() => setNs((x) => ({ ...x, [r.id]: x[r.id] + 1 }))}><Icon name="plus" className="h-3.5 w-3.5" />Add session</button>
               </div>}
             </div>); })}
-        {delta !== 0 && <div className="rounded-lg bg-amber-soft px-3 py-2 text-sm text-amber">{delta > 0 ? `Added sessions cost the standard price: +${money(delta)}` : `Removed sessions take their share off: −${money(-delta)}`}. New total {money(total + delta)}.</div>}
+        {delta !== 0 && <div className="rounded-lg bg-amber-soft px-3 py-2 text-sm text-amber">{delta > 0 ? `Added sessions cost the standard price: +${money(delta)}, invoiced with Generate invoice or when the next session is done` : `Removed sessions come off the invoice as a credit note, at what a session was charged: −${money(-delta)}`}. New total {money(total + delta)}.</div>}
         <div className="modal-foot"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={(!changed.length && !validChanged) || save.isPending || (!none && !date)} onClick={() => save.mutate()}><Icon name="check" />Save changes</button></div>
       </div>
     </Drawer>
@@ -81,7 +83,7 @@ export function CancelPlanDialog({ plans, sessions, courses, procName, onClose }
   const booked = plans.flatMap((r) => live(r).filter((s) => s.state === 'confirmed').map((s) => ({ ...s, proc: procName(r) })));
   // paid on each treatment's invoice, and what of it pays for sessions not done: that moves to the patient's advance on cancelling
   const paid = cs.reduce((s, c: any) => s + c.advancePaise, 0);
-  const back = cs.reduce((s, c: any) => s + Math.max(0, c.advancePaise - Math.round((c.totalPaise / c.sittings) * c.doneSittings)), 0);
+  const back = cs.reduce((s, c: any) => s + (c.invoiced ? Math.max(0, c.paidPaise - c.perSittingPaise * c.doneSittings) : 0), 0); // what a session was really charged × the sessions done stays; the rest of what was paid moves
   const mayRefund = can(perms, 'payment.refund') && back > 0;
   const [why, setWhy] = useState(''); const [refund, setRefund] = useState(false); const [mode, setMode] = useState<'upi' | 'cash' | 'card' | 'bank'>('upi');
   const go = useMutation({

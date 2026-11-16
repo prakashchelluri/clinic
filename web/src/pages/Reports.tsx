@@ -215,7 +215,7 @@ function DailyReport() {
           <Stat label="Visits" value={d.totals.visits} delay={0} />
           <Stat label="Collected" value={money(d.totals.collectedPaise)} tone="sage" sub={d.pharmacyPaise ? `Includes pharmacy ${money(d.pharmacyPaise)} · less refunds` : 'Less refunds · same as End of day'} delay={40} />
           <Stat label="Expenses" value={money(d.totals.expensesPaise)} sub={`${d.expenses.length} entries`} delay={80} />
-          <Stat label="Net for the day" value={money(d.totals.netPaise)} tone="clay" sub={`Outstanding overall ${money(d.outstanding.total)} across ${d.outstanding.n}`} delay={120} />
+          <Stat label="Net for the day" value={money(d.totals.netPaise)} tone="clay" sub={`Outstanding overall ${money(d.outstanding.total)} on ${d.outstanding.n} invoice${d.outstanding.n === 1 ? "" : "s"}`} delay={120} />
         </div>
         {d.byMode && <div aria-label="Collected by mode" className="card mt-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 !py-3 text-[15px]">
           {([['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['other', 'EMI / other']] as const).filter(([k]) => k !== 'other' || d.byMode.other).map(([k, l]) => <span key={k}><span className="text-muted">{l}</span> <b className="text-ink">{money(d.byMode[k])}</b></span>)}
@@ -223,7 +223,7 @@ function DailyReport() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
           <Section title="By visit category" delay={160}>
             {d.byCategory.length === 0 ? <Empty icon="users" title="No visits recorded" /> : (
-              <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Refunded</th></tr></thead>
+              <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Credited</th></tr></thead>
                 <tbody>{d.byCategory.map((c: any) => <tr key={c.code}><td className="pl-4">{c.name}</td><td className="text-right">{c.visits}</td><td className="text-right">{money(c.billed)}</td><td className="text-right text-muted">{money(c.waived)}</td><td className="text-right pr-4 text-muted">{money(c.refunded)}</td></tr>)}</tbody></table></div>)}
           </Section>
           <Section title="Expenses" delay={200}>
@@ -236,7 +236,7 @@ function DailyReport() {
         <Section title={<>Payments <span className="text-muted font-normal">· {d.payments.length}</span></>} delay={240} className="mt-5">
           {d.payments.length === 0 ? <Empty icon="wallet" title="No payments yet today" /> :
             <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Time</th><th>Receipt</th><th>Patient</th><th>For</th><th>Method</th><th className="text-right pr-4">Amount</th></tr></thead>
-              <tbody>{d.payments.map((p: any) => <tr key={p.id}><td className="pl-4 text-muted">{fmtTime(p.receivedAt)}</td><td className="text-muted">{p.receiptNo ?? '—'}</td><td className="font-medium">{p.patient}</td><td className="text-muted">{p.description ?? ''}</td><td><Chip tone={p.amountPaise < 0 ? 'amber' : undefined}>{p.amountPaise < 0 ? `${p.method} refund` : p.method}</Chip></td><td className="text-right pr-4">{money(p.amountPaise)}</td></tr>)}</tbody></table></div>}
+              <tbody>{d.payments.map((p: any) => <tr key={p.id}><td className="pl-4 text-muted">{fmtTime(p.receivedAt)}</td><td className="text-muted">{p.receiptNo ?? '—'}</td><td className="font-medium">{p.patient}</td><td className="text-muted">{p.description ?? (p.advance ? (p.amountPaise < 0 ? 'Refund from the advance' : 'Advance') : '')}</td><td><Chip tone={p.amountPaise < 0 ? 'amber' : undefined}>{p.amountPaise < 0 ? `${p.method} refund` : p.method}</Chip></td><td className="text-right pr-4">{p.amountPaise < 0 ? `−${money(-p.amountPaise)}` : money(p.amountPaise)}</td></tr>)}</tbody></table></div>}
         </Section>
       </>)}
     </div>

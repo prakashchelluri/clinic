@@ -45,14 +45,14 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
   // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
   // a refund of a whole invoice has no line of its own: it counts where the invoice's lines count
   const refundBills = [...new Set(pays.filter((x) => !x.p.chargeId && x.p.billId).map((x) => x.p.billId!))];
-  const billLines = refundBills.length ? await tx.select({ billId: charge.billId, visitId: charge.visitId, courseId: charge.courseId, procedureId: charge.procedureId }).from(charge).where(inArray(charge.billId, refundBills)) : [];
+  const billLines = refundBills.length ? await tx.select({ billId: charge.billId, visitId: charge.visitId, courseId: charge.courseId, procedureId: charge.procedureId, vDoc: visit.practitionerId }).from(charge).leftJoin(visit, eq(visit.id, charge.visitId)).where(inArray(charge.billId, refundBills)) : [];
   for (const { p, c, vDoc, sDoc, sale } of pays) {
     if (sale) continue; // a pharmacy bill's payment and refund rows mirror the sale; the sale and its returns below are what count, once
     if (p.method === 'advance') continue; // paid from the patient's advance: that money was counted the day the advance came in
 
     const bl = !c && p.billId ? billLines.find((x) => x.billId === p.billId) : undefined;
     add(p.receivedAt, p.courseId || c?.courseId || c?.procedureId || c?.sessionId || bl?.courseId || bl?.procedureId ? 'procedure' : c?.visitId || bl?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
-    const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
+    const doc = vDoc ?? sDoc ?? bl?.vDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
   for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) add(s.createdAt, 'pharmacy', x.method, x.amountPaise);

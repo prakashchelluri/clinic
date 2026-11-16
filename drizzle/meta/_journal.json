@@ -323,6 +323,13 @@
       "when": 1796600000000,
       "tag": "0045_pharmacist_medicines_only",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1796700000000,
+      "tag": "0046_credit_notes",
+      "breakpoints": true
     }
   ]
 }

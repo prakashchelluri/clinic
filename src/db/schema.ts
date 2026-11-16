@@ -485,7 +485,27 @@ export const bill = pgTable('bill', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   invoiceNo: text('invoice_no').notNull(),
+  taxGstin: text('tax_gstin'),              // the clinic's GSTIN when this invoice was issued (null = a Bill of Supply): it prints as issued forever
 }, (t) => [uniqueIndex('bill_no').on(t.tenantId, t.invoiceNo), index('bill_patient').on(t.tenantId, t.patientId)]);
+
+// A credit note: an issued invoice never changes; what comes off it (a session not given, a cancelled treatment, an approved discount,
+// money given back for something not done) is a numbered credit note against it. Money paid above what is then owed moves to the advance.
+export const creditNote = pgTable('credit_note', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  billId: uuid('bill_id').notNull(),
+  creditNo: text('credit_no').notNull(),
+  reason: text('reason').notNull(),
+  totalPaise: integer('total_paise').notNull(),
+  createdBy: uuid('created_by'),
+}, (t) => [uniqueIndex('credit_no').on(t.tenantId, t.creditNo), index('credit_bill').on(t.tenantId, t.billId)]);
+export const creditLine = pgTable('credit_line', {
+  ...tenantCols,
+  creditNoteId: uuid('credit_note_id').notNull().references(() => creditNote.id),
+  chargeId: uuid('charge_id').notNull().references(() => charge.id),
+  amountPaise: integer('amount_paise').notNull(),
+  what: text('what').notNull(),            // what it is for, as printed ("1 session not given")
+}, (t) => [index('credit_line_charge').on(t.chargeId)]);
 
 export const payment = pgTable('payment', {
   ...tenantCols,
@@ -740,7 +760,7 @@ export const domainEvent = pgTable('domain_event', {
 
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
-  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'bill', 'callback', 'quote', 'day_close', 'charge', 'payment',
+  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'bill', 'credit_note', 'credit_line', 'callback', 'quote', 'day_close', 'charge', 'payment',
   'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'lab_result',
 ];
 

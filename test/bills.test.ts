@@ -77,7 +77,7 @@ test('a bill: price-list items, % and ₹ discounts, split modes, part payment; 
   assert.equal((await owner('POST', `/discount-asks/${a.id}/decide`, { action: 'reject' })).status, 409, 'decided once');
   tl = (await owner('GET', `/patients/${p.id}/timeline`)).body;
   const done = tl.charges.find((c: any) => c.id === first.id);
-  assert.equal(done.status, 'paid'); assert.equal(done.amountPaise, 200000); assert.equal(done.discountPaise, 50000);
+  assert.equal(done.status, 'paid'); assert.equal(done.amountPaise, 250000, 'the invoice stays as issued'); assert.equal(done.creditedPaise, 50000, 'the approved discount is a credit note');
 
   // said no: the full price stays due
   const r3 = await bill(desk, { lines: [{ procedureId: peel.id, discountPaise: 125000 }], reason: 'asked for half' });

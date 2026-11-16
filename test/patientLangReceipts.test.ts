@@ -86,16 +86,20 @@ test('a clinic with no GSTIN prints a bill of supply with no CGST/SGST; with one
   await O('PATCH', '/admin/clinic', { settings: { gstin: '' } });
   const paid = await O('POST', '/payments/take', { patientId: p.id, chargeIds: [ch.id, ex.id], idempotencyKey: 'gst-take-1', parts: [{ method: 'upi', amountPaise: 148000, reference: 'UPI1' }] });
   assert.equal(paid.status, 200, JSON.stringify(paid.body));
-  const plain = (await O('GET', `/receipts/${paid.body.receiptNo}`)).body;
-  assert.equal(plain.tax.title, 'Bill of Supply'); assert.equal(plain.tax.gstin, null); assert.deepEqual(plain.tax.rates, [], 'no CGST/SGST lines');
+  const rc = (await O('GET', `/receipts/${paid.body.receiptNo}`)).body;
+  assert.equal(rc.tax, undefined, 'a receipt is proof of payment: the tax is on the invoice'); assert.equal(rc.voucher, false);
+  // charges made before a GSTIN was set: Bills of Supply, and they stay that way
+  const plain = (await O('GET', `/bills/${ch.billId}`)).body;
+  assert.equal(plain.gst.title, 'Bill of Supply'); assert.equal(plain.clinic.gstin, null); assert.deepEqual(plain.gst.rates, [], 'no CGST/SGST lines');
 
   assert.equal((await O('PATCH', '/admin/clinic', { settings: { gstin: 'bad' } })).status, 400, 'a GSTIN has 15 characters');
   assert.equal((await O('PATCH', '/admin/clinic', { settings: { gstin: '37abcde1234f1z5' } })).status, 200);
-  const inv = (await O('GET', `/receipts/${paid.body.receiptNo}`)).body;
-  assert.equal(inv.tax.title, 'Tax Invoice'); assert.equal(inv.tax.gstin, '37ABCDE1234F1Z5');
-  assert.deepEqual(inv.tax.rates, [
-    { rateBp: 0, taxablePaise: 30000, cgstPaise: 0, sgstPaise: 0 },
-    { rateBp: 1800, taxablePaise: 100000, cgstPaise: 9000, sgstPaise: 9000 },
-  ]);
+  assert.equal((await O('GET', `/bills/${ch.billId}`)).body.gst.title, 'Bill of Supply', 'an invoice prints as it was issued');
+  // issued with the GSTIN: a tax invoice with CGST/SGST by rate
+  const ch2 = (await O('POST', '/charges', { patientId: p.id, description: 'Chemical peel session 2', amountPaise: 118000, taxRateBp: 1800 })).body;
+  const inv = (await O('GET', `/bills/${ch2.billId}`)).body;
+  assert.equal(inv.gst.title, 'Tax Invoice'); assert.equal(inv.clinic.gstin, '37ABCDE1234F1Z5');
+  assert.deepEqual(inv.gst.rates, [{ rateBp: 1800, taxablePaise: 100000, cgstPaise: 9000, sgstPaise: 9000 }]);
   await O('PATCH', '/admin/clinic', { settings: { gstin: '' } });
+  assert.equal((await O('GET', `/bills/${ch2.billId}`)).body.gst.title, 'Tax Invoice', 'and stays one when the GSTIN is removed');
 });

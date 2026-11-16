@@ -35,7 +35,7 @@ export function Clinic() {
 
   const visits: any[] = fd.data?.visits ?? [];
   const waiting = visits.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status));
-  const longest = waiting.length ? Math.max(...waiting.map((v) => Math.round((Date.now() - new Date(v.arrivedAt).getTime()) / 60000))) : 0;
+  const longest = waiting.length ? Math.max(0, ...waiting.map((v) => Math.round((Date.now() - new Date(v.arrivedAt).getTime()) / 60000))) : 0; // never below 0 (a clock ahead of the server)
   const ps: any[] = procs.data ?? [];
   const reviews: any[] = stock.data?.reviews ?? [];
   const expired: number = stock.data?.tiles?.expired ?? 0;

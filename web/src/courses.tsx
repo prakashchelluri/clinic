@@ -17,16 +17,17 @@ export const useCourses = (patientId: string) => useQuery({ queryKey: ['courses'
  *  `action` is the next step (Book sitting N), shown on the Sittings row. */
 function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | null; action?: React.ReactNode }) {
   const day = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const paid = c.advancePaise - c.refundedPaise + c.paidOnDayPaise;
+  const paid = c.paidPaise ?? 0; const net = (c.netPaise ?? 0) + (c.uninvoicedPaise ?? 0); // what the treatment really costs the patient now
+  const less = [c.discountPaise ? `${money(c.discountPaise)} discount` : '', c.creditedPaise ? `${money(c.creditedPaise)} in credit notes` : ''].filter(Boolean).join(' and ');
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line py-2.5 first:border-t-0"><span className="text-muted">{label}</span><div>{children}</div></div>);
   return (
     <div className="rounded-[10px] border border-line px-4 py-1 text-[14px]">
-      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· about {money(Math.round(c.perSittingPaise / 100) * 100)} each</span>{c.listPaise > c.totalPaise && <div className="text-[13px] text-muted">{money(c.listPaise)} less {money(c.listPaise - c.totalPaise)} refunded or credited for sessions not given</div>}
+      <Row label="Price"><b>{money(c.invoiced ? net : c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· about {money(Math.round(c.perSittingPaise / 100) * 100)} each</span>{c.invoiced && less && <div className="text-[13px] text-muted">Invoiced at {money(c.invoicedPaise)}, less {less}</div>}
         <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Custom price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? `Share of the ${c.packageName ?? 'clinic'} package${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : 'Standard price'}</div>
         {c.validUntil && <div className={`text-[13px] ${c.expired ? 'text-rose' : 'text-muted'}`}>{c.expired ? `Expired on ${day(c.validUntil)}: sessions not done can only be refunded` : `Valid till ${day(c.validUntil)}`}</div>}</Row>
       <Row label="Agreed">By the patient on {day(c.createdAt)}<div className="text-[13px] text-muted">{c.agreedBy ? `Recorded by ${c.agreedBy}` : ''}</div></Row>
-      <Row label="Invoice">{c.invoiced ? <>On an invoice · {paid > 0 ? <b>{money(paid)} paid</b> : 'nothing paid yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span></> : c.invoicedPaise > 0 ? <>{money(c.invoicedPaise)} invoiced session by session<span className="text-muted"> · {money(c.uninvoicedPaise)} not invoiced yet</span></> : <span className="text-muted">Not invoiced yet: Generate invoice bills the whole treatment once</span>}</Row>
+      <Row label="Invoice">{c.invoiced ? <>On an invoice · {paid > 0 ? <b>{money(paid)} paid</b> : 'nothing paid yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span>{c.uninvoicedPaise > 0 && <div className="text-[13px] text-muted">{money(c.uninvoicedPaise)} for sessions added since: invoiced with Generate invoice, or when the next session is done</div>}</> : <span className="text-muted">Not invoiced yet: Generate invoice bills the whole treatment once, or it is invoiced when the first session is done</span>}</Row>
       <Row label="Sessions"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `session ${(booked as any).sittingNo ?? c.doneSittings + 1} booked on ${day(booked.day)}${(booked as any).startTime ? ` ${(booked as any).startTime}` : ''}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
     </div>
   );

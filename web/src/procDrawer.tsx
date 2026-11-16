@@ -7,12 +7,12 @@ import { FlagChips } from './flags';
 import { PhotoCapture, usePhotos } from './photos';
 import { ScheduleModal } from './pages/Worklist';
 
-// invoiced: the whole treatment is on an invoice; amountPaise is what is still owed on it
-type Money = { kind: 'invoiced' | 'due' | 'paid' | 'none'; amountPaise: number } | null | undefined;
+// invoiced: the whole treatment is on an invoice; amountPaise is what is still owed on it. on_done: not invoiced yet; marking a session done invoices the whole treatment (amountPaise)
+type Money = { kind: 'invoiced' | 'on_done' | 'due' | 'paid' | 'none'; amountPaise: number } | null | undefined;
 /** "On invoice", "₹2,500 due", "Paid" or "No price on the list", for a sitting row or the drawer. Nothing when the user cannot see fees. */
 export function MoneyChip({ m }: { m: Money }) {
   if (!m) return null;
-  return m.kind === 'invoiced' ? <Chip tone="sky">On invoice · {money(m.amountPaise)} to pay</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price on the list</Chip>;
+  return m.kind === 'invoiced' ? <Chip tone="sky">On invoice · {money(m.amountPaise)} to pay</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'on_done' ? <Chip>Not invoiced yet</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price on the list</Chip>;
 }
 /** Consent kept on the patient per procedure: "Consent on file" or "Consent needed". */
 type Consent = { consentNeeded?: boolean; consent?: { grantedAt: string; by: string; how?: string; documentId?: string } | null };
@@ -88,7 +88,7 @@ export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; proced
 /** Marking done makes the charge, so say what it will be first. */
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
   const m = s.money;
-  const pay = !m ? '' : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'invoiced' ? ' It is on the treatment\'s invoice: nothing more is billed.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
+  const pay = !m ? '' : m.kind === 'on_done' ? ` The treatment is not on an invoice yet: it is invoiced now, whole (${money(m.amountPaise)}).` : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'invoiced' ? ' It is on the treatment\'s invoice: nothing more is billed.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
   return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
 }
 
@@ -108,7 +108,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const [signing, setSigning] = useState(false);
   const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false); const [moving, setMoving] = useState(false);
   const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
-    onSuccess: (_r, b) => { setSigning(false); if (b.state === 'in_progress' && s?.form) nav(`/procedure-sessions/${id}`); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
+    onSuccess: (_r, b) => { setSigning(false); if (b.state === 'in_progress' && s?.form) nav(`/procedure-sessions/${id}`); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist', 'timeline', 'bills', 'courses', 'advance', 'procedure-plans'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'on_done' ? ` · treatment invoiced, ${money(s.money.amountPaise)}` : s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
     onError: (e) => toast(errText(e), 'err') });
   const s = q.data;
   const p = s?.patient;

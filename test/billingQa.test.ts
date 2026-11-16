@@ -45,10 +45,12 @@ test('H1 + M1: a refund on a treatment invoice is never billed again, and an inv
   const after = (await owner('GET', `/patients/${p.id}/bills`)).json().bills.find((b: any) => b.id === bill.id);
   assert.equal(after.duePaise, total - 300000); assert.equal(after.status, 'unpaid', 'money is still due, so not "Refunded"');
   balanced((await owner('GET', `/patients/${p.id}/account`)).json().totals);
-  // the printed invoice: the line at its price, less what was refunded; one payment line; the refund apart
+  // the printed invoice: as issued, with its credit note; the payment, and the same money moved off it to the advance (the refund left from there)
   const v = (await owner('GET', `/bills/${bill.id}`)).json();
-  assert.equal(v.rows[0].listPaise, total); assert.equal(v.rows[0].lessPaise, 300000);
-  assert.equal(v.payments.filter((x: any) => x.kind === 'paid').length, 1); assert.equal(v.payments.filter((x: any) => x.kind === 'refund').length, 1);
+  assert.equal(v.rows[0].amountPaise, total, 'as issued'); assert.equal(v.rows[0].creditedPaise, 300000); assert.equal(v.creditNotes.length, 1);
+  assert.equal(v.payments.filter((x: any) => x.kind === 'paid').length, 1); assert.equal(v.payments.filter((x: any) => x.kind === 'moved').reduce((s: number, x: any) => s + x.amountPaise, 0), -300000);
+  const acc = (await owner('GET', `/patients/${p.id}/account`)).json();
+  assert.ok(acc.activity.find((a: any) => a.type === 'refund' && a.receiptNo?.startsWith('RF-') && a.amountPaise === 300000), 'a refund voucher');
 });
 
 test('H2: Billing, Clinic, Accounts and Reports agree on what is due (part payments taken off)', async () => {
@@ -102,9 +104,9 @@ test('M3: after a part-paid treatment is cancelled, the printed invoice keeps th
   assert.equal((await owner('POST', '/procedure-plans/cancel', { ids: [rec.id], reason: 'Moved away' })).statusCode, 200);
   const bill = (await owner('GET', `/patients/${p.id}/bills`)).json().bills.find((b: any) => b.items[0].startsWith('Chemical'));
   const v = (await owner('GET', `/bills/${bill.id}`)).json();
-  assert.equal(v.rows[0].listPaise, total, 'printed at the price it was billed at'); assert.equal(v.rows[0].amountPaise, 0);
-  assert.equal(v.payments.filter((x: any) => x.kind === 'credit').reduce((s: number, x: any) => s + x.amountPaise, 0), -400000, 'the credit');
-  assert.equal(v.payments.filter((x: any) => x.kind === 'refund').length, 0, 'not a refund');
+  assert.equal(v.rows[0].amountPaise, total, 'printed as issued'); assert.equal(v.rows[0].creditedPaise, total, 'a credit note for all of it'); assert.equal(v.status, 'credited');
+  assert.equal(v.payments.filter((x: any) => x.kind === 'moved').reduce((s: number, x: any) => s + x.amountPaise, 0), -400000, 'what was paid moved to the advance');
+  assert.equal((await owner('GET', `/patients/${p.id}/account`)).json().totals.refundedPaise, 0, 'not a refund');
   balanced((await owner('GET', `/patients/${p.id}/account`)).json().totals);
 });
 

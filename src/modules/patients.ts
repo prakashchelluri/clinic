@@ -1,13 +1,14 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, ilike, inArray, isNull, ne, or, sql } from 'drizzle-orm';
-import { type PatientFlags, appointment, callback, patient, practitioner, procedureCatalog, procedureSession, session, visit, encounter, prescriptionItem, recommendation, charge, payment, message } from '../db/schema.js';
+import { type PatientFlags, appointment, callback, discountAsk, patient, practitioner, procedureCatalog, procedureSession, session, visit, encounter, prescriptionItem, recommendation, charge, payment, message } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { auditView, writeAudit } from '../lib/audit.js';
 import { nextNumber, emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { normHistory, cleanHistory, allergyText, HISTORY_KEYS } from '../lib/history.js';
 import { listData } from '../lib/pad.js';
+import { lineMoney } from '../lib/money.js';
 
 const PatientIn = z.object({
   fullName: z.string().trim().min(2).max(100),
@@ -217,12 +218,14 @@ export function patientRoutes(app: FastifyInstance) {
       ...sessions.filter((s) => s.ps.state === 'missed').map((s) => ({ kind: 'sitting' as const, refId: s.ps.id, day: s.ps.day, time: s.ps.startTime, what: `${s.proc ?? 'Procedure'} session ${s.ps.sittingNo}`, calls: calls.filter((c) => c.refId === s.ps.id) })),
     ].sort((a, b) => b.day.localeCompare(a.day));
     // what is still owed: a part-paid invoice counts only its balance
-    const paidOn = (cid: string) => payments.filter((x) => x.chargeId === cid).reduce((s, x) => s + x.amountPaise, 0);
-    const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - paidOn(c.id)), 0);
+    const lm = await lineMoney(tx, t, charges.map((c) => c.id));
+    const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - lm.credited(c.id) - lm.applied(c.id)), 0);
+    const asks = can(req.perms, 'fees.see') ? await tx.select({ lines: discountAsk.lines }).from(discountAsk).where(and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, id), eq(discountAsk.status, 'pending'))) : [];
+    const waitingPaise = Math.min(due, asks.reduce((s, a) => s + a.lines.reduce((n, l) => n + (l.chargeId ? l.offPaise : 0), 0), 0)); // owed, but a discount on it is waiting for a decision
     const guardian = p.guardianId ? await tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }).from(patient).where(and(eq(patient.id, p.guardianId), eq(patient.tenantId, t))).then((r) => r[0] ?? null) : null;
     const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
     // roles without 'See fees and payments' see no prices, payments or amounts due
     const fees = can(req.perms, 'fees.see');
-    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, data: listData(e.data, clinical(req.perms)), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0 };
+    return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, data: listData(e.data, clinical(req.perms)), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: fees ? charges.map((c) => ({ ...c, creditedPaise: lm.credited(c.id) })) : [], payments: fees ? payments : [], outstandingPaise: fees ? due : 0, waitingPaise };
   });
 }

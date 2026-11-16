@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, sql, inArray, notInArray } from 'drizzle-orm';
-import { course, charge, encounter, payment, practitioner, procedureCatalog, procedureSession, quote, recommendation, tenant } from '../db/schema.js';
+import { course, charge, encounter, payment, practitioner, procedureCatalog, procedureSession, quote, recommendation } from '../db/schema.js';
+import { advanceBalance, issueCredit, lineMoney, settle } from '../lib/money.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, nextNumber, todayIn, addMonths } from '../lib/core.js';
@@ -12,39 +13,51 @@ type Course = typeof course.$inferSelect;
 const sum = (rows: { n: number }[]) => rows[0]?.n ?? 0;
 const VOID = ['cancelled', 'waived']; // charges that no longer count
 
-/** Where the course stands in money. Money belongs to the patient: the treatment is invoiced (once, as a whole, or session by session
- *  when it never was) and paid like any invoice. The old "paid ahead" fields stay in the shape, at zero, so every screen reads the same object. */
-export async function standing(tx: Tx, t: string, c: Course) {
-  const chs = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.courseId, c.id), notInArray(charge.status, VOID)));
-  const paidPaise = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), inArray(payment.chargeId, chs.length ? chs.map((x) => x.id) : ['00000000-0000-4000-8000-000000000000']))));
-  const invoicedPaise = chs.reduce((s, x) => s + x.amountPaise + x.discountPaise, 0); // at the course price: a discount given on the invoice is billed, not left to bill again
-  const offPaise = chs.reduce((s, x) => s + x.discountPaise, 0);
-  const done = sum(await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))));
-  const perSittingPaise = Math.round(c.totalPaise / c.sittings);
-  const treatment = chs.find((x) => !x.sessionId) ?? null; // the whole treatment on one invoice
-  return { ...c, perSittingPaise, invoicedPaise, uninvoicedPaise: Math.max(0, c.totalPaise - invoicedPaise), invoiceId: treatment?.billId ?? null, invoiced: !!treatment,
-    advancePaise: paidPaise, refundedPaise: 0, drawnPaise: 0, unusedPaise: 0, paidOnDayPaise: 0, doneSittings: done, unusedSittings: 0, refundablePaise: 0,
-    discountPaise: offPaise, stillToPayPaise: Math.max(0, c.totalPaise - offPaise - paidPaise) };
+/** The charges that bill a course: its own lines, and lines of its sessions billed before the course existed (older builds). */
+async function courseCharges(tx: Tx, t: string, c: Course) {
+  return tx.select().from(charge).where(and(eq(charge.tenantId, t), notInArray(charge.status, VOID),
+    sql`(${charge.courseId} = ${c.id} or ${charge.sessionId} in (select id from procedure_session where recommendation_id = ${c.recommendationId}))`)).orderBy(charge.createdAt, charge.id);
 }
 
-/** The treatment's invoice line follows the course price down: fewer sessions (an edit, or cancelling what is not done) lower it.
- *  Money already paid above the new amount moves to the patient's advance, to use on the next bill or give back with Refund. */
-export async function syncTreatment(tx: Tx, ctx: Ctx, courseId: string, reason: string) {
+/** Where the course stands in money. A treatment is billed once, as a whole (at Generate invoice, or when its first session is done);
+ *  sessions never bill. What came off is a credit note. "Per session" is what a session really costs the patient: after any discount and credit.
+ *  The old "paid ahead" fields stay in the shape, at zero, so every screen reads the same object. */
+export async function standing(tx: Tx, t: string, c: Course) {
+  const chs = await courseCharges(tx, t, c);
+  const m = await lineMoney(tx, t, chs.map((x) => x.id));
+  const invoicedPaise = chs.reduce((s, x) => s + x.amountPaise + x.discountPaise, 0); // at the course price: a discount given on the invoice is billed, not left to bill again
+  const discountPaise = chs.reduce((s, x) => s + x.discountPaise, 0);
+  const creditedPaise = chs.reduce((s, x) => s + m.credited(x.id), 0);
+  const paidPaise = chs.reduce((s, x) => s + m.applied(x.id), 0);
+  const uninvoicedPaise = Math.max(0, c.totalPaise - invoicedPaise);
+  const netPaise = chs.reduce((s, x) => s + x.amountPaise, 0) - creditedPaise; // billed after discount and credits
+  const duePaise = chs.reduce((s, x) => s + Math.max(0, x.amountPaise - m.credited(x.id) - m.applied(x.id)), 0);
+  const done = sum(await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))));
+  const perSittingPaise = Math.round((netPaise + uninvoicedPaise) / Math.max(1, c.sittings));
+  const treatment = chs.find((x) => !x.sessionId) ?? chs[0] ?? null;
+  return { ...c, perSittingPaise, invoicedPaise, uninvoicedPaise, netPaise, creditedPaise, invoiceId: treatment?.billId ?? null, invoiced: chs.length > 0,
+    advancePaise: paidPaise, paidPaise, refundedPaise: 0, drawnPaise: 0, unusedPaise: 0, paidOnDayPaise: 0, doneSittings: done, unusedSittings: 0, refundablePaise: 0,
+    discountPaise, duePaise, stillToPayPaise: duePaise + uninvoicedPaise };
+}
+
+/**
+ * Sessions taken off a treatment (fewer sessions, or cancelled): the course is priced for the sessions kept, and what was billed for the
+ * others comes off its invoice as a credit note, at what the patient was really charged for a session (after discount and earlier credits).
+ * Money paid above what is then owed moves to the patient's advance. Call before the course row is changed. Returns what moved to the advance.
+ */
+export async function creditSessions(tx: Tx, ctx: Ctx, c: Course, keep: number, reason: string) {
   const t = ctx.tenantId;
-  const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.id, courseId))).then((r) => r[0]); if (!c) return;
-  const chs = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.courseId, c.id), notInArray(charge.status, VOID)));
-  const tr = chs.find((x) => !x.sessionId); if (!tr) return;
-  // the line at the new course price, less the other lines (at their price) and the discount it was given
-  const want = Math.max(0, c.totalPaise - chs.filter((x) => x.id !== tr.id).reduce((s, x) => s + x.amountPaise + x.discountPaise, 0) - tr.discountPaise);
-  if (want >= tr.amountPaise) return; // an issued invoice only ever goes down; sessions added later are billed on the next invoice ("the rest")
-  const got = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(eq(payment.chargeId, tr.id)));
-  await tx.update(charge).set({ amountPaise: want, originalPaise: sql`coalesce(${charge.originalPaise}, ${charge.amountPaise} + ${charge.discountPaise})`, adjustmentReason: reason, adjustedBy: ctx.userId, status: got >= want ? 'paid' : 'due' }).where(eq(charge.id, tr.id));
-  if (got > want) { // a credit: the extra leaves the invoice and becomes the patient's advance (no money moves, so method 'advance')
-    const back = got - want; const base = { tenantId: t, patientId: c.patientId, method: 'advance', receivedBy: ctx.userId };
-    await tx.insert(payment).values({ ...base, chargeId: tr.id, amountPaise: -back, reference: `Credit: ${reason}`.slice(0, 200) });
-    await tx.insert(payment).values({ ...base, advance: true, amountPaise: back, reference: `Credit on ${tr.description}`.slice(0, 200) });
-  }
-  await emit(tx, ctx, 'charge.adjusted', 'charge', tr.id, { from: tr.amountPaise, to: want, reason, toAdvancePaise: Math.max(0, got - want) });
+  const st = await standing(tx, t, c);
+  await tx.update(course).set({ totalPaise: Math.round((c.totalPaise / Math.max(1, c.sittings)) * keep) }).where(eq(course.id, c.id));
+  let credit = Math.max(0, st.netPaise - Math.round(st.perSittingPaise * keep)); if (!credit) return 0;
+  const chs = (await courseCharges(tx, t, c)).reverse(); // newest line first
+  const m = await lineMoney(tx, t, chs.map((x) => x.id));
+  const byBill = new Map<string, { chargeId: string; amountPaise: number; what: string }[]>();
+  for (const x of chs) { if (!credit) break; const take = Math.min(credit, x.amountPaise - m.credited(x.id)); if (take <= 0) continue;
+    byBill.set(x.billId!, [...(byBill.get(x.billId!) ?? []), { chargeId: x.id, amountPaise: take, what: `${x.description}: ${c.sittings - keep} session${c.sittings - keep === 1 ? '' : 's'} not given` }]); credit -= take; }
+  let moved = 0;
+  for (const [billId, lines] of byBill) moved += (await issueCredit(tx, ctx, { billId, patientId: c.patientId, reason, lines })).toAdvancePaise;
+  return moved;
 }
 
 /** The course for a procedure plan, made on first need: the doctor's own amount when they set one on the pad (the total for all sittings),
@@ -78,44 +91,33 @@ export async function ensureCourse(tx: Tx, ctx: Ctx, recommendationId: string, s
   return row;
 }
 
-/** A session billed on the day is paid from the patient's advance first, as far as it goes (no money moves, so method 'advance'). */
+/** A new invoice line is paid from the patient's advance first, as far as it goes (no money moves, so method 'advance'). */
 async function payFromAdvance(tx: Tx, ctx: Ctx, ch: { id: string; patientId: string; amountPaise: number; description: string }) {
   const t = ctx.tenantId;
-  const bal = sum(await tx.select({ n: sql<number>`coalesce(sum(amount_paise),0)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.patientId, ch.patientId), eq(payment.advance, true))));
-  const take = Math.min(bal, ch.amountPaise); if (take <= 0) return;
+  const take = Math.min(await advanceBalance(tx, t, ch.patientId), ch.amountPaise); if (take <= 0) return;
   const base = { tenantId: t, patientId: ch.patientId, method: 'advance', receivedBy: ctx.userId };
   await tx.insert(payment).values({ ...base, chargeId: ch.id, amountPaise: take });
   await tx.insert(payment).values({ ...base, advance: true, amountPaise: -take, reference: ch.description.slice(0, 60) });
-  if (take >= ch.amountPaise) await tx.update(charge).set({ status: 'paid' }).where(eq(charge.id, ch.id));
+  await settle(tx, t, [ch.id]);
 }
 
-/** A session was done. When the treatment is on an invoice, nothing more is billed: the session only uses it up.
- *  Otherwise the session is invoiced on the day (due), at the course's price per session, or the doctor's or list price with no course,
- *  so a done session never goes out unbilled. Generating the treatment's invoice later bills only what is left. */
+/** A session was done. A treatment not on an invoice yet is invoiced now, whole (a package: all its procedures, on one invoice), so a
+ *  done session never goes out unbilled and is never billed twice. Sessions themselves bill nothing. */
 export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommendationId: string; patientId: string; procedureId?: string | null; sittingNo?: number }) {
   const t = ctx.tenantId;
-  if (await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID))).then((r) => r.length)) return;
-  const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
-  if (!c) { // no course agreed: billed per sitting at the doctor's amount (its share) or the standard price
-    const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
-    const rec = await tx.select({ amountPaise: recommendation.amountPaise, sittings: recommendation.sittings }).from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
-    const price = rec?.amountPaise ? Math.round(rec.amountPaise / Math.max(1, rec.sittings ?? 1)) : proc?.pricePaise;
-    if (!price) return; // no price anywhere: nothing to bill
-    const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${ps.sittingNo ?? 1}${rec?.amountPaise ? ' · custom price' : ''}`, amountPaise: price, taxRateBp: proc?.taxRateBp ?? 0, sessionId: ps.id, procedureId: ps.procedureId ?? null, status: 'due' }).returning();
-    await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: null, amountPaise: price, listPrice: !rec?.amountPaise });
+  let c: Course;
+  try { c = await ensureCourse(tx, ctx, ps.recommendationId); } catch (e) { if (e instanceof HttpError) return; throw e; } // no price anywhere: nothing to bill
+  const group = c.packageGroup ? await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.patientId, c.patientId), eq(course.packageGroup, c.packageGroup))) : [c];
+  let billId: string | null = null;
+  for (const k of group) {
+    const st = await standing(tx, t, k); if (st.uninvoicedPaise <= 0) continue;
+    const proc = k.procedureId ? await tx.select({ name: procedureCatalog.name, tax: procedureCatalog.taxRateBp }).from(procedureCatalog).where(eq(procedureCatalog.id, k.procedureId)).then((r) => r[0]) : null;
+    const [row]: (typeof charge.$inferSelect)[] = await tx.insert(charge).values({ tenantId: t, patientId: k.patientId, billId, description: `${proc?.name ?? 'Procedure'}${k.packageName ? ` (${k.packageName})` : ''} · ${k.sittings} session${k.sittings === 1 ? '' : 's'}${st.invoicedPaise ? ', the rest' : ''}`,
+      amountPaise: st.uninvoicedPaise, taxRateBp: proc?.tax ?? 0, courseId: k.id, procedureId: k.procedureId, status: 'due' }).returning();
+    billId = row.billId;
+    await emit(tx, ctx, 'course.invoiced', 'charge', row.id, { courseId: k.id, amountPaise: row.amountPaise, onSessionDone: ps.id });
     await payFromAdvance(tx, ctx, row);
-    return;
   }
-  const st = await standing(tx, t, c);
-  // the treatment is on an invoice: its sessions bill nothing. Sessions added after it (not on any invoice) are billed when done.
-  if (st.invoiced && (st.uninvoicedPaise <= 0 || st.doneSittings <= Math.round(st.invoicedPaise / Math.max(1, st.perSittingPaise)))) return;
-  const isLast = st.doneSittings >= c.sittings;
-  const amount = isLast ? st.uninvoicedPaise : Math.min(st.perSittingPaise, st.uninvoicedPaise); // the last session takes the rounding
-  if (amount <= 0) return;
-  const proc = c.procedureId ? await tx.select({ name: procedureCatalog.name, tax: procedureCatalog.taxRateBp }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]) : null;
-  const [row] = await tx.insert(charge).values({ tenantId: t, patientId: ps.patientId, description: `${proc?.name ?? 'Procedure'} session ${st.doneSittings} of ${c.sittings}${c.priceSource === 'doctor' ? ' · custom price' : ''}`, amountPaise: amount, taxRateBp: proc?.tax ?? 0, courseId: c.id, sessionId: ps.id, procedureId: c.procedureId, status: 'due' }).returning();
-  await emit(tx, ctx, 'course.sitting_due', 'charge', row.id, { courseId: c.id, amountPaise: amount });
-  await payFromAdvance(tx, ctx, row);
 }
 
 /** A done session was undone (cancelled, or moved back): its charge is cancelled so a rebooked session is not billed twice; what the advance paid on it goes back to the advance.
@@ -134,22 +136,19 @@ export async function reverseSitting(tx: Tx, ctx: Ctx, sessionId: string, reason
   }
 }
 
-/** What a session means for the patient's money on the day: on the treatment's invoice (with what is still owed on it), due, already paid, or no price at all. */
-export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommendationId: string; procedureId: string | null }): Promise<{ kind: 'invoiced' | 'due' | 'paid' | 'none'; amountPaise: number }> {
-  const chs = await tx.select().from(charge).where(and(eq(charge.tenantId, t), eq(charge.sessionId, ps.id), notInArray(charge.status, VOID)));
-  if (chs.length) {
-    const due = chs.filter((x) => x.status !== 'paid').reduce((s, x) => s + x.amountPaise, 0);
-    return due ? { kind: 'due', amountPaise: due } : { kind: 'paid', amountPaise: chs.reduce((s, x) => s + x.amountPaise, 0) };
-  }
+/** What a session means for the patient's money: on the treatment's invoice (with what is still owed), paid, billed on its own (older builds),
+ *  invoiced when it is done (the treatment is not on an invoice yet: the whole of it), or no price at all. */
+export async function sittingMoney(tx: Tx, t: string, ps: { id: string; recommendationId: string; procedureId: string | null }): Promise<{ kind: 'invoiced' | 'on_done' | 'due' | 'paid' | 'none'; amountPaise: number }> {
   const c = await tx.select().from(course).where(and(eq(course.tenantId, t), eq(course.recommendationId, ps.recommendationId))).then((r) => r[0]);
   if (c) {
     const st = await standing(tx, t, c);
-    const covered = Math.round(st.invoicedPaise / Math.max(1, st.perSittingPaise)); // sessions the invoices pay for
-    if (st.invoiced && (st.uninvoicedPaise <= 0 || st.doneSittings < covered)) return st.stillToPayPaise > 0 ? { kind: 'invoiced', amountPaise: st.stillToPayPaise } : { kind: 'paid', amountPaise: 0 }; // the treatment's invoice carries the money
-    return { kind: 'due', amountPaise: Math.min(st.perSittingPaise, st.uninvoicedPaise) };
+    if (st.invoiced) return st.stillToPayPaise > 0 ? { kind: 'invoiced', amountPaise: st.stillToPayPaise } : { kind: 'paid', amountPaise: 0 };
+    return { kind: 'on_done', amountPaise: st.uninvoicedPaise };
   }
-  const price = ps.procedureId ? await tx.select({ p: procedureCatalog.pricePaise }).from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]?.p ?? null) : null;
-  return price ? { kind: 'due', amountPaise: price } : { kind: 'none', amountPaise: 0 };
+  const rec = await tx.select({ amountPaise: recommendation.amountPaise, sittings: recommendation.sittings }).from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
+  const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
+  const total = rec?.amountPaise && rec.amountPaise > 0 ? rec.amountPaise : (proc?.pricePaise ?? 0) * (rec?.sittings ?? 1);
+  return total ? { kind: 'on_done', amountPaise: total } : { kind: 'none', amountPaise: 0 };
 }
 
 export function courseRoutes(app: FastifyInstance) {

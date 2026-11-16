@@ -378,7 +378,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
 }
 
 /* ---------- Confirm and short questions, in the app's own style (replaces the browser's confirm / prompt / alert) ---------- */
-type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; initial?: string; maxLength?: number } };
+type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; minLength?: number; initial?: string; maxLength?: number } };
 type Pending = AskOpts & { resolve: (v: { value: string } | null) => void };
 let pending: Pending | null = null; const askSubs = new Set<() => void>();
 const setPending = (p: Pending | null) => { pending = p; askSubs.forEach((s) => s()); };
@@ -391,7 +391,7 @@ export function DialogHost() {
   useEffect(() => setVal(p?.field?.initial ?? ''), [p]);
   useScrollLock(!!p); useDialogFocus(panel, !!p);
   const done = (v: { value: string } | null) => { if (!p) return; p.resolve(v); setPending(null); };
-  const bad = !!p?.field?.required && !val.trim();
+  const bad = !!p?.field?.required && val.trim().length < (p.field.minLength ?? 1);
   useEffect(() => {
     if (!p) return;
     // Capture phase: this dialog sits on top, so Esc must not also close whatever is underneath.

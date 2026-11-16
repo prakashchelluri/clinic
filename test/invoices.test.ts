@@ -68,12 +68,13 @@ test('two items for ₹10,000 with ₹500 paid: one invoice, one number, part pa
   assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 1000 }], reason: ' ' })).status, 400);
   assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 200000 }, { method: 'upi', amountPaise: 100000 }], reason: 'biopsy not done' })).status, 200);
   after = (await desk('GET', `/patients/${p.id}/bills`)).body.bills.find((x: any) => x.id === inv.id);
-  assert.equal(after.refundedPaise, 300000); assert.equal(after.status, 'part_refunded'); assert.equal(after.duePaise, 0, 'a refund never makes a bill due again');
+  assert.equal(after.creditedPaise, 300000, 'a credit note for what went back'); assert.equal(after.billedPaise, 1000000, 'the invoice as issued'); assert.equal(after.paidPaise, 700000);
+  assert.equal(after.status, 'paid'); assert.equal(after.duePaise, 0, 'a refund never makes a bill due again');
   assert.equal(await day(), before - 300000);
   // all the rest back: refunded
   assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'upi', amountPaise: 700000 }], reason: 'laser not done either' })).status, 200);
   after = (await desk('GET', `/patients/${p.id}/bills`)).body.bills.find((x: any) => x.id === inv.id);
-  assert.equal(after.status, 'refunded');
+  assert.equal(after.status, 'credited'); assert.equal(after.creditedPaise, 1000000); assert.equal(after.paidPaise, 0);
 
   // the clinic's list finds it by number
   const all = (await desk('GET', `/bills?q=${inv.invoiceNo}`)).body;
