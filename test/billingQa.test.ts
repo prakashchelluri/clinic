@@ -129,3 +129,34 @@ test('low 10: cancelling a treatment\'s only invoice frees its price again', asy
   const c = (await owner('GET', `/courses?patientId=${p.id}`)).json()[0];
   assert.equal(c.lockedAt, null); assert.equal(c.uninvoicedPaise, c.totalPaise, 'billable again');
 });
+
+// The fresh-database report of 16 Nov 2026 (docs/qa-billing-fresh-2026-11-16.md), highs H1 and H4 (H2, H3 and M1 are in invoices.test.ts and moneyFuzz.test.ts).
+test('fresh H1: a discount at Collect on an issued invoice is a credit note; the invoice prints as issued', async () => {
+  const owner = await as('owner@demo.clinic');
+  const cfg = (await owner('GET', '/config')).json(); const biopsy = cfg.procedures.find((x: any) => x.name === 'Excision biopsy');
+  const p = (await owner('POST', '/patients', { fullName: 'QA Collect discount', phone: '9848077811' })).json();
+  assert.equal((await owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ procedureId: biopsy.id }] })).statusCode, 200);
+  const b = (await owner('GET', `/patients/${p.id}/bills`)).json().bills[0];
+  const r = await owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ chargeId: b.lines[0].id, discountPaise: 30000 }], reason: 'Known patient', parts: [{ method: 'cash', amountPaise: 270000 }] });
+  assert.equal(r.statusCode, 200, r.body);
+  const v = (await owner('GET', `/bills/${b.id}`)).json();
+  assert.equal(v.rows[0].amountPaise, 300000, 'the invoice as issued'); assert.equal(v.creditNotes.length, 1); assert.equal(v.creditedPaise, 30000); assert.equal(v.duePaise, 0);
+  // and the database itself refuses any change to an issued line, whatever code tries it
+  const { withTenant } = await import('../src/db/index.js'); const { sql } = await import('drizzle-orm');
+  await assert.rejects(withTenant(p.tenantId, '00000000-0000-4000-8000-000000000000', (tx: any) => tx.execute(sql`update charge set amount_paise = 1 where id = ${b.lines[0].id}`)), (e: any) => /ISSUED_INVOICE_LINE_IS_FROZEN/.test(String(e?.cause?.message ?? e?.message)));
+  await assert.rejects(withTenant(p.tenantId, '00000000-0000-4000-8000-000000000000', (tx: any) => tx.execute(sql`update charge set discount_paise = 1 where id = ${b.lines[0].id}`)), (e: any) => /ISSUED_INVOICE_LINE_IS_FROZEN/.test(String(e?.cause?.message ?? e?.message)));
+});
+
+test('fresh H4: sessions cut and then added back are billed, never free', async () => {
+  const owner = await as('owner@demo.clinic');
+  const { peel, p, rec } = await treatment(owner, 'QA Add back', '9848077812', 4);
+  assert.equal((await owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ recommendationId: rec.id }], parts: [{ method: 'cash', amountPaise: peel.pricePaise * 3 }] })).statusCode, 200);
+  const cut = (await owner('PATCH', '/procedure-plans/edit', { plans: [{ id: rec.id, sittings: 2 }] })).json();
+  assert.equal(cut[0].toAdvancePaise, peel.pricePaise, '3 paid, 2 kept: one session to the advance');
+  assert.equal((await owner('PATCH', '/procedure-plans/edit', { plans: [{ id: rec.id, sittings: 3 }] })).statusCode, 200);
+  const c = (await owner('GET', `/courses?patientId=${p.id}`)).json()[0];
+  assert.equal(c.invoicedSessions, 2); assert.equal(c.uninvoicedSessions, 1); assert.equal(c.uninvoicedPaise, peel.pricePaise, 'the added session has its price');
+  const inv = (await owner('POST', '/bills', { patientId: p.id, idempotencyKey: key(), lines: [{ recommendationId: rec.id }], parts: [{ method: 'advance', amountPaise: peel.pricePaise }] })).json();
+  assert.equal(inv.payablePaise, peel.pricePaise); assert.equal(inv.balancePaise, 0, 'paid from the advance it left');
+  const t = (await owner('GET', `/patients/${p.id}/account`)).json().totals; assert.equal(t.advancePaise, 0); balanced(t);
+});

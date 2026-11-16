@@ -36,7 +36,7 @@ test('stock: order, receive against the promise, owner decides, free goods owed 
   // vendors
   assert.equal((await P('POST', '/vendors', { name: 'X' })).statusCode, 400, 'name too short');
   assert.equal((await P('POST', '/vendors', { name: 'Godavari Medical Agencies', phone: '12345' })).statusCode, 400, 'phone has 10 digits');
-  const v = (await P('POST', '/vendors', { name: 'Godavari Medical Agencies', phone: '9000000001', gstin: '37ABCDE1234F1Z5' })).json();
+  const v = (await P('POST', '/vendors', { name: 'Godavari Medical Agencies', phone: '9000000001', gstin: '37ABCDE1234F1ZZ' })).json();
   assert.equal((await P('POST', '/vendors', { name: 'godavari medical agencies' })).statusCode, 409, 'no duplicate vendor');
 
   // order: the scheme text works out the free units

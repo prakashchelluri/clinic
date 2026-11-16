@@ -33,27 +33,35 @@ export function invoiceHtml(v: any) {
   <div class="who"><div>Patient: <b>${esc(v.patient.fullName)}</b><br>Patient ID: ${esc(v.patient.patientNo)}<br>${v.patient.ageYears || v.patient.sex ? `Age / sex: ${esc([v.patient.ageYears ? v.patient.ageYears + 'y' : '', v.patient.sex ?? ''].filter(Boolean).join(', '))}<br>` : ''}${v.patient.phone ? 'Mobile: ' + esc(v.patient.phone) : ''}</div>
   <div class="r">Invoice no: <b>${esc(v.invoiceNo)}</b><br>Date: ${esc(when(v.createdAt))}<br>Status: <b>${esc(st)}</b></div></div>
   <table><tr><th>#</th><th>Item</th><th class="r">Price</th><th class="r">Discount</th>${g ? '<th class="r">GST</th>' : ''}<th class="r">Amount</th></tr>
-  ${v.rows.map((r: any, i: number) => { const off = ['cancelled', 'waived'].includes(r.status); return `<tr><td>${i + 1}</td><td>${esc(r.description)}${off ? ` <span class="s">(${esc(r.status)})</span>` : ''}</td><td class="r${off ? ' x' : ''}">${esc(money(r.listPaise))}</td><td class="r">${r.discountPaise ? '−' + esc(money(r.discountPaise)) : '—'}</td>${g ? `<td class="r">${pctOf(r.taxRateBp)}</td>` : ''}<td class="r${off ? ' x' : ''}">${esc(money(r.amountPaise))}</td></tr>`; }).join('')}</table>
-  <div class="sum"><div><span>Subtotal</span><span>${esc(money(v.subtotalPaise))}</span></div>${v.discountPaise ? `<div><span>Discount</span><span>−${esc(money(v.discountPaise))}</span></div>` : ''}
+  ${v.rows.map((r: any, i: number) => { const off = ['cancelled', 'waived'].includes(r.status); return `<tr><td>${i + 1}</td><td>${esc(r.description)}${off ? ` <span class="s">(${esc(r.status)}${r.reason ? ': ' + esc(r.reason) : ''})</span>` : ''}${r.discountPaise && r.discountReason ? `<div class="s">Discount: ${esc(r.discountReason)}</div>` : ''}</td><td class="r${off ? ' x' : ''}">${esc(money(r.listPaise))}</td><td class="r">${r.discountPaise ? '−' + esc(money(r.discountPaise)) : '—'}</td>${g ? `<td class="r">${pctOf(r.taxRateBp)}</td>` : ''}<td class="r${off ? ' x' : ''}">${esc(money(r.amountPaise))}</td></tr>`; }).join('')}</table>
+  ${v.status === 'cancelled' ? `<div class="sum"><div><span>Subtotal</span><span class="x">${esc(money(v.rows.reduce((n: number, r: any) => n + r.listPaise, 0)))}</span></div><div class="b red"><span>Cancelled${v.rows[0]?.reason ? ': ' + esc(v.rows[0].reason) : ''}</span><span>₹0</span></div></div>` : ''}
+  ${v.status === 'cancelled' ? '' : `<div class="sum"><div><span>Subtotal</span><span>${esc(money(v.subtotalPaise))}</span></div>${v.discountPaise ? `<div><span>Discount</span><span>−${esc(money(v.discountPaise))}</span></div>` : ''}
   <div class="b"><span>Invoice total</span><span>${esc(money(v.billedPaise))}</span></div>
   ${g ? v.gst.rates.map((x: any) => x.rateBp ? `<div class="s"><span>Taxable at ${pctOf(x.rateBp)} ${esc(money(x.taxablePaise))} · CGST ${x.rateBp / 200}%</span><span>${esc(money(x.cgstPaise))}</span></div><div class="s"><span>SGST ${x.rateBp / 200}%</span><span>${esc(money(x.sgstPaise))}</span></div>` : `<div class="s"><span>Exempt</span><span>${esc(money(x.taxablePaise))}</span></div>`).join('') : ''}
   ${v.creditNotes.map((n: any) => `<div class="s"><span>Credit note ${esc(n.creditNo)} · ${esc(fmtDate(n.at))} · ${esc(n.reason)}</span><span>−${esc(money(n.totalPaise))}</span></div>`).join('')}
   ${v.creditedPaise ? `<div class="b"><span>Total after credit notes</span><span>${esc(money(v.netPaise))}</span></div>` : ''}
   ${v.payments.map((p: any) => `<div class="s"><span>${line(p)}</span><span>${p.amountPaise < 0 ? '−' : ''}${esc(money(Math.abs(p.amountPaise)))}</span></div>`).join('')}
   <div class="b g"><span>Paid on this invoice</span><span>${esc(money(v.paidPaise))}</span></div>
-  ${v.duePaise ? `<div class="b red"><span>Due</span><span>${esc(money(v.duePaise))}</span></div>` : ''}${v.waitingOffPaise ? `<div class="s"><span>Of which a discount awaiting approval</span><span>${esc(money(v.waitingOffPaise))}</span></div>` : ''}</div>
+  ${v.duePaise ? `<div class="b red"><span>Due</span><span>${esc(money(v.duePaise))}</span></div>` : ''}${v.waitingOffPaise ? `<div class="s"><span>Of which a discount awaiting approval</span><span>${esc(money(v.waitingOffPaise))}</span></div>` : ''}</div>`}
   <p class="s" style="margin-top:22px">${g ? 'Prices include GST.' : 'Not registered for GST, so no tax is charged on this bill.'} ${esc(v.clinic.print?.footer ?? '')}</p>`;
 }
 
-/** A credit note as it prints: the invoice it comes off, each line and amount, why, and where the money went. */
+/** A credit note as it prints: the invoice it comes off, each item and amount at the GST it was invoiced with (taxable value, CGST, SGST
+ *  reversed by rate on a Tax Invoice), why, and what happened to the money: given back on a voucher, kept in the advance, or simply no longer due. */
 export function creditNoteHtml(n: any) {
+  const g = !!n.clinic.gstin;
+  const money_ = n.refundNo ? `<div class="s"><span>Given back to the patient · voucher ${esc(n.refundNo)}</span><span>${esc(money(n.refundedPaise))}</span></div>`
+    : n.toAdvancePaise ? `<div class="s"><span>Kept in the patient's advance</span><span>${esc(money(n.toAdvancePaise))}</span></div>`
+    : `<div class="s"><span>Taken off what was due on the invoice</span><span>${esc(money(n.totalPaise))}</span></div>`;
   return `<!doctype html><meta charset="utf-8"><title>${esc(n.creditNo)}</title><style>${DOC_CSS}</style>
-  <div class="hd">${head(n.clinic)}<div class="s r">Credit note</div></div><div class="t">Credit Note</div>
+  <div class="hd">${head(n.clinic)}</div><div class="t">Credit Note</div>
   <div class="who"><div>Patient: <b>${esc(n.patient.fullName)}</b><br>Patient ID: ${esc(n.patient.patientNo)}${n.patient.phone ? '<br>Mobile: ' + esc(n.patient.phone) : ''}</div>
-  <div class="r">Credit note no: <b>${esc(n.creditNo)}</b><br>Date: ${esc(when(n.createdAt))}<br>Against invoice: <b>${esc(n.invoiceNo)}</b> of ${esc(fmtDate(n.invoiceAt))}</div></div>
-  <table><tr><th>#</th><th>Item</th><th class="r">Amount</th></tr>${n.lines.map((l: any, i: number) => `<tr><td>${i + 1}</td><td>${esc(l.what)}</td><td class="r">${esc(money(l.amountPaise))}</td></tr>`).join('')}</table>
-  <div class="sum"><div class="b"><span>Total credited</span><span>${esc(money(n.totalPaise))}</span></div>${n.toAdvancePaise ? `<div class="s"><span>Moved to the patient's advance</span><span>${esc(money(n.toAdvancePaise))}</span></div>` : ''}</div>
-  <p class="s" style="margin-top:18px">Reason: ${esc(n.reason)}</p>`;
+  <div class="r">Credit note no: <b>${esc(n.creditNo)}</b><br>Date: ${esc(when(n.createdAt))}<br>Against ${g ? 'Tax Invoice' : 'invoice'}: <b>${esc(n.invoiceNo)}</b> of ${esc(fmtDate(n.invoiceAt))}</div></div>
+  <table><tr><th>#</th><th>Item</th>${g ? '<th class="r">GST</th>' : ''}<th class="r">Amount</th></tr>${n.lines.map((l: any, i: number) => `<tr><td>${i + 1}</td><td>${esc(l.what)}</td>${g ? `<td class="r">${pctOf(l.taxRateBp)}</td>` : ''}<td class="r">${esc(money(l.amountPaise))}</td></tr>`).join('')}</table>
+  <div class="sum"><div class="b"><span>Total credited</span><span>${esc(money(n.totalPaise))}</span></div>
+  ${g ? n.gst.rates.map((x: any) => x.rateBp ? `<div class="s"><span>Taxable value reversed at ${pctOf(x.rateBp)} ${esc(money(x.taxablePaise))} · CGST ${x.rateBp / 200}%</span><span>${esc(money(x.cgstPaise))}</span></div><div class="s"><span>SGST ${x.rateBp / 200}%</span><span>${esc(money(x.sgstPaise))}</span></div>` : `<div class="s"><span>Exempt</span><span>${esc(money(x.taxablePaise))}</span></div>`).join('') : ''}
+  ${money_}</div>
+  <p class="s" style="margin-top:18px">Reason: ${esc(n.reason)}${g ? '. Prices include GST.' : ''}</p>`;
 }
 
 /** Print an invoice, or a credit note, in its own window. */
@@ -70,7 +78,7 @@ async function cancelInvoice(id: string, invoiceNo: string) {
 /** The invoices table, the same on the patient's Bills tab and on the clinic's Billing page. */
 export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, empty }: { bills: any[]; showPatient?: boolean; onView: (b: any) => void; onCollect?: (b: any) => void; onRefund?: (b: any) => void; empty: string }) {
   const { perms } = useOutletContext<any>();
-  const mayRefund = can(perms, 'payment.refund'); const mayCollect = can(perms, 'payment.record');
+  const mayRefund = can(perms, 'payment.refund'); const mayCollect = can(perms, 'payment.record'); const mayExclude = can(perms, 'config.write'); // the owner: it changes the GST report
   const exclude = async (b: any) => {
     const a = await ask({ title: `Leave ${b.invoiceNo} out of the tax reports?`, confirmLabel: 'Leave out', cancelLabel: 'Keep in', field: { label: 'Why (at least 3 letters)', required: true, minLength: 3, maxLength: 200 } }); if (!a) return;
     try { for (const c of b.lines.filter((c: any) => !c.excludedAt)) await post(`/charges/${c.id}/exclude`, { reason: a.value }); refreshBills(); toast('Left out of the tax reports'); } catch (e) { toast(errText(e), 'err'); }
@@ -97,7 +105,7 @@ export function InvoiceTable({ bills, showPatient, onView, onCollect, onRefund, 
               { label: `Collect ${money(b.collectablePaise)}`, hidden: !(mayCollect && onCollect && b.collectablePaise > 0), onClick: () => onCollect!(b) },
               { label: 'Refund', hidden: !(mayRefund && onRefund && b.paidPaise > 0), danger: true, onClick: () => onRefund!(b) },
               { label: 'Cancel invoice', hidden: !(mayRefund && b.status === 'unpaid' && !b.creditedPaise), danger: true, onClick: () => cancelInvoice(b.id, b.invoiceNo) },
-              { label: 'Leave out of tax reports', hidden: !(mayRefund && !b.excluded && !cancelled), onClick: () => exclude(b) },
+              { label: 'Leave out of tax reports', hidden: !(mayExclude && !b.excluded && !cancelled), onClick: () => exclude(b) },
             ]; return items.some((x) => !x.hidden) ? <MoreMenu items={items} /> : null; })()}
           </span></td>
         </tr>; })}</tbody>
@@ -141,9 +149,17 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
   const left = b.paidPaise;
   const acc = useQuery({ queryKey: ['bills', 'account', b.patient.id], queryFn: () => get(`/patients/${b.patient.id}/account`) }); const closed = !!acc.data?.dayClosed;
   const [parts, setParts] = useState<RPart[]>([{ method: 'cash', amount: '', reference: '' }]); const [why, setWhy] = useState(''); const [lower, setLower] = useState(true);
+  const [key] = useState(() => crypto.randomUUID()); // one refund, however many times it is sent
+  // the items it comes off: each named, at its own GST (an invoice of one item needs nothing typed)
+  const items = (b.lines ?? []).filter((c: any) => !['cancelled', 'waived'].includes(c.status)).map((c: any) => ({ id: c.id, what: c.description, rate: c.taxRateBp, room: c.amountPaise - (b.creditedOn?.[c.id] ?? 0) })).filter((c: any) => c.room > 0);
+  const [offs, setOffs] = useState<Record<string, string>>({});
   const total = parts.reduce((s, p) => s + toPaise(p.amount), 0);
-  const bad = closed ? 'Today has been closed: no money can be given back today' : total <= 0 ? 'Type the amount' : total > left ? `Only ${money(left)} was paid on this invoice` : why.trim().length < 3 ? 'Say why' : '';
-  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/refund`, { lower, parts: parts.filter((p) => toPaise(p.amount) > 0).map((p) => ({ method: p.method, amountPaise: toPaise(p.amount), reference: p.method !== 'cash' ? p.reference.trim() || undefined : undefined })), reason: why.trim() }),
+  const many = lower && items.length > 1; const itemsSum = many ? items.reduce((s: number, c: any) => s + toPaise(offs[c.id] ?? ''), 0) : total;
+  const overItem = many ? items.find((c: any) => toPaise(offs[c.id] ?? '') > c.room) : null;
+  const bad = closed ? 'Today has been closed: no money can be given back today' : total <= 0 ? 'Type the amount' : total > left ? `Only ${money(left)} was paid on this invoice`
+    : overItem ? `Only ${money(overItem.room)} is left of ${overItem.what}` : many && itemsSum !== total ? `The items add up to ${money(itemsSum)}, the refund is ${money(total)}` : why.trim().length < 3 ? 'Say why' : '';
+  const go = useMutation({ mutationFn: () => post(`/bills/${b.id}/refund`, { lower, idempotencyKey: key, ...(many ? { lines: items.filter((c: any) => toPaise(offs[c.id] ?? '') > 0).map((c: any) => ({ chargeId: c.id, amountPaise: toPaise(offs[c.id]) })) } : {}),
+    parts: parts.filter((p) => toPaise(p.amount) > 0).map((p) => ({ method: p.method, amountPaise: toPaise(p.amount), reference: p.method !== 'cash' ? p.reference.trim() || undefined : undefined })), reason: why.trim() }),
     onSuccess: (r: any) => { refreshBills(); toast(`${money(total)} given back on ${b.invoiceNo}${r?.creditNo ? ` · credit note ${r.creditNo}` : ''}`, 'ok', r?.receiptNo ? { label: 'Voucher', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); },
     onError: (e: any) => toast(e?.body?.code === 'MORE_THAN_PAID' ? `Only ${money(e.body.refundablePaise)} can be refunded` : moneyErr(e), 'err') });
   const set = (i: number, patch: Partial<RPart>) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
@@ -161,6 +177,10 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
         <div><label className="label" htmlFor="rb-why">Why</label><input id="rb-why" className="input" maxLength={200} placeholder="for example: procedure not done" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
         <label className="flex items-start gap-2 text-[13.5px]"><input type="checkbox" className="mt-0.5" checked={lower} onChange={(e) => setLower(e.target.checked)} aria-label="Take it off the invoice with a credit note" />
           <span><b>Take it off the invoice</b> with a credit note<span className="block text-xs text-muted">{lower ? 'For something not given: what is still due stays as it is.' : 'Unticked: the invoice stays, so this much is due again (money taken by mistake).'}</span></span></label>
+        {many && <div className="space-y-1.5 rounded-xl border border-line p-2.5"><div className="text-[12.5px] font-semibold text-muted">How much comes off each item</div>
+          {items.map((c: any) => <div key={c.id} className="flex items-center gap-2 text-sm"><span className="min-w-0 flex-1"><span className="font-medium">{c.what}</span><span className="block text-xs text-muted">up to {money(c.room)}{c.rate ? ` · GST ${c.rate / 100}%` : ''}</span></span>
+            <MoneyInput className="w-32" value={offs[c.id] ?? ''} label={`Off ${c.what}`} onChange={(v) => setOffs((o) => ({ ...o, [c.id]: v }))} /></div>)}
+          <div className="flex justify-between text-xs"><span className="text-muted">Items</span><b className={itemsSum === total ? 'text-sage' : 'text-amber'}>{money(itemsSum)} of {money(total)}</b></div></div>}
         <div className="rounded-xl bg-surface-2 p-3 text-center text-[15px]"><b className="text-rose">{money(total)}</b> will be given back, with a refund voucher</div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{bad}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!bad || go.isPending} onClick={() => go.mutate()}>Give back {money(total)}</button></div>
       </div>
@@ -222,7 +242,8 @@ export function PatientRefund({ patientId, patientName, advancePaise, dayClosed,
   const [amount, setAmount] = useState(''); const [mode, setMode] = useState<'cash' | 'upi' | 'card' | 'bank'>('upi'); const [why, setWhy] = useState(''); const [ref, setRef] = useState('');
   const paise = toPaise(amount);
   const bad = dayClosed ? 'Today has been closed: no money can be given back today' : !advancePaise ? 'Nothing in the advance to give back' : paise <= 0 ? 'Type the amount' : paise > advancePaise ? `Only ${money(advancePaise)} is in the advance` : why.trim().length < 3 ? 'Say why' : '';
-  const go = useMutation({ mutationFn: () => post(`/patients/${patientId}/advance/refund`, { amountPaise: paise, method: mode, reference: mode !== 'cash' ? ref.trim() || undefined : undefined, reason: why.trim() }),
+  const [key] = useState(() => crypto.randomUUID());
+  const go = useMutation({ mutationFn: () => post(`/patients/${patientId}/advance/refund`, { idempotencyKey: key, amountPaise: paise, method: mode, reference: mode !== 'cash' ? ref.trim() || undefined : undefined, reason: why.trim() }),
     onSuccess: (r: any) => { refreshBills(); toast(`Gave back ${money(paise)} to ${patientName.split(' ')[0]}`, 'ok', r?.receiptNo ? { label: 'Voucher', run: () => printReceipt(r.receiptNo) } : undefined); onClose(); }, onError: (e) => toast(moneyErr(e), 'err') });
   return (
     <Modal title="Refund" subtitle={`${patientName} · from the patient's advance`} onClose={onClose} width="max-w-md">
@@ -312,7 +333,8 @@ export function Billing() {
       </div>
       {!d ? <div className="text-sm text-muted">Loading…</div> : <>
         <Totals t={d.totals} />
-        <Section title={<>Invoices <span className="font-normal text-muted">· {d.bills.length}</span></>}>
+        <Section title={<>Invoices <span className="font-normal text-muted">· {d.count ?? d.bills.length}</span></>}>
+          {d.count > d.bills.length && <div className="px-4 pb-2 text-xs text-amber">Showing the newest {d.bills.length} of {d.count}. The totals above are for all {d.count}; pick fewer dates or search to see the rest.</div>}
           <InvoiceTable bills={d.bills} showPatient onView={(b) => setViewing(b.id)} onCollect={setCollecting} onRefund={setRefunding} empty={find ? `No invoices match “${find}” in these dates.` : 'No invoices in these dates.'} />
         </Section>
       </>}

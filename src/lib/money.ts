@@ -66,7 +66,8 @@ export async function unapply(tx: Tx, ctx: Ctx, c: { id: string; patientId: stri
  * A credit note against one invoice: the lines it comes off and how much from each. The invoice itself is not touched.
  * Money already applied above what each line now owes moves to the patient's advance. Returns the note's number and what moved.
  */
-export async function issueCredit(tx: Tx, ctx: Ctx, b: { billId: string; patientId: string; reason: string; lines: { chargeId: string; amountPaise: number; what: string }[] }) {
+type CreditIn = { chargeId: string; amountPaise: number; what: string; sessions?: number; listPaise?: number };
+export async function issueCredit(tx: Tx, ctx: Ctx, b: { billId: string; patientId: string; reason: string; lines: CreditIn[] }) {
   const t = ctx.tenantId; const lines = b.lines.filter((l) => l.amountPaise > 0);
   if (!lines.length) return { creditNo: null as string | null, creditId: null as string | null, toAdvancePaise: 0, totalPaise: 0 };
   const charges = await tx.select().from(charge).where(and(eq(charge.tenantId, t), inArray(charge.id, lines.map((l) => l.chargeId))));
@@ -79,7 +80,7 @@ export async function issueCredit(tx: Tx, ctx: Ctx, b: { billId: string; patient
   const creditNo = `CN-${fy}-${String(await nextNumber(tx, t, 'credit_no', `fy:${fy}`)).padStart(4, '0')}`;
   const totalPaise = lines.reduce((s, l) => s + l.amountPaise, 0);
   const [cn] = await tx.insert(creditNote).values({ tenantId: t, patientId: b.patientId, billId: b.billId, creditNo, reason: b.reason.slice(0, 200), totalPaise, createdBy: ctx.userId }).returning();
-  await tx.insert(creditLine).values(lines.map((l) => ({ tenantId: t, creditNoteId: cn.id, chargeId: l.chargeId, amountPaise: l.amountPaise, what: l.what.slice(0, 200) })));
+  await tx.insert(creditLine).values(lines.map((l) => ({ tenantId: t, creditNoteId: cn.id, chargeId: l.chargeId, amountPaise: l.amountPaise, what: l.what.slice(0, 200), sessions: l.sessions ?? 0, listPaise: l.listPaise ?? 0 })));
   let toAdvancePaise = 0;
   for (const l of lines) {
     const c = charges.find((x) => x.id === l.chargeId)!;
@@ -92,15 +93,26 @@ export async function issueCredit(tx: Tx, ctx: Ctx, b: { billId: string; patient
 }
 
 type Part = { method: string; amountPaise: number; reference?: string | null };
-/** Money back to the patient, always from the advance: one refund voucher (its own number series), in one or more modes, with a reason. */
-export async function refundFromAdvance(tx: Tx, ctx: Ctx, b: { patientId: string; parts: Part[]; reason: string; billId?: string | null }) {
+
+/** A refund already made with this request key (a retry, a slow network, a second tab): its voucher, so it is not paid twice. */
+export async function refundDone(tx: Tx, t: string, key?: string | null) {
+  if (!key) return null;
+  const [r] = await tx.select({ receiptNo: payment.receiptNo }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.idempotencyKey, `${key}#rf0`)));
+  return r ? { receiptNo: r.receiptNo, repeated: true as const } : null;
+}
+
+/** Money back to the patient, always from the advance: one refund voucher (its own number series), in one or more modes, with a reason.
+ *  With a request key each row carries it, and the unique index on it means the same refund can never be written twice. */
+export async function refundFromAdvance(tx: Tx, ctx: Ctx, b: { patientId: string; parts: Part[]; reason: string; billId?: string | null; key?: string | null; creditId?: string | null }) {
   const t = ctx.tenantId; const bal = await advanceBalance(tx, t, b.patientId);
   const amountPaise = b.parts.reduce((s, p) => s + p.amountPaise, 0);
   if (amountPaise > bal) throw new HttpError(400, 'MORE_THAN_THE_ADVANCE', { balancePaise: bal });
   const fy = fyOf(todayIn(ctx.timezone));
   const voucherNo = `RF-${fy}-${String(await nextNumber(tx, t, 'refund_no', `fy:${fy}`)).padStart(4, '0')}`;
   const rows = await tx.insert(payment).values(b.parts.map((p) => ({ tenantId: t, patientId: b.patientId, billId: b.billId ?? null, advance: true, amountPaise: -p.amountPaise, method: p.method,
-    reference: [p.method === 'cash' ? null : p.reference?.trim(), `Refund: ${b.reason}`].filter(Boolean).join(' · ').slice(0, 200), receiptNo: voucherNo, receivedBy: ctx.userId }))).returning();
+    reference: [p.method === 'cash' ? null : p.reference?.trim(), `Refund: ${b.reason}`].filter(Boolean).join(' · ').slice(0, 200), receiptNo: voucherNo, receivedBy: ctx.userId,
+    idempotencyKey: b.key ? `${b.key}#rf${b.parts.indexOf(p)}` : null }))).returning();
+  if (b.creditId) await tx.update(creditNote).set({ refundNo: voucherNo }).where(eq(creditNote.id, b.creditId));
   await emit(tx, ctx, 'advance.refunded', 'payment', rows[0].id, { amountPaise, reason: b.reason, patientId: b.patientId, voucherNo, methods: b.parts.map((p) => p.method) });
   return { voucherNo, balancePaise: bal - amountPaise };
 }

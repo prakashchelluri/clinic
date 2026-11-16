@@ -66,13 +66,24 @@ test('two items for ₹10,000 with ₹500 paid: one invoice, one number, part pa
   assert.equal((await desk('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 1000 }], reason: 'not done' })).status, 403);
   assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 1000001 }], reason: 'not done' })).body.code, 'MORE_THAN_PAID');
   assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 1000 }], reason: ' ' })).status, 400);
-  assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 200000 }, { method: 'upi', amountPaise: 100000 }], reason: 'biopsy not done' })).status, 200);
+  // two items: the refund must say which it comes off (each at its own GST), and the amounts must add up
+  const laser = inv.lines.find((c: any) => c.description.startsWith('Fractional')); const biopsy = inv.lines.find((c: any) => c.description.startsWith('Excision'));
+  assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 1000 }], reason: 'not done' })).body.code, 'SAY_WHICH_ITEM');
+  assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 1000 }], lines: [{ chargeId: biopsy.id, amountPaise: 900 }], reason: 'not done' })).body.code, 'ITEMS_DO_NOT_ADD_UP');
+  assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'cash', amountPaise: 300000 }], lines: [{ chargeId: biopsy.id, amountPaise: 300000 }], reason: 'not done' })).body.code, 'MORE_THAN_THE_LINE');
+  const once = { parts: [{ method: 'cash', amountPaise: 200000 }, { method: 'upi', amountPaise: 100000 }], lines: [{ chargeId: biopsy.id, amountPaise: 200000 }, { chargeId: laser.id, amountPaise: 100000 }], reason: 'biopsy not done', idempotencyKey: 'inv-refund-once-1' };
+  const r1 = await owner('POST', `/bills/${inv.id}/refund`, once); assert.equal(r1.status, 200);
+  const r2 = await owner('POST', `/bills/${inv.id}/refund`, once); assert.equal(r2.body.receiptNo, r1.body.receiptNo, 'the same request twice: one refund'); assert.equal(r2.body.repeated, true);
+  const cn = (await owner('GET', `/bills/${inv.id}`)).body.creditNotes[0];
+  const note = (await owner('GET', `/credit-notes/${cn.id}`)).body;
+  assert.deepEqual(note.lines.map((l: any) => [l.what.slice(0, 8), l.amountPaise]), [['Fraction', 100000], ['Excision', 200000]], 'off the items named, in invoice order');
+  assert.equal(note.refundNo, r1.body.receiptNo, 'the credit note names the voucher that paid it out'); assert.equal(note.refundedPaise, 300000);
   after = (await desk('GET', `/patients/${p.id}/bills`)).body.bills.find((x: any) => x.id === inv.id);
   assert.equal(after.creditedPaise, 300000, 'a credit note for what went back'); assert.equal(after.billedPaise, 1000000, 'the invoice as issued'); assert.equal(after.paidPaise, 700000);
   assert.equal(after.status, 'paid'); assert.equal(after.duePaise, 0, 'a refund never makes a bill due again');
   assert.equal(await day(), before - 300000);
   // all the rest back: refunded
-  assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'upi', amountPaise: 700000 }], reason: 'laser not done either' })).status, 200);
+  assert.equal((await owner('POST', `/bills/${inv.id}/refund`, { parts: [{ method: 'upi', amountPaise: 700000 }], lines: [{ chargeId: laser.id, amountPaise: 700000 }], reason: 'laser not done either' })).status, 200);
   after = (await desk('GET', `/patients/${p.id}/bills`)).body.bills.find((x: any) => x.id === inv.id);
   assert.equal(after.status, 'credited'); assert.equal(after.creditedPaise, 1000000); assert.equal(after.paidPaise, 0);
 

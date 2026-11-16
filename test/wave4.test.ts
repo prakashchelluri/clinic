@@ -29,8 +29,8 @@ after(async () => { await app.close(); });
 test('take payment: two invoices, three modes, EMI awaiting settlement, then settled with the lender fee as an expense', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
   const p = (await reception('POST', '/patients', { fullName: 'Pay Wave4', phone: '9848044411' })).body;
-  const c1 = (await reception('POST', '/charges', { patientId: p.id, description: 'Laser sitting 4', amountPaise: 350000 })).body;
-  const c2 = (await reception('POST', '/charges', { patientId: p.id, description: 'Peel sitting 2', amountPaise: 80000 })).body;
+  const c1 = (await owner('POST', '/charges', { patientId: p.id, description: 'Laser sitting 4', amountPaise: 350000 })).body;
+  const c2 = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel sitting 2', amountPaise: 80000 })).body;
   const key = 'wave4-take-0001';
   const take = await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [c1.id, c2.id], idempotencyKey: key, parts: [
     { method: 'upi', amountPaise: 230000, reference: '8821' }, { method: 'cash', amountPaise: 100000 }, { method: 'emi', amountPaise: 100000, lender: 'Bajaj Finserv', reference: 'APR-5521' }] });
@@ -44,7 +44,7 @@ test('take payment: two invoices, three modes, EMI awaiting settlement, then set
   assert.equal(again.body.repeated, true);
 
   // more than due is refused; EMI needs lender and approval code
-  const c3 = (await reception('POST', '/charges', { patientId: p.id, description: 'Consult', amountPaise: 50000 })).body;
+  const c3 = (await owner('POST', '/charges', { patientId: p.id, description: 'Consult', amountPaise: 50000 })).body;
   assert.equal((await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [c3.id], idempotencyKey: 'wave4-take-0002', parts: [{ method: 'cash', amountPaise: 60000 }] })).status, 400);
   assert.equal((await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [c3.id], idempotencyKey: 'wave4-take-0003', parts: [{ method: 'emi', amountPaise: 50000 }] })).status, 400);
   // a part payment leaves the invoice due with the balance
@@ -68,17 +68,17 @@ test('take payment: two invoices, three modes, EMI awaiting settlement, then set
 test('refund needs its own permission; junior doctors see no fees', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic'); const junior = await as('assistant@demo.clinic');
   const p = (await reception('POST', '/patients', { fullName: 'Refund Wave4', phone: '9848044422' })).body;
-  const c = (await reception('POST', '/charges', { patientId: p.id, description: 'Peel', amountPaise: 100000 })).body;
+  const c = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel', amountPaise: 100000 })).body;
   await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [c.id], idempotencyKey: 'wave4-refund-01', parts: [{ method: 'cash', amountPaise: 100000 }] });
   assert.equal((await reception('POST', `/charges/${c.id}/adjust`, { kind: 'refunded', reason: 'patient declined' })).status, 403, 'the desk cannot refund by default');
   assert.equal((await reception('POST', `/charges/${c.id}/adjust`, { kind: 'waived', reason: 'known person' })).status, 200, 'a waiver keeps its own permission');
-  const c2 = (await reception('POST', '/charges', { patientId: p.id, description: 'Peel 2', amountPaise: 100000 })).body;
+  const c2 = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel 2', amountPaise: 100000 })).body;
   assert.equal((await owner('POST', `/charges/${c2.id}/adjust`, { kind: 'refunded', reason: 'patient declined' })).status, 200);
 
   // the owner can hand the refund permission to the desk
   const set = await owner('PATCH', '/admin/roles/receptionist', { perms: ['fees.see', 'patient.read', 'patient.write', 'appointment.read', 'appointment.write', 'visit.read', 'visit.write', 'visit.queue', 'payment.record', 'payment.waive', 'payment.refund', 'worklist.read', 'worklist.write', 'document.read', 'document.write'] });
   assert.equal(set.status, 200, JSON.stringify(set.body));
-  const c3 = (await reception('POST', '/charges', { patientId: p.id, description: 'Peel 3', amountPaise: 100000 })).body;
+  const c3 = (await owner('POST', '/charges', { patientId: p.id, description: 'Peel 3', amountPaise: 100000 })).body;
   const r2 = await as('reception@demo.clinic');
   assert.equal((await r2('POST', `/charges/${c3.id}/adjust`, { kind: 'refunded', reason: 'patient declined' })).status, 200);
 
@@ -94,7 +94,7 @@ test('invoice menu: cancel only unpaid, exclude from tax reports, discount cap (
   assert.equal((await owner('DELETE', '/admin/roles/receptionist')).status, 200, 'back to the standard desk permissions');
   const reception = await as('reception@demo.clinic');
   const p = (await reception('POST', '/patients', { fullName: 'Menu Wave4', phone: '9848044433' })).body;
-  const mk = async (d: string, n: number) => (await reception('POST', '/charges', { patientId: p.id, description: d, amountPaise: n })).body;
+  const mk = async (d: string, n: number) => (await owner('POST', '/charges', { patientId: p.id, description: d, amountPaise: n })).body;
   const a = await mk('Peel 1', 100000); const b = await mk('Peel 2', 100000); const c = await mk('Peel 3', 100000);
 
   assert.equal((await reception('POST', `/charges/${a.id}/cancel`, { reason: 'entered by mistake' })).status, 403);
@@ -124,6 +124,6 @@ test('invoice menu: cancel only unpaid, exclude from tax reports, discount cap (
   assert.equal((await bill(owner, 8000, 'wave4-disc-0002', 'owner agreed')).body.waitingForApproval, false);
   assert.equal((await owner('PATCH', '/admin/clinic', { settings: { discountCapPct: 200 } })).status, 400);
   const cur = (await owner('GET', `/patients/${p.id}/timeline`)).body.charges.find((x: any) => x.id === c.id);
-  assert.equal(cur.amountPaise, 84000); assert.equal(cur.discountPaise, 16000);
+  assert.equal(cur.amountPaise, 100000, 'the invoice as issued'); assert.equal(cur.creditedPaise, 16000, 'both discounts are credit notes');
   assert.equal((await bill(r2, 84000, 'wave4-disc-0003', 'whole thing')).status, 400, 'a whole-amount discount is a waiver');
 });

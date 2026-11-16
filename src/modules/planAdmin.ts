@@ -78,8 +78,11 @@ export function planAdminRoutes(app: FastifyInstance) {
         if (newN < oldN && total != null && newN === 0) delta = -total;
         set.sittings = newN;
         if (r.amountPaise != null && r.amountPaise > 0) set.amountPaise = Math.max(0, r.amountPaise + delta);
-        if (c && newN < oldN) toAdvance = await creditSessions(tx, req.ctx, c, newN, `Sessions changed to ${newN}`); // off its invoice as a credit note, at what a session was really charged
-        if (c) await tx.update(course).set({ sittings: newN, totalPaise: Math.max(0, c.totalPaise + delta), listPaise: Math.max(c.totalPaise + delta, std * newN), standardPaise: std * newN || null }).where(eq(course.id, c.id));
+        if (c && newN < oldN) { // off its invoice as a credit note, at what a session was really charged; the course price follows
+          toAdvance = await creditSessions(tx, req.ctx, c, newN, `Sessions changed to ${newN}`);
+          delta = (await tx.select({ p: course.totalPaise }).from(course).where(eq(course.id, c.id)).then((y) => y[0].p)) - c.totalPaise;
+        }
+        if (c) await tx.update(course).set({ sittings: newN, ...(newN > oldN ? { totalPaise: c.totalPaise + delta } : {}), listPaise: Math.max(c.totalPaise + delta, std * newN), standardPaise: std * newN || null }).where(eq(course.id, c.id));
         const [{ doneN }] = await tx.select({ doneN: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, r.id), eq(procedureSession.state, 'completed')));
         if (newN <= doneN) set.status = 'done'; // the sessions left were taken off: it is finished
         else if (r.status === 'done') set.status = 'open'; // more sessions on a finished procedure: it runs again

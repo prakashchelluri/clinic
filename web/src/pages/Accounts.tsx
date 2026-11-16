@@ -8,8 +8,8 @@ import { Expenses } from './Expenses';
 import { Drawer, Icon, NoAccess, PageHeader, Segmented, Skeleton, Stat, Tabs, money as inr } from '../ui';
 
 type Period = 'today' | 'month' | 'last' | 'pick';
-type Tab = 'sum' | 'days' | 'spend' | 'due';
-const SOURCES = [['consultation', 'Consultations', 'fees taken at check-in'], ['procedure', 'Procedures', 'treatments and price-list procedures'], ['pharmacy', 'Pharmacy', 'medicine sales, less returns'], ['other', 'Other', 'anything not tied to a visit or a session']] as const;
+type Tab = 'sum' | 'days' | 'spend' | 'due' | 'gst';
+const SOURCES = [['consultation', 'Consultations', 'fees taken at check-in'], ['procedure', 'Procedures', 'treatments and price-list procedures'], ['pharmacy', 'Pharmacy', 'medicine sales, less returns'], ['other', 'Advances & other', 'advances not used yet, refunds from them, and anything not tied to a visit or a session']] as const;
 // one shade per source, told apart by lightness as well as colour; works in both themes
 const SHADE: Record<string, string> = { consultation: 'bg-muted', procedure: 'bg-clay', pharmacy: 'bg-line-2', other: 'bg-paper-2' };
 const MODES = [['cash', 'Cash'], ['upi', 'UPI'], ['card', 'Card'], ['other', 'EMI and other']] as const;
@@ -54,7 +54,7 @@ export function Accounts() {
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
   const period = (['today', 'month', 'last', 'pick'].includes(sp.get('period') ?? '') ? sp.get('period') : 'month') as Period;
-  const tab = (['sum', 'days', 'spend', 'due'].includes(sp.get('tab') ?? '') ? sp.get('tab') : 'sum') as Tab;
+  const tab = (['sum', 'days', 'spend', 'due', 'gst'].includes(sp.get('tab') ?? '') ? sp.get('tab') : 'sum') as Tab;
   const r = periodOf(period, sp);
   const q = useQuery({ queryKey: ['finance', r.from, r.to, r.prevFrom, r.prevTo], queryFn: () => get(`/finance?from=${r.from}&to=${r.to}&prevFrom=${r.prevFrom}&prevTo=${r.prevTo}`), enabled: can(perms, 'finance.read') });
   const [open, setOpen] = useState<string | null>(null);
@@ -91,10 +91,11 @@ export function Accounts() {
       </PageHeader>
 
       <Tabs<Tab> className="mb-4" value={tab} onChange={(v) => go({ tab: v === 'sum' ? null : v, cat: null })} options={[
-        { value: 'sum', label: 'Summary' }, { value: 'days', label: 'Day by day', count: d?.days.length }, { value: 'spend', label: 'Spending', count: d?.expenses.n }, { value: 'due', label: 'Not in yet' }]} />
+        { value: 'sum', label: 'Summary' }, { value: 'days', label: 'Day by day', count: d?.days.length }, { value: 'spend', label: 'Spending', count: d?.expenses.n }, { value: 'due', label: 'Not in yet' }, { value: 'gst', label: 'GST' }]} />
 
       {q.isError ? <div className="card flex flex-wrap items-center gap-3 text-[14px]"><span>Couldn't load the accounts. {errText(q.error)}</span><button className="btn btn-sm btn-primary" onClick={() => q.refetch()}>Retry</button></div>
         : tab === 'spend' ? <Expenses period={{ from: r.from, to: r.to }} />
+        : tab === 'gst' ? <GstReport from={r.from} to={r.to} canExport={!!me?.privacy?.canExport} />
         : !d ? <Skeleton rows={4} />
         : tab === 'sum' ? <Summary d={d} vs={r.vs} inT={inT} outT={outT} notIn={notIn} onDay={setOpen} onCat={(c) => go({ tab: 'spend', cat: c })} onDue={() => go({ tab: 'due' })} onSpend={() => go({ tab: 'spend', cat: null })} />
         : tab === 'days' ? <Days d={d} open={open} onDay={setOpen} />
@@ -295,4 +296,46 @@ function Closed({ x, long = false }: { x: any; long?: boolean }) {
 
 function Row({ a, b }: { a: React.ReactNode; b: React.ReactNode }) {
   return <div className="flex justify-between gap-3 border-t border-line py-2 text-[14px] font-semibold tabular-nums"><span className="min-w-0 font-medium text-muted">{a}</span><span className="shrink-0 text-right">{b}</span></div>;
+}
+
+/** GST for the period, for the accountant: Tax Invoices by rate, less credit notes at the same rates; exempt supplies; Bills of Supply;
+ *  and the invoices the owner left out (with why). Every document counts at the GSTIN and rates it was issued with. */
+function GstReport({ from, to, canExport }: { from: string; to: string; canExport: boolean }) {
+  const q = useQuery({ queryKey: ['gst', from, to], queryFn: () => get(`/reports/gst?from=${from}&to=${to}`) }); const g: any = q.data;
+  if (q.isError) return <div className="card text-[14px]">Couldn't load the GST report. {errText(q.error)}</div>;
+  if (!g) return <Skeleton rows={4} />;
+  const pct = (bp: number) => (bp ? `${bp / 100}%` : 'Exempt');
+  const rates = (rs: any[]) => rs.map((x) => `${pct(x.rateBp)} ${money(x.taxablePaise)}${x.rateBp ? ` + ${money(x.cgstPaise + x.sgstPaise)}` : ''}`).join(' · ');
+  const download = () => {
+    const rupees = (p: number) => (p / 100).toFixed(2);
+    const rows = [['Document', 'Number', 'Date', 'Patient / invoice', 'Rate', 'Taxable value', 'CGST', 'SGST'],
+      ...g.invoices.flatMap((b: any) => b.rates.map((x: any) => ['Tax Invoice', b.invoiceNo, b.at.slice(0, 10), b.patient, String(x.rateBp / 100), rupees(x.taxablePaise), rupees(x.cgstPaise), rupees(x.sgstPaise)])),
+      ...g.credits.flatMap((n: any) => n.rates.map((x: any) => ['Credit note', n.creditNo, n.at.slice(0, 10), n.invoiceNo, String(x.rateBp / 100), rupees(-x.taxablePaise), rupees(-x.cgstPaise), rupees(-x.sgstPaise)]))];
+    const csv = rows.map((l) => l.map((c: string) => /[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `gst-${from}-to-${to}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Taxable value" value={money(g.totals.taxablePaise)} sub="Tax Invoices less credit notes" />
+        <Stat label="CGST" value={money(g.totals.cgstPaise)} delay={40} />
+        <Stat label="SGST" value={money(g.totals.sgstPaise)} delay={80} />
+        <Stat label="Exempt (0%)" value={money(g.totals.exemptPaise)} sub={g.billsOfSupply.count ? `and ${g.billsOfSupply.count} Bill${g.billsOfSupply.count === 1 ? '' : 's'} of Supply, ${money(g.billsOfSupply.totalPaise)}` : 'no Bills of Supply'} delay={120} />
+      </div>
+      <div className="card-flat overflow-x-auto"><table className="table min-w-[520px]"><thead><tr><th className="pl-4">Rate</th><th className="text-right">Taxable value</th><th className="text-right">CGST</th><th className="text-right">SGST</th><th className="pr-4 text-right">Total</th></tr></thead>
+        <tbody>{g.summary.length ? g.summary.map((x: any) => <tr key={x.rateBp}><td className="pl-4">{pct(x.rateBp)}</td><td className="text-right tabular-nums">{money(x.taxablePaise)}</td><td className="text-right tabular-nums">{money(x.cgstPaise)}</td><td className="text-right tabular-nums">{money(x.sgstPaise)}</td><td className="pr-4 text-right tabular-nums">{money(x.taxablePaise + x.cgstPaise + x.sgstPaise)}</td></tr>)
+          : <tr><td colSpan={5} className="p-4 text-sm text-muted">No Tax Invoices in these dates.</td></tr>}</tbody></table></div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="card-flat"><div className="flex items-center justify-between border-b border-line px-4 py-2.5"><b className="text-[14px]">Tax Invoices · {g.invoices.length}</b>{canExport && <button className="btn btn-sm" onClick={() => listOut(`Downloaded GST ${from} to ${to}`, g.invoices.length + g.credits.length, download)}><Icon name="download" />Download</button>}</div>
+          <div className="max-h-[360px] overflow-y-auto">{g.invoices.map((b: any) => <div key={b.id} className="flex justify-between gap-3 border-b border-line/60 px-4 py-2 text-[13px]"><span><b>{b.invoiceNo}</b> · {b.patient}<span className="block text-xs text-muted">{rates(b.rates)}</span></span><span className="tabular-nums">{money(b.totalPaise)}</span></div>)}
+            {!g.invoices.length && <div className="p-4 text-sm text-muted">None.</div>}</div></div>
+        <div className="card-flat"><div className="border-b border-line px-4 py-2.5"><b className="text-[14px]">Credit notes · {g.credits.length}</b></div>
+          <div className="max-h-[360px] overflow-y-auto">{g.credits.map((n: any) => <div key={n.id} className="flex justify-between gap-3 border-b border-line/60 px-4 py-2 text-[13px]"><span><b>{n.creditNo}</b> · off {n.invoiceNo}<span className="block text-xs text-muted">{rates(n.rates)} · {n.reason}</span></span><span className="tabular-nums">−{money(n.totalPaise)}</span></div>)}
+            {!g.credits.length && <div className="p-4 text-sm text-muted">None.</div>}</div></div>
+      </div>
+      {g.leftOut.length > 0 && <div className="card-flat"><div className="border-b border-line px-4 py-2.5"><b className="text-[14px]">Left out of this report by the owner · {g.leftOut.length}</b></div>
+        {g.leftOut.map((b: any) => <div key={b.id} className="flex justify-between gap-3 border-b border-line/60 px-4 py-2 text-[13px]"><span><b>{b.invoiceNo}</b> · {b.patient}<span className="block text-xs text-muted">{b.reason ?? 'no reason given'}</span></span><span className="tabular-nums">{money(b.totalPaise)}</span></div>)}</div>}
+      <p className="text-xs text-muted">Prices include GST. Each invoice and credit note counts at the GSTIN and rates it was issued with. SAC codes and place of supply are not recorded yet: ask your accountant before filing.</p>
+    </div>
+  );
 }

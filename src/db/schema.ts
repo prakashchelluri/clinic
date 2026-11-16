@@ -478,6 +478,8 @@ export const charge = pgTable('charge', {
   originalPaise: integer('original_paise'), // the line's price before it was first lowered (cancelled sessions, a refund): what the invoice prints
   prepaid: boolean('prepaid').notNull().default(false), // paid from the course's advance
   billId: uuid('bill_id'),                 // the invoice this line is on; a trigger makes a new numbered bill when none is given
+  lineNo: integer('line_no'),              // its place on the invoice (set by a trigger): print order and payment order
+  sessions: integer('sessions'),           // a treatment line: how many sessions it bills
 });
 
 // An invoice: one number, one or more lines (charges). Paid, due and refunded come from its lines' payments and its refunds.
@@ -498,6 +500,7 @@ export const creditNote = pgTable('credit_note', {
   reason: text('reason').notNull(),
   totalPaise: integer('total_paise').notNull(),
   createdBy: uuid('created_by'),
+  refundNo: text('refund_no'),             // the refund voucher that paid it out, when one did
 }, (t) => [uniqueIndex('credit_no').on(t.tenantId, t.creditNo), index('credit_bill').on(t.tenantId, t.billId)]);
 export const creditLine = pgTable('credit_line', {
   ...tenantCols,
@@ -505,6 +508,8 @@ export const creditLine = pgTable('credit_line', {
   chargeId: uuid('charge_id').notNull().references(() => charge.id),
   amountPaise: integer('amount_paise').notNull(),
   what: text('what').notNull(),            // what it is for, as printed ("1 session not given")
+  sessions: integer('sessions').notNull().default(0), // sessions it takes back (a treatment made shorter); they can be billed again if added back
+  listPaise: integer('list_paise').notNull().default(0), // those sessions' share of the list price
 }, (t) => [index('credit_line_charge').on(t.chargeId)]);
 
 export const payment = pgTable('payment', {

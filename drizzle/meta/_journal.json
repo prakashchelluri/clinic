@@ -330,6 +330,13 @@
       "when": 1796700000000,
       "tag": "0046_credit_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1796800000000,
+      "tag": "0047_frozen_lines",
+      "breakpoints": true
     }
   ]
 }

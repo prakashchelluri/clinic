@@ -1,13 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, gte, lt, lte, desc, isNull, inArray, notInArray } from 'drizzle-orm';
-import { bill, charge, course, payment, expense, visit, feeCategory, patient, tenant, appUser } from '../db/schema.js';
+import { bill, charge, course, discountAsk, payment, expense, visit, feeCategory, patient, tenant, appUser } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { expenseCategoriesOf } from '../lib/lists.js';
 import { assertDayOpen, dayFigures } from './dayclose.js';
-import { balancesOf, chargeBalance, chargeCredited, issueCredit, lineMoney, refundFromAdvance, settle } from '../lib/money.js';
+import { balancesOf, chargeBalance, chargeCredited, issueCredit, lineMoney, refundDone, refundFromAdvance, settle } from '../lib/money.js';
 
 /** [start,end) in UTC for a local day in the tenant timezone. */
 export function dayBounds(day: string, tz: string) {
@@ -66,9 +66,10 @@ export function billingRoutes(app: FastifyInstance) {
 
   /** Waive or refund a charge; the row is kept, status + reason change, event recorded. */
   route(app, 'post', '/charges/:id/adjust', 'payment.waive', async (req, tx) => {
-    const body = z.object({ kind: z.enum(['waived', 'refunded']), reason: z.string().trim().min(3, 'Say why').max(200) }).parse(req.body);
+    const body = z.object({ kind: z.enum(['waived', 'refunded']), reason: z.string().trim().min(3, 'Say why').max(200), idempotencyKey: z.string().min(8).max(80).optional() }).parse(req.body);
     if (body.kind === 'refunded' && !can(req.perms, 'payment.refund')) throw new HttpError(403, 'FORBIDDEN:payment.refund');
     const t = req.ctx.tenantId; const id = (req.params as any).id;
+    if (await refundDone(tx, t, body.idempotencyKey)) throw new HttpError(409, 'ALREADY_REFUNDED');
     const cur = await tx.select().from(charge).where(and(eq(charge.id, id), eq(charge.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
     if (cur.status === 'refunded') throw new HttpError(409, 'ALREADY_REFUNDED');
@@ -80,7 +81,7 @@ export function billingRoutes(app: FastifyInstance) {
       const cr = await issueCredit(tx, req.ctx, { billId: cur.billId!, patientId: cur.patientId, reason: `Refunded: ${body.reason}`, lines: [{ chargeId: id, amountPaise: room, what: cur.description }] });
       if (cr.toAdvancePaise > 0) {
         const mode = await tx.select({ method: payment.method }).from(payment).where(and(eq(payment.chargeId, id), sql`${payment.method} <> 'advance'`, sql`${payment.amountPaise} > 0`)).orderBy(desc(payment.amountPaise)).limit(1).then((r) => r[0]?.method ?? 'cash');
-        await refundFromAdvance(tx, req.ctx, { patientId: cur.patientId, billId: cur.billId, parts: [{ amountPaise: cr.toAdvancePaise, method: mode === 'emi' ? 'bank' : mode }], reason: `${cur.description} · ${body.reason}` });
+        await refundFromAdvance(tx, req.ctx, { patientId: cur.patientId, billId: cur.billId, parts: [{ amountPaise: cr.toAdvancePaise, method: mode === 'emi' ? 'bank' : mode }], reason: `${cur.description} · ${body.reason}`, key: body.idempotencyKey, creditId: cr.creditId });
       }
       await emit(tx, req.ctx, 'charge.refunded', 'charge', id, { reason: body.reason, amountPaise: room, creditNo: cr.creditNo });
       return { ...cur, creditNo: cr.creditNo };
@@ -157,13 +158,20 @@ export function billingRoutes(app: FastifyInstance) {
     if (c.status !== 'due' || (await paidOn(tx, c.id)) > 0) throw new HttpError(409, 'HAS_PAYMENTS_USE_REFUND');
     const [row] = await tx.update(charge).set({ status: 'cancelled', adjustmentReason: b.reason, adjustedBy: req.ctx.userId }).where(eq(charge.id, c.id)).returning();
     await emit(tx, req.ctx, 'charge.cancelled', 'charge', c.id, { reason: b.reason, amountPaise: c.amountPaise });
+    // a discount waiting for approval on this line has nothing left to decide
+    const asks = await tx.select().from(discountAsk).where(and(eq(discountAsk.tenantId, req.ctx.tenantId), eq(discountAsk.patientId, c.patientId), eq(discountAsk.status, 'pending')));
+    for (const a of asks.filter((x: any) => x.lines.some((l: any) => l.chargeId === c.id))) {
+      const rest = a.lines.filter((l: any) => l.chargeId !== c.id);
+      await tx.update(discountAsk).set(rest.length ? { lines: rest, offPaise: rest.reduce((s: number, l: any) => s + l.offPaise, 0), listPaise: rest.reduce((s: number, l: any) => s + l.listPaise, 0) }
+        : { status: 'withdrawn', decidedBy: req.ctx.name, decidedAt: new Date().toISOString() }).where(eq(discountAsk.id, a.id));
+    }
     if (c.courseId) { // the treatment's only invoice gone: its price is free again until it is invoiced
       const left = await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.courseId, c.courseId), notInArray(charge.status, ['cancelled', 'waived'])));
       if (!left.length) await tx.update(course).set({ lockedAt: null }).where(eq(course.id, c.courseId));
     }
     return row;
   });
-  route(app, 'post', '/charges/:id/exclude', 'payment.refund', async (req, tx) => {
+  route(app, 'post', '/charges/:id/exclude', 'config.write', async (req, tx) => { // the owner only: it changes what the GST report shows
     const b = Reason.parse(req.body); const c = await chargeOf(req, tx);
     if (c.excludedAt) throw new HttpError(409, 'ALREADY_EXCLUDED');
     const [row] = await tx.update(charge).set({ excludedAt: new Date().toISOString(), excludedReason: b.reason }).where(eq(charge.id, c.id)).returning();
@@ -192,7 +200,7 @@ export function billingRoutes(app: FastifyInstance) {
       voucher: String((req.params as any).no).startsWith('RF-') };
   });
 
-  route(app, 'post', '/charges', 'payment.record', async (req, tx) => {
+  route(app, 'post', '/charges', 'config.write', async (req, tx) => { // a charge with a typed price: settings only (the desk bills from the price list)
     const body = z.object({ patientId: z.string().uuid(), visitId: z.string().uuid().optional(), description: z.string().min(1), amountPaise: z.number().int().min(0), taxRateBp: z.number().int().default(0) }).parse(req.body);
     const [row] = await tx.insert(charge).values({ ...body, tenantId: req.ctx.tenantId }).returning();
     return row;
@@ -258,13 +266,14 @@ export function billingRoutes(app: FastifyInstance) {
     const expenses = await tx.select().from(expense).where(and(eq(expense.tenantId, t), eq(expense.day, day), isNull(expense.voidedAt)));
     // the same "due" as every other page: what is left on each line after payments and credit notes
     const outstanding = await tx.select({ total: sql<number>`coalesce(sum(${chargeBalance}),0)::int`, n: sql<number>`count(distinct ${charge.billId}) filter (where ${chargeBalance} > 0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
-    const payments = await tx.select({ pay: payment, patient: patient.fullName, desc: charge.description }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId))
+    const payments = await tx.select({ pay: payment, patient: patient.fullName, desc: charge.description, invoiceNo: bill.invoiceNo }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId))
+      .leftJoin(bill, eq(bill.id, sql`coalesce(${payment.billId}, ${charge.billId})`))
       .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end), sql`${payment.method} <> 'advance'`)).orderBy(desc(payment.receivedAt)); // moves to and from the advance are not money
     // One "Collected" for the whole app: the same figure as End of day (payments net of refunds, plus pharmacy sales less returns).
     const f = await dayFigures(tx, t, req.ctx.timezone, day); const m = f.money.total;
     const collected = m.total;
     const spent = expenses.reduce((s, e) => s + e.amountPaise, 0);
-    return { day, byMethod, byCategory, expenses, outstanding: outstanding[0], payments: payments.map((p) => ({ ...p.pay, patient: p.patient, description: p.desc })),
+    return { day, byMethod, byCategory, expenses, outstanding: outstanding[0], payments: payments.map((p) => ({ ...p.pay, patient: p.patient, description: p.desc, invoiceNo: p.invoiceNo })),
       byMode: { cash: m.cash, upi: m.upi, card: m.card, other: m.other }, pharmacyPaise: f.money.pharmacy.total,
       totals: { collectedPaise: collected, expensesPaise: spent, netPaise: collected - spent, visits: byCategory.reduce((s, c) => s + c.visits, 0) }, prevDay: addDays(day, -1), nextDay: addDays(day, 1) };
   });

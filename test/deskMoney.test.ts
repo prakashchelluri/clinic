@@ -64,7 +64,7 @@ test('a refund comes off the day it is given, in the mode it was paid; receipt n
   assert.equal(daily.byMode.upi, aft.money.total.upi);
 
   // receipt: taken by the desk, printed by the owner
-  const c = (await R('POST', '/charges', { patientId: p.id, description: 'Peel', amountPaise: 50000 })).body;
+  const c = (await O('POST', '/charges', { patientId: p.id, description: 'Peel', amountPaise: 50000 })).body;
   const take = (await R('POST', '/payments/take', { patientId: p.id, chargeIds: [c.id], idempotencyKey: 'dm-receipt-01', parts: [{ method: 'cash', amountPaise: 50000 }] })).body;
   const desk = (await R('GET', '/me')).body;
   const rc = (await O('GET', `/receipts/${take.receiptNo}`)).body;

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, inArray, sql } from 'drizzle-orm';
-import { charge, course, discountAsk, domainEvent, patient, payment, procedureCatalog, service, tenant } from '../db/schema.js';
+import { bill, charge, course, discountAsk, domainEvent, patient, payment, procedureCatalog, service, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn } from '../lib/core.js';
@@ -9,7 +9,7 @@ import { HttpError, can } from '../lib/auth.js';
 import { assertDayOpen } from './dayclose.js';
 import { nextReceiptNo } from './billing.js';
 import { ensureCourse, standing } from './courses.js';
-import { advanceBalance, balancesOf, issueCredit, refundFromAdvance, settle } from '../lib/money.js';
+import { advanceBalance, balancesOf, issueCredit, refundDone, refundFromAdvance, settle } from '../lib/money.js';
 export { advanceBalance } from '../lib/money.js';
 
 const Line = z.object({
@@ -34,7 +34,7 @@ const Bill = z.object({
 });
 
 
-type Item = { what: string; gross: number; prior: number; disc: number; canDiscount: boolean; why?: string; chargeId?: string; courseId?: string; procedureId?: string; at: string; tax?: number; isNew?: boolean };
+type Item = { what: string; gross: number; prior: number; disc: number; canDiscount: boolean; why?: string; chargeId?: string; billId?: string; courseId?: string; procedureId?: string; at: string; ln?: number; tax?: number; isNew?: boolean; sessions?: number };
 type BillBody = z.infer<typeof Bill>;
 
 const paidOn = async (tx: Tx, ids: string[]) => {
@@ -95,8 +95,8 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
         if (!c) throw new HttpError(404, 'CHARGE_NOT_FOUND');
         const owing = (left.get(c.id) ?? 0) - (waiting.get(c.id) ?? 0);
         if (c.status !== 'due' || owing <= 0) throw new HttpError(409, 'NOTHING_DUE', { chargeId: c.id });
-        const why = c.visitId ? 'NO_DISCOUNT_ON_CONSULTATION' : c.description.startsWith('Pharmacy') ? 'NO_DISCOUNT_ON_PHARMACY' : (paid.get(c.id) ?? 0) > 0 || owing + (waiting.get(c.id) ?? 0) < c.amountPaise ? 'DISCOUNT_ONLY_BEFORE_PAYMENT' : waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined;
-        items.push({ what: c.description, gross: owing, prior: c.discountPaise, disc: l.discountPaise, canDiscount: !why, why, chargeId: c.id, at: c.createdAt });
+        const why = c.visitId ? 'NO_DISCOUNT_ON_CONSULTATION' : c.description.startsWith('Pharmacy') ? 'NO_DISCOUNT_ON_PHARMACY' : (paid.get(c.id) ?? 0) > 0 ? 'DISCOUNT_ONLY_BEFORE_PAYMENT' : waiting.has(c.id) ? 'DISCOUNT_ALREADY_WAITING' : undefined;
+        items.push({ what: c.description, gross: owing, prior: c.discountPaise, disc: l.discountPaise, canDiscount: !why, why, chargeId: c.id, billId: c.billId ?? undefined, at: c.createdAt, ln: c.lineNo ?? 0 });
       } else if (l.procedureId) {
         const p = await tx.select().from(procedureCatalog).where(and(eq(procedureCatalog.id, l.procedureId), eq(procedureCatalog.tenantId, t))).then((r) => r[0]);
         if (!p) throw new HttpError(404, 'PROCEDURE_NOT_FOUND');
@@ -115,7 +115,8 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
         if (st.uninvoicedPaise <= 0) throw new HttpError(409, 'ALREADY_INVOICED');
         if (c.validUntil && c.validUntil < todayIn(ctx.timezone)) throw new HttpError(409, 'PACKAGE_EXPIRED', { validUntil: c.validUntil });
         const proc = c.procedureId ? await tx.select({ n: procedureCatalog.name, tax: procedureCatalog.taxRateBp }).from(procedureCatalog).where(eq(procedureCatalog.id, c.procedureId)).then((r) => r[0]) : null;
-        items.push({ what: `${proc?.n ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${c.sittings} session${c.sittings === 1 ? '' : 's'}${st.invoicedPaise ? ', the rest' : ''}`, gross: st.uninvoicedPaise, prior: 0, disc: l.discountPaise, canDiscount: true, courseId: c.id, procedureId: c.procedureId ?? undefined, isNew: true, tax: proc?.tax ?? 0, at: new Date().toISOString() });
+        const n = st.uninvoicedSessions || c.sittings;
+        items.push({ what: `${proc?.n ?? 'Procedure'}${c.packageName ? ` (${c.packageName})` : ''} · ${n} session${n === 1 ? '' : 's'}${st.invoiced ? ' added' : ''}`, gross: st.uninvoicedPaise, prior: 0, disc: l.discountPaise, canDiscount: true, courseId: c.id, procedureId: c.procedureId ?? undefined, isNew: true, tax: proc?.tax ?? 0, at: new Date().toISOString(), sessions: n });
       }
     }
     // a package is invoiced whole: every procedure of it still to invoice goes on the same invoice
@@ -132,7 +133,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
       const room = items.filter((i) => i.canDiscount); const base = room.reduce((s, i) => s + i.gross - i.disc, 0);
       if (!base) throw new HttpError(400, 'NOTHING_TO_DISCOUNT');
       let left = b.extraDiscountPaise;
-      room.forEach((i, k) => { const share = k === room.length - 1 ? left : Math.round((b.extraDiscountPaise * (i.gross - i.disc)) / base); i.disc += share; left -= share; });
+      room.forEach((i, k) => { const share = k === room.length - 1 ? left : Math.round((b.extraDiscountPaise * (i.gross - i.disc)) / base / 100) * 100; i.disc += share; left -= share; }); // whole rupees per line; the last takes the rest
     }
     for (const i of items) if (i.disc >= i.gross && i.disc > 0) throw new HttpError(400, 'DISCOUNT_MORE_THAN_THE_ITEM', { what: i.what });
     const off = items.reduce((s, i) => s + i.disc, 0);
@@ -143,19 +144,22 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     const pct = listSum ? Math.round(((off + off_.reduce((s, i) => s + i.prior, 0)) / listSum) * 1000) / 10 : 0; // what was already taken off these lines counts too
     const ask = off > 0 && (!can(req.perms, 'discount.give') || (pct > cap && !can(req.perms, 'discount.approve')));
 
-    // new items become invoices; a discount that may be given now comes off at once
-    let newBill: string | undefined; // everything added on this screen is one invoice
+    // new items become one invoice, in the order entered. A discount that may be given now is printed on it (price, discount, amount);
+    // on an invoice already issued it is a credit note (an issued line never changes). One waiting for approval leaves the invoice at full price.
+    let newBill: string | undefined;
     for (const i of items) if (i.isNew) {
-      const [row] = await tx.insert(charge).values({ billId: newBill, tenantId: t, patientId: b.patientId, description: i.what, amountPaise: i.gross, taxRateBp: i.tax ?? 0, courseId: i.courseId ?? null, procedureId: i.procedureId ?? null, status: 'due' }).returning();
+      const now = off > 0 && !ask ? i.disc : 0;
+      const [row] = await tx.insert(charge).values({ billId: newBill, tenantId: t, patientId: b.patientId, description: i.what, amountPaise: i.gross - now, discountPaise: now, discountReason: now ? b.reason : null,
+        taxRateBp: i.tax ?? 0, courseId: i.courseId ?? null, procedureId: i.procedureId ?? null, sessions: i.sessions ?? null, status: 'due' }).returning();
       if (i.courseId) await tx.update(course).set({ lockedAt: sql`coalesce(${course.lockedAt}, now())` }).where(eq(course.id, i.courseId)); // invoiced: the price holds
-      i.chargeId = row.id; i.at = row.createdAt; newBill = row.billId ?? undefined;
+      i.chargeId = row.id; i.at = row.createdAt; i.ln = row.lineNo ?? 0; i.billId = row.billId ?? undefined; newBill = row.billId ?? undefined;
+      if (now) await emit(tx, ctx, 'charge.discounted', 'charge', row.id, { reason: b.reason, discountPaise: now, pct });
     }
     let askId: string | null = null;
     if (off > 0 && !ask) {
-      for (const i of off_) {
-        await tx.update(charge).set({ amountPaise: sql`${charge.amountPaise} - ${i.disc}`, discountPaise: sql`${charge.discountPaise} + ${i.disc}`, discountReason: b.reason }).where(eq(charge.id, i.chargeId!));
-        await emit(tx, ctx, 'charge.discounted', 'charge', i.chargeId!, { reason: b.reason, discountPaise: i.disc, pct });
-      }
+      const issued = off_.filter((i) => !i.isNew);
+      for (const billId of [...new Set(issued.map((i) => i.billId!))])
+        await issueCredit(tx, ctx, { billId, patientId: b.patientId, reason: `Discount: ${b.reason}`, lines: issued.filter((i) => i.billId === billId).map((i) => ({ chargeId: i.chargeId!, amountPaise: i.disc, what: `Discount on ${i.what}` })) });
     } else if (ask) {
       const [row] = await tx.insert(discountAsk).values({ tenantId: t, patientId: b.patientId, reason: b.reason, askedBy: ctx.name, listPaise: listSum, offPaise: off,
         lines: off_.map((i) => ({ chargeId: i.chargeId!, what: i.what, listPaise: i.gross + i.prior, offPaise: i.disc })) }).returning();
@@ -171,7 +175,7 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
     const extra = total - payable;
     if (extra > 0 && (!b.keepExtraAsAdvance || extra > total - fromAdvance)) throw new HttpError(400, 'MORE_THAN_DUE', { duePaise: payable }); // the advance never pays into itself
     if (!items.length && total <= 0) throw new HttpError(400, 'NOTHING_TO_BILL');
-    const targets = [...items].sort((x, y) => x.at.localeCompare(y.at)).map((i) => ({ i, room: i.gross - i.disc }));
+    const targets = [...items].sort((x, y) => x.at.localeCompare(y.at) || (x.ln ?? 0) - (y.ln ?? 0)).map((i) => ({ i, room: i.gross - i.disc })); // oldest first, then in line order
     const receiptNo = total - fromAdvance ? await nextReceiptNo(tx, t, ctx.timezone) : null; // a receipt is for money handed over
     let seq = 0;
     const put = (v: Partial<typeof payment.$inferInsert> & { amountPaise: number; method: string }) => tx.insert(payment).values({ tenantId: t, patientId: b.patientId, receiptNo: v.method === 'advance' ? null : receiptNo, receivedBy: ctx.userId, idempotencyKey: `${b.idempotencyKey}#${seq++}`, ...v });
@@ -197,9 +201,10 @@ async function takeBill(req: any, tx: Tx, b: BillBody) {
 function moreBillRoutes(app: FastifyInstance) {
   /** Give back what is left of the advance: money out today, with a reason, by someone who may refund. */
   route(app, 'post', '/patients/:id/advance/refund', 'payment.refund', async (req, tx) => {
-    const b = z.object({ amountPaise: z.number().int().positive().max(100_000_000), method: z.enum(['cash', 'upi', 'card', 'bank']), reference: z.string().trim().max(60).optional(), reason: z.string().trim().min(3, 'Say why').max(200) }).parse(req.body);
+    const b = z.object({ amountPaise: z.number().int().positive().max(100_000_000), method: z.enum(['cash', 'upi', 'card', 'bank']), reference: z.string().trim().max(60).optional(), reason: z.string().trim().min(3, 'Say why').max(200), idempotencyKey: z.string().min(8).max(80).optional() }).parse(req.body);
+    const done = await refundDone(tx, req.ctx.tenantId, b.idempotencyKey); if (done) return { ...done, balancePaise: await advanceBalance(tx, req.ctx.tenantId, (req.params as any).id) };
     await assertDayOpen(tx, req.ctx);
-    const r = await refundFromAdvance(tx, req.ctx, { patientId: (req.params as any).id, parts: [{ amountPaise: b.amountPaise, method: b.method, reference: b.reference }], reason: b.reason });
+    const r = await refundFromAdvance(tx, req.ctx, { patientId: (req.params as any).id, parts: [{ amountPaise: b.amountPaise, method: b.method, reference: b.reference }], reason: b.reason, key: b.idempotencyKey });
     return { balancePaise: r.balancePaise, receiptNo: r.voucherNo };
   });
 
@@ -210,7 +215,8 @@ function moreBillRoutes(app: FastifyInstance) {
     const rows = await tx.select({ a: discountAsk, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(discountAsk).innerJoin(patient, eq(patient.id, discountAsk.patientId)).where(where).orderBy(discountAsk.createdAt).limit(100);
     const ids = [...new Set(rows.flatMap((r) => r.a.lines.map((l) => l.chargeId).filter(Boolean)))] as string[];
     const got = await paidOn(tx, ids);
-    return rows.map((r) => ({ ...r.a, paidPaise: r.a.lines.reduce((s, l) => s + (l.chargeId ? got.get(l.chargeId) ?? 0 : 0), 0) || r.a.paidPaise, patient: { id: r.a.patientId, fullName: r.name, phone: r.phone, patientNo: r.no }, pct: Math.round((r.a.offPaise / Math.max(1, r.a.listPaise)) * 1000) / 10 }));
+    const nos = ids.length ? await tx.select({ id: charge.id, no: bill.invoiceNo }).from(charge).innerJoin(bill, eq(bill.id, charge.billId)).where(inArray(charge.id, ids)) : [];
+    return rows.map((r) => ({ ...r.a, invoices: [...new Set(r.a.lines.map((l) => nos.find((n) => n.id === l.chargeId)?.no).filter(Boolean))] as string[], paidPaise: r.a.lines.reduce((s, l) => s + (l.chargeId ? got.get(l.chargeId) ?? 0 : 0), 0) || r.a.paidPaise, patient: { id: r.a.patientId, fullName: r.name, phone: r.phone, patientNo: r.no }, pct: Math.round((r.a.offPaise / Math.max(1, r.a.listPaise)) * 1000) / 10 }));
   });
 
   /** Approve: the discount comes off the invoices (and the course). Say no: the amount stays due, as billed. */

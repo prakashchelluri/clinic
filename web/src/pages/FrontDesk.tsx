@@ -369,7 +369,7 @@ function HistoryPanel({ find, onBook }: { canDesk: boolean; find: string; onBook
   useEffect(() => { if (find && !term) setTerm(find); }, []);
   useEffect(() => { const h = setTimeout(() => setQd(term), 300); return () => clearTimeout(h); }, [term]);
   const h = useQuery({ queryKey: ['fd-history', from, to, qd, filter], queryFn: () => get(`/frontdesk/history?from=${from}&to=${to}&q=${encodeURIComponent(qd)}&filter=${filter}`), enabled: !badDates });
-  const refund = useMutation({ mutationFn: ({ c, reason }: any) => post(`/charges/${c.id}/adjust`, { kind: 'refunded', reason }), onSuccess: (_r, { c, name }: any) => { ['fd-history', 'frontdesk', 'daily', 'dayclose'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`Refunded ${money(c.amountPaise)} to ${name}`); }, onError: (e) => toast(moneyErr(e), 'err') });
+  const refund = useMutation({ mutationFn: ({ c, reason }: any) => post(`/charges/${c.id}/adjust`, { kind: 'refunded', reason, idempotencyKey: `fee-refund-${c.id}` }), onSuccess: (_r, { c, name }: any) => { ['fd-history', 'frontdesk', 'daily', 'dayclose'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`Refunded ${money(c.amountPaise)} to ${name}`); }, onError: (e) => toast(moneyErr(e), 'err') });
   // the same reason picker as every other refund
   const [refunding, setRefunding] = useState<null | { c: any; name: string }>(null);
   const rows: any[] = h.data?.rows ?? []; const s = h.data?.summary;

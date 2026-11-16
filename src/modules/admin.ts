@@ -12,6 +12,7 @@ import { writeAudit, feeSummary } from '../lib/audit.js';
 import jsonLogic from 'json-logic-js';
 import { PackagesIn } from '../lib/packages.js';
 import { DEFAULT_ROLES, PERMISSIONS, hashPassword, HttpError, can, rolesFor, isKnownPerm, expandPerms, BUILTIN_NAMES } from '../lib/auth.js';
+import { validGstin } from '../lib/gstin.js';
 
 const DEFAULT_ROLES_FOR = (k: string) => DEFAULT_ROLES[k] ?? [];
 const Name = z.string().trim().min(1).max(100);
@@ -34,7 +35,7 @@ export function adminRoutes(app: FastifyInstance) {
     // UPI ID for the pharmacy's payment QR (name@bank); empty clears it
     if (body.settings?.upiId !== undefined) body.settings.upiId = z.string().trim().regex(/^([a-zA-Z0-9._-]{2,64}@[a-zA-Z0-9]{2,64})?$/, 'UPI_ID_FORMAT').parse(body.settings.upiId) || null;
     // GSTIN: 15 letters and digits; empty clears it (the clinic then issues a bill of supply, no CGST/SGST)
-    if (body.settings?.gstin !== undefined) body.settings.gstin = z.string().trim().toUpperCase().regex(/^([0-9A-Z]{15})?$/, 'GSTIN_FORMAT').parse(body.settings.gstin ?? '') || null;
+    if (body.settings?.gstin !== undefined) body.settings.gstin = z.string().trim().toUpperCase().refine((g) => !g || validGstin(g), 'GSTIN_FORMAT').parse(body.settings.gstin ?? '') || null; // format and check character
     // what patients read when their own language is not set
     if (body.settings?.messages?.language !== undefined) body.settings.messages.language = z.enum(['en', 'te', 'hi']).parse(body.settings.messages.language);
     if (body.settings && 'display' in body.settings) throw new HttpError(400, 'DISPLAY_TOKEN_IS_GENERATED');

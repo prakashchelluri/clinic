@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, sql, inArray, notInArray } from 'drizzle-orm';
-import { course, charge, encounter, payment, practitioner, procedureCatalog, procedureSession, quote, recommendation } from '../db/schema.js';
+import { course, charge, creditLine, encounter, payment, practitioner, procedureCatalog, procedureSession, quote, recommendation } from '../db/schema.js';
 import { advanceBalance, issueCredit, lineMoney, settle } from '../lib/money.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
@@ -16,45 +16,61 @@ const VOID = ['cancelled', 'waived']; // charges that no longer count
 /** The charges that bill a course: its own lines, and lines of its sessions billed before the course existed (older builds). */
 async function courseCharges(tx: Tx, t: string, c: Course) {
   return tx.select().from(charge).where(and(eq(charge.tenantId, t), notInArray(charge.status, VOID),
-    sql`(${charge.courseId} = ${c.id} or ${charge.sessionId} in (select id from procedure_session where recommendation_id = ${c.recommendationId}))`)).orderBy(charge.createdAt, charge.id);
+    sql`(${charge.courseId} = ${c.id} or ${charge.sessionId} in (select id from procedure_session where recommendation_id = ${c.recommendationId}))`)).orderBy(charge.createdAt, charge.lineNo);
 }
 
-/** Where the course stands in money. A treatment is billed once, as a whole (at Generate invoice, or when its first session is done);
- *  sessions never bill. What came off is a credit note. "Per session" is what a session really costs the patient: after any discount and credit.
- *  The old "paid ahead" fields stay in the shape, at zero, so every screen reads the same object. */
+/**
+ * Where the course stands, counted in sessions as well as rupees. A treatment is billed once for the sessions planned (at Generate invoice,
+ * or when its first session is done); sessions never bill one by one. Sessions taken off come back as a credit note that records how many
+ * sessions and how much of the list price it took back, so sessions added again later are always billable (never "Fully paid" for free).
+ * "Per session" is what a session really costs the patient: after discount and credits. The old "paid ahead" fields stay, at zero.
+ */
 export async function standing(tx: Tx, t: string, c: Course) {
   const chs = await courseCharges(tx, t, c);
-  const m = await lineMoney(tx, t, chs.map((x) => x.id));
-  const invoicedPaise = chs.reduce((s, x) => s + x.amountPaise + x.discountPaise, 0); // at the course price: a discount given on the invoice is billed, not left to bill again
+  const ids = chs.map((x) => x.id);
+  const m = await lineMoney(tx, t, ids);
+  const cls = ids.length ? await tx.select({ sessions: creditLine.sessions, listPaise: creditLine.listPaise }).from(creditLine).where(and(eq(creditLine.tenantId, t), inArray(creditLine.chargeId, ids))) : [];
+  const invoicedPaise = chs.reduce((s, x) => s + x.amountPaise + x.discountPaise, 0); // as issued, at the course price
   const discountPaise = chs.reduce((s, x) => s + x.discountPaise, 0);
   const creditedPaise = chs.reduce((s, x) => s + m.credited(x.id), 0);
   const paidPaise = chs.reduce((s, x) => s + m.applied(x.id), 0);
-  const uninvoicedPaise = Math.max(0, c.totalPaise - invoicedPaise);
+  const invoicedSessions = Math.max(0, chs.reduce((s, x) => s + (x.sessions ?? 0), 0) - cls.reduce((s, x) => s + x.sessions, 0));
+  const listBilledPaise = invoicedPaise - cls.reduce((s, x) => s + x.listPaise, 0); // the list price of the sessions still on invoices
+  const uninvoicedSessions = Math.max(0, c.sittings - invoicedSessions);
+  const uninvoicedPaise = uninvoicedSessions ? Math.max(0, c.totalPaise - listBilledPaise) : 0;
   const netPaise = chs.reduce((s, x) => s + x.amountPaise, 0) - creditedPaise; // billed after discount and credits
   const duePaise = chs.reduce((s, x) => s + Math.max(0, x.amountPaise - m.credited(x.id) - m.applied(x.id)), 0);
   const done = sum(await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))));
   const perSittingPaise = Math.round((netPaise + uninvoicedPaise) / Math.max(1, c.sittings));
   const treatment = chs.find((x) => !x.sessionId) ?? chs[0] ?? null;
-  return { ...c, perSittingPaise, invoicedPaise, uninvoicedPaise, netPaise, creditedPaise, invoiceId: treatment?.billId ?? null, invoiced: chs.length > 0,
+  return { ...c, perSittingPaise, invoicedPaise, uninvoicedPaise, invoicedSessions, uninvoicedSessions, listBilledPaise, netPaise, creditedPaise, invoiceId: treatment?.billId ?? null, invoiced: chs.length > 0,
     advancePaise: paidPaise, paidPaise, refundedPaise: 0, drawnPaise: 0, unusedPaise: 0, paidOnDayPaise: 0, doneSittings: done, unusedSittings: 0, refundablePaise: 0,
     discountPaise, duePaise, stillToPayPaise: duePaise + uninvoicedPaise };
 }
 
 /**
- * Sessions taken off a treatment (fewer sessions, or cancelled): the course is priced for the sessions kept, and what was billed for the
- * others comes off its invoice as a credit note, at what the patient was really charged for a session (after discount and earlier credits).
- * Money paid above what is then owed moves to the patient's advance. Call before the course row is changed. Returns what moved to the advance.
+ * The treatment is cut to `keep` sessions (fewer sessions, or cancelled after some were done). Invoiced sessions taken off come back as one
+ * credit note: at what a session was really charged (after discount and earlier credits), with the number of sessions and their share of the
+ * list price, so they can be billed again if added back. The course price follows. Money paid above what is then owed moves to the advance.
+ * Returns what moved to the advance.
  */
 export async function creditSessions(tx: Tx, ctx: Ctx, c: Course, keep: number, reason: string) {
   const t = ctx.tenantId;
   const st = await standing(tx, t, c);
-  await tx.update(course).set({ totalPaise: Math.round((c.totalPaise / Math.max(1, c.sittings)) * keep) }).where(eq(course.id, c.id));
-  let credit = Math.max(0, st.netPaise - Math.round(st.perSittingPaise * keep)); if (!credit) return 0;
+  const invKeep = Math.min(st.invoicedSessions, keep); const removed = st.invoicedSessions - invKeep; const uninvKeep = keep - invKeep;
+  const listPer = st.invoicedSessions ? st.listBilledPaise / st.invoicedSessions : 0;
+  const listRemoved = removed ? st.listBilledPaise - Math.round(listPer * invKeep) : 0;
+  const uninvPer = st.uninvoicedSessions ? st.uninvoicedPaise / st.uninvoicedSessions : 0;
+  await tx.update(course).set({ sittings: keep, totalPaise: Math.max(0, st.listBilledPaise - listRemoved + Math.round(uninvPer * uninvKeep)) }).where(eq(course.id, c.id)); // the sessions kept, at their price
+  let credit = removed && st.invoicedSessions ? st.netPaise - Math.round((st.netPaise / st.invoicedSessions) * invKeep) : 0;
+  if (credit <= 0) return 0;
   const chs = (await courseCharges(tx, t, c)).reverse(); // newest line first
   const m = await lineMoney(tx, t, chs.map((x) => x.id));
-  const byBill = new Map<string, { chargeId: string; amountPaise: number; what: string }[]>();
+  const byBill = new Map<string, { chargeId: string; amountPaise: number; what: string; sessions?: number; listPaise?: number }[]>();
+  let first = true;
   for (const x of chs) { if (!credit) break; const take = Math.min(credit, x.amountPaise - m.credited(x.id)); if (take <= 0) continue;
-    byBill.set(x.billId!, [...(byBill.get(x.billId!) ?? []), { chargeId: x.id, amountPaise: take, what: `${x.description}: ${c.sittings - keep} session${c.sittings - keep === 1 ? '' : 's'} not given` }]); credit -= take; }
+    byBill.set(x.billId!, [...(byBill.get(x.billId!) ?? []), { chargeId: x.id, amountPaise: take, what: `${x.description}: ${removed} session${removed === 1 ? '' : 's'} not given`, ...(first ? { sessions: removed, listPaise: listRemoved } : {}) }]);
+    credit -= take; first = false; }
   let moved = 0;
   for (const [billId, lines] of byBill) moved += (await issueCredit(tx, ctx, { billId, patientId: c.patientId, reason, lines })).toAdvancePaise;
   return moved;
@@ -112,8 +128,9 @@ export async function drawSitting(tx: Tx, ctx: Ctx, ps: { id: string; recommenda
   for (const k of group) {
     const st = await standing(tx, t, k); if (st.uninvoicedPaise <= 0) continue;
     const proc = k.procedureId ? await tx.select({ name: procedureCatalog.name, tax: procedureCatalog.taxRateBp }).from(procedureCatalog).where(eq(procedureCatalog.id, k.procedureId)).then((r) => r[0]) : null;
-    const [row]: (typeof charge.$inferSelect)[] = await tx.insert(charge).values({ tenantId: t, patientId: k.patientId, billId, description: `${proc?.name ?? 'Procedure'}${k.packageName ? ` (${k.packageName})` : ''} · ${k.sittings} session${k.sittings === 1 ? '' : 's'}${st.invoicedPaise ? ', the rest' : ''}`,
-      amountPaise: st.uninvoicedPaise, taxRateBp: proc?.tax ?? 0, courseId: k.id, procedureId: k.procedureId, status: 'due' }).returning();
+    const n = st.uninvoicedSessions;
+    const [row]: (typeof charge.$inferSelect)[] = await tx.insert(charge).values({ tenantId: t, patientId: k.patientId, billId, description: `${proc?.name ?? 'Procedure'}${k.packageName ? ` (${k.packageName})` : ''} · ${n} session${n === 1 ? '' : 's'}${st.invoiced ? ' added' : ''}`,
+      amountPaise: st.uninvoicedPaise, taxRateBp: proc?.tax ?? 0, courseId: k.id, procedureId: k.procedureId, sessions: n, status: 'due' }).returning();
     billId = row.billId;
     await emit(tx, ctx, 'course.invoiced', 'charge', row.id, { courseId: k.id, amountPaise: row.amountPaise, onSessionDone: ps.id });
     await payFromAdvance(tx, ctx, row);

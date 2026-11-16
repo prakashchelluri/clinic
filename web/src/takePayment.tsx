@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from './api';
 import { can } from './App';
-import { Icon, Modal, MoneyInput, Section, money, toPaise, toast, fmtDate } from './ui';
+import { Icon, Modal, MoneyInput, Section, ask, money, toPaise, toast, fmtDate } from './ui';
 import { printReceipt } from './invoices';
 import { stdTotal } from './procedureSettings';
 
@@ -28,6 +28,11 @@ export function moneyErr(e: any): string {
   if (c === 'NO_PRICE_ON_THE_PRICE_LIST') return 'This has no price on the price list. Set it in Settings › Consultation types or Procedures & packages.';
   if (c === 'MORE_THAN_THE_ADVANCE') return `Only ${money(b.balancePaise)} is left in the advance.`;
   if (c === 'NOTHING_TO_BILL') return 'Add an item, or type an amount to take as advance.';
+  if (c === 'FEE_MORE_THAN_PAYMENT') return 'The fee is more than the EMI amount. Check what the lender kept.';
+  if (c === 'SAY_WHICH_ITEM') return 'Say how much comes off each item.';
+  if (c === 'ITEMS_DO_NOT_ADD_UP') return 'The amounts off the items must add up to the refund.';
+  if (c === 'MORE_THAN_THE_LINE') return `That is more than is left of ${b.what}${b.leftPaise != null ? ` (${money(b.leftPaise)})` : ''}.`;
+  if (c === 'ISSUED_INVOICE_LINE_IS_FROZEN') return 'An issued invoice cannot be changed. Use a credit note (refund or discount) instead.';
   return errText(e);
 }
 const MODE_NAME: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'card', emi: 'EMI', bank: 'bank transfer', advance: 'the advance' };
@@ -49,7 +54,7 @@ function UnitSwitch({ unit, onChange, label }: { unit: Unit; onChange: (u: Unit)
     <button key={u} type="button" aria-pressed={unit === u} className={`h-7 min-w-7 rounded-md px-1.5 text-[13px] font-bold ${unit === u ? 'bg-surface text-ink shadow-sm' : 'text-muted'}`} onClick={() => onChange(u)}>{u === 'pct' ? '%' : '₹'}</button>)}</span>;
 }
 function DiscountBox({ v, unit, onV, onUnit, label, disabled, maxPaise }: { v: string; unit: Unit; onV: (v: string) => void; onUnit: (u: Unit) => void; label: string; disabled?: boolean; maxPaise: number }) {
-  return <span className="inline-flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-1.5"><input className="input !h-9 !w-16 text-right tabular-nums sm:!w-20" inputMode={unit === 'pct' ? 'decimal' : 'numeric'} autoComplete="off" aria-label={label} disabled={disabled} placeholder="0" value={v}
+  return <span className="inline-flex flex-col items-end gap-1 xl:flex-row xl:items-center xl:gap-1.5"><input className="input !h-9 !w-16 text-right tabular-nums xl:!w-20" inputMode={unit === 'pct' ? 'decimal' : 'numeric'} autoComplete="off" aria-label={label} disabled={disabled} placeholder="0" value={v}
     onChange={(e) => {
       let x = unit === 'rs' ? e.target.value.split('.')[0].replace(/\D/g, '') : e.target.value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1').replace(/(\.\d{2})\d+/, '$1'); // ₹ in whole rupees
       if (unit === 'pct' && Number(x) > 100) x = '100'; if (unit === 'rs' && Number(x) * 100 > maxPaise) x = String(Math.floor(maxPaise / 100)); // never more than the item
@@ -91,11 +96,11 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const pkgOf = (r: any) => r?.package?.name ? ` · ${r.package.name} package` : '';
   const treatLine = (recId: string, on = true): Line | null => {
     const r = plans.find((x) => x.id === recId); if (!r) return null;
-    const c = courses.find((x) => x.recommendationId === recId); const n = c?.sittings ?? r.sittings ?? 1;
+    const c = courses.find((x) => x.recommendationId === recId); const n = c ? (c.uninvoicedSessions || c.sittings) : r.sittings ?? 1; // an invoiced treatment: only the sessions added since
     const total = c ? c.uninvoicedPaise : r.amountPaise > 0 ? r.amountPaise as number : stdTotal(procs.find((p) => p.id === r.procedureId), n);
     if (!total || total <= 0 || c?.expired) return null;
-    return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(r.procedureId)}${pkgOf(r)} · ${n} session${n === 1 ? '' : 's'}${c?.invoicedPaise ? ', the rest' : ''}`,
-      sub: `${c?.doneSittings ? `${c.doneSittings} of ${n} done · ` : ''}${r.package ? 'its share of the package price · ' : r.amountPaise > 0 ? 'custom price · ' : ''}the whole treatment; sessions are not billed again`,
+    return { key: `a:${recId}`, kind: 'ahead', id: recId, what: `${procName(r.procedureId)}${pkgOf(r)} · ${n} session${n === 1 ? '' : 's'}${c?.invoiced ? ' added' : ''}`,
+      sub: c?.invoiced ? `sessions added after the treatment was invoiced, at the standard price` : `${c?.doneSittings ? `${c.doneSittings} of ${n} done · ` : ''}${r.package ? 'its share of the package price · ' : r.amountPaise > 0 ? 'custom price · ' : ''}the whole treatment; sessions are not billed again`,
       unitPaise: total, qty: 1, maxQty: 1, on, dv: '', unit: 'pct', prior: 0, taxBp: taxOf(r.procedureId), group: r.package?.group, procId: r.procedureId };
   };
 
@@ -151,7 +156,9 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
   const tooBig = on.find((l) => !l.noDiscount && lineOff(l) >= gross(l) && lineOff(l) > 0);
   const fromAdv = advUse;
   const extra = Math.max(0, total - payable); // more than the bill: kept as advance when ticked
-  const gst = on.reduce((s, l) => { const after = gross(l) - lineOff(l); const share = !l.noDiscount && room ? Math.round((extra_ * after) / room) : 0; return s + gstIn(after - share, l.taxBp); }, 0);
+  // the extra discount shared out the way the server does it: in proportion, whole rupees per line, the last line takes the rest
+  const shares = new Map<string, number>(); { const rl = on.filter((l) => !l.noDiscount); let rest = extra_; rl.forEach((l, k) => { const sh = k === rl.length - 1 ? rest : room ? Math.round((extra_ * (gross(l) - lineOff(l))) / room / 100) * 100 : 0; shares.set(l.key, sh); rest -= sh; }); }
+  const gst = on.reduce((s, l) => { const after = gross(l) - lineOff(l); return s + gstIn(after - (shares.get(l.key) ?? 0), l.taxBp); }, 0);
   const problem = !on.length && total <= 0 ? 'Tick or add an item, or type an amount to take as advance'
     : tooBig ? `The discount is the whole of ${tooBig.what}`
     : off > 0 && why.trim().length < 3 ? 'Say why there is a discount'
@@ -196,7 +203,10 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
       const svc = v.startsWith('s:'); const x = (svc ? services : procs).find((y) => y.id === v.slice(2)); if (!x) return;
       const have = lines.find((l) => l.kind === (svc ? 'service' : 'proc') && l.id === x.id);
       if (have) { setLine(have.key, { on: true, qty: Math.min(have.maxQty, have.qty + (have.on ? 1 : 0)) }); return; } // already on the bill: one more
-      setLines((ls) => [...ls, { key: `${v}:${ls.length}`, kind: svc ? 'service' : 'proc', id: x.id, what: x.name, sub: svc ? 'service, from the price list' : 'from the price list', unitPaise: x.pricePaise, qty: 1, maxQty: 20, on: true, dv: '', unit: 'pct', prior: 0, taxBp: svc ? 0 : x.taxRateBp ?? 0 }]);
+      // already billed and not paid yet: say so, so it is not billed twice by mistake
+      const open = svc ? null : tl.charges.find((c: any) => c.status === 'due' && c.procedureId === x.id);
+      if (open) toast(`${x.name} is already on ${invoiceNo[open.billId] ?? 'an invoice'}, not paid yet. Collect that one instead if it is the same.`, 'info');
+      setLines((ls) => [...ls, { key: `${v}:${ls.length}`, kind: svc ? 'service' : 'proc', id: x.id, what: x.name, sub: svc ? 'service, from the price list' : open ? `from the price list · already on ${invoiceNo[open.billId] ?? 'an invoice'}, unpaid` : 'from the price list', unitPaise: x.pricePaise, qty: 1, maxQty: 20, on: true, dv: '', unit: 'pct', prior: 0, taxBp: svc ? 0 : x.taxRateBp ?? 0 }]);
     } else { const ls0 = withPackage(v.split(':')[1]).filter((l) => !lines.some((x) => x.key === l.key)); if (ls0.length) setLines((ls) => [...ls, ...ls0]); else toast('This treatment is already on an invoice', 'info'); }
   };
   // quantity: in its own column, or under the item's name on a phone
@@ -218,15 +228,15 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
               </button>))}
           </div>}
         </div>
-        <div className="overflow-x-auto rounded-xl border border-line"><table className="table sm:min-w-[700px]">
-          <thead><tr><th className="w-8 pl-3" /><th>Item</th><th className="hidden text-right sm:table-cell">Qty</th><th className="hidden text-right sm:table-cell">Price</th><th>Discount</th>{gstOn && <th className="text-right">GST</th>}<th className="pr-3 text-right">Amount</th></tr></thead>
+        <div className="overflow-x-auto rounded-xl border border-line"><table className="table xl:min-w-[700px]">
+          <thead><tr><th className="w-8 pl-3" /><th>Item</th><th className="hidden text-right xl:table-cell">Qty</th><th className="hidden text-right xl:table-cell">Price</th><th>Discount</th>{gstOn && <th className="text-right">GST</th>}<th className="pr-3 text-right">Amount</th></tr></thead>
           <tbody>{lines.length === 0 ? <tr><td colSpan={gstOn ? 7 : 6} className="p-4 text-sm text-muted">Nothing is due. Search above to add an item, or just type an amount on the right to take an advance.</td></tr> : lines.map((l) => {
-            const g = gross(l); const o = l.on ? lineOff(l) + (!l.noDiscount && room ? Math.round((extra_ * (g - lineOff(l))) / room) : 0) : 0; // its own discount and its share of the extra
+            const g = gross(l); const o = l.on ? lineOff(l) + (shares.get(l.key) ?? 0) : 0; // its own discount and its share of the extra
             return <tr key={l.key} className={l.on ? '' : 'opacity-55'}>
               <td className="pl-3"><input type="checkbox" className="accent-clay h-4 w-4" checked={l.on} aria-label={`Include ${l.what}`} onChange={(e) => { const on = e.target.checked; setLines((ls) => ls.map((x) => (x.key === l.key || (l.group && x.group === l.group) ? { ...x, on } : x))); }} /></td>
-              <td className="min-w-0"><div className="text-sm font-medium">{l.what}</div><div className="text-xs text-muted">{l.sub}<span className="sm:hidden"> · {money(l.unitPaise)} each</span></div>{l.maxQty > 1 && <div className="sm:hidden">{stepper(l)}</div>}</td>
-              <td className="hidden text-right tabular-nums sm:table-cell">{l.maxQty > 1 ? stepper(l) : l.qty}</td>
-              <td className="hidden text-right tabular-nums sm:table-cell">{money(l.unitPaise)}</td>
+              <td className="min-w-0"><div className="text-sm font-medium">{l.what}</div><div className="text-xs text-muted">{l.sub}{l.maxQty > 1 && <span className="xl:hidden"> · {money(l.unitPaise)} each</span>}</div>{l.maxQty > 1 && <div className="xl:hidden">{stepper(l)}</div>}</td>
+              <td className="hidden text-right tabular-nums xl:table-cell">{l.maxQty > 1 ? stepper(l) : l.qty}</td>
+              <td className="hidden text-right tabular-nums xl:table-cell">{money(l.unitPaise)}</td>
               <td>{l.noDiscount ? <span className="text-xs text-muted">{l.noDiscount}</span> : <DiscountBox v={l.dv} unit={l.unit} label={`Discount on ${l.what}`} disabled={!l.on} maxPaise={Math.max(0, g - 100)} onV={(v) => setLine(l.key, { dv: v })} onUnit={(u) => setLine(l.key, { unit: u, dv: '' })} />}</td>
               {gstOn && <td className="text-right tabular-nums">{l.taxBp ? `${l.taxBp / 100}%` : '—'}{l.taxBp > 0 && <div className="text-xs text-muted">{money(gstIn(g - o, l.taxBp))}</div>}</td>}
               <td className="pr-3 text-right tabular-nums"><b>{money(g - o)}</b>{o > 0 && <div className="text-xs text-muted">−{money(o)} off</div>}</td>
@@ -261,7 +271,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
             {p.method !== 'cash' && p.method !== 'advance' && <input className="input" maxLength={60} aria-label={p.method === 'emi' ? 'Approval code' : 'Reference'} placeholder={p.method === 'emi' ? 'Approval code' : p.method === 'upi' ? 'Ref, last 4 digits' : 'Reference'} value={p.reference} onChange={(e) => setPart(i, { reference: e.target.value })} />}
             {p.method === 'emi' && <input className="input" maxLength={60} aria-label="Lender" placeholder="Lender, for example Bajaj Finserv" value={p.lender} onChange={(e) => setPart(i, { lender: e.target.value })} />}
           </div>))}
-          {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => setParts([...parts, { method: 'cash', amount: '', reference: '', lender: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
+          {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => setParts([...parts.map((p, i) => (i === 0 && parts.length === 1 && p.amount === '' && toPay > 0 ? { ...p, amount: String(toPay / 100) } : p)), { method: 'cash', amount: '', reference: '', lender: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
         </div>}
         <div className="flex justify-between border-t border-line pt-2.5 font-bold"><span>Paying now</span><span className="tabular-nums">{money(paidNew)}</span></div>
         <div className="flex justify-between"><span className="text-muted">Stays due</span><span className="tabular-nums font-semibold text-amber">{money(Math.max(0, payable - total))}</span></div>
@@ -277,16 +287,16 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
 export function EmiAwaiting() {
   const q = useQuery({ queryKey: ['payments-awaiting'], queryFn: () => get('/payments/awaiting') });
   const [open, setOpen] = useState<any>(null); const [fee, setFee] = useState(''); const [ref, setRef] = useState('');
-  const settle = useMutation({ mutationFn: () => post(`/payments/${open.id}/settle`, { feePaise: toPaise(fee), reference: ref.trim() || undefined }), onSuccess: () => { refresh(); toast('Matched with the bank credit'); setOpen(null); }, onError: (e) => toast(errText(e), 'err') });
+  const settle = useMutation({ mutationFn: () => post(`/payments/${open.id}/settle`, { feePaise: toPaise(fee), reference: ref.trim() || undefined }), onSuccess: () => { refresh(); toast('Matched with the bank credit'); setOpen(null); }, onError: (e) => toast(moneyErr(e), 'err') });
   const rows: any[] = q.data ?? [];
   if (!rows.length) return null;
   return (
     <Section title={<>EMI awaiting settlement <span className="text-muted font-normal">· {rows.length}</span></>} className="mt-5">
       <div className="overflow-x-auto"><table className="table min-w-[460px]"><tbody>{rows.map((r) => <tr key={r.id}><td className="pl-4">{r.patient}<div className="text-xs text-muted">{r.lender} · code {r.reference} · approved {fmtDate(r.receivedAt)}</div></td><td className="text-right">{money(r.amountPaise)}</td><td className="text-right pr-4 no-print"><button className="btn btn-sm" onClick={() => { setOpen(r); setFee(''); setRef(''); }}>Bank credit arrived</button></td></tr>)}</tbody></table></div>
       {open && <Modal title="Match the bank credit" subtitle={`${open.patient} · ${open.lender} · ${money(open.amountPaise)}`} onClose={() => setOpen(null)} width="max-w-md">
-        <div className="space-y-3"><div><label className="label">What the lender kept (fee)</label><MoneyInput autoFocus value={fee} onChange={setFee} /><div className="mt-1 text-xs text-muted">Booked as an expense.</div></div>
+        <div className="space-y-3"><div><label className="label">What the lender kept (fee)</label><MoneyInput autoFocus value={fee} onChange={setFee} /><div className={`mt-1 text-xs ${toPaise(fee) > open.amountPaise ? 'text-rose' : 'text-muted'}`}>{toPaise(fee) > open.amountPaise ? `The fee cannot be more than the ${money(open.amountPaise)} paid.` : 'Booked as an expense.'}</div></div>
           <div><label className="label">Bank reference (optional)</label><input className="input" maxLength={60} value={ref} onChange={(e) => setRef(e.target.value)} /></div>
-          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button><button className="btn btn-primary" disabled={settle.isPending} onClick={() => settle.mutate()}><Icon name="check" />Matched</button></div></div></Modal>}
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setOpen(null)}>Cancel</button><button className="btn btn-primary" disabled={settle.isPending || toPaise(fee) > open.amountPaise} onClick={() => settle.mutate()}><Icon name="check" />Matched</button></div></div></Modal>}
     </Section>
   );
 }
@@ -300,9 +310,9 @@ export function DiscountAsks() {
   return <>{rows.map((a) => <div key={a.id} className="row flex-wrap">
     <span className="flex h-11 min-w-14 items-center justify-center rounded-xl bg-amber/15 px-2 text-[15px] font-extrabold tabular-nums">{a.pct}%</span>
     <div className="min-w-[220px] flex-1"><div className="text-[14px] font-semibold">Discount {money(a.offPaise)} for {a.patient.fullName}</div>
-      <div className="text-xs text-muted">{a.lines.map((l: any) => l.what).join(', ')} · list {money(a.listPaise)} → {money(a.listPaise - a.offPaise)} · asked by {a.askedBy}, {fmtDate(a.createdAt)}</div>
+      <div className="text-xs text-muted">{a.invoices?.length ? <b className="text-ink">{a.invoices.join(', ')} · </b> : null}{a.lines.map((l: any) => l.what).join(', ')} · list {money(a.listPaise)} → {money(a.listPaise - a.offPaise)} · asked by {a.askedBy}, {fmtDate(a.createdAt)}</div>
       <div className="text-xs text-muted">“{a.reason}” · {a.paidPaise ? `${money(a.paidPaise)} taken on that bill` : 'nothing taken on that bill'}</div></div>
-    <span className="flex gap-2"><button className="btn btn-sm" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, action: 'reject' })}>Say no</button><button className="btn btn-sm btn-primary" disabled={decide.isPending} onClick={() => decide.mutate({ id: a.id, action: 'approve' })}>Approve</button></span>
+    <span className="flex gap-2"><button className="btn btn-sm" disabled={decide.isPending} onClick={() => ask({ title: `Say no to ${money(a.offPaise)} off for ${a.patient.fullName}?`, body: `${a.invoices?.join(', ') ?? ''} · the full amount stays due.`, confirmLabel: 'Say no', tone: 'danger' }).then((ok) => ok && decide.mutate({ id: a.id, action: 'reject' }))}>Say no</button><button className="btn btn-sm btn-primary" disabled={decide.isPending} onClick={() => ask({ title: `Approve ${money(a.offPaise)} off for ${a.patient.fullName}?`, body: `${a.invoices?.join(', ') ?? ''} · a credit note takes it off the invoice.`, confirmLabel: 'Approve' }).then((ok) => ok && decide.mutate({ id: a.id, action: 'approve' }))}>Approve</button></span>
   </div>)}</>;
 }
 export const useDiscountAsks = (enabled: boolean) => useQuery({ queryKey: ['discount-asks', 'pending'], queryFn: () => get('/discount-asks'), enabled, refetchInterval: 60000 });

@@ -89,7 +89,7 @@ export function CancelPlanDialog({ plans, sessions, courses, procName, onClose }
   const go = useMutation({
     mutationFn: async () => {
       const r: any = await post('/procedure-plans/cancel', { ids: plans.map((r) => r.id), reason: why.trim() });
-      if (refund && mayRefund && r.toAdvancePaise > 0) await post(`/patients/${plans[0].patientId}/advance/refund`, { amountPaise: r.toAdvancePaise, method: mode, reason: `Cancelled: ${why.trim()}` });
+      if (refund && mayRefund && r.toAdvancePaise > 0) await post(`/patients/${plans[0].patientId}/advance/refund`, { idempotencyKey: `cancel-${plans.map((p) => p.id).join('-').slice(0, 60)}`, amountPaise: r.toAdvancePaise, method: mode, reason: `Cancelled: ${why.trim()}` });
       return r;
     },
     onSuccess: (r: any) => { refresh(); ['bills', 'advance'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(`${pk ? pk.name : procName(plans[0])} cancelled${r.toAdvancePaise ? ` · ${money(r.toAdvancePaise)} ${refund && mayRefund ? 'refunded' : 'moved to the advance'}` : ''}`); onClose(); },
