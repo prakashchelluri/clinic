@@ -17,6 +17,8 @@ const { message, procedureSession } = await import('../src/db/schema.js');
 const { localToUtc } = await import('../src/lib/booking.js');
 const { addDays } = await import('../src/lib/core.js');
 const { eq } = await import('drizzle-orm');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const SYS = '00000000-0000-4000-8000-000000000000';
@@ -46,7 +48,7 @@ test('course: planned with a gap, booked one sitting at a time, confirmed a week
 
   // sitting 1, ten days out: not confirmed yet; one reminder at 10:00 the day before
   const day10 = addDays(today(), 10);
-  const s1 = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: day10, startTime: '11:00', minutes: 30, force: true })).body;
+  const s1 = (await O('POST', '/procedure-sessions', { practitionerId: await drMain(O), recommendationId: rec.id, day: day10, startTime: '11:00', minutes: 30, force: true })).body;
   assert.equal(s1.weekConfirmedAt, null); assert.equal(s1.patientConfirmedAt, null);
   const msgs = (id: string) => withTenant(p.tenantId, SYS, (tx) => tx.select().from(message).where(eq(message.procedureSessionId, id)));
   let m = (await msgs(s1.id)).filter((x) => x.status === 'pending');
@@ -57,7 +59,7 @@ test('course: planned with a gap, booked one sitting at a time, confirmed a week
   assert.equal((await calls('confirm')).length, 0, 'ten days out: nothing to confirm yet');
 
   // moving it twice still leaves exactly one reminder
-  for (const d of [addDays(today(), 12), day10]) assert.equal((await R('POST', `/procedure-sessions/${s1.id}/reschedule`, { day: d, startTime: '11:00', minutes: 30, force: true })).status, 200);
+  for (const d of [addDays(today(), 12), day10]) assert.equal((await O('POST', `/procedure-sessions/${s1.id}/reschedule`, { practitionerId: await drMain(O), day: d, startTime: '11:00', minutes: 30, force: true })).status, 200);
   m = (await msgs(s1.id)).filter((x) => x.status === 'pending'); assert.equal(m.length, 1);
 
   // six days to go (time passes): the week-before call
@@ -92,7 +94,7 @@ test('course: planned with a gap, booked one sitting at a time, confirmed a week
   assert.equal((await R('PATCH', `/procedure-sessions/${byPlan.id}`, { state: 'cancelled', reason: 'patient wants it sooner' })).status, 200);
 
   // sitting 2 booked inside the week (at the desk): that is the week confirmation; missed drops its reminder and the course stays to book
-  const s2 = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(today(), 5), startTime: '12:00', minutes: 30, force: true })).body;
+  const s2 = (await O('POST', '/procedure-sessions', { practitionerId: await drMain(O), recommendationId: rec.id, day: addDays(today(), 5), startTime: '12:00', minutes: 30, force: true })).body;
   assert.equal(s2.sittingNo, 2); assert.ok(s2.weekConfirmedAt); assert.equal(s2.patientConfirmedAt, null);
   assert.equal((await calls('confirm')).length, 0);
   assert.equal((await msgs(s2.id)).filter((x) => x.status === 'pending').length, 1);
@@ -109,7 +111,7 @@ test('a patient who asked for no WhatsApp gets no reminder, only the calls', asy
   const e = (await O('POST', `/visits/${v.id}/encounter`, {})).body;
   await O('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Acne'] }, assessment: { diagnosis: [{ name: 'Acne' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 2, gapDays: 21 }] });
   const rec = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
-  const s = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(today(), 9), startTime: '10:00', minutes: 30, force: true })).body;
+  const s = (await O('POST', '/procedure-sessions', { practitionerId: await drMain(O), recommendationId: rec.id, day: addDays(today(), 9), startTime: '10:00', minutes: 30, force: true })).body;
   const m = await withTenant(p.tenantId, SYS, (tx) => tx.select().from(message).where(eq(message.procedureSessionId, s.id)));
   assert.equal(p.noWhatsapp, true); assert.equal(m.length, 1); assert.equal(m[0].status, 'skipped'); assert.match(m[0].error ?? '', /no WhatsApp/);
 });
@@ -124,8 +126,8 @@ test('menu badges: calls due today and today\'s sittings, amber while one is not
   const rec = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
   const before = (await R('GET', '/followups/menu-counts')).body;
   // booked at the desk for today: counted, already confirmed
-  const s = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(today(), 3), startTime: '19:30', minutes: 30, force: true })).body;
-  await R('POST', `/procedure-sessions/${s.id}/reschedule`, { day: today(), startTime: '19:30', minutes: 30, force: true }); // moved by the clinic: not confirmed
+  const s = (await O('POST', '/procedure-sessions', { practitionerId: await drMain(O), recommendationId: rec.id, day: addDays(today(), 3), startTime: '19:30', minutes: 30, force: true })).body;
+  await O('POST', `/procedure-sessions/${s.id}/reschedule`, { practitionerId: await drMain(O), day: today(), startTime: '19:30', minutes: 30, force: true }); // moved by the clinic: not confirmed
   const mid = (await R('GET', '/followups/menu-counts')).body;
   assert.equal(mid.sittings, before.sittings + 1); assert.equal(mid.unconfirmed, before.unconfirmed + 1);
   assert.equal(mid.calls, before.calls, 'booked: off the to-book list, onto the day call (same count)');

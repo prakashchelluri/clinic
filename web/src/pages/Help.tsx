@@ -165,9 +165,10 @@ function Reception() {
       <>Tap <Btn>Generate invoice</Btn>. The treatment is one line for all its sessions. Take what the patient pays now; the rest stays due on the patient.</>,
       <>A discount is given on that screen, never on the price (see Taking a payment).</>,
     ]}</Steps>
-    <Tip>If the patient stops, <b>Cancel</b> the procedure on the patient&rsquo;s Procedures. The invoice drops to the sessions done, and money paid for the rest moves to the patient&rsquo;s advance. <Btn>Refund</Btn> on Bills &amp; payments gives it back.</Tip>
-    <P>The <b>Procedures</b> page has three views. <b>Schedule</b> shows sessions by date. <b>Board</b> shows every plan as Advised, Started or Paid; tap a plan to see each session: when, who did it, and whether it was paid. <b>Plans to schedule</b> lists plans with no booked session.</P>
-    <P>To put a second doctor on a session as supervisor, open Schedule, choose the session, and use <Btn>Assign doctor</Btn> then <b>Supervised by</b>.</P>
+    <Tip>If the patient stops, <b>Cancel</b> the procedure on the patient&rsquo;s Procedures. A credit note takes the sessions not done off the invoice, and money paid for them moves to the patient&rsquo;s advance. <Btn>Refund</Btn> on Bills &amp; payments gives it back.</Tip>
+    <P>The <b>Procedures</b> page has three tabs. <b>Today&rsquo;s sessions</b> shows today by the hour. <b>Week plan</b> shows a week of sessions by the hour, with their status. <b>All courses</b> lists every course and where it stands.</P>
+    <P>Every session has a doctor, and the doctor approves every session. A session the doctor books for themselves is approved at once. Any other booking is <b>Not sent</b>. The Procedures menu, the Week plan tab and the desk&rsquo;s Action panel show how many are waiting. Each week, open <b>Week plan</b>, check the next week and press <Btn>Send for doctor approval</Btn>. Each doctor sees only their own sessions under <b>Needs your attention</b> and can approve, move or send them back with a note. The patient gets the reminder only after approval. Once a week has been sent, a change in that week goes to the doctor straight away. A session booked for the current week also goes to the doctor straight away.</P>
+    <P>To put a second doctor on a session as supervisor, open the session on the Week plan and use <Btn>Change doctor</Btn> then <b>Supervised by</b>.</P>
 
     <H2 id="payments">Bills &amp; payments</H2>
     <P>Money belongs to the patient, not to a procedure. The patient&rsquo;s Bills &amp; payments tab shows Billed, Received, Refunded and what is Due (or held as Advance), then one list of invoices, payments, refunds and credits. It has three buttons:</P>
@@ -181,7 +182,7 @@ function Reception() {
       <>To bill something new, pick it from <b>+ Add an item from the price list</b>.</>,
       <>A <b>discount</b> goes on a line or on the whole bill (Extra discount). Each has a <b>%</b> / <b>₹</b> switch. Say why. Consultation fees take no discount.</>,
       <>Within the clinic&rsquo;s discount limit it applies at once. Above it (or if you may not give discounts) the button says <Btn>Send discount for approval</Btn>: you can take the discounted amount now, and the rest waits. The owner sees it on Today under Needs your attention; if the owner says no, the difference becomes due.</>,
-      <>Pick a mode and an amount. To <b>split</b>, tap <Btn>Payment mode</Btn>. You can pay part and leave the rest due, or tick <b>Nothing now, pay later</b> to only save the bill.</>,
+      <>Each payment is one line: a method and an amount. To <b>split</b> (say cash and UPI), tap <b>Split: add another method</b>. Less than the bill leaves a balance due; tap <b>Patient pays later</b> to only save the bill.</>,
       <>For <b>EMI</b> type the lender and the approval code. EMI counts as paid at once, but it is listed under &ldquo;EMI awaiting settlement&rdquo; (Reports page) until the bank credit arrives. Then tap <Btn>Bank credit arrived</Btn> and enter the fee the lender kept.</>,
       <>Under <b>Invoices</b>, the &hellip; menu on a paid row has <Btn>Print receipt</Btn>.</>,
     ]}</Steps>

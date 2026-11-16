@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, post, qc, today, errText } from '../api';
+import { can } from '../App';
 import { ProcToday } from './ProcToday';
 import { ProcWeek } from './ProcWeek';
 import { CourseList, clashLabel } from '../procBoard';
@@ -10,7 +11,9 @@ import { Drawer, Chip, Icon, PageHeader, Skeleton, Tabs, fmtDate, toast } from '
 type View = 'today' | 'week' | 'courses';
 /** Procedures: today's sittings by the hour, the week the coordinator plans and sends to the doctors, and every course on one board. */
 export function Worklist() {
-  const [sp, setSp] = useSearchParams();
+  const [sp, setSp] = useSearchParams(); const { perms } = useOutletContext<any>();
+  // the Week plan tab counts the sessions still to send for the doctor's approval (the desk and the coordinator)
+  const mc = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: can(perms, 'worklist.write'), refetchInterval: 30000 });
   const tab = sp.get('tab');
   // older links: schedule = today, plans = week (Pending schedules), board = courses
   const view: View = tab === 'week' || tab === 'plans' ? 'week' : tab === 'courses' || tab === 'board' ? 'courses' : 'today';
@@ -18,7 +21,7 @@ export function Worklist() {
   return (
     <div>
       <PageHeader title="Procedures" />
-      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sessions" }, { value: 'week', label: 'Week plan' }, { value: 'courses', label: 'All courses' }]} />
+      <Tabs<View> className="mb-4" value={view} onChange={setView} options={[{ value: 'today', label: "Today's sessions" }, { value: 'week', label: 'Week plan', count: mc.data?.toSend?.n || undefined }, { value: 'courses', label: 'All courses' }]} />
       {view === 'today' ? <ProcToday /> : view === 'week' ? <ProcWeek /> : <CourseList />}
     </div>
   );
@@ -33,12 +36,17 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
   const [minutesTouched, setMinutesTouched] = useState(false);
   const [minutes, setMinutesRaw] = useState<number>(sitting ? Math.max(5, toM(sitting.endTime) - toM(sitting.startTime) - (proc?.bufferMinutes ?? 0)) : proc?.typicalMinutes ?? 30);
   const setMinutes = (m: number) => { setMinutesRaw(m); setMinutesTouched(true); };
-  const [doc, setDoc] = useState<string>(sitting ? sitting.practitionerId ?? '' : (rec as any).practitionerId ?? proc?.practitionerId ?? (proc?.requiresMainDoctor ? cfg.practitioners[0]?.id ?? '' : ''));
+  // every session has a doctor, who approves it; the course's doctor is picked first (the server says who that is)
+  const [doc, setDocRaw] = useState<string>(sitting?.practitionerId ?? (rec as any).practitionerId ?? proc?.practitionerId ?? '');
+  const [docTouched, setDocTouched] = useState(false);
+  const setDoc = (d: string) => { setDocRaw(d); setDocTouched(true); };
+  const docs = cfg.practitioners.filter((p: any) => p.active !== false);
   const [pick, setPick] = useState<{ roomId: string; startTime: string } | null>(at ? { roomId: at.roomId, startTime: at.startTime } : null); // a free room-hour tapped on the schedule
   const [manual, setManual] = useState({ startTime: '', roomId: '' });
   const [conf, setConf] = useState<any[] | null>(null);
   const endOf = (start: string) => { const m = toM(start) + minutes + (proc?.bufferMinutes ?? 0); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
-  const slots =useQuery({ queryKey: ['slots', rec.procedureId, day, doc, minutes], queryFn: () => get(`/procedure-sessions/slots?day=${day}&procedureId=${rec.procedureId}&minutes=${minutes}${doc ? `&practitionerId=${doc}` : ''}`), enabled: !!rec.procedureId });
+  const slots =useQuery({ queryKey: ['slots', rec.procedureId, day, doc, minutes], queryFn: () => get(`/procedure-sessions/slots?day=${day}&procedureId=${rec.procedureId}&minutes=${minutes}${doc ? `&practitionerId=${doc}` : ''}${rec.id ? `&recommendationId=${rec.id}` : ''}`), enabled: !!rec.procedureId });
+  useEffect(() => { if (!doc && !docTouched && slots.data?.courseDoctorId) setDocRaw(slots.data.courseDoctorId); }, [slots.data?.courseDoctorId]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = useMutation({
     mutationFn: (force: boolean) => post(sitting ? `/procedure-sessions/${sitting.id}/reschedule` : '/procedure-sessions', { ...(sitting ? { reason: reason.trim() || undefined } : { recommendationId: rec.id }), day, startTime: pick?.startTime ?? manual.startTime, minutes, ...(!sitting && !minutesTouched ? { autoMinutes: true } : {}), roomId: pick?.roomId ?? manual.roomId ?? null, practitionerId: doc || null, force }),
     onSuccess: (r: any) => { toast(`${sitting ? 'Moved to' : 'Scheduled'} ${day} ${r.startTime}`); onClose(); },
@@ -54,7 +62,7 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
         <div className="grid grid-cols-3 gap-3">
           <div><label className="label">Day</label><input type="date" className="input" value={day} onChange={(e) => { setDay(e.target.value); setPick(null); }} /></div>
           <div><label className="label">Duration (min)</label><div className="flex gap-1 flex-wrap">{[15, 30, 45, 60, 90, 120].map((m) => <button key={m} className={`toggle-opt ${minutes === m ? 'on' : ''}`} onClick={() => { setMinutes(m); setPick(null); }}>{m}</button>)}</div></div>
-          <div><label className="label">Doctor {proc?.requiresMainDoctor && <span className="text-clay">Required</span>}</label><select className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setPick(null); }}><option value="">Other staff / none</option>{cfg.practitioners.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <div><label className="label">Doctor</label><select className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setPick(null); }}>{!doc && <option value="">Pick the doctor</option>}{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
             {doc && <div className="text-[11px] text-amber mt-1">{cfg.practitioners.find((p: any) => p.id === doc)?.name ?? 'This doctor'} gets no OPD bookings {(pick?.startTime ?? manual.startTime) ? `${pick?.startTime ?? manual.startTime}–${endOf(pick?.startTime ?? manual.startTime)}` : 'for the session'}.</div>}</div>
         </div>
         <div>
@@ -69,7 +77,7 @@ export function ScheduleModal({ rec, sitting, at, onClose, cfg: cfgP }: { rec: a
         <details className="text-sm"><summary className="cursor-pointer text-muted">Set time and room manually</summary>
           <div className="flex gap-2 mt-2 items-center"><input type="time" className="input !w-auto" value={manual.startTime} onChange={(e) => { setManual({ ...manual, startTime: e.target.value }); setPick(null); }} /><select className="input !w-auto" value={manual.roomId} onChange={(e) => setManual({ ...manual, roomId: e.target.value })}><option value="">No room</option>{cfg.rooms.map((r: any) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div></details>
         {conf && <div className="rounded-xl bg-amber-soft text-amber text-sm p-3 anim-fade-up"><div className="font-medium mb-1">This slot clashes:</div>{conf.map((c, i) => <div key={i}>• {clashLabel(c.kind)}: {c.who} ({c.startTime}–{c.endTime})</div>)}<button className="btn btn-sm mt-2" onClick={() => save.mutate(true)}>Schedule anyway</button></div>}
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || (!pick && !manual.startTime)} onClick={() => save.mutate(false)}><Icon name="check" />Book {new Date(day + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}{(pick?.startTime ?? manual.startTime) ? `, ${pick?.startTime ?? manual.startTime}` : ''}</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !doc || (!pick && !manual.startTime)} onClick={() => save.mutate(false)}><Icon name="check" />Book {new Date(day + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })}{(pick?.startTime ?? manual.startTime) ? `, ${pick?.startTime ?? manual.startTime}` : ''}</button></div>
       </div>
     </Drawer>
   );

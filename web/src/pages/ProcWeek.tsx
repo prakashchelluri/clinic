@@ -3,7 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useOutletContext, useSearchParams } from 'react-router';
 import { get, patch, post, today, errText } from '../api';
 import { can } from '../App';
-import { Floating, Icon, Modal, Skeleton, ask, toast } from '../ui';
+import { Chip, Floating, Icon, Modal, Skeleton, ask, toast } from '../ui';
 import { ScheduleModal } from './Worklist';
 import { LoadError } from '../procBoard';
 import { ProcedureDrawer } from '../procDrawer';
@@ -14,8 +14,9 @@ import { AssignDoctor, Block, Stub, addDay, fillsHour, hourLabel, inHour, lenTex
 /** The Monday of a day's week. */
 export const mondayOf = (d: string) => addDay(d, -((new Date(d + 'T00:00:00Z').getUTCDay() + 6) % 7));
 const fmt = (d: string, o: Intl.DateTimeFormatOptions) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { ...o, timeZone: 'UTC' });
-const rangeText = (mon: string) => { const sat = addDay(mon, 5);
-  return mon.slice(5, 7) === sat.slice(5, 7) ? `${Number(mon.slice(8))} – ${fmt(sat, { day: 'numeric', month: 'short', year: 'numeric' })}` : `${fmt(mon, { day: 'numeric', month: 'short' })} – ${fmt(sat, { day: 'numeric', month: 'short', year: 'numeric' })}`; };
+/** "16 – 21 Nov 2026": Monday to Saturday, or to Sunday when the clinic works it that week. */
+const rangeText = (mon: string, n = 6) => { const last = addDay(mon, n - 1);
+  return mon.slice(5, 7) === last.slice(5, 7) ? `${Number(mon.slice(8))} – ${fmt(last, { day: 'numeric', month: 'short', year: 'numeric' })}` : `${fmt(mon, { day: 'numeric', month: 'short' })} – ${fmt(last, { day: 'numeric', month: 'short', year: 'numeric' })}`; };
 
 /** The month in the week picker: one row per week, Monday first; a row picks that week. */
 function MiniCal({ mon, onPick }: { mon: string; onPick: (m: string) => void }) {
@@ -49,7 +50,6 @@ export function ProcWeek() {
   const t = today();
   const mon = mondayOf(sp.get('week') ?? addDay(t, 7)); // next week unless one is picked
   const setMon = (m: string) => setSp((p) => { p.set('tab', 'week'); p.set('week', m); return p; }, { replace: true });
-  const days = Array.from({ length: 6 }, (_, i) => addDay(mon, i));
   const canWrite = can(perms, 'worklist.write');
   const [calOpen, setCalOpen] = useState(false); const rangeBtn = useRef<HTMLButtonElement>(null);
   const [openId, setOpenId] = useState<string | null>(null); const [moving, setMoving] = useState<any>(null); const [assigning, setAssigning] = useState<any>(null);
@@ -57,13 +57,17 @@ export function ProcWeek() {
   const [landed, setLanded] = useState<string | null>(null);
   const land = (id: string) => { setLanded(id); setTimeout(() => setLanded(null), 700); };
 
-  const q = useQuery({ queryKey: ['psessions', 'week', mon], queryFn: () => get(`/procedure-sessions?from=${mon}&to=${days[5]}&active=1`), refetchInterval: 20000 });
+  const q = useQuery({ queryKey: ['psessions', 'week', mon], queryFn: () => get(`/procedure-sessions?from=${mon}&to=${addDay(mon, 6)}&active=1`), refetchInterval: 20000 });
   const wk = useQuery({ queryKey: ['pweek', mon], queryFn: () => get(`/procedure-weeks/${mon}`) });
   const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval. From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: () => { refreshProcedures(); toast('Noted: the patient said yes', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
   const all: any[] = q.data ?? [];
   const docs = (cfg?.practitioners ?? []).filter((p: any) => p.active !== false);
+  // Sunday is a column when a doctor works Sundays or something is booked that Sunday; otherwise the week is Monday to Saturday
+  const sun = addDay(mon, 6);
+  const sundayOn = docs.some((p: any) => p.routine?.days?.['0']?.length) || all.some((s) => s.day === sun);
+  const days = Array.from({ length: sundayOn ? 7 : 6 }, (_, i) => addDay(mon, i));
   const procMin = (id: string) => cfg?.procedures?.find((p: any) => p.id === id)?.typicalMinutes ?? 30;
   const away = (s: any, d: string) => (wk.data?.away ?? []).some((a: any) => a.practitionerId === s.practitionerId && a.day === d);
   const awayDays = new Set((wk.data?.away ?? []).map((a: any) => `${a.day}`));
@@ -97,10 +101,13 @@ export function ProcWeek() {
   // what the week holds, and the Send review
   const booked = all.filter((s) => s.state === 'confirmed');
   const n = (a: string) => booked.filter((s) => s.approval === a).length;
+  // every session has a doctor, who approves it: the Not sent ones go in the Send
   const drafts = booked.filter((s) => s.approval === 'draft');
-  const byDoc = [...new Set(drafts.map((s) => s.doctor ?? 'No doctor'))].map((name) => ({ name, list: drafts.filter((s) => (s.doctor ?? 'No doctor') === name) }));
+  const sendable = drafts.filter((s) => s.practitionerId);
+  const byDoc = [...new Set(sendable.map((s) => s.doctor ?? ''))].map((name) => ({ name, list: sendable.filter((s) => (s.doctor ?? '') === name) }));
   const asked = booked.filter((s) => s.approval === 'change');
-  const summary = !all.length ? 'Nothing booked this week yet' : [n('draft') && `${n('draft')} tentative`, n('sent') && `${n('sent')} with the doctor`, n('change') && `${n('change')} sent back`, n('approved') && `${n('approved')} approved`, all.filter((s: any) => s.autoBooked).length && `${all.filter((s: any) => s.autoBooked).length} booked by the plan, confirm with the patient`].filter(Boolean).join(' · ');
+  const byPlan = all.filter((s: any) => s.autoBooked && s.state === 'confirmed').length;
+  const sendWhy = sendable.length ? '' : !booked.length ? 'Nothing booked this week' : n('sent') ? 'All sent, approval pending' : 'Nothing to send';
   const tapOk = (key: string) => !!tap && !check(tap, key);
 
   const opened = all.find((s) => s.id === openId);
@@ -122,16 +129,23 @@ export function ProcWeek() {
         <section className="fd-sheet fd-sch overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 px-4 py-3">
             <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Previous week" onClick={() => setMon(addDay(mon, -7))}><Icon name="chevL" className="h-4 w-4" /></button>
-            <button ref={rangeBtn} type="button" className="pw-range" aria-haspopup="dialog" aria-expanded={calOpen} onClick={() => setCalOpen(!calOpen)}>{mon === addDay(mondayOf(t), 7) ? 'Next week · ' : mon === mondayOf(t) ? 'This week · ' : ''}{rangeText(mon)}<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 opacity-60" /></button>
+            <button ref={rangeBtn} type="button" className="pw-range" aria-haspopup="dialog" aria-expanded={calOpen} onClick={() => setCalOpen(!calOpen)}>{mon === addDay(mondayOf(t), 7) ? 'Next week · ' : mon === mondayOf(t) ? 'This week · ' : ''}{rangeText(mon, days.length)}<Icon name="chevR" className="h-3.5 w-3.5 rotate-90 opacity-60" /></button>
             <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next week" onClick={() => setMon(addDay(mon, 7))}><Icon name="chevR" className="h-4 w-4" /></button>
             {mon !== mondayOf(t) && <button type="button" className="btn btn-sm" onClick={() => setMon(mondayOf(t))}>This week</button>}
             <Floating anchor={rangeBtn} open={calOpen} onClose={() => setCalOpen(false)} width={292} align="left"><MiniCal mon={mon} onPick={(m) => { setMon(m); setCalOpen(false); }} /></Floating>
-            <span className="ml-auto text-[13.5px] text-muted">{summary}{wk.data?.sent && !n('draft') && all.length > 0 && mon > mondayOf(t) ? ' · changes reach the doctor straight away' : ''}</span>
-            {canWrite && drafts.length > 0 && <button type="button" className="btn btn-primary" onClick={() => setReview(true)}>Send {drafts.length} to the doctor</button>}
+            <span className="ml-auto flex flex-wrap items-center gap-1.5" aria-label="Where this week stands">
+              {n('draft') > 0 && <Chip tone="clay">{`Not sent ${n('draft')}`}</Chip>}
+              {n('sent') > 0 && <Chip tone="amber">{`Approval pending ${n('sent')}`}</Chip>}
+              {n('change') > 0 && <Chip tone="rose">{`Sent back ${n('change')}`}</Chip>}
+              {n('approved') > 0 && <Chip tone="sage">{`Approved ${n('approved')}`}</Chip>}
+              {byPlan > 0 && <Chip>{`Booked by the plan ${byPlan}`}</Chip>}
+            </span>
+            {canWrite && <button type="button" className="btn btn-primary" disabled={!sendable.length} title={sendWhy || undefined} onClick={() => setReview(true)}><Icon name="check" />{sendable.length ? `Send ${sendable.length} for doctor approval` : 'Send for doctor approval'}</button>}
+            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent && mon > mondayOf(t) ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
           </div>
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">
-              <div className="pw-week">
+              <div className="pw-week" style={{ gridTemplateColumns: `84px repeat(${days.length}, minmax(0, 1fr))` }}>
                 <span className="hd" style={{ borderLeft: 0 }} />
                 {days.map((d) => <span key={d} className={`hd ${d === t ? 'today' : ''}`}>{fmt(d, { weekday: 'short', day: 'numeric', month: 'short' })}
                   <small className={awayDays.has(d) ? 'red' : ''}>{d === t ? 'today' : awayDays.has(d) ? `${docs.filter((p: any) => (wk.data?.away ?? []).some((a: any) => a.day === d && a.practitionerId === p.id)).map((p: any) => p.name).join(', ')} away` : ' '}</small></span>)}
@@ -158,7 +172,7 @@ export function ProcWeek() {
       </div>
       {drag.ghost}
 
-      {review && <Modal title="Send for doctor approval?" subtitle={`Week of ${rangeText(mon)}`} onClose={() => setReview(false)} width="max-w-lg">
+      {review && <Modal title="Send for doctor approval?" subtitle={`Week of ${rangeText(mon, days.length)}`} onClose={() => setReview(false)} width="max-w-lg">
         <div className="space-y-3">
           {byDoc.map((d) => (
             <div key={d.name} className="flex gap-4 border-t border-line pt-3 first:border-t-0 first:pt-0">
@@ -167,7 +181,7 @@ export function ProcWeek() {
             </div>))}
           <div className="text-[13px] text-muted">Each doctor sees only their own sessions, on Today under “Needs your attention”. After this, any change you make in this week reaches the doctor straight away.</div>
           <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setReview(false)}>Back</button>
-            <button className="btn btn-primary" disabled={send.isPending} onClick={() => send.mutate()}><Icon name="check" />{byDoc.length > 1 ? `Send to ${byDoc.length} doctors` : `Send to ${byDoc[0]?.name ?? 'the doctor'}`}</button></div>
+            <button className="btn btn-primary" disabled={send.isPending || !byDoc.length} onClick={() => send.mutate()}><Icon name="check" />{byDoc.length > 1 ? `Send to ${byDoc.length} doctors` : `Send to ${byDoc[0]?.name ?? 'the doctor'}`}</button></div>
         </div>
       </Modal>}
       {opened && <ProcedureDrawer id={opened.id} canAct={canWrite} extra={actions(opened)} onClose={() => setOpenId(null)} />}

@@ -126,6 +126,34 @@
       }
     },
     {
+      "name": "cubott-calls",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3110,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-calls",
+        "PORT": "3110"
+      }
+    },
+    {
+      "name": "cubott-demo",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3120,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-demo",
+        "PORT": "3120"
+      }
+    },
+    {
       "name": "cubott-procform",
       "runtimeExecutable": "npx",
       "runtimeArgs": [

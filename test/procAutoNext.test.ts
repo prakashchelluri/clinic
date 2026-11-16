@@ -58,7 +58,7 @@ test('the room taken at that time: the nearest free time that day', async () => 
   const target = notSunday(plus(today(), 30));
   // someone else's sitting in the same room at 15:00 on the day the plan would pick
   const other = await setup('Auto Blocker', '9848077703', 1);
-  await desk('POST', '/procedure-sessions', { recommendationId: other.rec.id, day: target, startTime: '15:00', minutes: 30, roomId, force: true });
+  await desk('POST', '/procedure-sessions', { recommendationId: other.rec.id, day: target, startTime: '15:00', minutes: 30, roomId, practitionerId: drId, force: true });
   const s1 = (await desk('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '15:00', minutes: 30, roomId, practitionerId: drId, force: true })).json();
   await finish(desk, s1.id);
   const next = (await sittingsOf(desk, p.id)).find((x) => x.state === 'confirmed');

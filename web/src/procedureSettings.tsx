@@ -95,7 +95,6 @@ export function ProcedureForm({ value, cfg, onClose, onSaved }: { value: any; cf
               <div><span className="label">GST</span><div className="flex gap-1">{([[0, 'Exempt (medical)'], [1800, '18% (cosmetic)']] as const).map(([v, l]) => <button key={v} type="button" className={`toggle-opt ${f.taxRateBp === v ? 'on' : ''}`} onClick={() => set('taxRateBp', v)}>{l}</button>)}</div></div>
               <div><label className="label" htmlFor="pf-buf">Buffer after each session</label><div className="flex items-center gap-1.5 text-sm"><NumInput id="pf-buf" max={240} className="input !w-16" value={f.bufferMinutes} onChange={(e) => set('bufferMinutes', e.target.value)} />min</div></div>
             </div>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-ink" checked={f.requiresMainDoctor} onChange={(e) => set('requiresMainDoctor', e.target.checked)} />Needs a doctor present (blocks their OP time)</label>
             {value.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-ink" checked={f.active} onChange={(e) => set('active', e.target.checked)} />Active</label>}
           </div>
         </details>

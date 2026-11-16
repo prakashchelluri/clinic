@@ -27,7 +27,7 @@ const refresh = () => ['procedure-plans', 'worklist', 'psessions', 'courses'].fo
 function standing(p: any): { t: string; sub: string; tone: string } {
   const n = p.next?.sittingNo ?? p.doneSittings + 1;
   if (p.stage === 'finished') return { t: p.finishedOn ? `Finished ${fmtDate(p.finishedOn)}` : 'Finished', sub: `all ${p.sittings} sessions done`, tone: 'text-muted' };
-  if (p.stage === 'booked') return { t: `${day(p.next.day)}, ${fmtTime(p.next.startTime)}`, sub: `session ${n} · ${p.next.approval !== 'approved' ? 'with the doctor to approve' : p.next.confirmed ? 'patient confirmed' : 'approved, to call'}`, tone: 'text-sage' };
+  if (p.stage === 'booked') return { t: `${day(p.next.day)}, ${fmtTime(p.next.startTime)}`, sub: `session ${n} · ${p.next.approval === 'draft' ? 'not sent for approval' : p.next.approval !== 'approved' ? 'approval pending' : p.next.confirmed ? 'patient confirmed' : 'approved, to call'}`, tone: 'text-sage' };
   if (p.stage === 'advised') {
     const q = p.quote; const cold = q?.state === 'expired';
     return { t: cold ? 'Went quiet' : 'Not started', sub: `advised ${fmtDate(p.advisedOn.slice(0, 10))}${q ? ` · quote ${cold ? 'expired' : 'valid to'} ${fmtDate(q.validUntil)}` : ' · no quote yet'}`, tone: cold ? 'text-rose' : 'text-amber' };

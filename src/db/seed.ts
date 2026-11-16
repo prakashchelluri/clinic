@@ -4,6 +4,7 @@ import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCa
 import { randomUUID } from 'node:crypto';
 import { hashPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
+import { ensureDemoPack } from './demoPack.js';
 
 /* ---------------- Dermatology specialty pack (data, editable per clinic in Settings → Forms) ---------------- */
 export const DERM_ENCOUNTER_VERSION = 3;
@@ -196,6 +197,8 @@ export async function ensureFormsCurrent() {
     if (!(await db.select({ id: rxTemplate.id }).from(rxTemplate).where(eq(rxTemplate.tenantId, t.id)).limit(1)).length) await insertStarterTemplates(db, t.id);
     // Section templates arrived with Wave 1: give every clinic its starter sets once.
     if (!(await db.select({ id: tmpl.id }).from(tmpl).where(eq(tmpl.tenantId, t.id)).limit(1)).length) await insertStarterSets(db, t.id);
+    // Starter templates, procedure forms, more medicines and opening stock: only what is missing.
+    await ensureDemoPack(db, t.id, todayIn(t.timezone ?? 'Asia/Kolkata'));
 
     const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r: any) => r[0]);
     // Only auto-upgrade clinics still on the stock pack (no owner-edited versions beyond it).

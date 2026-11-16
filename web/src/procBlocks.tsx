@@ -27,7 +27,7 @@ export function sitStatus(s: any, week = false, doctor = false): { word: string;
   if (s.state === 'in_progress') return { word: 'In the room', cls: 'room' };
   if (s.state === 'missed') return { word: 'No show', cls: 'done warn' };
   if (s.approval === 'draft') return { word: 'Not sent', cls: 'draft' };
-  if (s.approval === 'sent') return { word: doctor ? (s.changed ? 'Changed · to approve' : 'To approve') : s.changed ? 'Changed · with doctor' : 'With doctor', cls: 'sent amber' };
+  if (s.approval === 'sent') return { word: doctor ? (s.changed ? 'Changed · to approve' : 'To approve') : s.changed ? 'Changed · approval pending' : 'Approval pending', cls: 'sent amber' };
   if (s.approval === 'change') return { word: 'Change asked', cls: 'change' };
   if (s.patientConfirmedAt) return { word: 'Confirmed', cls: '' };
   return week ? { word: 'Approved', cls: '' } : { word: 'Not confirmed', cls: 'warn' };
@@ -66,13 +66,13 @@ export function AssignDoctor({ s, docs, onClose }: { s: any; docs: any[]; onClos
     <Modal title={s.practitionerId ? 'Change doctor' : 'Assign doctor'} subtitle={`${s.patient.fullName} · ${s.procedure ?? 'procedure'} · ${s.startTime}–${s.endTime}`} onClose={onClose} width="max-w-md">
       <div className="space-y-4">
         <div><label className="label" htmlFor="as-doc">Doctor</label>
-          <select id="as-doc" className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setConf(null); }}>{!s.requiresMainDoctor && <option value="">No doctor needed</option>}{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <select id="as-doc" className="input" value={doc} onChange={(e) => { setDoc(e.target.value); setConf(null); }}>{!doc && <option value="">Pick the doctor</option>}{docs.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
           {doc && <div className="mt-1 text-[11px] text-amber">{docs.find((p: any) => p.id === doc)?.name ?? 'This doctor'} gets no OPD bookings {s.startTime}–{s.endTime}.</div>}
           {doc && doc !== s.practitionerId && <div className="mt-1 text-[11px] text-muted">It goes to {docs.find((p: any) => p.id === doc)?.name ?? 'the doctor'} to approve.</div>}</div>
         <div><label className="label" htmlFor="as-sup">Supervised by (optional)</label><select id="as-sup" className="input" value={sup} onChange={(e) => setSup(e.target.value)}><option value="">Nobody</option>{docs.filter((p: any) => p.id !== doc).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
         {conf && <div className="rounded-xl bg-amber-soft p-3 text-sm text-amber anim-fade-up"><div className="mb-1 font-medium">This doctor is busy then:</div>{conf.map((c, i) => <div key={i}>• {clashLabel(c.kind)}: {c.who} ({c.startTime}–{c.endTime})</div>)}</div>}
         <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          {conf ? <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}>Assign anyway</button> : <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(false)}><Icon name="check" />Assign</button>}</div>
+          {conf ? <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(true)}>Assign anyway</button> : <button className="btn btn-primary" disabled={save.isPending || !doc} onClick={() => save.mutate(false)}><Icon name="check" />Assign</button>}</div>
       </div>
     </Modal>
   );

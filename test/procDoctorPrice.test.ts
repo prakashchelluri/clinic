@@ -12,6 +12,8 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const as = async (email: string) => {
@@ -50,14 +52,14 @@ test("the doctor's amount is the course price; a sitting done before an invoice 
 
   // custom, no course agreed: the done sitting invoices the treatment, whole, at the doctor's amount
   const b = await plan(owner, reception, 'Price Share', '9848066602', 2400000);
-  const ps = (await reception('POST', '/procedure-sessions', { recommendationId: b.rec.id, day: today(), startTime: '10:00', minutes: 30, force: true })).json();
+  const ps = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: b.rec.id, day: today(), startTime: '10:00', minutes: 30, force: true })).json();
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).statusCode, 200);
   const ch = (await owner('GET', `/patients/${b.p.id}/timeline`)).json().charges.filter((x: any) => /^Chemical peel/.test(x.description));
   assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 2400000);
   assert.equal((await owner('GET', `/courses?patientId=${b.p.id}`)).json()[0].priceSource, 'doctor');
 
   // the course carries its next booked sitting (the popup and the Procedures tab agree)
-  const booked1 = (await reception('POST', '/procedure-sessions', { recommendationId: a.rec.id, day: plusDays(3), startTime: '10:00', minutes: 30, force: true })).json();
+  const booked1 = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: a.rec.id, day: plusDays(3), startTime: '10:00', minutes: 30, force: true })).json();
   const listed = (await owner('GET', `/courses?patientId=${a.p.id}`)).json().find((x: any) => x.id === c.id);
   assert.equal(listed.nextSitting?.day, plusDays(3)); assert.equal(listed.nextSitting?.sittingNo, 1); assert.equal(listed.nextSitting?.id, booked1.id, 'the id, so the popup can reschedule it');
 

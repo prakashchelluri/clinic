@@ -13,6 +13,8 @@ rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true });
 const { migrate, applyRls } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
+/** Every procedure session has a doctor: Dr. Main Doctor (the owner) unless a test says otherwise. */
+const drMain = async (X: any) => { const r = await X('GET', '/config'); const b = typeof r.json === 'function' ? r.json() : r.body; return b.practitioners.find((p: any) => p.name === 'Dr. Main Doctor').id as string; };
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 type Call = (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) => Promise<{ status: number; body: any }>;
@@ -62,23 +64,23 @@ test('photos need consent, carry area/view/sitting, and form a timeline', async 
   assert.equal(rec.status, 200, JSON.stringify(rec.body)); assert.ok(recs[0], 'procedure recommendation on the worklist');
   {
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(Date.now() + 2 * 86400000));
-    const ps = await doctor('POST', '/procedure-sessions', { recommendationId: recs[0].id, day, startTime: '11:00', minutes: 30, force: true });
+    const ps = await doctor('POST', '/procedure-sessions', { practitionerId: await drMain(doctor), recommendationId: recs[0].id, day, startTime: '11:00', minutes: 30, force: true });
     assert.equal(ps.status, 200, JSON.stringify(ps.body)); sittingId = ps.body.id;
     // a room taken out for cleaning refuses a procedure, and works again once the block is removed
     const room = docs.rooms[0];
     const blk = await doctor('POST', '/calendar/blocks', { roomId: room.id, day, startTime: '16:00', endTime: '17:00', kind: 'other', note: 'Cleaning' });
     assert.equal(blk.status, 200, JSON.stringify(blk.body));
-    const clash = await doctor('POST', '/procedure-sessions', { recommendationId: recs[0].id, day, startTime: '16:15', minutes: 30, roomId: room.id });
+    const clash = await doctor('POST', '/procedure-sessions', { practitionerId: await drMain(doctor), recommendationId: recs[0].id, day, startTime: '16:15', minutes: 30, roomId: room.id });
     assert.equal(clash.status, 409, JSON.stringify(clash.body)); assert.ok(JSON.stringify(clash.body).includes('room_blocked'), 'says the room is blocked');
     assert.equal((await doctor('DELETE', `/calendar/blocks/${blk.body.id}`)).status, 200);
-    const ok = await doctor('POST', '/procedure-sessions', { recommendationId: recs[0].id, day, startTime: '16:15', minutes: 30, roomId: room.id });
+    const ok = await doctor('POST', '/procedure-sessions', { practitionerId: await drMain(doctor), recommendationId: recs[0].id, day, startTime: '16:15', minutes: 30, roomId: room.id });
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     // reschedule: moves the sitting, the worklist shows the next one, and a finished sitting cannot be moved
-    const mv = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { day, startTime: '17:30', minutes: 30, roomId: room.id, reason: 'patient asked for evening' });
+    const mv = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { practitionerId: await drMain(doctor), day, startTime: '17:30', minutes: 30, roomId: room.id, reason: 'patient asked for evening' });
     assert.equal(mv.status, 200, JSON.stringify(mv.body)); assert.equal(mv.body.startTime, '17:30'); assert.equal(mv.body.state, 'confirmed');
     const nxt = (await doctor('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patient.id === p.id);
     assert.equal(nxt.next.startTime, '11:00', 'worklist carries the next sitting'); assert.ok(nxt.contactLog.some((c: any) => c.outcome === 'Session rescheduled'), 'rescheduling is logged');
-    const clash2 = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { day, startTime: '16:00', minutes: 30, roomId: room.id });
+    const clash2 = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { practitionerId: await drMain(doctor), day, startTime: '16:00', minutes: 30, roomId: room.id });
     assert.equal(clash2.status, 200, 'a free slot is accepted');
     // schedule screen: list by day with planned sittings, counts per day, patient confirmation, assigning a doctor
     const list = (await doctor('GET', `/procedure-sessions?day=${day}&active=1`)).body;
@@ -90,7 +92,7 @@ test('photos need consent, carry area/view/sitting, and form a timeline', async 
     const moved = await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { day, startTime: '16:00', minutes: 30, roomId: room.id, practitionerId: dr.id });
     assert.equal(moved.status, 200, JSON.stringify(moved.body)); assert.equal(moved.body.patientConfirmedAt, null, 'moving a sitting clears the confirmation');
     await doctor('PATCH', `/procedure-sessions/${ok.body.id}`, { state: 'completed' });
-    assert.equal((await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { day, startTime: '18:00', minutes: 30 })).body.code, 'NOT_RESCHEDULABLE');
+    assert.equal((await doctor('POST', `/procedure-sessions/${ok.body.id}/reschedule`, { practitionerId: await drMain(doctor), day, startTime: '18:00', minutes: 30 })).body.code, 'NOT_RESCHEDULABLE');
   }
 
   const a = await doctor('POST', '/documents', { ...shot, procedureSessionId: sittingId });

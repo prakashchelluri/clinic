@@ -14,6 +14,7 @@ import { chime, makeOnceWatcher } from '../chime';
 import { JourneyPanel, StageStrip } from './frontDeskJourney';
 import { DaySchedule } from './frontDeskSchedule';
 import { ProcedureDrawer } from '../procDrawer';
+import { addDay as addDaysIso } from '../procBlocks';
 import { DataTable, filterValue, type Col, type FilterDef } from '../table';
 import { BookForm } from './Booking';
 import { AppointmentDrawer } from '../apptDrawer';
@@ -87,16 +88,15 @@ export function FrontDesk() {
     const r = await ask({ title: kind === 'noshow' ? `Mark ${n} as no show?` : `Mark ${n} as left?`, body: kind === 'noshow' ? 'They did not arrive for the booking today. Each one can be undone from the booking, and rebooked from Completed.' : 'They left before seeing the doctor. Any fee paid shows under Completed for a refund.', confirmLabel: kind === 'noshow' ? 'Mark no show' : 'Mark as left', tone: 'danger' });
     if (r) bulk.mutate({ ids: [...sel], kind });
   };
-  // Back with reports within the clinic's free days: no form, no fee. Check in and send straight in; the doctor sees "back with reports" and opens the same consultation.
-  // Past the free days the usual check-in (with the fee) opens instead.
+  // Back with reports within the clinic's free days: no form, no fee. Check in = the patient is here: they join Send in like everyone else,
+  // and Send in checks the reports first. Past the free days the usual check-in (with the fee) opens instead.
   const freeDays = Number(cfg?.tenant?.settings?.reports?.freeDays ?? 30);
   const backIn = useMutation({
     mutationFn: async (x: any) => {
       const code = (cfg?.feeCategories ?? []).find((c: any) => c.code === 'REN')?.code ?? cfg?.feeCategories?.[0]?.code;
-      const v: any = await post('/visits', { patientId: x.patientId, feeCategoryCode: code, details: { reportsEncounterId: x.reports.encounterId, complaint: `Back with reports: ${x.reports.tests}` }, idempotencyKey: uuid() });
-      try { await patch(`/visits/${v.id}`, { status: 'in_consult' }); return { v, sent: true, e: null as any }; } catch (e) { return { v, sent: false, e: e as any }; }
+      return post('/visits', { patientId: x.patientId, feeCategoryCode: code, details: { reportsEncounterId: x.reports.encounterId, complaint: `Back with reports: ${x.reports.tests}` }, idempotencyKey: uuid() }) as Promise<any>;
     },
-    onSuccess: (r, x: any) => { refresh(); toast(r.sent ? `${x.name} sent in for the report review · token ${r.v.opNumber}` : `${x.name} checked in · token ${r.v.opNumber}. ${r.e?.body?.code === 'ROOM_FULL' ? 'The room is full: send in when someone comes out.' : errText(r.e)}`, r.sent ? 'ok' : 'info'); },
+    onSuccess: (v, x: any) => { refresh(); toast(`${x.name} checked in · token ${v.opNumber} · in Send in`); },
     onError: (e: any) => toast(e?.body?.code === 'ALREADY_CHECKED_IN' ? `Already checked in today as token ${e.body.opNumber}` : errText(e), 'err'),
   });
   const reportsBack = (x: any) => { if (x.reports?.free) backIn.mutate(x); else setArrive(x); };
@@ -176,7 +176,23 @@ export function FrontDesk() {
     </div>);
   // Next for each doctor: the first in the line who can go in now
   const nextIds = new Set<string>(); { const seen = new Set<string>(); for (const v of visitsAll) if (['waiting', 'screened'].includes(v.status) && !(screening === 'required' && v.status === 'waiting') && !seen.has(v.practitionerId ?? '')) { seen.add(v.practitionerId ?? ''); nextIds.add(v.id); } }
-  const sendIn = (v: any) => upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
+  /** The held order a back-with-reports visit came for, from every open order (not the filtered list). */
+  const orderOf = (v: any) => v?.details?.reportsEncounterId ? ((reportsQ.data?.orders ?? []) as any[]).find((o) => o.encounterId === v.details.reportsEncounterId) : undefined;
+  /** Send in, but a patient back with reports that are not all uploaded gets asked first: upload them, or send in anyway. */
+  const sendIn = async (v: any) => {
+    const o = orderOf(v); const missing = (o?.tests ?? []).filter((t: any) => !t.receivedAt);
+    if (missing.length) {
+      const none = missing.length === o.tests.length;
+      const a = await ask({ title: none ? 'Reports not uploaded yet' : 'Some reports are missing',
+        body: <><div>{v.patient.fullName}: {none ? `none of the ${o.tests.length} reports is uploaded` : `${o.got} of ${o.tests.length} reports uploaded`}. If the patient brought paper reports, upload them first so the doctor sees them.</div>
+          <ul className="mt-2 space-y-0.5">{o.tests.map((t: any) => <li key={t.id ?? t.name} className="flex justify-between gap-2"><span>{t.name}</span><b className={t.receivedAt ? 'text-sage' : 'text-amber'}>{t.receivedAt ? 'Uploaded' : 'Not uploaded'}</b></li>)}</ul></>,
+        confirmLabel: none ? 'Upload reports' : 'Upload the rest', altLabel: none ? 'Send in anyway' : `Send in with ${o.got} of ${o.tests.length}` });
+      if (!a) return;
+      if (a.value !== 'alt') { nav(`/tests?open=${encodeURIComponent(o.key)}`); return; }
+    }
+    sendNow(v);
+  };
+  const sendNow = (v: any) => upVisit.mutate({ id: v.id, status: 'in_consult' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent in`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
   const toJunior = (v: any) => upVisit.mutate({ id: v.id, status: 'intake' }, { onSuccess: () => toast(`${v.patient.fullName} (${v.opNumber}) sent to the junior doctor`, 'info', { label: 'Undo', run: () => upVisit.mutate({ id: v.id, status: v.status }) }), onError: (e) => toast(errText(e), 'err') });
   const onSchedule = canDesk && tab !== 'history'; // the desk always has the calendar and the rail; List only swaps the grid for rows
   // One Action panel (v62): what the desk does next, in one card. Send in (one filled button: the first who can go in),
@@ -186,6 +202,12 @@ export function FrontDesk() {
   const procsNow = ((calq.data?.procedures ?? []) as any[]).filter((p) => p.state === 'in_progress' || (p.state === 'confirmed' && Math.abs(toMin(p.startTime) - nowMin()) <= 60))
     .filter((p) => !f || norm(p.patient ?? '').includes(norm(f))).sort((x, y) => x.startTime.localeCompare(y.startTime));
   const head = (t: string, n?: number) => <div className="border-t border-line px-4 pb-1.5 pt-3 text-[12.5px] font-semibold text-muted first:border-t-0">{t}{n ? ` · ${n}` : ''}</div>;
+  // procedure sessions the desk still has to send for the doctor's approval (the same count as the Procedures menu badge)
+  const mc = useQuery({ queryKey: ['followups', 'menu'], queryFn: () => get('/followups/menu-counts'), enabled: can(perms, 'worklist.write'), refetchInterval: 30000 });
+  const toSend: { n: number; week: string | null } = mc.data?.toSend ?? { n: 0, week: null };
+  const weekName = (mon: string) => { const thisMon = addDaysIso(day, -((new Date(day + 'T00:00:00Z').getUTCDay() + 6) % 7));
+    const range = `${new Date(mon + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })} – ${new Date(addDaysIso(mon, 5) + 'T00:00:00Z').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
+    return mon === thisMon ? `From this week · ${range}` : mon === addDaysIso(thisMon, 7) ? `From next week · ${range}` : `From the week of ${range}`; };
   const waitingPanel = (
     <aside className="flex flex-col gap-4">
       <section className="fd-sheet overflow-hidden">
@@ -196,7 +218,7 @@ export function FrontDesk() {
           <div key={v.id} className={`flex items-center gap-2 border-t border-line px-3 py-2.5 ${selV?.id === v.id ? 'bg-surface-2' : ''}`}>
             <button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left" title="Show the journey" onClick={() => setPickV(v.id)}>
               <span className="grid h-7 min-w-7 shrink-0 place-items-center rounded-[6px] bg-paper-2 px-1.5 text-[12.5px] font-semibold">{v.opNumber}</span>
-              <span className="min-w-0"><span className="block truncate text-[14px] font-medium">{v.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{meta([many ? v.doctor ?? 'no doctor' : null, jr ? 'with the junior doctor' : screened ? 'screened' : waitText(minsSince(v.arrivedAt)), due ? `${money(due)} due` : null])}</span></span>
+              <span className="min-w-0"><span className="block truncate text-[14px] font-medium">{v.patient.fullName}</span><span className="block truncate text-[12px] text-muted">{meta([many ? v.doctor ?? 'no doctor' : null, jr ? 'with the junior doctor' : screened ? 'screened' : waitText(minsSince(v.arrivedAt)), due ? `${money(due)} due` : null])}</span>{(() => { const o = orderOf(v); return o && <span className="mt-1 flex flex-wrap gap-1"><Chip tone="sky">Back with reports</Chip><Chip tone={o.got === o.tests.length ? 'sage' : 'amber'}>{o.got} of {o.tests.length} in</Chip></span>; })()}</span>
             </button>
             {!jr && <button className={`btn btn-sm shrink-0 ${v.id === firstNext ? 'btn-primary' : ''}`} disabled={!s.ok} title={s.why} onClick={() => sendIn(v)}>Send in</button>}
             {!jr && !screened && <MoreMenu items={[{ label: 'Send to the junior doctor', onClick: () => toJunior(v) }]} />}
@@ -217,6 +239,11 @@ export function FrontDesk() {
             <button key={v.id} type="button" className={`flex w-full items-center gap-2 border-t border-line px-3 py-2.5 text-left hover:bg-surface-2 ${selV?.id === v.id ? 'bg-surface-2' : ''}`} onClick={() => setPickV(v.id)}>
               <span className="fd-warn">!</span><span className="min-w-0"><span className="block truncate text-[14px] font-medium">{v.patient.fullName}</span>
                 <span className="block truncate text-[12px] text-muted">{[t.length && `Tests: ${t.map((r: any) => r.notes).filter(Boolean).join(', ') || t.length}`, pr.length && `Procedure: ${pr.map((r: any) => r.procedure ?? 'procedure').join(', ')}`, open.some((r: any) => r.kind === 'followup') && 'Review to book'].filter(Boolean).join(' · ')}</span></span></button>); })}</>}
+        {toSend.n > 0 && toSend.week && <>{head('Procedures for doctor approval', toSend.n)}
+          <div className="flex items-center gap-2 border-t border-line px-3 py-2.5">
+            <Icon name="syringe" className="fd-proc-ic h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-medium">{toSend.n} session{toSend.n === 1 ? '' : 's'} not sent</span><span className="block truncate text-[12px] text-muted">{weekName(toSend.week)}</span></span>
+            <button type="button" className="btn btn-sm shrink-0" onClick={() => nav(`/worklist?tab=week&week=${toSend.week}`)}>Review and send</button></div></>}
         {withDue.length > 0 && <>{head('To collect', withDue.length)}
           {withDue.map((v) => (
             <div key={v.id} className="flex items-center gap-2 border-t border-line px-3 py-2.5"><span className="min-w-0 flex-1 truncate text-[14px] font-medium">{v.patient.fullName}</span>
@@ -312,7 +339,7 @@ export function FrontDesk() {
                     {([['schedule', 'calendar', 'Calendar'], ['table', 'list', 'List']] as const).map(([v, ic, l], i) => <button key={v} type="button" aria-pressed={view === v} aria-label={l} title={l} onClick={() => setView(v)} className={`grid h-8 w-8 place-items-center ${i ? 'border-l border-line-2' : ''} ${view === v ? 'bg-paper-2 text-ink' : 'text-muted hover:text-ink'}`}><Icon name={ic} className="h-4 w-4" /></button>)}
                   </span></>} />
               {waitingPanel}</div>
-            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' })} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/dashboard?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/dashboard?book=1')} /> : (
+            : tab === 'checkout' ? <CheckoutList visits={checkout} canDesk={canDesk} canForce={can(perms, 'config.write')} /> : tab === 'reports' ? <ReportsQueue orders={reportsOpen} visits={visits} canDesk={canDesk} freeDays={cfg?.tenant?.settings?.reports?.freeDays ?? 30} onArrive={reportsBack} onSendIn={(id) => { const v = visitsAll.find((x) => x.id === id); if (v) void sendIn(v); }} /> : tab === 'history' ? <HistoryPanel canDesk={canDesk} find={find} slot={slot} onBook={(p?: any) => nav(p ? `/dashboard?book=1&patient=${p.id}&pname=${encodeURIComponent(p.fullName)}` : '/dashboard?book=1')} /> : (
               <div className="fd-sheet overflow-hidden anim-fade-up" style={{ animationDelay: '80ms' }}>
                 {groups.length === 0 && <div className="py-10 text-center text-muted">{emptyText[tab]}</div>}
                 {groups.map((g) => g.rows.map(render))}
@@ -330,7 +357,7 @@ export function FrontDesk() {
             <BookForm session={booking} arriveEarly={cfg?.tenant?.settings?.scheduling?.arriveEarlyMinutes ?? 30} onDone={() => { qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); setBooking(null); }} /></Drawer>}
           {apptId && <AppointmentDrawer id={apptId} cfg={cfg} canWrite={can(perms, 'appointment.write')} onArrive={canDesk ? (a) => { setApptId(null); setArrive({ patientId: a.patient.id ?? a.patientId, appointmentId: a.id, name: a.patient.fullName }); } : undefined} onClose={() => { setApptId(null); qc.invalidateQueries({ queryKey: ['calendar'] }); refresh(); }} />}
           {selV && <JourneyPanel key={selV.id} v={selV} order={reportsOpen.find((o) => o.encounterId === selV.encounterId)} screening={screening} inLine={waiting.findIndex((x) => x.id === selV.id) + 1} canDesk={canDesk}
-              canSend={canSend} onSendIn={(id) => upVisit.mutate({ id, status: 'in_consult' }, { onError: (e) => toast(errText(e), 'err') })} onToJunior={(id) => { const v = visitsAll.find((x) => x.id === id); if (v) toJunior(v); }} onClose={() => setPickV('')}
+              canSend={canSend} onSendIn={(id) => { const v = visitsAll.find((x) => x.id === id); if (v) void sendIn(v); }} onToJunior={(id) => { const v = visitsAll.find((x) => x.id === id); if (v) toJunior(v); }} onClose={() => setPickV('')}
               arrangeSlot={<CheckoutList bare visits={[selV]} canDesk={canDesk} canForce={can(perms, 'config.write')} />} />}
         </div>)}
     </div>
@@ -575,12 +602,20 @@ export function ArrivalSheet({ init, cfg, perms, todayAppts, waitingByDoctor, on
   let n = 2; // 1 is the patient; the rest follow what is shown
   const badge = 'inline-flex h-6 items-center whitespace-nowrap rounded-[7px] px-2 text-[11.5px] font-bold';
 
+  const booked = [...todayAppts].sort((a, b) => a.window.startTime.localeCompare(b.window.startTime)); // today's bookings not yet checked in, by hour
   if (step === 1) return (
-    <Modal title="Who has arrived?" subtitle="Phone, name or patient ID" onClose={onClose} width="max-w-2xl">
+    <Modal title="Who has arrived?" subtitle={booked.length ? 'Pick a booking, or search by phone, name or patient ID' : 'Phone, name or patient ID'} onClose={onClose} width="max-w-2xl">
       <div className="anim-fade-up">
         <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone, name or patient ID" className="input !pl-10 !py-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder="98765…" /></div>
-        <div className="mt-3 card-flat overflow-hidden max-h-64 overflow-y-auto">
-          {q.length < 2 ? <div className="p-4 text-sm text-muted">Type at least 2 characters</div> : search.isLoading ? <Skeleton rows={2} /> : (search.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No match. Register below.</div> :
+        <div className="mt-3 card-flat overflow-hidden max-h-80 overflow-y-auto">
+          {q.length < 2 ? (booked.length === 0 ? <div className="p-4 text-sm text-muted">No bookings left today. Type at least 2 characters to search.</div> : <>
+            <div className="px-4 pb-1 pt-3 text-xs font-semibold text-muted">Booked today · not yet arrived · {booked.length}</div>
+            {booked.map((a) => { const passed = toMin(a.window.endTime) < nowMin(); return (
+              <button key={a.id} className="row w-full text-left" onClick={() => setPatientId(a.patientId)}><Avatar name={a.patient.fullName} />
+                <div className="flex-1 min-w-0"><div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">{a.patient.fullName}{passed && <Chip tone="amber">Hour passed</Chip>}<FlagChips flags={a.patient.flags} /></div>
+                  <div className="text-xs text-muted">{[a.patient.patientNo, a.patient.phone, cfg?.practitioners?.find((x: any) => x.id === a.window.practitionerId)?.name, a.service].filter(Boolean).join(' · ')}</div></div>
+                <Chip>{a.window.startTime}–{a.window.endTime}</Chip><Icon name="chevR" className="text-muted" /></button>); })}</>)
+          : search.isLoading ? <Skeleton rows={2} /> : (search.data ?? []).length === 0 ? <div className="p-4 text-sm text-muted">No match. Register below.</div> :
             search.data.map((x: any) => <button key={x.id} className="row w-full text-left" onClick={() => setPatientId(x.id)}><Avatar name={x.fullName} /><div className="flex-1 min-w-0"><div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">{x.fullName} <span className="text-muted font-normal text-xs">{x.ageYears ? `${x.ageYears}` : ''} {x.sex ?? ''}</span><FlagChips flags={x.flags} /></div><div className="text-xs text-muted">{x.patientNo} · {x.phone ?? 'no phone'} · {x.locality ?? ''}</div></div><Icon name="chevR" className="text-muted" /></button>)}
         </div>
         <button className="btn mt-3" onClick={() => { setFirst(NO_FIRST); setNewFlags(NO_FLAGS); setNewP({ fullName: /^\d+$/.test(q) ? '' : q, phone: /^\d+$/.test(q) ? q : '' }); }}><Icon name="plus" />New patient</button>
@@ -806,7 +841,6 @@ function ReportsQueue({ orders, visits, canDesk, freeDays, onArrive, onSendIn }:
       {orders.map((o) => {
         const today = visits.find((v) => v.details?.reportsEncounterId === o.encounterId && ['waiting', 'screened', 'in_consult'].includes(v.status));
         const daysSince = Math.floor((Date.now() - new Date(o.orderedAt).getTime()) / dayMs); const free = daysSince <= freeDays;
-        const pending = o.tests.filter((t: any) => !t.receivedAt);
         return (
           <div key={o.key} className="card flex flex-wrap items-center gap-x-4 gap-y-2 !py-3">
             <div className="min-w-0 flex-1">
@@ -815,7 +849,7 @@ function ReportsQueue({ orders, visits, canDesk, freeDays, onArrive, onSendIn }:
               <div className="mt-0.5 text-xs text-muted">{o.tests.map((t: any) => `${t.name} (${t.receivedAt ? 'in' : t.expectedOn ? `expected ${fmtDate(t.expectedOn)}` : 'pending'})`).join(' · ')}</div>
             </div>
             {canDesk && (today ? (today.status === 'in_consult' ? <Chip tone="clay">with the doctor</Chip> : <button className="btn btn-sm btn-primary" onClick={() => onSendIn(today.id)}>Send in</button>)
-              : <button className="btn btn-sm btn-primary" title={free ? `Within ${freeDays} days: no form and no fee, straight to the doctor for the report review` : `More than ${freeDays} days: check in with the usual fee`} onClick={() => onArrive({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free, since: o.orderedAt } })}>{free ? 'Send in' : 'Patient is here'}{pending.length ? ' · partial' : ''}</button>)}
+              : <button className="btn btn-sm btn-primary" title={free ? `Within ${freeDays} days: no form and no fee; they join Send in` : `More than ${freeDays} days: check in with the usual fee`} onClick={() => onArrive({ patientId: o.patient.id, name: o.patient.fullName, reports: { encounterId: o.encounterId, tests: o.tests.map((t: any) => t.name).join(', '), free, since: o.orderedAt } })}>Check in</button>)}
             <button className="btn btn-sm" onClick={() => nav('/tests')}>Reports</button>
           </div>);
       })}

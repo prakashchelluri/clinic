@@ -75,18 +75,24 @@ export async function planSittingReminder(tx: Tx, t: string, sittingId: string) 
   return row;
 }
 
+/** The doctor of a course: the one named on it (added from the patient record), else the consultation's doctor. */
+export async function courseDoctor(tx: Tx, rec: { practitionerId: string | null; encounterId: string }) {
+  return rec.practitionerId ?? await tx.select({ d: encounter.practitionerId }).from(encounter).where(eq(encounter.id, rec.encounterId)).then((r) => r[0]?.d ?? null);
+}
+
 /** The Monday of the week a day falls in. */
 export const weekOf = (day: string) => addDays(day, -((new Date(day + 'T00:00:00Z').getUTCDay() + 6) % 7));
 
 /**
  * The doctor's say on a sitting someone books or moves. Its own doctor booking or moving it approves it. Anyone else's goes to
  * that doctor: straight away when its week was already sent (or is this week or earlier), otherwise it waits as a draft until
- * the coordinator sends the week. A sitting with no doctor has nobody to approve it.
+ * the coordinator sends the week. Every sitting has a doctor (required since 15 Nov 2026; older ones were given their course's).
  */
 export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string) {
   const now = new Date().toISOString();
   const set = (approval: 'approved' | 'sent' | 'draft', changed: boolean) => ({ approval, approvalNote: null, approvedBy: approval === 'approved' ? ctx.name : null, approvedAt: approval === 'approved' ? now : null, changed, bookedBy: ctx.userId });
-  if (!practitionerId || practitionerId === ctx.practitionerId) return set('approved', false);
+  if (!practitionerId) return set('draft', false);
+  if (practitionerId === ctx.practitionerId) return set('approved', false);
   const wk = weekOf(day);
   if (wk <= weekOf(todayIn(ctx.timezone))) return set('sent', false);
   const sent = await tx.select({ id: procedureWeek.id }).from(procedureWeek).where(and(eq(procedureWeek.tenantId, ctx.tenantId), eq(procedureWeek.weekStart, wk))).then((r) => r[0]);
@@ -120,29 +126,32 @@ async function conflicts(tx: Tx, t: string, day: string, start: string, end: str
 
 /**
  * The next sitting, booked by the plan when one is done: the gap after the day it was done, the same time, room and doctor.
- * If that is taken (or the doctor is away) it takes the nearest free time that day, else the next day; Sundays are skipped and it looks
+ * If that is taken (or the doctor is away) it takes the nearest free time that day, else the next day; a Sunday is skipped unless the doctor works Sundays, and it looks
  * a week ahead at most. Tentative (the coordinator confirms it with the patient in the week before); nothing is booked when nothing fits.
  */
 async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$inferSelect, gapDays: number) {
   const t = ctx.tenantId; const want = toMin(done.startTime);
+  const rec = await tx.select({ practitionerId: recommendation.practitionerId, encounterId: recommendation.encounterId }).from(recommendation).where(eq(recommendation.id, done.recommendationId)).then((r) => r[0]);
+  const doctor = done.practitionerId ?? (rec ? await courseDoctor(tx, rec) : null); // every session has a doctor; an old one without takes the course's
+  const worksSunday = doctor ? !!(await tx.select({ r: practitioner.routine }).from(practitioner).where(eq(practitioner.id, doctor)).then((r) => r[0]?.r?.days?.['0']?.length)) : false;
   const proc = done.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, done.procedureId)).then((r) => r[0]) : null;
   const def = sessionDef(proc, done.sittingNo + 1); // the next session as set up in Settings: its own length
   const span = def ? def.minutes + (proc?.bufferMinutes ?? 0) : toMin(done.endTime) - toMin(done.startTime);
   const first = addDays(done.day, gapDays);
   for (let k = 0; k < 7; k++) {
     const day = addDays(first, k);
-    if (new Date(day + 'T00:00:00Z').getUTCDay() === 0) continue; // Sunday
+    if (new Date(day + 'T00:00:00Z').getUTCDay() === 0 && !worksSunday) continue; // Sunday, when the doctor does not work it
     // the same start first, then the nearest half hour either side, inside the day
     const starts = [want, ...Array.from({ length: 22 }, (_, i) => want + (i % 2 ? -1 : 1) * 30 * (Math.floor(i / 2) + 1))].filter((m) => m >= 9 * 60 && m + span <= DAY_END);
     for (const m of starts) {
       const startTime = toHHMM(m); const endTime = toHHMM(m + span);
-      if ((await conflicts(tx, t, day, startTime, endTime, done.roomId, done.practitionerId)).length) continue;
+      if ((await conflicts(tx, t, day, startTime, endTime, done.roomId, doctor)).length) continue;
       const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, done.recommendationId), sql`${procedureSession.state} <> 'cancelled'`));
-      const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: done.recommendationId, patientId: done.patientId, procedureId: done.procedureId, practitionerId: done.practitionerId, roomId: done.roomId,
-        sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, done.practitionerId, day)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
+      const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: done.recommendationId, patientId: done.patientId, procedureId: done.procedureId, practitionerId: doctor, roomId: done.roomId,
+        sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, doctor, day)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
       await planSittingReminder(tx, t, ps.id);
-      if (done.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: done.practitionerId, roomId: done.roomId, day, startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
-      await emit(tx, ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day, startTime, endTime, roomId: done.roomId, practitionerId: done.practitionerId, byPlan: true });
+      if (doctor) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doctor, roomId: done.roomId, day, startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
+      await emit(tx, ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day, startTime, endTime, roomId: done.roomId, practitionerId: doctor, byPlan: true });
       return ps;
     }
   }
@@ -152,7 +161,7 @@ async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$i
 export function procedureRoutes(app: FastifyInstance) {
   /** Feasible slots for a procedure on a day: rooms with the needed capability, free of conflicts. */
   route(app, 'get', '/procedure-sessions/slots', 'worklist.read', async (req, tx) => {
-    const q = z.object({ day: DAY, procedureId: z.string().uuid(), practitionerId: z.string().uuid().optional(), minutes: z.coerce.number().int().min(5).optional() }).parse(req.query);
+    const q = z.object({ day: DAY, procedureId: z.string().uuid(), practitionerId: z.string().uuid().optional(), minutes: z.coerce.number().int().min(5).optional(), recommendationId: z.string().uuid().optional() }).parse(req.query);
     const t = req.ctx.tenantId;
     const proc = await tx.select().from(procedureCatalog).where(and(eq(procedureCatalog.id, q.procedureId), eq(procedureCatalog.tenantId, t))).then((r) => r[0]);
     if (!proc) throw new HttpError(404, 'PROCEDURE_NOT_FOUND');
@@ -163,7 +172,9 @@ export function procedureRoutes(app: FastifyInstance) {
       const c = await conflicts(tx, t, q.day, toHHMM(m), toHHMM(m + minutes), r.id, q.practitionerId ?? null);
       if (!c.length) slots.push({ roomId: r.id, room: r.name, startTime: toHHMM(m), endTime: toHHMM(m + minutes) });
     }
-    return { minutes, rooms: rooms.map((r) => ({ id: r.id, name: r.name })), requiredCapability: proc.requiredCapability, slots };
+    // the course's doctor, so the booking drawer starts with them picked
+    const rec = q.recommendationId ? await tx.select().from(recommendation).where(and(eq(recommendation.id, q.recommendationId), eq(recommendation.tenantId, t))).then((r) => r[0]) : null;
+    return { minutes, rooms: rooms.map((r) => ({ id: r.id, name: r.name })), requiredCapability: proc.requiredCapability, slots, courseDoctorId: rec ? await courseDoctor(tx, rec) : null };
   });
 
   const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), autoMinutes: z.boolean().optional(), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
@@ -175,7 +186,7 @@ export function procedureRoutes(app: FastifyInstance) {
     const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t))).then((r) => r[0]);
     if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
     const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
-    if (proc?.requiresMainDoctor && !body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED');
+    if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
     if (proc?.requiredCapability && body.roomId) {
       const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
       if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
@@ -226,7 +237,7 @@ export function procedureRoutes(app: FastifyInstance) {
     if (!(can(req.perms, 'worklist.write') || (!ps.practitionerId && !!body.practitionerId && body.practitionerId === req.ctx.practitionerId))) throw new HttpError(403, 'FORBIDDEN:worklist.write');
     if (ps.state !== 'confirmed') throw new HttpError(409, 'NOT_CHANGEABLE', { state: ps.state });
     const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
-    if (proc?.requiresMainDoctor && !body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED');
+    if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
     if (body.practitionerId) {
       const c = (await conflicts(tx, t, ps.day, ps.startTime, ps.endTime, null, body.practitionerId, id));
       if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
@@ -297,7 +308,7 @@ export function procedureRoutes(app: FastifyInstance) {
     if (!ps) throw new HttpError(404, 'NOT_FOUND');
     if (!['confirmed', 'postponed', 'missed'].includes(ps.state)) throw new HttpError(409, 'NOT_RESCHEDULABLE', { state: ps.state });
     const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
-    if (proc?.requiresMainDoctor && !body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED');
+    if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
     if (proc?.requiredCapability && body.roomId) {
       const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
       if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
@@ -343,7 +354,8 @@ export function procedureRoutes(app: FastifyInstance) {
     const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
     const buffer = proc?.bufferMinutes ?? 0;
     const minutes = ps ? Math.max(5, toMin(ps.endTime) - toMin(ps.startTime) - buffer) : proc?.typicalMinutes ?? 30;
-    const doctor = ps ? ps.practitionerId : await tx.select({ d: encounter.practitionerId }).from(encounter).where(eq(encounter.id, rec.encounterId)).then((r) => r[0]?.d ?? null);
+    const doctor = ps ? ps.practitionerId ?? await courseDoctor(tx, rec) : await courseDoctor(tx, rec);
+    if (!doctor) throw new HttpError(409, 'NO_FIT', { why: 'pick a doctor for this session first' });
     const rooms = (await tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true)))).filter((r) => !proc?.requiredCapability || r.capabilities.includes(proc.requiredCapability))
       .sort((a, b) => Number(b.id === ps?.roomId) - Number(a.id === ps?.roomId));
     const today = todayIn(req.ctx.timezone);
@@ -370,7 +382,7 @@ export function procedureRoutes(app: FastifyInstance) {
     const sent = await tx.select().from(procedureWeek).where(and(eq(procedureWeek.tenantId, t), eq(procedureWeek.weekStart, start))).then((r) => r[0] ?? null);
     const away = await tx.select({ practitionerId: calendarBlock.practitionerId, day: calendarBlock.day, startTime: calendarBlock.startTime, endTime: calendarBlock.endTime }).from(calendarBlock)
       .where(and(eq(calendarBlock.tenantId, t), gte(calendarBlock.day, start), lte(calendarBlock.day, addDays(start, 6)), eq(calendarBlock.kind, 'leave')));
-    return { start, sent: !!sent || start <= weekOf(todayIn(req.ctx.timezone)), sentAt: sent?.createdAt ?? null, sentBy: sent?.sentBy ?? null, away };
+    return { start, sent: !!sent, sentAt: sent?.createdAt ?? null, sentBy: sent?.sentBy ?? null, away };
   });
 
   /** Send a week to the doctors: each draft in it goes to its own doctor. From then on, a change in that week reaches the doctor straight away. */
@@ -379,7 +391,7 @@ export function procedureRoutes(app: FastifyInstance) {
     await tx.insert(procedureWeek).values({ tenantId: t, weekStart: start, sentBy: req.ctx.name }).onConflictDoNothing();
     const wk = await tx.select().from(procedureWeek).where(and(eq(procedureWeek.tenantId, t), eq(procedureWeek.weekStart, start))).then((r) => r[0]);
     const rows = await tx.update(procedureSession).set({ approval: 'sent' })
-      .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, start), lte(procedureSession.day, addDays(start, 6)), eq(procedureSession.approval, 'draft'))).returning({ id: procedureSession.id });
+      .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, start), lte(procedureSession.day, addDays(start, 6)), eq(procedureSession.approval, 'draft'), eq(procedureSession.state, 'confirmed'), sql`${procedureSession.practitionerId} is not null`)).returning({ id: procedureSession.id });
     await emit(tx, req.ctx, 'procedure_week.sent', 'procedure_week', wk.id, { start, sittings: rows.length });
     return { start, sent: rows.length };
   });

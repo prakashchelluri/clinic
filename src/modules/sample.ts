@@ -7,6 +7,7 @@ import { nextNumber, todayIn, addDays } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { originOf } from '../lib/booking.js';
 import { loadBookingSample } from './sampleBookings.js';
+import { ensureOpeningStock } from '../db/demoPack.js';
 
 /** What a clinic is set up with and keeps through a reset: people, rooms, doctors, prices, forms, templates, settings. The audit log is kept too: nobody can edit it. */
 const KEEP = new Set(['branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog', 'rx_template', 'tmpl', 'room', 'service', 'audit_log']);
@@ -49,6 +50,7 @@ export function sampleRoutes(app: FastifyInstance) {
     if ((req.body as any)?.confirm !== 'RESET') throw new HttpError(400, 'CONFIRM_BY_TYPING_RESET');
     const t = req.ctx.tenantId;
     const cleared = await clearClinicData(tx, t);
+    await ensureOpeningStock(tx, t, todayIn(req.ctx.timezone)); // stock was cleared with everything else
     const base = await loadSample(tx, t, req.ctx.userId, req.ctx.timezone);
     return { cleared, base, ...(await loadBookingSample(tx, t, req.ctx.userId, req.ctx.timezone, originOf(req))) };
   });
