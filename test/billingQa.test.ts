@@ -108,6 +108,15 @@ test('M3: after a part-paid treatment is cancelled, the printed invoice keeps th
   balanced((await owner('GET', `/patients/${p.id}/account`)).json().totals);
 });
 
+test('Q1: the pharmacy login handles medicines only: no clinic billing, no patient accounts, no payments', async () => {
+  const owner = await as('owner@demo.clinic'); const pharmacy = await as('pharmacy@demo.clinic');
+  const p = (await owner('POST', '/patients', { fullName: 'QA Pharmacy', phone: '9848077807' })).json();
+  assert.equal((await pharmacy('GET', `/bills?from=${today()}&to=${today()}`)).statusCode, 403, 'no clinic Billing page');
+  assert.equal((await pharmacy('GET', `/patients/${p.id}/account`)).statusCode, 403, 'no patient account');
+  assert.equal((await pharmacy('POST', `/patients/${p.id}/payments`, { amountPaise: 100, method: 'cash', idempotencyKey: key() })).statusCode, 403, 'no Record payment');
+  assert.equal((await pharmacy('GET', '/pharmacy/counter')).statusCode, 200, 'the counter still works');
+});
+
 test('low 10: cancelling a treatment\'s only invoice frees its price again', async () => {
   const owner = await as('owner@demo.clinic');
   const { p, rec } = await treatment(owner, 'QA Unlock', '9848077805', 2);

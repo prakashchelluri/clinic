@@ -316,6 +316,13 @@
       "when": 1796500000000,
       "tag": "0044_charge_procedure",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1796600000000,
+      "tag": "0045_pharmacist_medicines_only",
+      "breakpoints": true
     }
   ]
 }

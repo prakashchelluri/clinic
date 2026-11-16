@@ -21,7 +21,7 @@ export const DEFAULT_ROLES: Record<string, string[]> = {
   assistant: ['patient.read', 'visit.read', 'visit.queue', 'encounter.intake', 'document.*'],
   receptionist: ['fees.see', 'patient.*', 'appointment.*', 'visit.*', 'payment.record', 'payment.waive', 'worklist.*', 'report.daily', 'expense.read', 'expense.write', 'document.*'],
   coordinator: ['fees.see', 'patient.read', 'appointment.*', 'visit.read', 'worklist.*', 'payment.record', 'document.*'],
-  pharmacist: ['fees.see', 'patient.read', 'pharmacy.*', 'stock.read', 'stock.write', 'payment.record', 'document.read'],
+  pharmacist: ['patient.read', 'pharmacy.*', 'stock.read', 'stock.write', 'document.read'], // medicines only: no clinic billing, no patient payments (16 Nov 2026)
   superadmin: ['platform.*'],
 };
 
