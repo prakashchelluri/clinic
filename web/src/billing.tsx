@@ -129,15 +129,30 @@ export function RefundBill({ bill: b, onClose }: { bill: any; onClose: () => voi
   return (
     <Modal title={`Refund ${b.invoiceNo}`} subtitle={`${b.patient.fullName} · billed ${money(b.billedPaise)} · paid ${money(b.paidPaise)}${b.refundedPaise ? ` · ${money(b.refundedPaise)} already refunded` : ''}`} onClose={onClose} width="max-w-lg">
       <div className="space-y-3">
-        {parts.map((p, i) => <div key={i} className="space-y-1.5 rounded-xl border border-line p-2.5">
-          <div className="flex flex-wrap items-center gap-1">{(['cash', 'upi', 'card', 'bank'] as const).map((m) => <button key={m} type="button" aria-pressed={p.method === m} className={`toggle-opt !py-1 ${p.method === m ? 'on' : ''}`} onClick={() => set(i, { method: m })}>{MODE[m]}</button>)}
-            <span className="ml-auto" />{parts.length > 1 && <button type="button" className="btn btn-ghost btn-sm !px-1.5" aria-label="Remove this mode" onClick={() => setParts(parts.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button>}</div>
-          <MoneyInput value={p.amount} label={`Refund by ${MODE[p.method]}`} onChange={(v) => set(i, { amount: v })} />
+        {/* money going back: one line per method, the same as taking a payment */}
+        <span className="label !mb-0">Refunds given now</span>
+        <div className="space-y-2">{parts.map((p, i) => <div key={i} className="space-y-1.5">
+          <div className="grid grid-cols-[110px_minmax(0,1fr)_28px] items-center gap-1.5">
+            <select className="input !px-2" aria-label={`Method of refund ${i + 1}`} value={p.method} onChange={(e) => set(i, { method: e.target.value as RPart['method'] })}>{(['cash', 'upi', 'card', 'bank'] as const).map((m) => <option key={m} value={m}>{MODE[m]}</option>)}</select>
+            <MoneyInput value={p.amount} label={`Refund by ${MODE[p.method]}`} onChange={(v) => set(i, { amount: v })} />
+            {parts.length > 1 ? <button type="button" className="btn btn-ghost btn-sm !px-1.5" aria-label="Remove this refund line" onClick={() => setParts(parts.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button> : <span />}
+          </div>
           {p.method !== 'cash' && <input className="input" maxLength={60} aria-label="Reference" placeholder="Reference (optional)" value={p.reference} onChange={(e) => set(i, { reference: e.target.value })} />}
-        </div>)}
-        {parts.length < 4 && <button type="button" className="btn btn-sm" onClick={() => setParts([...parts, { method: 'upi', amount: '', reference: '' }])}><Icon name="plus" className="h-3.5 w-3.5" />Payment mode</button>}
+        </div>)}</div>
+        {parts.length < 4 && <button type="button" className="inline-flex items-center gap-1 text-[13px] font-medium text-clay hover:underline" onClick={() => {
+          const rest = Math.max(0, left - total); const used = new Set(parts.map((p) => p.method));
+          const next = (['cash', 'upi', 'card', 'bank'] as const).find((m) => !used.has(m)) ?? 'upi';
+          setParts([...parts, { method: next, amount: rest ? String(rest / 100) : '', reference: '' }]);
+        }}><Icon name="plus" className="h-3.5 w-3.5" />Split: add another method</button>}
+        <div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-label="Refunded against what was paid" aria-valuemin={0} aria-valuemax={left} aria-valuenow={Math.min(total, left)}><div className="h-full rounded-full bg-clay transition-[width]" style={{ width: `${left ? Math.min(100, (total / left) * 100) : 0}%` }} /></div>
+          <div className="mt-1 text-xs text-muted">{money(Math.min(total, left))} of {money(left)} paid being refunded</div>
+        </div>
         <div><label className="label" htmlFor="rb-why">Why</label><input id="rb-why" className="input" maxLength={200} placeholder="for example: procedure not done" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
-        <div className="rounded-xl bg-surface-2 p-3 text-center text-[15px]"><b className="text-rose">{money(total)}</b> will be refunded to the patient</div>
+        <div className="rounded-xl bg-surface-2 p-3 text-[14px]">
+          <div className="flex justify-between font-bold"><span>Refunded now</span><span className="tabular-nums text-rose">{money(total)}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Stays paid</span><span className="tabular-nums">{money(Math.max(0, left - total))}</span></div>
+        </div>
         <div className="modal-foot"><span className="mr-auto text-xs text-muted" role="status">{bad}</span><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={!!bad || go.isPending} onClick={() => go.mutate()}>Refund the bill</button></div>
       </div>
     </Modal>
