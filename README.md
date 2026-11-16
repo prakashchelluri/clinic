@@ -48,7 +48,7 @@ npm test
 ## Deploy free: Render + Neon
 
 1. **Database**: create a free project at neon.tech (pick the Singapore region, nearest to India). Copy the pooled connection string.
-2. **App**: push this repo to GitHub, then on render.com choose *New → Blueprint* and point it at the repo. `render.yaml` defines the free web service. Set `DATABASE_URL` to the Neon string when prompted.
+2. **App**: push this repo to GitHub, then on render.com choose *New → Blueprint* and point it at the repo. `render.yaml` defines the free web service. Paste your Postgres connection string (Aiven, Neon, etc.) as `DATABASE_URL` when prompted.
 3. First boot runs migrations, applies RLS and seeds the demo tenant automatically.
 4. **Uploads (photos, reports)**: Render's disk is wiped on every restart, so files go to Cloudflare R2. `render.yaml` already sets the endpoint and the `cubott` bucket. In Cloudflare → R2 → *Manage API tokens*, create a token with **Object Read & Write** on that bucket, then paste its Access Key ID and Secret Access Key into the Render service's Environment as `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`. The log line `uploads: object storage, bucket cubott` confirms it after the next deploy. Without the keys, uploads fall back to the throwaway local disk.
 

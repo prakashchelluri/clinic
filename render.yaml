@@ -1,12 +1,5 @@
-# Render Blueprint: free web service plus a free Render Postgres so the app runs out of the box.
-# To use Neon instead: in the Render dashboard open the service -> Environment, set DATABASE_URL to the Neon pooled
-# connection string (remove the fromDatabase link here first, or the blueprint will keep resetting it).
-databases:
-  - name: cubott-db
-    plan: free
-    databaseName: cubott
-    user: cubott
-
+# Render Blueprint: free web service. The database is an external Postgres (Aiven free, since Nov 2026; Render's
+# free Postgres expired). DATABASE_URL is a secret: paste it in the Render dashboard -> service -> Environment.
 services:
   - type: web
     name: cubott-clinical
@@ -23,10 +16,9 @@ services:
         value: "1"
       - key: COOKIE_SECRET
         generateValue: true
+      # postgres://user:pass@host:port/db?sslmode=require (never commit it)
       - key: DATABASE_URL
-        fromDatabase:
-          name: cubott-db
-          property: connectionString
+        sync: false
       # Uploads (clinical photos, reports) go to Cloudflare R2; Render's own disk is wiped on every restart.
       - key: S3_ENDPOINT
         value: https://15272c82fc1db1d2ae347f89ca9c55d6.r2.cloudflarestorage.com
