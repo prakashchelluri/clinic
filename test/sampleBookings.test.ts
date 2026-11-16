@@ -12,12 +12,12 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 rmSync(process.env.UPLOAD_DIR, { recursive: true, force: true });
 
 const { migrate, applyRls } = await import('../src/db/index.js');
-const { seedIfEmpty } = await import('../src/db/seed.js');
+const { seedIfEmpty, ensureFormsCurrent } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 const login = async (email: string) => (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email, password: 'demo1234', tenant: 'sahitya' } })).cookies.find((c) => c.name === 'cc_session')!.value;
-before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); app = await buildApp(); });
+before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); await ensureFormsCurrent(); app = await buildApp(); }); // as the server starts: templates and procedure forms come from the demo pack
 after(async () => { await app.close(); });
 
 test('test data fills the week, pharmacy and courses, and can be topped up', async () => {
@@ -31,7 +31,7 @@ test('test data fills the week, pharmacy and courses, and can be topped up', asy
   assert.ok(s.base?.patients >= 20, 'base sample loaded first');
   assert.ok(s.booked + s.confirmed > 20, 'upcoming bookings'); assert.ok(s.arrived > 10 && s.no_show > 0, 'past visits and no-shows');
   assert.ok(s.series >= 6 && s.messages > 0, JSON.stringify(s));
-  assert.equal(s.sittings, 8); assert.equal(s.photos, 16);
+  assert.equal(s.sittings, 29); assert.equal(s.photos, 32); // 8 courses (3 done + the next; the biopsy is one), photos on 4
 
   const counts = (await call(reception, 'GET', '/bookings/counts')).json();
   assert.ok(counts.unconfirmed > 0 && counts.requests === undefined);
@@ -44,6 +44,23 @@ test('test data fills the week, pharmacy and courses, and can be topped up', asy
   const file = await call(owner, 'GET', `/documents/${tl.photos[0].id}/file`);
   assert.equal(file.statusCode, 200); assert.equal(file.headers['content-type'], 'image/png');
   assert.deepEqual([...file.rawPayload.subarray(0, 4)], [137, 80, 78, 71], 'a real PNG');
+
+  // every procedure has a course whose done sessions have its form filled in, nothing required left out
+  const plans = (await call(owner, 'GET', '/worklist?kind=procedure')).json();
+  for (const name of ['Laser hair reduction', 'Chemical peel', 'Fractional CO2 laser (acne scars)', 'PRP (hair)', 'Cryotherapy (warts)', 'Intralesional steroid injection', 'Hydrafacial', 'Excision biopsy']) {
+    const plan = plans.find((x: any) => x.procedure === name && x.done > 0); assert.ok(plan, name);
+    const h = (await call(owner, 'GET', `/procedure-plans/${plan.id}/form-history`)).json();
+    const done = h.sessions.filter((x: any) => x.state === 'completed');
+    assert.ok(h.hasForm && done.length >= 1, name + JSON.stringify({ hasForm: h.hasForm, states: h.sessions?.map((x: any) => x.state) }));
+    for (const x of done) {
+      assert.ok(x.formDefinitionId && Object.keys(x.outcome ?? {}).length >= 5, name);
+      const one = (await call(owner, 'GET', `/procedure-sessions/${x.id}`)).json();
+      assert.deepEqual(one.missing, [], name);
+    }
+  }
+  // the week's notes are written from the clinic's templates, with the template's medicines
+  const used = (await call(owner, 'GET', '/rx-templates')).json();
+  assert.ok(used.filter((x: any) => x.uses > 0).length >= 8, 'most templates used');
 
   // the week around today is filled (today aside: it only gets windows still ahead), and tomorrow is busy
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());

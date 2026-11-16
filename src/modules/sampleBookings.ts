@@ -1,7 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { patient, appointment, session, service, practitioner, recommendation, procedureSession, procedureCatalog, room, calendarBlock, document, tenant, OPEN_STATUSES, branch, feeCategory, visit, encounter, prescriptionItem, charge, payment, expense, medicine, formDefinition, pharmacySale, stockBatch, stockDoc, vendor } from '../db/schema.js';
+import { patient, appointment, session, service, practitioner, recommendation, procedureSession, procedureCatalog, room, calendarBlock, document, tenant, OPEN_STATUSES, branch, feeCategory, visit, encounter, prescriptionItem, charge, payment, expense, medicine, formDefinition, pharmacySale, stockBatch, stockDoc, vendor, rxTemplate, type FormSchema } from '../db/schema.js';
 import { todayIn, addDays, nextNumber } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { newToken, queueMessage, planReminders } from '../lib/booking.js';
@@ -18,8 +18,50 @@ import { receiveStock, schemeFree, type Actor } from './stock.js';
  */
 const MARKER = 'sample-bookings-marker';
 
+/** One course per procedure. values: what this patient's form says where the generic filler would guess (areas, the agent, the indication). */
+type Course = { name: string; area: string; sittings: number; gap: number; start: string; photos?: boolean; values: Record<string, unknown> };
+const COURSES: Course[] = [
+  { name: 'Laser hair reduction', area: 'Chin', sittings: 8, gap: 28, start: '11:00', photos: true, values: { areas: ['Chin', 'Upper lip'], machine: 'Diode 808 nm', hair_colour: 'Black', hair_thickness: 'Coarse', skin_type: 'IV', cooling: 'Contact cooling', reaction: ['Expected (perifollicular oedema)'] } },
+  { name: 'Chemical peel', area: 'Cheeks', sittings: 6, gap: 14, start: '15:30', photos: true, values: { indication: ['Acne marks', 'Melasma'], skin_type: 'IV', skin_nature: 'Oily', priming_with: 'Glycolic acid 6% cream at night', agent: 'Glycolic acid', areas: ['Cheeks', 'Forehead'], reaction: ['None'] } },
+  { name: 'Fractional CO2 laser (acne scars)', area: 'Cheeks', sittings: 4, gap: 30, start: '12:00', photos: true, values: { indication: 'Atrophic acne scars', area: 'Both cheeks' } },
+  { name: 'PRP (hair)', area: 'Crown', sittings: 6, gap: 30, start: '16:30', photos: true, values: { indication: 'Androgenetic alopecia', area: 'Crown and vertex', technique: 'Microneedling + PRP' } },
+  { name: 'Cryotherapy (warts)', area: 'Fingers', sittings: 4, gap: 14, start: '10:30', values: { indication: 'Common warts', area: 'Right index and middle finger' } },
+  { name: 'Intralesional steroid injection', area: 'Scalp', sittings: 4, gap: 28, start: '12:30', values: { indication: 'Alopecia areata', area: 'Two patches, occiput', drug: 'Triamcinolone acetonide' } },
+  { name: 'Hydrafacial', area: 'Face', sittings: 4, gap: 30, start: '17:00', values: { indication: 'Dull skin', area: 'Full face', serum: 'Brightening', steps: ['Cleanse', 'Peel', 'Extract', 'Hydrate'] } },
+  { name: 'Excision biopsy', area: 'Back', sittings: 1, gap: 10, start: '12:00', values: { indication: 'Changing mole', area: 'Upper back', site: 'Upper back, left of spine', sample_sent: true } },
+];
+
+/** Plausible numbers for a session's settings; some rise a little each session, as they do in practice. */
+const NUMBERS: Record<string, (k: number) => number> = {
+  fluence: (k) => 12 + 2 * k, pulse_width: () => 30, spot_size: () => 12, frequency: () => 2, passes: () => 2, shots: (k) => 380 + 20 * k,
+  strength: (k) => 20 + 10 * Math.min(k, 3), layers: () => 1, contact_time: (k) => 2 + k,
+  energy: (k) => 35 + 5 * k, density: () => 10, concentration: () => 10, volume: () => 0.6, lesions: () => 2,
+  warts: (k) => Math.max(1, 5 - k), freeze_time: () => 10, cycles: () => 2, blood_drawn: () => 20, prp_volume: () => 4, size: () => 6, sutures: () => 3,
+};
+const NOT_TRUE = new Set(['recent_tan', 'photosensitive_meds', 'isotretinoin_6m', 'active_lesions', 'pregnant']); // safety checks: "no" is the normal answer
+const PROGRESS: Record<string, string[]> = { hair_reduction: ['Under 25%', 'Under 25%', '25–50%', '50–75%'], response: ['No change', 'Slight', 'Good', 'Very good'] };
+
+/** A completed session's form as a careful doctor would fill it: every field answered, settings carried from session to session. */
+function fillProcForm(schema: FormSchema, given: Record<string, unknown>, k: number, next: string | null, note: string) {
+  const out: Record<string, unknown> = {};
+  for (const fld of schema.sections.flatMap((s) => s.fields)) {
+    const opts = fld.options ?? [];
+    if (fld.key in given) out[fld.key] = given[fld.key];
+    else if (fld.key === 'next_session') { if (next) out[fld.key] = next; }
+    else if (fld.key === 'notes') out[fld.key] = note;
+    else if (PROGRESS[fld.key]) out[fld.key] = PROGRESS[fld.key][Math.min(k, 3)];
+    else if (fld.type === 'checkbox') out[fld.key] = !NOT_TRUE.has(fld.key);
+    else if (fld.type === 'number') out[fld.key] = (NUMBERS[fld.key] ?? (() => 1))(k);
+    else if (/pain|burning/.test(fld.key) && opts.length) out[fld.key] = String(2 + (k % 3));
+    else if (fld.type === 'multiselect') out[fld.key] = opts.slice(0, 1);
+    else if (opts.length) out[fld.key] = opts.find((o) => /^(none|mild|erythema|done, no reaction)$/i.test(o)) ?? opts[Math.min(1, opts.length - 1)];
+    else if (fld.type === 'text') out[fld.key] = 'As before';
+  }
+  return out;
+}
+
 /** The sample's deliberately low (Terbinafine) and expiring (Sunscreen) items: no sample sale touches them, so the Stock page always shows both cases. */
-const KEEP_STOCK = /^(Terbinafine|Sunscreen)/;
+const KEEP_STOCK = /^(Terbinafine|Sunscreen SPF|Permethrin|Calamine)/; // + the demo pack's low (Permethrin) and expiring (Calamine) items
 export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: string, origin: string) {
   const first = !(await tx.select({ id: appointment.id }).from(appointment).where(and(eq(appointment.tenantId, t), eq(appointment.idempotencyKey, MARKER))).limit(1)).length;
   const ten = (await tx.select().from(tenant).where(eq(tenant.id, t)))[0];
@@ -90,37 +132,41 @@ export async function loadBookingSample(tx: Tx, t: string, userId: string, tz: s
   // 4. Patient messages for the next bookings: confirmations and planned reminders, as if booked through the app
   for (const id of made.slice(0, 15)) { await queueMessage(tx, t, id, 'confirmation', origin); await planReminders(tx, t, id, origin); counts.messages++; }
 
-  // 5. Procedure courses with sittings and photos: two patients, a laser course and a peel course
+  // 5. A procedure course for every procedure that has a plan: past sessions with the procedure form filled in, the next one booked; photos on four of them
   const procs = await tx.select().from(procedureCatalog).where(eq(procedureCatalog.tenantId, t));
   const rooms = await tx.select().from(room).where(eq(room.tenantId, t));
-  const courses = [{ name: 'Laser hair reduction', area: 'Chin', sittings: 8, gap: 21 }, { name: 'Chemical peel', area: 'Cheeks', sittings: 6, gap: 14 }];
-  for (const [ci, c] of courses.entries()) {
+  for (const [ci, c] of COURSES.entries()) {
     const proc = procs.find((p) => p.name === c.name); if (!proc) continue;
     const rec = (await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'), eq(recommendation.procedureId, proc.id))).limit(1))[0];
     if (!rec) continue;
     const p = pts.find((x) => x.id === rec.patientId)!;
-    await tx.update(patient).set({ consents: { ...(p.consents ?? {}), photos: { grantedAt: new Date(Date.now() - 70 * 86400000).toISOString(), by: 'Dr. Main Doctor' } } }).where(eq(patient.id, p.id));
+    const form = (await tx.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t), eq(formDefinition.key, `procedure:${proc.id}`))).orderBy(sql`version desc`).limit(1))[0];
+    if (c.photos) await tx.update(patient).set({ consents: { ...(p.consents ?? {}), photos: { grantedAt: new Date(Date.now() - 100 * 86400000).toISOString(), by: 'Dr. Main Doctor' } } }).where(eq(patient.id, p.id));
     await tx.update(recommendation).set({ status: 'scheduled', sittings: c.sittings, dueOn: addDays(today, 7 + ci) }).where(eq(recommendation.id, rec.id));
     const rm = rooms.find((r) => proc.requiredCapability && r.capabilities.includes(proc.requiredCapability)) ?? rooms[0];
-    const doc = docs[ci % docs.length];
-    // baseline photos at the consultation, then three completed sittings, then the next one booked
-    const plan = [-(c.gap * 3 + 7), -(c.gap * 3), -(c.gap * 2), -c.gap, 7 + ci];
+    const doc = proc.requiresMainDoctor ? docs[0] : docs[ci % docs.length];
+    // baseline photos at the consultation, up to three done sessions, then the next one booked (when the course has more)
+    const done = Math.min(3, c.sittings);
+    const plan = [-(c.gap * done + 7), ...Array.from({ length: done }, (_, k) => -c.gap * (done - k)), ...(c.sittings > done ? [7 + ci] : [])];
     for (const [k, off] of plan.entries()) {
       const day = addDays(today, off); const sittingNo = k; // 0 = before the course
       let psId: string | null = null;
       if (k > 0) {
-        const start = ['11:00', '15:30'][ci]; const [h, m] = start.split(':').map(Number); const endMin = h * 60 + m + proc.typicalMinutes;
+        const [h, m] = c.start.split(':').map(Number); const endMin = h * 60 + m + proc.typicalMinutes;
         const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`;
+        const note = off < 0 ? ['Tolerated well', 'Mild redness, settled in 10 minutes', 'Good response, patient happy'][(k - 1) % 3] : null;
+        const next = plan[k + 1] !== undefined ? addDays(today, plan[k + 1]) : null;
+        const filled = off < 0 && form ? fillProcForm(form.schema as FormSchema, c.values, k, next, note!) : null;
         const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: p.id, procedureId: proc.id, practitionerId: doc.id, roomId: rm?.id ?? null, sittingNo,
-          day, startTime: start, endTime: end, state: off < 0 ? 'completed' : 'confirmed', notes: off < 0 ? ['tolerated well', 'mild redness, settled in 10 min', 'good response'][k % 3] : null }).returning();
-        if (off >= 0) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doc.id, roomId: rm?.id ?? null, day, startTime: start, endTime: end, kind: 'procedure', note: `${proc.name} · session ${sittingNo}`, procedureSessionId: ps.id });
+          day, startTime: c.start, endTime: end, state: off < 0 ? 'completed' : 'confirmed', notes: note, outcome: filled, formDefinitionId: filled ? form!.id : null }).returning();
+        if (off >= 0) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doc.id, roomId: rm?.id ?? null, day, startTime: c.start, endTime: end, kind: 'procedure', note: `${proc.name} · session ${sittingNo}`, procedureSessionId: ps.id });
         psId = ps.id; counts.sittings++;
       }
-      if (off >= 0) continue;
+      if (off >= 0 || !c.photos) continue;
       for (const view of ['front', 'left'] as const) {
         const png = samplePhoto(ci, k, view);
         const [d] = await tx.insert(document).values({ tenantId: t, patientId: p.id, kind: 'photo', title: `${c.area} · ${view === 'front' ? 'Front' : 'Left'} · sample`, mime: 'image/png', sizeBytes: png.length,
-          storageKey: 'pending', uploadedBy: userId, area: c.area, view, procedureSessionId: psId, takenAt: new Date(`${day}T${['11:20', '15:50'][ci]}:00+05:30`).toISOString(), note: k === 0 ? 'before the course' : null }).returning();
+          storageKey: 'pending', uploadedBy: userId, area: c.area, view, procedureSessionId: psId, takenAt: new Date(`${day}T${c.start}:00+05:30`).toISOString(), note: k === 0 ? 'before the course' : null }).returning();
         const key = `${t}/${p.id}/${d.id}.png`;
         await putFile(key, png, 'image/png');
         await tx.update(document).set({ storageKey: key }).where(eq(document.id, d.id));
@@ -184,7 +230,9 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
   const sampleActor = { tenantId: t, userId, name: 'Test data' };
   await loadStock(tx, sampleActor, today, meds, counts);
   const hm = (i: number, base = 10) => `${String(base + Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 14 + 3).padStart(2, '0')}`;
-  const COMPLAINTS = [['Pimples on face', 'Acne vulgaris'], ['Itchy rash', 'Eczema'], ['Hair fall', 'Telogen effluvium'], ['Dark patches', 'Melasma'], ['Itchy ring-shaped rash', 'Tinea corporis']];
+  // Each note is written from one of the clinic's prescription templates, in turn, so every template and its medicines show up in the records and the pharmacy.
+  const templates = (await tx.select().from(rxTemplate).where(eq(rxTemplate.tenantId, t)).orderBy(rxTemplate.name)).filter((x) => x.prescription.length);
+  let tn = 0;
 
   for (let day = addDays(today, -6); day <= today; day = addDays(day, 1)) {
     const past = day < today;
@@ -200,11 +248,12 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
           details: { complaint: 'Follow-up' }, status: 'done', queuePosition: String(n) }).returning({ id: visit.id });
         const [ch] = await tx.insert(charge).values({ tenantId: t, patientId: a.patientId, visitId: v.id, description: `Consultation (${gen.name})`, amountPaise: gen.amountPaise, status: 'paid', createdAt: at(day, time) }).returning({ id: charge.id });
         if (gen.amountPaise > 0) await tx.insert(payment).values({ tenantId: t, patientId: a.patientId, chargeId: ch.id, amountPaise: gen.amountPaise, method: i % 2 ? 'upi' : 'cash', receivedBy: userId, receivedAt: at(day, time), createdAt: at(day, time) });
-        const [cc, dx] = COMPLAINTS[rnd(COMPLAINTS.length)];
+        const tp = templates.length ? templates[tn++ % templates.length] : null;
         const [e] = await tx.insert(encounter).values({ tenantId: t, visitId: v.id, patientId: a.patientId, practitionerId: a.doctor, formDefinitionId: form.id, createdAt: at(day, time),
-          data: { complaint: { chief_complaint: [cc], duration: '2 weeks' }, assessment: { diagnosis: [{ name: dx, severity: 'Mild' }] }, plan: { advice: 'Review as advised.' } }, status: 'completed', completedAt: at(day, hm(i + 2)), provenance: { source: 'typed' } }).returning({ id: encounter.id });
-        const pick = [...meds].sort(() => rnd(3) - 1).slice(0, 2 + rnd(2));
-        await tx.insert(prescriptionItem).values(pick.map((m, k) => ({ tenantId: t, encounterId: e.id, medicineId: m.id, name: m.name, dose: m.defaults?.dose, route: m.defaults?.route, frequency: m.defaults?.frequency, durationDays: m.defaults?.durationDays, sortOrder: k })));
+          data: tp ? { ...tp.data, complaint: { ...(tp.data.complaint ?? {}), duration: ['2 weeks', '1 month', '3 months', '6 months'][rnd(4)] } } : { complaint: { chief_complaint: ['Follow-up'] }, plan: { advice: 'Review as advised.' } }, status: 'completed', completedAt: at(day, hm(i + 2)), provenance: { source: 'typed' } }).returning({ id: encounter.id });
+        const lines = tp ? tp.prescription.filter((x: any) => meds.some((m) => m.id === x.medicineId)) : [];
+        if (lines.length) await tx.insert(prescriptionItem).values(lines.map((x: any, k: number) => ({ tenantId: t, encounterId: e.id, medicineId: x.medicineId, name: x.name, dose: x.dose ?? null, route: x.route ?? null, frequency: x.frequency ?? null, durationDays: x.durationDays ?? null, instructions: x.instructions ?? null, sortOrder: k })));
+        if (tp) await tx.update(rxTemplate).set({ uses: sql`${rxTemplate.uses} + 1` }).where(eq(rxTemplate.id, tp.id));
         counts.visits++;
       }
     }
@@ -237,7 +286,8 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
 
     // C. counter sales without a prescription: real invoices from catalogue prices, a few every day (the first one of the day is the marker)
     const sold = await tx.select({ id: pharmacySale.id }).from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), sql`${pharmacySale.encounterId} is null`, sql`${pharmacySale.createdAt} >= ${at(day, '00:00')} and ${pharmacySale.createdAt} < ${at(addDays(day, 1), '00:00')}`)).limit(1);
-    const priced = meds.filter((m) => m.mrpPaise > 0 && !KEEP_STOCK.test(m.name) && !['H', 'H1', 'X'].includes(m.scheduleClass ?? '')); // counter sales: over-the-counter items only
+    const onHand = new Map((await tx.select({ m: stockBatch.medicineId, q: sql<number>`sum(${stockBatch.qty})::int` }).from(stockBatch).where(and(eq(stockBatch.tenantId, t), sql`${stockBatch.expiry} >= ${day}`)).groupBy(stockBatch.medicineId)).map((r) => [r.m, r.q]));
+    const priced = meds.filter((m) => m.mrpPaise > 0 && !KEEP_STOCK.test(m.name) && !['H', 'H1', 'X'].includes(m.scheduleClass ?? '') && (onHand.get(m.id) ?? 0) >= 10); // counter sales: over-the-counter items in stock only
     if (!sold.length && priced.length) {
       for (let i = 0; i < 3 + rnd(2); i++) {
         const items = Array.from({ length: 1 + rnd(3) }, () => ({ medicineId: priced[rnd(priced.length)].id, qty: 1 + rnd(3) }))
@@ -267,11 +317,12 @@ async function loadWeek(tx: Tx, t: string, userId: string, tz: string, today: st
  */
 async function loadStock(tx: Tx, a: Actor, today: string, meds: (typeof medicine.$inferSelect)[], counts: Record<string, number>) {
   const t = a.tenantId;
-  if ((await tx.select({ id: stockBatch.id }).from(stockBatch).where(eq(stockBatch.tenantId, t)).limit(1)).length) return;
+  // once: vendors mark it done. Opening stock may already be there from the demo pack; then only the vendors and their orders are added.
+  if ((await tx.select({ id: vendor.id }).from(vendor).where(eq(vendor.tenantId, t)).limit(1)).length) return;
   const priced = meds.filter((m) => m.mrpPaise > 0); if (!priced.length) return;
   const ym = (days: number) => addDays(today, days).slice(0, 7);
   const by = (n: string) => priced.find((m) => m.name === n);
-  await receiveStock(tx, a, { keepOpen: false, lines: priced.map((m, i) => ({ medicineId: m.id, qty: m.name.startsWith('Terbinafine') ? 3 : ['tab', 'cap'].includes(m.form ?? '') ? 400 : 300, freeQty: 0,
+  if (!(await tx.select({ id: stockBatch.id }).from(stockBatch).where(eq(stockBatch.tenantId, t)).limit(1)).length) await receiveStock(tx, a, { keepOpen: false, lines: priced.map((m, i) => ({ medicineId: m.id, qty: m.name.startsWith('Terbinafine') ? 3 : ['tab', 'cap'].includes(m.form ?? '') ? 400 : 300, freeQty: 0,
     ratePaise: Math.round(m.mrpPaise * 0.62), discBp: 0, batchNo: `OPN${String(i + 1).padStart(3, '0')}`, expiry: m.name.startsWith('Sunscreen') ? ym(50) : ym(540) })) }, today);
   const [g] = await tx.insert(vendor).values({ tenantId: t, name: 'Godavari Medical Agencies', phone: '9000000001', address: 'Rajahmundry' }).returning();
   await tx.insert(vendor).values({ tenantId: t, name: 'Sai Pharma Distributors', phone: '9000000002', address: 'Kakinada' });

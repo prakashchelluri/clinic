@@ -90,6 +90,8 @@ const CASES = [
   { c: 'Acne scars', dx: 'Post-acne atrophic scars', sev: 'Moderate', site: ['Face'], morph: ['Scar'], rx: ['Sunscreen SPF 50'], fu: 30, proc: 'Fractional CO2 laser (acne scars)' },
   { c: 'Unwanted facial hair', dx: 'Hirsutism', sev: 'Mild', site: ['Face'], morph: [], rx: [], fu: 60, proc: 'Laser hair reduction' },
   { c: 'Thinning hair on crown', dx: 'Androgenetic alopecia', sev: 'Moderate', site: ['Scalp'], morph: [], rx: [], fu: 30, proc: 'PRP (hair)' },
+  { c: 'Dull, tired skin', dx: 'Dull skin', sev: 'Mild', site: ['Face'], morph: [], rx: ['Sunscreen SPF 50', 'Moisturiser (ceramide)'], fu: 30, proc: 'Hydrafacial' },
+  { c: 'Mole on back getting bigger', dx: 'Melanocytic naevus, for biopsy', sev: 'Mild', site: ['Back'], morph: ['Papule'], rx: [], fu: 14, proc: 'Excision biopsy' },
 ];
 
 /** Demo only: 30 days of plausible daily collections so the Overview chart has a shape. Idempotent. */
