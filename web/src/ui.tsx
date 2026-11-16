@@ -378,7 +378,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
 }
 
 /* ---------- Confirm and short questions, in the app's own style (replaces the browser's confirm / prompt / alert) ---------- */
-type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; initial?: string; maxLength?: number } };
+type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; /** a third answer between Cancel and the confirm: resolves { value: 'alt' } */ altLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; initial?: string; maxLength?: number } };
 type Pending = AskOpts & { resolve: (v: { value: string } | null) => void };
 let pending: Pending | null = null; const askSubs = new Set<() => void>();
 const setPending = (p: Pending | null) => { pending = p; askSubs.forEach((s) => s()); };
@@ -416,6 +416,7 @@ export function DialogHost() {
           <div className="modal-foot">
             {/* a danger confirm starts on Cancel, so a stray Enter never deletes */}
             <button data-autofocus={danger && !p.field ? '' : undefined} className="btn" onClick={() => done(null)}>{p.cancelLabel ?? 'Cancel'}</button>
+            {p.altLabel && <button className="btn" onClick={() => done({ value: 'alt' })}>{p.altLabel}</button>}
             <button data-autofocus={p.field || danger ? undefined : ''} className={danger ? 'btn !bg-rose-soft !text-rose' : 'btn btn-primary'} disabled={bad} onClick={() => done({ value: val.trim() })}>{p.confirmLabel ?? 'OK'}</button>
           </div>
         </div>
