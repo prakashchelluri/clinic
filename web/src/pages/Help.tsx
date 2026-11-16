@@ -177,7 +177,7 @@ function Reception() {
       <>To bill something new, pick it from <b>+ Add an item from the price list</b>.</>,
       <>A <b>discount</b> goes on a line or on the whole bill (Extra discount). Each has a <b>%</b> / <b>₹</b> switch. Say why. Consultation fees take no discount.</>,
       <>Within the clinic&rsquo;s discount limit it applies at once. Above it (or if you may not give discounts) the button says <Btn>Send discount for approval</Btn>: you can take the discounted amount now, and the rest waits. The owner sees it on Today under Needs your attention; if the owner says no, the difference becomes due.</>,
-      <>Pick a mode and an amount. To <b>split</b>, tap <Btn>Payment mode</Btn>. You can pay part and leave the rest due, or tick <b>Nothing now, pay later</b> to only save the bill.</>,
+      <>Each payment is one line: a method and an amount. To <b>split</b> (say cash and UPI), tap <b>Split: add another method</b>. Less than the bill leaves a balance due; tap <b>Patient pays later</b> to only save the bill.</>,
       <>For <b>EMI</b> type the lender and the approval code. EMI counts as paid at once, but it is listed under &ldquo;EMI awaiting settlement&rdquo; (Reports page) until the bank credit arrives. Then tap <Btn>Bank credit arrived</Btn> and enter the fee the lender kept.</>,
       <>Under <b>Invoices</b>, the &hellip; menu on a paid row has <Btn>Print receipt</Btn>.</>,
     ]}</Steps>
