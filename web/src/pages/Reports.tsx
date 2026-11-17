@@ -1,15 +1,15 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useOutletContext, useSearchParams } from 'react-router';
-import { get, today, fmtTime, listOut } from '../api';
+import { get, today, fmtTime, listOut, errText } from '../api';
 import { can } from '../App';
 import { EmiAwaiting } from '../takePayment';
 import { EndOfDay } from '../endOfDay';
 import { downloadCsv } from '../table';
 import { LoadError } from '../procBoard';
-import { Chip, Empty, Filter, Icon, PageHeader, Section, Segmented, Skeleton, Stat, Tabs, fmtDate, money } from '../ui';
+import { Chip, Drawer, Empty, Filter, Icon, PageHeader, Section, Segmented, Skeleton, Stat, Tabs, fmtDate, money, toast } from '../ui';
 
-type Tab = 'overview' | 'visits' | 'patients' | 'clinical' | 'day';
+type Tab = 'overview' | 'visits' | 'patients' | 'clinical' | 'day' | 'files';
 type Range = 'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last' | 'pick';
 type Row = { name: string; n: number };
 const addDays = (d: string, n: number) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -71,7 +71,9 @@ export function Reports() {
   const [sp, setSp] = useSearchParams();
   const analytics = can(perms, 'report.read'); const daily = can(perms, 'report.daily') || can(perms, 'finance.read');
   const clinical = can(perms, 'encounter.complete') || can(perms, 'encounter.intake');
-  const tabs: { value: Tab; label: string }[] = [...(analytics ? [{ value: 'overview' as Tab, label: 'Overview' }, { value: 'visits' as Tab, label: 'Visits' }, { value: 'patients' as Tab, label: 'Patients' }, ...(clinical ? [{ value: 'clinical' as Tab, label: 'Clinical' }] : [])] : []), ...(daily ? [{ value: 'day' as Tab, label: 'Day' }] : [])];
+  const files = useQuery({ queryKey: ['report-files'], queryFn: () => get('/reports/files') as Promise<Catalogue> });
+  const tabs: { value: Tab; label: string }[] = [...(analytics ? [{ value: 'overview' as Tab, label: 'Overview' }, { value: 'visits' as Tab, label: 'Visits' }, { value: 'patients' as Tab, label: 'Patients' }, ...(clinical ? [{ value: 'clinical' as Tab, label: 'Clinical' }] : [])] : []), ...(daily ? [{ value: 'day' as Tab, label: 'Day' }] : []),
+    ...(files.data?.canExport && files.data.kinds.length ? [{ value: 'files' as Tab, label: 'Downloads' }] : [])];
   // ?view=eod&day=… (from Accounts and the Clinic page) still opens that day's End of day
   const asked = (sp.get('view') === 'eod' || sp.get('day') ? 'day' : sp.get('tab')) as Tab;
   const tab: Tab = tabs.some((x) => x.value === asked) ? asked : tabs[0]?.value ?? 'day';
@@ -79,7 +81,7 @@ export function Reports() {
   const { from, to } = spanOf(range, sp);
   const doctor = sp.get('doctor') ?? '';
   const set = (p: Record<string, string | null>) => { const n = new URLSearchParams(sp); for (const [k, v] of Object.entries(p)) v === null || v === '' ? n.delete(k) : n.set(k, v); setSp(n, { replace: true }); };
-  const q = useQuery({ queryKey: ['analytics', from, to, doctor], queryFn: () => get(`/reports/analytics?from=${from}&to=${to}${doctor ? `&doctor=${doctor}` : ''}`), enabled: analytics && tab !== 'day', placeholderData: keepPreviousData });
+  const q = useQuery({ queryKey: ['analytics', from, to, doctor], queryFn: () => get(`/reports/analytics?from=${from}&to=${to}${doctor ? `&doctor=${doctor}` : ''}`), enabled: analytics && tab !== 'day' && tab !== 'files', placeholderData: keepPreviousData });
   const d = q.data;
   const csv = (name: string, rows: unknown[][]) => listOut(`Downloaded the ${name} report ${from} to ${to}`, rows.length - 1, () => downloadCsv(`${name}-${from}-to-${to}`, rows));
   const csvFor: Record<string, () => void> = !d ? {} : {
@@ -88,11 +90,11 @@ export function Reports() {
     patients: () => csv('patients', [...(['sex', 'ages', 'frequency', 'localities'] as const).flatMap((k) => [[{ sex: 'Men and women', ages: 'Age', frequency: 'Visits in the period', localities: 'Area' }[k], 'Patients'], ...d.patients[k].map((r: Row) => [r.name, r.n]), []]), ['Referral card', d.patients.referralCard]]),
     clinical: () => d.clinical && csv('clinical', (['diagnoses', 'medicines', 'tests', 'procedures'] as const).flatMap((k) => [[{ diagnoses: 'Diagnosis', medicines: 'Medicine', tests: 'Test', procedures: 'Procedure (sessions done)' }[k], 'Count'], ...d.clinical[k].map((r: Row) => [r.name, r.n]), []])),
   };
-  const subtitle = tab === 'day' ? undefined : `${fmtDate(from)}${from !== to ? ` to ${fmtDate(to)}` : ''} · compared with the ${d ? `${fmtDate(d.previous.from)}${d.previous.from !== d.previous.to ? `–${fmtDate(d.previous.to)}` : ''}` : 'period before'}`;
+  const subtitle = tab === 'day' || tab === 'files' ? undefined : `${fmtDate(from)}${from !== to ? ` to ${fmtDate(to)}` : ''} · compared with the ${d ? `${fmtDate(d.previous.from)}${d.previous.from !== d.previous.to ? `–${fmtDate(d.previous.to)}` : ''}` : 'period before'}`;
   return (
     <div>
       {tabs.length > 1 && <Tabs<Tab> className="mb-4" value={tab} onChange={(t) => set({ tab: t, view: null, day: null })} options={tabs} />}
-      {tab === 'day' ? <DailyReport /> : (<>
+      {tab === 'files' ? <Downloads c={files.data!} /> : tab === 'day' ? <DailyReport /> : (<>
         <PageHeader title="Reports" subtitle={subtitle}>
           {d?.doctors && d.doctors.length > 1 && <Filter<string> icon="users" value={doctor} onChange={(v) => set({ doctor: v })} options={[{ value: '', label: 'All doctors' }, ...d.doctors.map((x: any) => ({ value: x.id, label: x.name }))]} />}
           <Filter<Range> icon="calendar" value={range} onChange={(v) => set({ r: v === '30d' ? null : v, ...(v === 'pick' ? { from, to } : { from: null, to: null }) })} options={RANGES} />
@@ -240,5 +242,83 @@ function DailyReport() {
         </Section>
       </>)}
     </div>
+  );
+}
+
+type Kind = 'daily' | 'collection' | 'threec' | 'billing' | 'pharmacy' | 'appointments' | 'procedures' | 'rx' | 'rxlines';
+type Catalogue = { kinds: Kind[]; canExport: boolean; ownOnly: boolean; doctors: { id: string; name: string }[]; staff: { id: string; name: string }[] };
+// Tatva's Reports page: a card each, a side drawer with its choices, a CSV out. IPD is left out (no wards here).
+const REPORTS: { kind: Kind; group: 'Money' | 'Clinical'; title: string; about: string; icon: string; types?: { value: string; label: string }[]; doctor?: boolean }[] = [
+  { kind: 'daily', group: 'Money', title: 'Daily collection', about: 'Every receipt, advance, refund and pharmacy bill of one day, with the totals by mode.', icon: 'wallet' },
+  { kind: 'collection', group: 'Money', title: 'Collection report', about: 'What came in by bill type and mode: for the period, day by day, or every payment.', icon: 'rupee',
+    types: [{ value: 'general', label: 'General' }, { value: 'detailed', label: 'Detailed' }, { value: 'daywise', label: 'Day-wise' }] },
+  { kind: 'threec', group: 'Money', title: '3C report', about: 'Cash memos, invoices and credit notes issued in the period.', icon: 'list',
+    types: [{ value: '', label: 'All' }, { value: 'cash', label: 'Cash memos' }, { value: 'invoice', label: 'Invoices' }, { value: 'credit', label: 'Credit notes' }] },
+  { kind: 'billing', group: 'Money', title: 'Billing overall', about: 'Revenue line by line with discount and GST, or cash flow: money in against expenses.', icon: 'chart',
+    types: [{ value: 'revenue', label: 'Revenue' }, { value: 'cashflow', label: 'Cash flow' }] },
+  { kind: 'pharmacy', group: 'Money', title: 'Pharmacy sales', about: 'Every medicine sold or returned, with batch, expiry and GST.', icon: 'pill' },
+  { kind: 'appointments', group: 'Clinical', title: 'Appointments', about: 'Booked, came, cancelled, no-show and walk-ins: by day, by doctor, or each booking.', icon: 'calendar',
+    types: [{ value: 'general', label: 'Day-wise' }, { value: 'doctor', label: 'By doctor' }, { value: 'detailed', label: 'Detailed' }], doctor: true },
+  { kind: 'procedures', group: 'Clinical', title: 'Procedure sessions', about: 'Every session in the period with its procedure, doctor and status.', icon: 'syringe', doctor: true },
+  { kind: 'rx', group: 'Clinical', title: 'Prescription analytics', about: 'How often each medicine and generic was prescribed, and how much the pharmacy issued.', icon: 'chart', doctor: true },
+  { kind: 'rxlines', group: 'Clinical', title: 'Prescription medicines detailed', about: 'Each prescribed medicine with patient, doctor, dose, frequency and duration.', icon: 'pill', doctor: true },
+];
+
+function Downloads({ c }: { c: Catalogue }) {
+  const [open, setOpen] = useState<Kind | null>(null);
+  const mine = REPORTS.filter((r) => c.kinds.includes(r.kind));
+  const cur = mine.find((r) => r.kind === open);
+  return (<>
+    <PageHeader title="Reports to download" subtitle={c.ownOnly ? 'Your patients only. Each download is noted in the audit log.' : 'Each opens in Excel or Google Sheets. Each download is noted in the audit log.'} />
+    <div className="space-y-5">{(['Money', 'Clinical'] as const).map((g) => { const rs = mine.filter((r) => r.group === g); return rs.length > 0 && (
+      <section key={g} aria-label={g}>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{g} <span className="font-normal">· {rs.length}</span></h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{rs.map((r) => (
+          <div key={r.kind} className="card flex flex-col gap-3 !p-4">
+            <div className="flex items-start justify-between gap-3"><div><div className="font-semibold">{r.title}</div><div className="mt-1 text-[13px] text-muted">{r.about}</div></div><span className="rounded-md bg-paper-2 p-2 text-clay"><Icon name={r.icon} /></span></div>
+            <button className="btn mt-auto justify-center" onClick={() => setOpen(r.kind)}><Icon name="download" />Download</button>
+          </div>))}</div>
+      </section>); })}</div>
+    {cur && <ReportDrawer key={cur.kind} r={cur} c={c} onClose={() => setOpen(null)} />}
+  </>);
+}
+
+function ReportDrawer({ r, c, onClose }: { r: (typeof REPORTS)[number]; c: Catalogue; onClose: () => void }) {
+  const [type, setType] = useState(r.types?.[0].value ?? '');
+  const [range, setRange] = useState<Range>('month');
+  const [pick, setPick] = useState(() => ({ from: today().slice(0, 8) + '01', to: today() }));
+  const [day, setDay] = useState(today());
+  const [doctor, setDoctor] = useState(''); const [mode, setMode] = useState(''); const [by, setBy] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { from, to } = range === 'pick' ? pick : spanOf(range, new URLSearchParams());
+  const detailed = r.kind === 'collection' && type === 'detailed';
+  const go = async () => {
+    const p = new URLSearchParams(r.kind === 'daily' ? { day } : { from, to });
+    for (const [k, v] of Object.entries({ type, doctor: r.doctor ? doctor : '', mode: detailed ? mode : '', by: detailed ? by : '' })) if (v) p.set(k, v);
+    setBusy(true);
+    try { const f = await get(`/reports/files/${r.kind}?${p}`); downloadCsv(f.file, f.rows); toast(`Downloaded ${f.title} · ${f.count} row${f.count === 1 ? '' : 's'}`); }
+    catch (e) { toast(errText(e), 'err'); } finally { setBusy(false); }
+  };
+  const label = (s: string) => <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{s}</div>;
+  const select = (value: string, set: (v: string) => void, opts: { value: string; label: string }[], name: string) =>
+    <select aria-label={name} className="input" value={value} onChange={(e) => set(e.target.value)}>{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
+  return (
+    <Drawer title={r.title} subtitle={r.group === 'Money' ? 'Money report' : 'Clinical report'} width="max-w-md" onClose={onClose}>
+      <div className="space-y-5">
+        {r.types && <div>{label('Report type')}<Segmented value={type} onChange={setType} options={r.types} /></div>}
+        {r.kind === 'daily' ? <div>{label('Date')}<input type="date" aria-label="Date" className="input" value={day} max={today()} onChange={(e) => e.target.value && setDay(e.target.value)} /></div> : (
+          <div>{label('Period')}
+            {select(range, (v) => setRange(v as Range), RANGES, 'Period')}
+            {range === 'pick' && <div className="mt-2 flex items-center gap-2"><input type="date" aria-label="From" className="input" value={pick.from} max={pick.to} onChange={(e) => e.target.value && setPick({ ...pick, from: e.target.value })} /><span className="text-muted">to</span><input type="date" aria-label="To" className="input" value={pick.to} min={pick.from} max={today()} onChange={(e) => e.target.value && setPick({ ...pick, to: e.target.value })} /></div>}
+            <div className="mt-1.5 text-xs text-muted">{fmtDate(from)}{from !== to ? ` to ${fmtDate(to)}` : ''}</div>
+          </div>)}
+        {r.doctor && c.doctors.length > 1 && <div>{label('Doctor')}{select(doctor, setDoctor, [{ value: '', label: 'All doctors' }, ...c.doctors.map((d) => ({ value: d.id, label: d.name }))], 'Doctor')}</div>}
+        {detailed && <>
+          <div>{label('Taken by')}{select(by, setBy, [{ value: '', label: 'Everyone' }, ...c.staff.map((s) => ({ value: s.id, label: s.name }))], 'Taken by')}</div>
+          <div>{label('Mode of payment')}{select(mode, setMode, [{ value: '', label: 'All modes' }, { value: 'cash', label: 'Cash' }, { value: 'upi', label: 'UPI' }, { value: 'card', label: 'Card' }, { value: 'bank', label: 'Bank' }, { value: 'emi', label: 'EMI' }, { value: 'advance', label: 'From advance' }], 'Mode of payment')}</div>
+        </>}
+        <button className="btn btn-primary w-full justify-center" disabled={busy} onClick={go}><Icon name="download" />{busy ? 'Preparing…' : 'Download CSV'}</button>
+      </div>
+    </Drawer>
   );
 }
