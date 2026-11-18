@@ -9,6 +9,7 @@ import { writeAudit } from '../lib/audit.js';
 import { clinical } from './patients.js';
 import { dayBounds } from './billing.js';
 import { moneyByDay } from './dayclose.js';
+import { pharmacyFile, type PharmacyKind } from './pharmacyReports.js';
 
 /**
  * Reports to download (Tatva's Reports page): each one is a CSV built here as rows, so the figures match End of day and Accounts.
@@ -24,12 +25,13 @@ const STATUS: Record<string, string> = { booked: 'Booked', confirmed: 'Confirmed
 const SESSION: Record<string, string> = { confirmed: 'Booked', in_progress: 'In progress', completed: 'Done', missed: 'Missed', cancelled: 'Cancelled', postponed: 'Postponed' };
 const gstIn = (amount: number, bp: number) => (bp ? amount - Math.round((amount * 10000) / (10000 + bp)) : 0);
 
-type Kind = 'daily' | 'collection' | 'threec' | 'billing' | 'appointments' | 'rx' | 'rxlines' | 'pharmacy' | 'procedures';
+type Kind = 'daily' | 'collection' | 'threec' | 'billing' | 'appointments' | 'rx' | 'rxlines' | 'procedures' | PharmacyKind;
+const PHARMACY: PharmacyKind[] = ['pharmacy', 'pharmacy_margin', 'purchase', 'moving', 'stockadj'];
 type Perms = string[];
 const money = (p: Perms) => can(p, 'finance.read');
 const ALLOWED: Record<Kind, (p: Perms) => boolean> = {
   daily: (p) => can(p, 'fees.see') && (can(p, 'report.daily') || money(p)),
-  collection: money, threec: money, billing: money, pharmacy: money,
+  collection: money, threec: money, billing: money, pharmacy: money, pharmacy_margin: money, purchase: money, moving: money, stockadj: money,
   appointments: (p) => can(p, 'report.read') || can(p, 'report.daily'),
   procedures: (p) => can(p, 'report.read') || can(p, 'report.daily'),
   rx: (p) => can(p, 'report.read') && clinical(p),
@@ -241,21 +243,8 @@ export function reportFileRoutes(app: FastifyInstance) {
           ...[...m].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0])).map(([k, r]) => [k, r.generic, r.n, r.patients.size, [...r.doctors].map((d) => docName.get(d)).join('; '), r.qty, r.issued, r.given]),
           [], ['Generic', 'Times prescribed'], ...[...gen].sort((a, b) => b[1] - a[1]).map(([g, n]) => [g, n])];
       }
-    } else if (kind === 'pharmacy') {
-      title = `Pharmacy sales ${span}`;
-      const start = dayBounds(from, tz).start; const end = dayBounds(to, tz).end;
-      const sales = await tx.select({ s: pharmacySale, name: patient.fullName, no: patient.patientNo }).from(pharmacySale).innerJoin(patient, eq(patient.id, pharmacySale.patientId))
-        .where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90)), lt(pharmacySale.createdAt, end))).orderBy(asc(pharmacySale.createdAt));
-      const body: unknown[][] = [];
-      for (const { s, name, no } of sales) {
-        const who = s.buyerName ?? name;
-        if (new Date(s.createdAt).toISOString() >= start) s.items.forEach((l) => body.push([todayIn(tz, new Date(s.createdAt)), 'Sale', s.invoiceNo, who, no, l.name, l.batchNo ?? '', l.expiry ?? '', l.qty, rs(l.mrpPaise), (l.gstBp / 100).toString(), rs(l.amountPaise), rs(gstIn(l.amountPaise, l.gstBp)), mode(s.method)]));
-        for (const r of s.returns ?? []) if (r.at >= start && r.at < end)
-          r.lines.forEach((rl) => { const l = s.items[rl.line]; body.push([todayIn(tz, new Date(r.at)), 'Return', r.creditNoteNo, who, no, l?.name ?? '', l?.batchNo ?? '', l?.expiry ?? '', -rl.qty, rs(l?.mrpPaise ?? 0), ((l?.gstBp ?? 0) / 100).toString(), rs(-rl.amountPaise), rs(-gstIn(rl.amountPaise, l?.gstBp ?? 0)), mode(r.method)]); });
-      }
-      const inSales = sales.filter((x) => new Date(x.s.createdAt).toISOString() >= start);
-      rows = [['Date', 'Type', 'Bill / credit note no', 'Patient', 'Patient no', 'Medicine', 'Batch', 'Expiry', 'Qty', 'MRP (Rs)', 'GST %', 'Amount (Rs)', 'GST in it (Rs)', 'Mode'], ...body,
-        [], ['Bills', inSales.length], ['Bill discounts (Rs)', rs(inSales.reduce((s, x) => s + x.s.discountPaise, 0))]];
+    } else if (PHARMACY.includes(kind as PharmacyKind)) {
+      ({ title, rows } = await pharmacyFile(tx, t, tz, kind as PharmacyKind, type, from, to, span));
     } else if (kind === 'procedures') {
       title = `Procedure sessions ${span}`;
       const list = await tx.select({ s: procedureSession, proc: procedureCatalog.name, name: patient.fullName, no: patient.patientNo }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
@@ -264,7 +253,8 @@ export function reportFileRoutes(app: FastifyInstance) {
       rows = [['Date', 'Time', 'Patient', 'Patient no', 'Procedure', 'Session no', 'Doctor', 'Status', 'Reason'],
         ...list.map(({ s, proc, name, no }) => [s.day, `${s.startTime}–${s.endTime}`, name, no, proc ?? 'Procedure', s.sittingNo, docName.get(s.practitionerId ?? '') ?? '', SESSION[s.state] ?? s.state, s.stateReason ?? ''])];
     }
-    const n = Math.max(0, rows.findIndex((r) => r.length === 0) === -1 ? rows.length - 1 : rows.findIndex((r) => r.length === 0) - 1);
+    const blank = rows.findIndex((r) => r.length === 0); // data rows: after the header, before the first gap, not counting a Total line
+    const n = rows.slice(1, blank === -1 ? undefined : blank).filter((r) => r[0] !== 'Total' && !r.slice(0, 7).includes('Total')).length;
     if (doc) title += ` · ${docName.get(doc)}`;
     await writeAudit(tx, req.ctx, { kind: 'print', action: 'report.downloaded', summary: `Downloaded ${title} · ${n} rows`, unusual: true });
     return { title, file: title.replace(/[^\w-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').toLowerCase(), count: n, rows };

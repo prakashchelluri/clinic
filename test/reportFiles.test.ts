@@ -18,7 +18,7 @@ const as = (c: string) => async (method: 'GET' | 'POST' | 'PUT', url: string, pa
 before(async () => { await migrate(); await applyRls(); await seedIfEmpty(); app = await buildApp(); });
 after(async () => { await app.close(); });
 
-const ALL = ['daily', 'collection', 'threec', 'billing', 'appointments', 'rx', 'rxlines', 'pharmacy', 'procedures'];
+const ALL = ['daily', 'collection', 'threec', 'billing', 'appointments', 'rx', 'rxlines', 'pharmacy', 'procedures', 'pharmacy_margin', 'purchase', 'moving', 'stockadj'];
 const rupees = (s: unknown) => Math.round(Number(s) * 100);
 
 test('owner: every report downloads with its header, each audited; the money ones agree with End of day', async () => {
@@ -83,6 +83,49 @@ test('period rules: needed, in order, at most a year; unknown report 404', async
   assert.equal((await O('GET', '/reports/files/collection?from=2026-05-02&to=2026-05-01')).body.code, 'BAD_RANGE');
   assert.equal((await O('GET', '/reports/files/collection?from=2024-01-01&to=2026-01-01')).body.code, 'RANGE_TOO_LONG');
   assert.equal((await O('GET', '/reports/files/nope?from=2026-01-01&to=2026-01-02')).status, 404);
+});
+
+test('pharmacy files: bills, GST lines, returns, margin, purchase, moving and adjustments all tell the same story', async () => {
+  const O = as(await login('owner@demo.clinic')); const P = as(await login('pharmacy@demo.clinic'));
+  const cet = (await O('GET', '/config')).body.medicines.find((m: any) => m.name === 'Cetirizine 10 mg'); // MRP 30, GST 12%
+  const exp = new Date(); exp.setUTCMonth(exp.getUTCMonth() + 18);
+  assert.equal((await P('POST', '/stock/receipts', { lines: [{ medicineId: cet.id, qty: 20, ratePaise: 1000, batchNo: 'RF1', expiry: exp.toISOString().slice(0, 7) }] })).status, 200);
+  const sale = (await P('POST', '/pharmacy/sale', { walkIn: { name: 'Pharmacy File Buyer' }, items: [{ medicineId: cet.id, qty: 3 }], discountPaise: 600, method: 'upi', reference: 'UTR998877' })).body;
+  assert.ok(sale.id, JSON.stringify(sale));
+  const ret = (await P('POST', `/pharmacy/sale/${sale.id}/return`, { lines: [{ line: 0, qty: 1 }], reason: 'Patient brought it back', method: 'cash' })).body;
+  const batch = (await O('GET', `/stock/medicines/${cet.id}`)).body.batches.find((b: any) => b.batchNo === 'RF1');
+  assert.equal((await O('POST', `/stock/batches/${batch.id}/adjust`, { change: -1, reason: 'Strip damaged' })).status, 200);
+
+  const day = (await O('GET', '/dayclose')).body.day; const range = `from=${day}&to=${day}`;
+  const file = async (k: string, type = '') => { const r = await O('GET', `/reports/files/${k}?${range}${type ? `&type=${type}` : ''}`); assert.equal(r.status, 200, `${k} ${type}`); return r.body.rows as any[][]; };
+  const mine = (rows: any[][], col: number) => rows.filter((r) => r[col] === sale.invoiceNo);
+
+  // bill-wise: MRP 90, discount 6, net 84, returned what was refunded
+  const [b] = mine(await file('pharmacy', 'bills'), 2);
+  assert.deepEqual([rupees(b[8]), rupees(b[10]), rupees(b[11]), rupees(b[13]), rupees(b[14])], [9000, 600, 8400, ret.refundPaise, 8400 - ret.refundPaise]);
+  // GST lines: taxable + CGST + SGST = amount; CGST and SGST split the GST
+  const [l] = mine(await file('pharmacy', 'lines'), 1);
+  assert.equal(rupees(l[12]) + rupees(l[14]) + rupees(l[15]), rupees(l[11])); assert.ok(Math.abs(rupees(l[14]) - rupees(l[15])) <= 1); assert.equal(l[16], 1, 'one came back');
+  const [r] = mine(await file('pharmacy', 'returns'), 2);
+  assert.equal(rupees(r[11]), ret.refundPaise); assert.equal(r[9], 1);
+  assert.equal((await file('pharmacy', 'month')).length, 2, 'one month row under the header');
+
+  // margin by bill line: 2 kept, cost 2 × ₹10 (without GST), profit = sale without GST less cost
+  const [m] = (await file('pharmacy_margin', 'line')).filter((x) => x[1] === sale.invoiceNo);
+  const kept = 8400 - ret.refundPaise; const taxable = kept - (kept - Math.round(kept * 10000 / 11200));
+  assert.deepEqual([m[6], rupees(m[7]), rupees(m[9]), rupees(m[10]), rupees(m[11])], [2, kept, taxable, 2000, taxable - 2000]);
+  for (const t of ['medicine', 'day', 'month']) assert.ok((await file('pharmacy_margin', t)).length >= 3, t);
+
+  // purchase: 20 × ₹10 taxable, 12% GST on top
+  const pu = (await file('purchase')).find((x) => x[8] === 'RF1')!;
+  assert.deepEqual([rupees(pu[14]), rupees(pu[16]) + rupees(pu[17]), rupees(pu[18])], [20000, 2400, 22400]);
+  // moving: 3 sold, 1 back; non-moving never lists it
+  assert.equal((await file('moving', 'moving')).find((x) => x[0] === 'Cetirizine 10 mg')![1], 2);
+  assert.ok(!(await file('moving', 'nonmoving')).some((x) => x[0] === 'Cetirizine 10 mg'));
+  const adjs = (await file('stockadj')).filter((x) => x[3] === 'RF1');
+  assert.ok(adjs.some((x) => String(x[9]).startsWith('Written off')), 'a return not fit to sell shows as a write-off');
+  const adj = adjs.find((x) => x[9] === 'Strip damaged')!;
+  assert.deepEqual([adj[4], adj[7], adj[9], rupees(adj[6])], [-1, 'Adjustment', 'Strip damaged', -1000]);
 });
 
 test('reception: only lists it is allowed, and only once the owner lets lists leave the app; doctor: own patients, no money', async () => {

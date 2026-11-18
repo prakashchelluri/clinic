@@ -245,10 +245,10 @@ function DailyReport() {
   );
 }
 
-type Kind = 'daily' | 'collection' | 'threec' | 'billing' | 'pharmacy' | 'appointments' | 'procedures' | 'rx' | 'rxlines';
+type Kind = 'daily' | 'collection' | 'threec' | 'billing' | 'pharmacy' | 'pharmacy_margin' | 'purchase' | 'moving' | 'stockadj' | 'appointments' | 'procedures' | 'rx' | 'rxlines';
 type Catalogue = { kinds: Kind[]; canExport: boolean; ownOnly: boolean; doctors: { id: string; name: string }[]; staff: { id: string; name: string }[] };
 // Tatva's Reports page: a card each, a side drawer with its choices, a CSV out. IPD is left out (no wards here).
-const REPORTS: { kind: Kind; group: 'Money' | 'Clinical'; title: string; about: string; icon: string; types?: { value: string; label: string }[]; doctor?: boolean }[] = [
+const REPORTS: { kind: Kind; group: 'Money' | 'Pharmacy' | 'Clinical'; title: string; about: string; icon: string; types?: { value: string; label: string }[]; doctor?: boolean }[] = [
   { kind: 'daily', group: 'Money', title: 'Daily collection', about: 'Every receipt, advance, refund and pharmacy bill of one day, with the totals by mode.', icon: 'wallet' },
   { kind: 'collection', group: 'Money', title: 'Collection report', about: 'What came in by bill type and mode: for the period, day by day, or every payment.', icon: 'rupee',
     types: [{ value: 'general', label: 'General' }, { value: 'detailed', label: 'Detailed' }, { value: 'daywise', label: 'Day-wise' }] },
@@ -256,7 +256,14 @@ const REPORTS: { kind: Kind; group: 'Money' | 'Clinical'; title: string; about: 
     types: [{ value: '', label: 'All' }, { value: 'cash', label: 'Cash memos' }, { value: 'invoice', label: 'Invoices' }, { value: 'credit', label: 'Credit notes' }] },
   { kind: 'billing', group: 'Money', title: 'Billing overall', about: 'Revenue line by line with discount and GST, or cash flow: money in against expenses.', icon: 'chart',
     types: [{ value: 'revenue', label: 'Revenue' }, { value: 'cashflow', label: 'Cash flow' }] },
-  { kind: 'pharmacy', group: 'Money', title: 'Pharmacy sales', about: 'Every medicine sold or returned, with batch, expiry and GST.', icon: 'pill' },
+  { kind: 'pharmacy', group: 'Pharmacy', title: 'Pharmacy billing', about: 'Bill by bill with discount, GST and returns; every line for GST filing; returns; or month by month.', icon: 'pill',
+    types: [{ value: 'bills', label: 'Bill-wise' }, { value: 'lines', label: 'GST lines' }, { value: 'returns', label: 'Returns' }, { value: 'month', label: 'Monthly' }] },
+  { kind: 'pharmacy_margin', group: 'Pharmacy', title: 'Pharmacy margin', about: 'Sale, cost and profit: by medicine, by bill line, by date or by month.', icon: 'chart',
+    types: [{ value: 'medicine', label: 'By medicine' }, { value: 'line', label: 'Bill lines' }, { value: 'day', label: 'By date' }, { value: 'month', label: 'By month' }] },
+  { kind: 'purchase', group: 'Pharmacy', title: 'Purchase GST', about: 'Every stock receipt line with vendor GSTIN, HSN, taxable value, CGST and SGST.', icon: 'box' },
+  { kind: 'moving', group: 'Pharmacy', title: 'Moving and non-moving', about: 'What sold most in the period, and stock on the shelf that did not sell at all.', icon: 'repeat',
+    types: [{ value: 'moving', label: 'Moving' }, { value: 'nonmoving', label: 'Non-moving' }] },
+  { kind: 'stockadj', group: 'Pharmacy', title: 'Stock adjustments', about: 'Every hand correction and stock count, with who did it, why, and its value at cost.', icon: 'edit' },
   { kind: 'appointments', group: 'Clinical', title: 'Appointments', about: 'Booked, came, cancelled, no-show and walk-ins: by day, by doctor, or each booking.', icon: 'calendar',
     types: [{ value: 'general', label: 'Day-wise' }, { value: 'doctor', label: 'By doctor' }, { value: 'detailed', label: 'Detailed' }], doctor: true },
   { kind: 'procedures', group: 'Clinical', title: 'Procedure sessions', about: 'Every session in the period with its procedure, doctor and status.', icon: 'syringe', doctor: true },
@@ -270,7 +277,7 @@ function Downloads({ c }: { c: Catalogue }) {
   const cur = mine.find((r) => r.kind === open);
   return (<>
     <PageHeader title="Reports to download" subtitle={c.ownOnly ? 'Your patients only. Each download is noted in the audit log.' : 'Each opens in Excel or Google Sheets. Each download is noted in the audit log.'} />
-    <div className="space-y-5">{(['Money', 'Clinical'] as const).map((g) => { const rs = mine.filter((r) => r.group === g); return rs.length > 0 && (
+    <div className="space-y-5">{(['Money', 'Pharmacy', 'Clinical'] as const).map((g) => { const rs = mine.filter((r) => r.group === g); return rs.length > 0 && (
       <section key={g} aria-label={g}>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{g} <span className="font-normal">· {rs.length}</span></h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">{rs.map((r) => (
@@ -303,7 +310,7 @@ function ReportDrawer({ r, c, onClose }: { r: (typeof REPORTS)[number]; c: Catal
   const select = (value: string, set: (v: string) => void, opts: { value: string; label: string }[], name: string) =>
     <select aria-label={name} className="input" value={value} onChange={(e) => set(e.target.value)}>{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>;
   return (
-    <Drawer title={r.title} subtitle={r.group === 'Money' ? 'Money report' : 'Clinical report'} width="max-w-md" onClose={onClose}>
+    <Drawer title={r.title} subtitle={`${r.group} report`} width="max-w-md" onClose={onClose}>
       <div className="space-y-5">
         {r.types && <div>{label('Report type')}<Segmented value={type} onChange={setType} options={r.types} /></div>}
         {r.kind === 'daily' ? <div>{label('Date')}<input type="date" aria-label="Date" className="input" value={day} max={today()} onChange={(e) => e.target.value && setDay(e.target.value)} /></div> : (
