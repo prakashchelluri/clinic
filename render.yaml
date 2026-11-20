@@ -5,12 +5,25 @@ services:
     name: cubott-clinical
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    # --include=dev: vite, typescript and react are dev dependencies, and npm ci leaves them out when NODE_ENV=production
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # secure cookies, HSTS, and no development defaults (the server refuses to start without COOKIE_SECRET)
+      - key: NODE_ENV
+        value: production
+      # This deployment is the demo: make the demo clinic (six demo1234 accounts) on an empty database. Never set it for a real clinic.
+      - key: SEED_DEMO
+        value: "1"
+      # The CUBOTT platform admin (superadmin@cubott.in). Without it the account is switched off. Paste a long password in the dashboard.
+      - key: SUPERADMIN_PASSWORD
+        sync: false
+      # Not set yet: TRUST_PROXY (the number of proxies in front of the app). Until it is, every request appears to come from Render's
+      # proxy, so "work only from the clinic" and the per-address login limit cannot tell people apart. Set it, then check that
+      # Settings › Privacy shows your own public address.
       # This deployment is the demo: show the demo accounts on the sign-in page (read at build time). Never set it for a real clinic.
       - key: VITE_DEMO_LOGIN
         value: "1"

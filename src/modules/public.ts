@@ -72,7 +72,7 @@ function patientView(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>
 }
 
 export function publicRoutes(app: FastifyInstance) {
-  const ip = (req: FastifyRequest) => String(req.headers['x-forwarded-for'] ?? req.ip).split(',')[0].trim();
+  const ip = (req: FastifyRequest) => req.ip; // never a header the caller writes: behind a proxy, TRUST_PROXY makes req.ip the real address
 
   // --- the patient's own link: confirm, cancel or move inside the clinic's rules ---
   async function byToken(slug: string, token: string) {

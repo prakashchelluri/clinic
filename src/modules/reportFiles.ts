@@ -10,6 +10,7 @@ import { clinical } from './patients.js';
 import { dayBounds } from './billing.js';
 import { moneyByDay } from './dayclose.js';
 import { pharmacyFile, type PharmacyKind } from './pharmacyReports.js';
+import { chargeCredited } from '../lib/money.js';
 
 /**
  * Reports to download (Tatva's Reports page): each one is a CSV built here as rows, so the figures match End of day and Accounts.
@@ -56,7 +57,8 @@ export async function ledger(tx: Tx, t: string, tz: string, from: string, to: st
     const bl = !c && p.billId ? billLines.find((x) => x.billId === p.billId) : undefined;
     const section = p.courseId || c?.courseId || bl?.courseId ? 'procedure' : c?.visitId || bl?.visitId ? 'consultation' : 'other';
     const used = p.method === 'advance';
-    const kind = used ? 'Paid from advance' : p.advance ? (p.amountPaise < 0 ? 'Advance given back' : 'Advance received') : p.amountPaise < 0 ? 'Refund' : 'Receipt';
+    // since patient-level billing every refund is a voucher paid out of the advance: it is still a Refund, as Billing and Accounts call it
+    const kind = used ? 'Paid from advance' : p.amountPaise < 0 ? 'Refund' : p.advance ? 'Advance received' : 'Receipt';
     rows.push({ ...at(p.receivedAt), receiptNo: p.receiptNo ?? '', invoiceNo: inv ?? (c?.billId ? invNo.get(c.billId) ?? '' : ''), patient: name, patientNo: no,
       for: c?.description ?? (p.courseId ? 'Course advance' : p.advance ? 'Advance' : p.billId ? 'Invoice refund' : 'Payment'), kind, section, method: p.method, amountPaise: p.amountPaise, counted: !used, by: by ?? '', byId: p.receivedBy });
   }
@@ -178,18 +180,21 @@ export function reportFileRoutes(app: FastifyInstance) {
         rows = [['Date', 'Money in (Rs)', 'Expenses out (Rs)', 'Net (Rs)', 'Running net (Rs)'], ...body, ['Total', rs(tin), rs(tout), rs(tin - tout), '']];
       } else {
         title = `Revenue ${span}`;
-        const lines = await tx.select({ c: charge, inv: bill.invoiceNo, name: patient.fullName, no: patient.patientNo, vDoc: visit.practitionerId, sDoc: procedureSession.practitionerId }).from(charge)
+        const lines = await tx.select({ c: charge, credited: chargeCredited, inv: bill.invoiceNo, name: patient.fullName, no: patient.patientNo, vDoc: visit.practitionerId, sDoc: procedureSession.practitionerId }).from(charge)
           .innerJoin(patient, eq(patient.id, charge.patientId)).leftJoin(bill, eq(bill.id, charge.billId)).leftJoin(visit, eq(visit.id, charge.visitId)).leftJoin(procedureSession, eq(procedureSession.id, charge.sessionId))
           .leftJoin(pharmacySale, and(eq(pharmacySale.tenantId, t), eq(pharmacySale.chargeId, charge.id)))
           .where(and(eq(charge.tenantId, t), gte(charge.createdAt, start), lt(charge.createdAt, end), ne(charge.status, 'cancelled'), isNull(pharmacySale.id))).orderBy(asc(charge.createdAt));
+        // since patient-level billing a refund leaves the line as it was and puts a credit note against it: the line reads Refunded when
+        // credit notes cover all of it (part credited when some), and only what is left counts as billed
         const st: Record<string, string> = { due: 'Due', paid: 'Paid', waived: 'Waived', refunded: 'Refunded' };
-        const body: unknown[][] = lines.map(({ c, inv, name, no, vDoc, sDoc }) => [todayIn(tz, new Date(c.createdAt)), inv ?? '', name, no, c.description, c.courseId || c.sessionId ? 'Procedure' : c.visitId ? 'Consultation' : 'Other',
-          docName.get(vDoc ?? sDoc ?? '') ?? '', rs(c.amountPaise + c.discountPaise), rs(c.discountPaise), rs(c.amountPaise), rs(gstIn(c.amountPaise, c.taxRateBp)), st[c.status] ?? c.status]);
+        const status = (c: typeof charge.$inferSelect, cr: number) => c.amountPaise > 0 && cr >= c.amountPaise ? 'Refunded' : cr > 0 ? `${st[c.status] ?? c.status}, ${rs(cr)} credited` : st[c.status] ?? c.status;
+        const body: unknown[][] = lines.map(({ c, credited, inv, name, no, vDoc, sDoc }) => [todayIn(tz, new Date(c.createdAt)), inv ?? '', name, no, c.description, c.courseId || c.sessionId ? 'Procedure' : c.visitId ? 'Consultation' : 'Other',
+          docName.get(vDoc ?? sDoc ?? '') ?? '', rs(c.amountPaise + c.discountPaise), rs(c.discountPaise), rs(c.amountPaise), rs(gstIn(c.amountPaise, c.taxRateBp)), status(c, credited)]);
         const sales = await tx.select({ s: pharmacySale, name: patient.fullName, no: patient.patientNo }).from(pharmacySale).innerJoin(patient, eq(patient.id, pharmacySale.patientId))
           .where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end))).orderBy(asc(pharmacySale.createdAt));
         for (const { s, name, no } of sales) body.push([todayIn(tz, new Date(s.createdAt)), s.invoiceNo, s.buyerName ?? name, no, `Pharmacy: ${s.items.length} item${s.items.length === 1 ? '' : 's'}`, 'Pharmacy', '', rs(s.grossPaise), rs(s.discountPaise), rs(s.totalPaise), rs(s.gstPaise), (s.returns ?? []).length ? 'Paid, part returned' : 'Paid']);
         const live = lines.filter((x) => x.c.status !== 'waived' && x.c.status !== 'refunded');
-        const total = live.reduce((s, x) => s + x.c.amountPaise, 0) + sales.reduce((s, x) => s + x.s.totalPaise, 0);
+        const total = live.reduce((s, x) => s + Math.max(0, x.c.amountPaise - x.credited), 0) + sales.reduce((s, x) => s + x.s.totalPaise, 0);
         rows = [['Date', 'Invoice no', 'Patient', 'Patient no', 'Item', 'Bill type', 'Doctor', 'Price (Rs)', 'Discount (Rs)', 'Amount (Rs)', 'GST in it (Rs)', 'Status'], ...body.sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
           [], ['Billed (not waived or refunded)', '', '', '', '', '', '', '', '', rs(total)]];
       }

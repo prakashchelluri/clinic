@@ -409,6 +409,15 @@ export function Encounter() {
   useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('online', f); return () => window.removeEventListener('online', f); }, [enc.data?.status]);
   useEffect(() => { const t = setInterval(() => { if (loaded.current && dirty.current && enc.data?.status !== 'completed' && !save.isPending) save.mutate({ complete: false }); }, 15000); return () => clearInterval(t); }, [enc.data?.status, save.isPending]);
   useEffect(() => { const f = () => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') save.mutate({ complete: false }); }; window.addEventListener('app:save-now', f); return () => window.removeEventListener('app:save-now', f); }, [enc.data?.status]);
+  // leaving the pad inside the app (a menu link, Back, the next patient) with changes not yet saved: keep a copy on this computer, then send it.
+  // A good save removes the copy; if the save does not get through, the copy is offered back the next time this pad opens.
+  const latest = useRef({ data, rx, recs }); latest.current = { data, rx, recs };
+  const signed = useRef(false); signed.current = enc.data?.status === 'completed';
+  useEffect(() => () => {
+    if (!loaded.current || !dirty.current || signed.current) return;
+    try { localStorage.setItem(localKey, JSON.stringify({ at: Date.now(), ...latest.current })); } catch { /* private mode */ }
+    save.mutate({ complete: false });
+  }, []);
   // closing the tab with changes not yet saved asks first
   useEffect(() => { const f = (ev: BeforeUnloadEvent) => { if (loaded.current && dirty.current && enc.data?.status !== 'completed') { ev.preventDefault(); ev.returnValue = ''; } }; window.addEventListener('beforeunload', f); return () => window.removeEventListener('beforeunload', f); }, [enc.data?.status]);
 

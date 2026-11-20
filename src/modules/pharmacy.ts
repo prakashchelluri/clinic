@@ -9,6 +9,7 @@ import { emit, todayIn, nextNumber, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { allocate, moveStock, type Actor } from './stock.js';
+import { assertDayOpen } from './dayclose.js';
 
 /**
  * How many tablets one dose is. Only a count of units ("2 tab", "1 cap", "3 drops", "2 puffs", a bare "2") multiplies;
@@ -128,7 +129,8 @@ export function pharmacyRoutes(app: FastifyInstance) {
   });
 
   route(app, 'post', '/pharmacy/sale', 'pharmacy.bill', async (req, tx) => {
-    const body = SaleIn.parse(req.body);
+    const body = { ...SaleIn.parse(req.body), at: undefined }; // a back-dated sale is for the test-data loader only, never from the counter
+    await assertDayOpen(tx, req.ctx); // a closed day takes no more money, at the counter too
     const [tn] = await tx.select({ settings: tenant.settings }).from(tenant).where(eq(tenant.id, req.ctx.tenantId));
     return recordSale(tx, { tenantId: req.ctx.tenantId, userId: req.ctx.userId, name: req.ctx.name }, body, { ctx: req.ctx, maxDiscountBp: can(req.perms, 'stock.approve') ? 10000 : (tn?.settings as any)?.pharmacy?.maxDiscountBp ?? 1000 });
   });
@@ -213,6 +215,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
   /** Items back from a patient: into the same batch, refund in the chosen mode, credit note number. */
   route(app, 'post', '/pharmacy/sale/:id/return', 'pharmacy.return', async (req, tx) => {
     const b = ReturnIn.parse(req.body);
+    await assertDayOpen(tx, req.ctx);
     return returnItems(tx, { tenantId: req.ctx.tenantId, userId: req.ctx.userId, name: req.ctx.name }, (req.params as any).id, b, req.ctx);
   });
   /** Void: undo a bill just taken (wrong patient, wrong item). Whoever took it, within ten minutes, before any return; everything goes back and the money is refunded the way it came. */
@@ -224,6 +227,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     if (s.returns.length) throw new HttpError(409, 'ALREADY_RETURNED');
     // ponytail: a split bill would need one refund per method; those are cancelled from Bills
     if (s.method === 'split') throw new HttpError(409, 'VOID_SPLIT');
+    await assertDayOpen(tx, req.ctx);
     const why = z.object({ reason: z.string().trim().max(160).optional() }).parse(req.body ?? {}).reason;
     const reference = s.method === 'cash' ? undefined : `VOID ${s.invoiceNo}`; // a refund note, never the patient's own UTR passed off as one
     // the items never left the counter, so they go back on the shelf
@@ -236,6 +240,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     if (!s) throw new HttpError(404, 'NOT_FOUND');
     const lines = s.items.map((l, i) => ({ line: i, qty: l.qty - returnedQty(s, i), restock: b.restock })).filter((l) => l.qty > 0);
     if (!lines.length) throw new HttpError(409, 'NOTHING_TO_RETURN');
+    await assertDayOpen(tx, req.ctx);
     return returnItems(tx, { tenantId: req.ctx.tenantId, userId: req.ctx.userId, name: req.ctx.name }, s.id, { ...b, lines }, req.ctx);
   });
 

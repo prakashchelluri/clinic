@@ -48,6 +48,8 @@ declare module 'fastify' {
 export async function buildApp() {
   // TRUST_PROXY: set when running behind a proxy (e.g. 1 for one hop) so the real client address is used; never trust a forwarded address otherwise.
   const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 15 * 1024 * 1024, trustProxy: process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY === 'true') as any : false });
+  // the session cookie is signed with this: a known value would let anyone forge a sign-in, so production refuses to start without one
+  if (process.env.NODE_ENV === 'production' && !process.env.COOKIE_SECRET) throw new Error('COOKIE_SECRET is not set');
   await app.register(cookie, { secret: process.env.COOKIE_SECRET ?? 'dev-secret-change-me' });
 
   app.setErrorHandler((err: any, _req, reply) => {

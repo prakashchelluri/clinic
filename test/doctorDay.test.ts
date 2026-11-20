@@ -113,7 +113,8 @@ test('waiting list: add, listed, taken off when booked', async () => {
   await R('POST', '/appointments', { sessionId: free[0].sessionId, patientId: p.id });
   assert.ok(!(await R('GET', '/waitlist')).json().some((x: any) => x.id === w.id), 'booked patients leave the list');
   const D = as(await login('doctor2@demo.clinic'));
-  assert.equal((await D('POST', '/waitlist', { patientId: p.id })).statusCode, 403, 'doctors do not manage the list');
+  // doctors book since 14 Nov 2026 (appointment.write), so they may put a patient on the waiting list too
+  assert.equal((await D('POST', '/waitlist', { patientId: p.id })).statusCode, 200, 'a doctor who can book can add to the list');
 });
 
 test('templates: save, list most used first, same name replaces, use counts', async () => {

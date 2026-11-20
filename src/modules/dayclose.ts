@@ -83,8 +83,8 @@ export async function dayFigures(tx: Tx, t: string, tz: string, day: string, to 
 }
 
 /** A day that has been closed does not take new payments; a mistake is put right by a refund, which is dated today. */
-export async function assertDayOpen(tx: Tx, ctx: Ctx) {
-  const closed = await tx.select({ id: dayClose.id }).from(dayClose).where(and(eq(dayClose.tenantId, ctx.tenantId), eq(dayClose.day, todayIn(ctx.timezone)))).limit(1);
+export async function assertDayOpen(tx: Tx, ctx: Pick<Ctx, 'tenantId' | 'timezone'>, day = todayIn(ctx.timezone)) {
+  const closed = await tx.select({ id: dayClose.id }).from(dayClose).where(and(eq(dayClose.tenantId, ctx.tenantId), eq(dayClose.day, day))).limit(1);
   if (closed.length) throw new HttpError(409, 'DAY_CLOSED');
 }
 

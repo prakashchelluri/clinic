@@ -222,6 +222,7 @@ export function billingRoutes(app: FastifyInstance) {
     const today = todayIn(req.ctx.timezone);
     if (b.day && b.day > today) throw new HttpError(400, 'FUTURE_DATE');
     if (b.day && b.day < addDays(today, -366)) throw new HttpError(400, 'TOO_OLD');
+    if (b.day) await assertDayOpen(tx, req.ctx, b.day); // a closed day's drawer is counted: no expense goes onto it
     if (b.category) { const ten = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r: any) => r[0]); if (!categoriesOf(ten?.settings).includes(b.category)) throw new HttpError(400, 'BAD_CATEGORY'); }
   };
   route(app, 'get', '/expenses', 'expense.read', async (req, tx) => {
@@ -234,13 +235,15 @@ export function billingRoutes(app: FastifyInstance) {
     return { from, to, categories: categoriesOf(ten?.settings), rows: rows.map((r) => ({ ...r.e, enteredByName: r.by })), totalPaise: live.reduce((s, r) => s + r.e.amountPaise, 0), byCategory: sum('category'), byMethod: sum('method') };
   });
   route(app, 'post', '/expenses', 'expense.write', async (req, tx) => {
-    const body = ExpenseIn.parse(req.body); await checkExpense(req, tx, body);
+    const body = ExpenseIn.parse(req.body); await checkExpense(req, tx, { ...body, day: body.day ?? todayIn(req.ctx.timezone) });
     const [row] = await tx.insert(expense).values({ ...body, day: body.day ?? todayIn(req.ctx.timezone), tenantId: req.ctx.tenantId, enteredBy: req.ctx.userId }).returning();
     await emit(tx, req.ctx, 'expense.added', 'expense', row.id, { amountPaise: row.amountPaise, category: row.category });
     return row;
   });
+  /** An expense already on a closed day is not changed or removed: that day's drawer was counted with it. */
+  const onOpenDay = async (req: any, tx: any) => { const e = await tx.select({ day: expense.day }).from(expense).where(and(eq(expense.id, req.params.id), eq(expense.tenantId, req.ctx.tenantId))).then((r: any) => r[0]); if (e) await assertDayOpen(tx, req.ctx, e.day); };
   route(app, 'patch', '/expenses/:id', 'expense.write', async (req, tx) => {
-    const body = sent(ExpenseIn.partial().parse(req.body), req.body); await checkExpense(req, tx, body);
+    const body = sent(ExpenseIn.partial().parse(req.body), req.body); await onOpenDay(req, tx); await checkExpense(req, tx, body);
     const [row] = await tx.update(expense).set(body).where(and(eq(expense.id, (req.params as any).id), eq(expense.tenantId, req.ctx.tenantId), isNull(expense.voidedAt))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     await emit(tx, req.ctx, 'expense.edited', 'expense', row.id, body);
@@ -248,7 +251,7 @@ export function billingRoutes(app: FastifyInstance) {
   });
   /** "Delete" keeps the row (voided, with who and why) so the books can always be explained. */
   route(app, 'delete', '/expenses/:id', 'expense.write', async (req, tx) => {
-    const reason = String((req.query as any).reason ?? '').trim().slice(0, 200);
+    const reason = String((req.query as any).reason ?? '').trim().slice(0, 200); await onOpenDay(req, tx);
     const [row] = await tx.update(expense).set({ voidedAt: new Date().toISOString(), voidedReason: reason || null }).where(and(eq(expense.id, (req.params as any).id), eq(expense.tenantId, req.ctx.tenantId), isNull(expense.voidedAt))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     await emit(tx, req.ctx, 'expense.voided', 'expense', row.id, { reason });

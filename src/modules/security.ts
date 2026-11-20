@@ -6,8 +6,10 @@ import { route } from '../lib/route.js';
 import { HttpError } from '../lib/auth.js';
 import { securityOf, validIp, ipAllowed, writeAudit, cleanIp } from '../lib/audit.js';
 
-const isOwner = (req: FastifyRequest) => req.ctx.roles.some((r) => r === 'owner' || r === 'superadmin');
-const canAudit = (req: FastifyRequest) => req.ctx.roles.some((r) => r === 'owner' || r === 'admin' || r === 'superadmin');
+// superadmin counts only on the CUBOTT platform; inside a clinic it is just a name nobody can be given
+const platformAdmin = (req: FastifyRequest) => req.ctx.tenantKind === 'platform' && req.ctx.roles.includes('superadmin');
+const isOwner = (req: FastifyRequest) => req.ctx.roles.includes('owner') || platformAdmin(req);
+const canAudit = (req: FastifyRequest) => req.ctx.roles.some((r) => r === 'owner' || r === 'admin') || platformAdmin(req);
 const ROLES = ['owner', 'admin', 'doctor', 'receptionist', 'assistant', 'coordinator', 'pharmacist'];
 
 const Addr = z.object({ label: z.string().trim().min(1).max(60), from: z.string().trim().refine(validIp, 'BAD_IP'), to: z.string().trim().refine(validIp, 'BAD_IP').nullish() });

@@ -45,6 +45,8 @@ export function adminRoutes(app: FastifyInstance) {
     if (body.settings?.expenseCategories !== undefined) body.settings.expenseCategories = NameList(40, 40).parse(body.settings.expenseCategories);
     if (body.settings?.discountCapPct !== undefined) body.settings.discountCapPct = z.number().int().min(0).max(100).parse(body.settings.discountCapPct);
     if (body.settings && 'security' in body.settings) throw new HttpError(403, 'FORBIDDEN:owner');
+    // roles change only through /admin/roles, which checks that nobody hands out what they do not hold themselves
+    if (body.settings && ('roles' in body.settings || 'roleNames' in body.settings)) throw new HttpError(400, 'USE_ROLES_SETTINGS');
     // pictures change only by uploading them (/admin/clinic/logo, /admin/practitioners/:id/signature), never as a typed address
     if (body.settings && ('signatures' in body.settings || (body.settings.print && 'logoUrl' in body.settings.print))) throw new HttpError(400, 'UPLOAD_THE_PICTURE'); // privacy settings change only through /security (owner)
     const cur = await tx.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)).then((r) => r[0]);
@@ -72,6 +74,7 @@ export function adminRoutes(app: FastifyInstance) {
   route(app, 'post', '/admin/users', 'user.write', async (req, tx) => {
     const body = UserIn.parse(req.body); await checkRoles(tx, req.ctx.tenantId, body.roles);
     if (body.roles.includes('owner') && !req.ctx.roles.includes('owner')) throw new HttpError(403, 'OWNER_ONLY_GRANT');
+    await mayAssign(req, tx, body.roles);
     // No password given: the app makes one, shows it once, and the person picks their own at first sign-in.
     const generated = body.password ? null : firstPassword();
     const [row] = await tx.insert(appUser).values({ tenantId: req.ctx.tenantId, name: body.name, email: body.email.toLowerCase(), passwordHash: hashPassword(body.password ?? generated!), role: body.roles[0], roles: body.roles, practitionerId: body.practitionerId ?? null, mustChangePassword: !!generated }).returning();
@@ -98,6 +101,7 @@ export function adminRoutes(app: FastifyInstance) {
     // The owner role: only an owner hands it out or takes it away, only an owner changes an owner's sign-in, and the clinic always keeps one active owner.
     const iAmOwner = req.ctx.roles.includes('owner'); const wasOwner = (cur.roles?.length ? cur.roles : [cur.role]).includes('owner'); const staysOwner = (body.roles ?? (cur.roles?.length ? cur.roles : [cur.role])).includes('owner');
     if (wasOwner !== staysOwner && !iAmOwner) throw new HttpError(403, 'OWNER_ONLY_GRANT');
+    if (body.roles) { const had = cur.roles?.length ? cur.roles : [cur.role]; await mayAssign(req, tx, body.roles.filter((k) => !had.includes(k))); } // roles they already had stay as they are
     if (wasOwner && !iAmOwner && ((body.email !== undefined && body.email.toLowerCase() !== cur.email) || body.password || (body.active !== undefined && body.active !== cur.active))) throw new HttpError(403, 'OWNER_ONLY_EDIT');
     if (wasOwner && cur.active && (!staysOwner || body.active === false)) {
       const others = await tx.select({ id: appUser.id }).from(appUser).where(and(eq(appUser.tenantId, req.ctx.tenantId), eq(appUser.active, true), sql`${appUser.id} <> ${id}`, sql`'owner' = any(${appUser.roles})`)).limit(1);
@@ -113,7 +117,12 @@ export function adminRoutes(app: FastifyInstance) {
   // --- roles: each clinic decides what every role can do, and can add its own ---
   async function checkRoles(tx: any, tenantId: string, keys: string[]) {
     const known = new Set((await clinicRoles(tx, tenantId)).map((r) => r.key));
-    for (const k of keys) if (!known.has(k)) throw new HttpError(400, 'UNKNOWN_ROLE', { role: k });
+    for (const k of keys) if (!known.has(k) || k === 'superadmin') throw new HttpError(400, 'UNKNOWN_ROLE', { role: k }); // superadmin is the platform's, never a clinic role
+  }
+  /** Giving someone a role is handing out its permissions: only roles whose every permission you hold yourself (so nobody, themselves included, is lifted above you). */
+  async function mayAssign(req: any, tx: any, keys: string[]) {
+    const all = await clinicRoles(tx, req.ctx.tenantId);
+    for (const k of keys) { const r = all.find((x) => x.key === k); if (r) mayGrant(req, r.perms); }
   }
   route(app, 'get', '/admin/permissions', 'user.read', async () => PERMISSIONS);
   route(app, 'get', '/admin/roles', 'user.read', async (req, tx) => {
@@ -156,7 +165,7 @@ export function adminRoutes(app: FastifyInstance) {
       const held = await tx.select({ roles: appUser.roles }).from(appUser).where(and(eq(appUser.tenantId, cur.id), eq(appUser.active, true)));
       if (held.some((u) => u.roles?.includes(key))) throw new HttpError(409, 'ROLE_IN_USE');
       delete roleNames[key];
-    }
+    } else { const before = new Set(expandPerms(roles[key] ?? DEFAULT_ROLES_FOR(key))); mayGrant(req, expandPerms(DEFAULT_ROLES_FOR(key)).filter((p) => !before.has(p))); } // a reset gives back the standard permissions: the same rule as granting them
     delete roles[key];
     await tx.update(tenant).set({ settings: { ...cur.settings, roles, roleNames } }).where(eq(tenant.id, cur.id));
     await emit(tx, req.ctx, 'role.removed', 'tenant', cur.id, { key });

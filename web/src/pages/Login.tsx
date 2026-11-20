@@ -131,7 +131,7 @@ export function Login() {
           {err && <div className="text-sm text-rose anim-fade-in" role="alert">{err}</div>}
           <button className="btn btn-primary w-full !py-3.5 !text-[15px]" disabled={busy || !f.email}>{busy ? 'Signing in…' : 'Login'}<Icon name="chevR" /></button>
 
-          {DEMO.length > 0 && <div className="mt-3">
+          {SHOW_DEMO && <div className="mt-3">{/* SHOW_DEMO is fixed at build time, so a clinic's build carries none of this text */}
             <div className="label">Demo accounts · password demo1234</div>
             <div className="grid grid-cols-2 gap-2 stagger">
               {DEMO.map(([e, role, hint], i) => (

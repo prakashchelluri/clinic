@@ -2,7 +2,7 @@ import { and, eq, desc, sql } from 'drizzle-orm';
 import { db } from './index.js';
 import { tenant, branch, appUser, specialty, practitioner, formDefinition, feeCategory, medicine, procedureCatalog, session, room, service, rxTemplate, tmpl, TENANT_TABLES, type FormSchema } from './schema.js';
 import { randomUUID } from 'node:crypto';
-import { hashPassword } from '../lib/auth.js';
+import { hashPassword, verifyPassword } from '../lib/auth.js';
 import { todayIn, addDays } from '../lib/core.js';
 import { ensureDemoPack } from './demoPack.js';
 
@@ -197,8 +197,10 @@ export async function ensureFormsCurrent() {
     if (!(await db.select({ id: rxTemplate.id }).from(rxTemplate).where(eq(rxTemplate.tenantId, t.id)).limit(1)).length) await insertStarterTemplates(db, t.id);
     // Section templates arrived with Wave 1: give every clinic its starter sets once.
     if (!(await db.select({ id: tmpl.id }).from(tmpl).where(eq(tmpl.tenantId, t.id)).limit(1)).length) await insertStarterSets(db, t.id);
-    // Starter templates, procedure forms, more medicines and opening stock: only what is missing.
-    await ensureDemoPack(db, t.id, todayIn(t.timezone ?? 'Asia/Kolkata'));
+    // Starter templates, procedure forms, more medicines and opening stock: only what is missing, and only in the demo clinic.
+    // A real clinic's stock is what it received; a medicine or template it deleted stays deleted.
+    const demo = (t.settings as any)?.demo === true || (await db.select({ id: appUser.id }).from(appUser).where(and(eq(appUser.tenantId, t.id), eq(appUser.email, 'owner@demo.clinic'))).limit(1)).length > 0;
+    if (demo) await ensureDemoPack(db, t.id, todayIn(t.timezone ?? 'Asia/Kolkata'));
 
     const cur = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, t.id), eq(formDefinition.key, 'encounter'))).orderBy(desc(formDefinition.version)).then((r: any) => r[0]);
     // Only auto-upgrade clinics still on the stock pack (no owner-edited versions beyond it).
@@ -213,18 +215,27 @@ export async function ensureFormsCurrent() {
   }
 }
 
-/** The platform tenant hosts CUBOTT staff who onboard clinics. Created once. */
+const production = () => process.env.NODE_ENV === 'production';
+
+/** The platform tenant hosts CUBOTT staff who onboard clinics. Created once.
+ *  Its admin's password is SUPERADMIN_PASSWORD, set again on every start. In production without it the account is switched off,
+ *  so the development password (demo1234) can never sign in to a public server. */
 export async function ensurePlatform() {
-  if (await db.select().from(tenant).where(eq(tenant.kind, 'platform')).then((r) => r.length)) return;
-  const pid = randomUUID();
+  const pw = process.env.SUPERADMIN_PASSWORD || (production() ? null : 'demo1234');
+  const pid = (await db.select().from(tenant).where(eq(tenant.kind, 'platform')).then((r) => r[0]))?.id ?? randomUUID();
   await (db as any).transaction(async (db: any) => {
-  await db.execute(sql`select set_config('app.tenant_id', ${pid}, true)`);
-  const [t] = await db.insert(tenant).values({ id: pid, slug: 'cubott', name: 'CUBOTT Platform', kind: 'platform', settings: {} }).returning();
-  await db.insert(appUser).values({ tenantId: t.id, email: 'superadmin@cubott.in', name: 'CUBOTT Admin', passwordHash: hashPassword(process.env.SUPERADMIN_PASSWORD ?? 'demo1234'), role: 'superadmin', roles: ['superadmin'] });
+    await db.execute(sql`select set_config('app.tenant_id', ${pid}, true)`);
+    if (!(await db.select().from(tenant).where(eq(tenant.id, pid))).length) await db.insert(tenant).values({ id: pid, slug: 'cubott', name: 'CUBOTT Platform', kind: 'platform', settings: {} });
+    const u = (await db.select().from(appUser).where(and(eq(appUser.tenantId, pid), eq(appUser.email, 'superadmin@cubott.in'))))[0];
+    if (!u) { await db.insert(appUser).values({ tenantId: pid, email: 'superadmin@cubott.in', name: 'CUBOTT Admin', passwordHash: hashPassword(pw ?? randomUUID()), role: 'superadmin', roles: ['superadmin'], active: !!pw }); return; }
+    if (!pw) { if (u.active) { await db.update(appUser).set({ active: false }).where(eq(appUser.id, u.id)); console.warn('superadmin@cubott.in switched off: set SUPERADMIN_PASSWORD to use it'); } return; }
+    if (!u.active || !verifyPassword(pw, u.passwordHash)) await db.update(appUser).set({ passwordHash: hashPassword(pw), active: true }).where(eq(appUser.id, u.id));
   });
 }
 
+/** The demo clinic (six known demo1234 accounts) is made only for development and tests, or when SEED_DEMO=1 (the public demo). */
 export async function seedIfEmpty() {
+  if (production() && process.env.SEED_DEMO !== '1') return;
   if (await db.select().from(tenant).where(eq(tenant.kind, 'clinic')).limit(1).then((r) => r.length)) return;
   await seedDemo();
 }
@@ -235,7 +246,7 @@ export async function seedDemo(slug = 'sahitya') {
   const tid = c.tenantId;
   return (db as any).transaction(async (db: any) => {
   await db.execute(sql`select set_config('app.tenant_id', ${tid}, true)`);
-  await db.update(tenant).set({ settings: { scheduling: { windowMinutes: 60, arriveEarlyMinutes: 35, defaultCapacity: 7 }, numbering: { opNumberScope: 'day+category' }, print: { address: 'Rajahmundry, Andhra Pradesh', phone: '', footer: 'Get well soon · ఆరోగ్యంగా ఉండండి' }, languages: ['te', 'en'] } }).where(eq(tenant.id, tid));
+  await db.update(tenant).set({ settings: { demo: true, scheduling: { windowMinutes: 60, arriveEarlyMinutes: 35, defaultCapacity: 7 }, numbering: { opNumberScope: 'day+category' }, print: { address: 'Rajahmundry, Andhra Pradesh', phone: '', footer: 'Get well soon · ఆరోగ్యంగా ఉండండి' }, languages: ['te', 'en'] } }).where(eq(tenant.id, tid));
   const [drB] = await db.insert(practitioner).values({ tenantId: tid, name: 'Dr. Second Doctor', regNo: 'APMC/00001', qualification: 'MBBS, DDVL', specialtyId: c.specialtyId,
     routine: { days: Object.fromEntries([1, 2, 3, 4, 5, 6].map((d) => [String(d), [['10:00', '14:00']] as [string, string][]])), capacity: 6, windowMinutes: 60 } }).returning();
   const pw = hashPassword('demo1234');

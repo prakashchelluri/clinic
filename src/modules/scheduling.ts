@@ -277,7 +277,9 @@ export function schedulingRoutes(app: FastifyInstance) {
     handling: z.enum(['move', 'ask', 'call']).default('move'), preview: z.boolean().default(false) });
   route(app, 'post', '/calendar/day-change', null, async (req, tx) => {
     const b = DayChange.parse(req.body); const t = req.ctx.tenantId; const origin = originOf(req);
-    if (!(can(req.perms, 'appointment.write') || req.ctx.practitionerId === b.practitionerId)) throw new HttpError(403, 'FORBIDDEN:appointment.write');
+    // the desk changes any doctor's day; a doctor (who can book since 14 Nov) changes only their own, unless they also run the clinic's settings
+    const own = req.ctx.practitionerId === b.practitionerId;
+    if (!own && !(req.ctx.practitionerId ? can(req.perms, 'config.write') : can(req.perms, 'appointment.write'))) throw new HttpError(403, 'FORBIDDEN:appointment.write');
     const today = todayIn(req.ctx.timezone);
     if (b.day < today) throw new HttpError(409, 'PAST_DAY');
     const doc = await tx.select().from(practitioner).where(and(eq(practitioner.id, b.practitionerId), eq(practitioner.tenantId, t))).then((r) => r[0]);

@@ -91,7 +91,9 @@ test('full OP slice', async () => {
   assert.equal((await reception('POST', '/documents', { patientId: book.body.patientId, recommendationIds: [tests[2].id, '00000000-0000-4000-8000-000000000000'], title: 'x.pdf', mime: 'application/pdf', dataBase64: pdf })).status, 400, 'a test of another patient is refused');
   await doctor('PATCH', `/encounters/${open.body.id}`, { data: {}, recommendations: ['CBC'].map((notes) => ({ kind: 'investigation', notes })) });
 
-  // 6. doctor: required field enforced, then completes with Rx + follow-up + procedure recommendation
+  // 6. doctor: required field enforced (the clinic ticks Diagnosis as required in Settings › Rx pad), then completes with Rx + follow-up + procedure recommendation
+  const pad = (await doctor('GET', '/admin/pad')).body;
+  assert.equal((await doctor('PUT' as any, '/admin/pad', { sections: pad.sections.map((s: any) => (s.key === 'diagnosis' ? { ...s, required: true } : s)) })).status, 200);
   const invalid = await doctor('PATCH', `/encounters/${open.body.id}`, { data: { complaint: { chief_complaint: 'acne' } }, complete: true });
   assert.equal(invalid.status, 422);
   const done = await doctor('PATCH', `/encounters/${open.body.id}`, {

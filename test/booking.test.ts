@@ -49,10 +49,12 @@ test('booking with a visit type, repeat series, confirm, cancel the rest of the 
   const cfg = (await reception('GET', '/config')).body;
   const doc = cfg.practitioners.find((p: any) => p.name.startsWith('Dr. Main')).id;
   const review = cfg.services.find((s: any) => s.name === 'Review');
-  const day = addDays(today(), 2);
-  const ws = (await reception('GET', `/sessions?day=${day}&practitionerId=${doc}`)).body;
+  // the first working day from two days out (the doctor has no hours on Sunday, so a fixed "+2" failed on Fridays)
+  let ws: any[] = [];
+  for (let n = 2; n < 9 && !ws.length; n++) ws = (await reception('GET', `/sessions?day=${addDays(today(), n)}&practitionerId=${doc}`)).body;
   const w = ws.find((x: any) => x.free > 0) ?? ws[0];
-  assert.ok(w, 'a window two days out');
+  assert.ok(w, 'a window in the coming week');
+  const day = w.day;
 
   const r = await reception('POST', '/appointments', { sessionId: w.id, serviceId: review.id, newPatient: { fullName: 'Series Patient', phone: '9000011111' }, repeat: { everyWeeks: 1, count: 4 } });
   assert.equal(r.status, 200, JSON.stringify(r.body));
