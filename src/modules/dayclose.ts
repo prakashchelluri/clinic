@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
-import { appointment, charge, dayClose, encounter, expense, feeCategory, patient, payment, pharmacySale, practitioner, prescriptionItem, procedureCatalog, procedureSession, recommendation, session, visit } from '../db/schema.js';
+import { and, desc, eq, gte, inArray, isNull, lt, lte, notInArray, sql } from 'drizzle-orm';
+import { appointment, charge, course, dayClose, encounter, expense, feeCategory, patient, payment, pharmacySale, practitioner, prescriptionItem, procedureCatalog, procedureSession, recommendation, session, visit } from '../db/schema.js';
 import { clinical } from './patients.js';
 import { markMissed } from './followups.js';
 import type { Tx } from '../db/index.js';
@@ -9,7 +9,8 @@ import { route } from '../lib/route.js';
 import { addDays, emit, todayIn } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { dayBounds } from './billing.js';
-import { chargeBalance } from '../lib/money.js';
+import { chargeBalance, lineMoney } from '../lib/money.js';
+import { standing } from './courses.js';
 
 export const COUNT_KEYS = ['General', 'Review', 'Procedure', 'Procedure follow-up', 'Relatives and friends'] as const;
 type Bucket = { cash: number; upi: number; card: number; other: number; total: number };
@@ -26,7 +27,7 @@ export function visitType(code: string, name: string): (typeof COUNT_KEYS)[numbe
 
 /** A day's money by type and mode, the cash that should be in the drawer, and the visit counts: what the head receptionist reads against the paper diary. */
 // `to` makes it a range (the Dashboard); every money figure in the app comes from here so they always agree.
-// byDoctor: the same money by the doctor of the visit or sitting it paid for; pharmacy, course advances and anything else stay out (the rest of the total).
+// byDoctor: the same money by the doctor of the visit it paid for, and course money by the doctor of each session done (below); pharmacy, deposits and anything else stay out.
 // refunds: money given back on a refund voucher, by the mode it left in (pharmacy returns stay under pharmacy, as before).
 export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; refunds: Bucket; total: Bucket };
 export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), refunds: empty(), total: empty() });
@@ -61,6 +62,19 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
     if (p.advance) { add(p.receivedAt, p.amountPaise < 0 ? 'refunds' : 'other', p.method, p.amountPaise); continue; } // a deposit, or a refund voucher
     add(p.receivedAt, key, p.method, p.amountPaise);
     if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
+  }
+  // A treatment is invoiced as a whole, so its money goes to the doctor who did each session (the owner's rule, 20 Nov 2026): on the
+  // session's day, that session's share of the course after discount and credits, as far as the patient has paid for the course.
+  // ponytail: "paid" is as of now, not as of the session day; keep a dated running total if a past range must never move
+  const doneIn = await tx.select({ c: course }).from(procedureSession).innerJoin(course, and(eq(course.tenantId, t), eq(course.recommendationId, procedureSession.recommendationId)))
+    .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.state, 'completed'), gte(procedureSession.day, from), lte(procedureSession.day, to)));
+  for (const c of new Map(doneIn.map((x) => [x.c.id, x.c])).values()) {
+    const per = (await standing(tx, t, c)).perSittingPaise;
+    const own = await tx.select({ id: charge.id }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.courseId, c.id), isNull(charge.sessionId), notInArray(charge.status, ['cancelled', 'waived'])));
+    const m = await lineMoney(tx, t, own.map((x) => x.id)); let paid = own.reduce((s, x) => s + m.applied(x.id), 0);
+    const done = await tx.select({ day: procedureSession.day, doc: procedureSession.practitionerId }).from(procedureSession)
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.recommendationId, c.recommendationId), eq(procedureSession.state, 'completed'))).orderBy(procedureSession.day, procedureSession.sittingNo);
+    for (const s of done) { const share = Math.min(per, Math.max(0, paid)); paid -= share; if (s.doc && share && s.day >= from && s.day <= to) byDoctor[s.doc] = (byDoctor[s.doc] ?? 0) + share; }
   }
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
   for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) add(s.createdAt, 'pharmacy', x.method, x.amountPaise);
@@ -178,7 +192,6 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const due = async (a: string, b: string) => {
       if (!money || (!allMoney && !doc)) return null;
       // what is still owed (part payments taken off). The whole clinic: everything billed in the period. One doctor: their visits and sessions.
-      // ponytail: a treatment invoiced as a whole is not split by doctor; split it by the plan's doctor if the per-doctor figure needs it
       if (allMoney && !doc) {
         const all = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), gte(charge.createdAt, dayBounds(a, tz).start), lt(charge.createdAt, dayBounds(b, tz).end)));
         return all[0]?.n ?? 0;

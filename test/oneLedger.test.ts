@@ -74,12 +74,33 @@ test('Dashboard, Reports, End of day and the Clinic page agree: consult, sitting
   const perDoctor = overview.overview.perDoctor as any[];
   assert.ok(perDoctor.reduce((s, d) => s + (d.collectedPaise ?? 0), 0) <= eod, 'the doctors\' shares never add up to more than the total');
   const mine = perDoctor.find((d) => d.id === doc.id);
-  // the kept consult counts for the doctor; the refunded one does not. A procedure is invoiced as a whole course since patient-level billing,
-  // and a course invoice is not tied to a doctor yet, so the sitting is not in the doctor's share (open question for the owner, audit F-09).
-  assert.ok(mine.collectedPaise >= 30000, 'the kept consult counts for the doctor');
-  assert.ok(mine.collectedPaise < 60000 + sit.amountPaise, 'the refunded consult does not');
+  // the kept consult counts for the doctor, the refunded one does not, and the paid course's one session goes to the doctor who did it
+  // (course money by session doctor, the owner's rule of 20 Nov 2026)
+  assert.equal(mine.collectedPaise, 30000 + sit.amountPaise);
 
   // a doctor sees no clinic-wide split
   const D = as(await login('doctor2@demo.clinic'));
   assert.equal((await D('GET', `/reports/analytics?from=${today()}&to=${today()}`)).body.overview.perDoctor, null);
+});
+
+test('course money goes to the doctor of each session, at its share, as far as the patient has paid', async () => {
+  const O = as(await login('owner@demo.clinic')); const R = as(await login('reception@demo.clinic'));
+  const cfg = (await O('GET', '/config')).body;
+  const [a, b] = cfg.practitioners; const peel = cfg.procedures.find((x: any) => x.name === 'Chemical peel');
+  const p = (await R('POST', '/patients', { fullName: 'Two Doctors', phone: '9848066009' })).body;
+  const v = (await R('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', practitionerId: a.id, payment: { method: 'cash', amountPaise: 30000 }, idempotencyKey: 'ledger-two' })).body;
+  const e = (await O('POST', `/visits/${v.id}/encounter`, {})).body;
+  await O('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Acne'] }, assessment: { diagnosis: [{ name: 'Acne' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 2 }] });
+  const rec = (await O('GET', '/worklist?kind=procedure')).body.find((r: any) => r.patientId === p.id);
+  const s1 = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '20:00', minutes: 30, practitionerId: a.id, force: true })).body;
+  const s2 = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: '21:00', minutes: 30, practitionerId: b.id, force: true })).body;
+  for (const s of [s1, s2]) assert.equal((await R('PATCH', `/procedure-sessions/${s.id}`, { state: 'completed' })).status, 200);
+  const line = (await O('GET', `/patients/${p.id}/timeline`)).body.charges.find((c: any) => /^Chemical peel/.test(c.description));
+  const share = async () => { const per = (await O('GET', `/reports/analytics?from=${today()}&to=${today()}`)).body.overview.perDoctor; return [a, b].map((d) => per.find((x: any) => x.id === d.id).collectedPaise); };
+  const before = await share();
+  const half = Math.round(line.amountPaise / 2);
+  assert.equal((await R('POST', '/payments', { patientId: p.id, chargeId: line.id, amountPaise: half, method: 'cash', idempotencyKey: 'ledger-two-1' })).status, 200);
+  assert.deepEqual(await share(), [before[0] + half, before[1]], 'half paid: the first session, the first doctor');
+  assert.equal((await R('POST', '/payments', { patientId: p.id, chargeId: line.id, amountPaise: line.amountPaise - half, method: 'upi', idempotencyKey: 'ledger-two-2' })).status, 200);
+  assert.deepEqual(await share(), [before[0] + half, before[1] + line.amountPaise - half], 'paid in full: the second session, the second doctor');
 });
