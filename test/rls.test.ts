@@ -58,6 +58,11 @@ test('seed, upgrades and login work under enforced row-level security', async ()
   assert.equal(made.statusCode, 200, made.body);
   const o2 = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'owner2@second.clinic', password: 'secret12' } }));
   assert.equal(o2.statusCode, 200, o2.body);
-  const other = await call('GET', '/patients', undefined, o2.cookies.find((c) => c.name === 'cc_session')!.value);
+  const oc = o2.cookies.find((c) => c.name === 'cc_session')!.value;
+  // the password the platform admin typed is temporary: nothing else works until the owner picks their own
+  assert.equal(o2.json().mustChangePassword, true);
+  assert.equal((await call('GET', '/patients', undefined, oc)).statusCode, 403);
+  assert.equal((await call('PATCH', '/me/password', { currentPassword: 'secret12', newPassword: 'secret12-own' }, oc)).statusCode, 200);
+  const other = await call('GET', '/patients', undefined, oc);
   assert.equal(other.json().length, 0);
 });

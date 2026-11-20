@@ -56,7 +56,10 @@ async function build(tx: Tx, t: string, tz: string, dx = true) {
   const recIds = [...procs.map((x) => x.r.id), ...missed.map((x) => x.ps.recommendationId).filter((x): x is string => !!x)];
   const booked = recIds.length ? new Set((await tx.select({ id: procedureSession.recommendationId }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.recommendationId, recIds), eq(procedureSession.state, 'confirmed')))).map((x) => x.id)) : new Set<string>();
   const rows: Row[] = [];
-  for (const x of followups) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: dx ? x.r.notes?.trim() || dxOf(x.enc) || 'Review' : 'Follow-up visit', dueOn: x.r.dueOn, detail: { advisedOn: x.r.createdAt, by: x.doc } });
+  // a review is settled once the patient has a visit booked from today on, however it was booked (Calendar, the desk, the patient link)
+  const comingIn = followups.length ? new Set((await tx.select({ id: appointment.patientId }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+    .where(and(eq(appointment.tenantId, t), inArray(appointment.patientId, [...new Set(followups.map((x) => x.p.id))]), inArray(appointment.status, ['booked', 'confirmed']), gte(session.day, today)))).map((x) => x.id)) : new Set<string>();
+  for (const x of followups) if (!comingIn.has(x.p.id)) rows.push({ key: x.r.id, kind: 'review', refId: x.r.id, patient: x.p, what: dx ? x.r.notes?.trim() || dxOf(x.enc) || 'Review' : 'Follow-up visit', dueOn: x.r.dueOn, detail: { advisedOn: x.r.createdAt, by: x.doc } });
   for (const x of procs) {
     const c = course0.get(x.r.id);
     if (booked.has(x.r.id) || c?.live) continue;

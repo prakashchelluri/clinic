@@ -30,13 +30,13 @@ function OnboardModal({ onClose }: { onClose: () => void }) {
   const [done, setDone] = useState<any>(null);
   const [slugTouched, setSlugTouched] = useState(false); // follows the clinic name until typed by hand
   const save = useMutation({ mutationFn: () => post('/platform/tenants', { name: f.name, slug: f.slug, address: f.address || undefined, phone: f.phone || undefined, owner: { name: f.ownerName, email: f.ownerEmail, password: f.password, regNo: f.regNo || undefined, qualification: f.qualification || undefined, isDoctor: f.isDoctor } }),
-    onSuccess: (r) => { setDone(r); toast('Clinic created'); }, onError: (e: any) => toast(e?.body?.code === 'SLUG_TAKEN' ? 'That sign-in name is taken' : errText(e), 'err') });
+    onSuccess: (r) => { setDone(r); toast('Clinic created'); qc.invalidateQueries({ queryKey: ['tenants'] }); }, onError: (e: any) => toast(e?.body?.code === 'SLUG_TAKEN' ? 'That sign-in name is taken' : errText(e), 'err') });
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   if (done) return (
     <Modal title="Clinic is live" onClose={onClose} width="max-w-md">
       <div className="space-y-3 text-sm">
         <div className="card !p-3"><div className="font-medium">{f.name}</div><div className="text-muted text-xs">sign-in name <b>{done.slug}</b></div></div>
-        <p>The owner signs in with <b>{f.ownerEmail}</b> and the password you set. {f.isDoctor ? 'They are set up as owner and doctor.' : 'They are set up as owner (not a doctor).'} First things to do in their Settings: add staff, check fee amounts, add rooms and medicines.</p>
+        <p>The owner signs in with <b>{f.ownerEmail}</b> and the password you set, then picks their own before anything else. {f.isDoctor ? 'They are set up as owner and doctor.' : 'They are set up as owner (not a doctor).'} First things to do in their Settings: add staff, check fee amounts, add rooms and medicines.</p>
         <div className="modal-foot"><button className="btn btn-primary" onClick={onClose}>Done</button></div>
       </div>
     </Modal>
@@ -54,11 +54,11 @@ function OnboardModal({ onClose }: { onClose: () => void }) {
         <div className="grid grid-cols-2 gap-3">
           <div><label className="label">Name</label><input className="input" value={f.ownerName} onChange={set('ownerName')} /></div>
           <div><label className="label">Email</label><input className="input" type="email" value={f.ownerEmail} onChange={set('ownerEmail')} /></div>
-          <div><label className="label">Temporary password</label><input className="input" value={f.password} onChange={set('password')} /></div>
+          <div><label className="label" htmlFor="ob-pw">Temporary password</label><input id="ob-pw" className="input" autoComplete="off" placeholder="At least 8 characters" value={f.password} onChange={set('password')} /></div>
           <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" className="accent-clay" checked={f.isDoctor} onChange={(e) => setF({ ...f, isDoctor: e.target.checked })} /> Owner is also a consulting doctor</label>
           {f.isDoctor && <><div><label className="label">Registration no.</label><input className="input" value={f.regNo} onChange={set('regNo')} /></div><div><label className="label">Qualification</label><input className="input" value={f.qualification} onChange={set('qualification')} /></div></>}
         </div>
-        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !f.name || !f.slug || !f.ownerName || !f.ownerEmail || f.password.length < 6} onClick={() => save.mutate()}><Icon name="check" />Create clinic</button></div>
+        <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" disabled={save.isPending || !f.name || !f.slug || !f.ownerName || !f.ownerEmail || f.password.length < 8} onClick={() => save.mutate()}><Icon name="check" />Create clinic</button></div>
       </div>
     </Modal>
   );

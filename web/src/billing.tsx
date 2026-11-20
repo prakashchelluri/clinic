@@ -4,14 +4,14 @@ import { useOutletContext } from 'react-router';
 import { get, post, qc, errText } from './api';
 import { can } from './App';
 import { Chip, Empty, Icon, Modal, MoneyInput, MoreMenu, Section, Stat, Tabs, ask, fmtDate, money, toPaise, toast } from './ui';
-import { printReceipt } from './invoices';
+import { printReceipt, printWindow } from './invoices';
 import { TakePayment, BILL_KEYS, moneyErr } from './takePayment';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const MODE: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', bank: 'Bank', emi: 'EMI', advance: 'Advance' };
 const STATUS: Record<string, [string, string]> = { paid: ['Paid fully', 'sage'], part: ['Part paid', 'amber'], unpaid: ['Unpaid', 'rose'], cancelled: ['Cancelled', ''], credited: ['Credited in full', ''], waiting: ['Discount awaiting approval', 'amber'] };
 const pctOf = (bp: number) => (bp ? `${bp / 100}%` : 'Exempt');
-const printDoc = (html: string, what: string) => { const w = window.open('', '_blank', 'width=760,height=900'); if (!w) return toast(`Allow pop-ups to print the ${what}`, 'err'); w.document.write(html + '<script>window.onload=function(){window.print()}<\/script>'); w.document.close(); };
+const printDoc = (html: string, what: string) => printWindow(html, what);
 const DOC_CSS = `body{font:13px system-ui,-apple-system,Segoe UI,sans-serif;margin:28px;color:#17191A}h1{font-size:19px;margin:0}.s{color:#5F625E;font-size:12px}
   .hd{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #17191A;padding-bottom:10px}.t{text-align:center;font-weight:700;margin:10px 0}
   .who{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #ccc;padding-bottom:8px;font-size:12.5px;line-height:1.6}

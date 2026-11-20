@@ -6,6 +6,7 @@ import { ArrowLeft, LayoutTemplate, Save, Printer, Plus, Trash2 } from 'lucide-r
 import { api, post, qc, errText } from './api';
 import { Floating, Icon, ask, toast } from './ui';
 import { useTemplates } from './templates';
+import { printWindow } from './invoices';
 
 /** One drawing on the pad: the drawing tool's elements and image files (to open it again), and its picture as a document (what prints). */
 export type PadCanvas = { id: string; name: string; showInRx: boolean; docId?: string | null; elements: any[]; files?: Record<string, any> };
@@ -86,7 +87,7 @@ function CanvasBoard({ canvas, patientId, encounterId, readOnly, onClose, onSave
       changed.current = false; onSaved(c); toast('Canvas saved'); return c;
     } catch (e) { toast(errText(e), 'err'); return null; } finally { setBusy(false); }
   };
-  const print = async () => { const url = await png(); const w = window.open('', '_blank'); if (!w) return; w.document.write(`<title>${name}</title><img src="${url}" style="max-width:100%" onload="print()">`); w.document.close(); };
+  const print = async () => { const url = await png(); printWindow(`<title>${String(name).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)}</title><img src="${url}" style="max-width:100%">`, 'drawing', ''); };
   const saveAsTemplate = async () => {
     const { elements, files } = scene(); if (!elements.length) return toast('Draw something first.', 'info');
     const r = await ask({ title: 'Save as a canvas template', body: 'It appears under Templates on every canvas.', confirmLabel: 'Save', field: { label: 'Name', required: true, initial: name, maxLength: 80 } });

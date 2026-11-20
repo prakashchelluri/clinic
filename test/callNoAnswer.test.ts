@@ -12,7 +12,8 @@ rmSync(process.env.PGLITE_DIR, { recursive: true, force: true });
 const { migrate, applyRls, db } = await import('../src/db/index.js');
 const { seedIfEmpty } = await import('../src/db/seed.js');
 const { buildApp } = await import('../src/app.js');
-const { recommendation } = await import('../src/db/schema.js');
+const { recommendation, visit } = await import('../src/db/schema.js');
+const { eq } = await import('drizzle-orm');
 
 let app: Awaited<ReturnType<typeof buildApp>>;
 type Call = (method: 'GET' | 'POST', url: string, payload?: unknown) => Promise<{ status: number; body: any }>;
@@ -44,4 +45,22 @@ test('no answer twice: the review stays on the list, same due day, 2 attempts, a
   assert.equal(r.lastCall.callbackOn, null);
   assert.equal(r.lastCall.attempts, 2);
   assert.equal(await count(), before, 'the menu badge still counts it');
+});
+
+test('a review leaves the Calls list once the patient has a visit booked, however it was booked', async () => {
+  const owner = await as('owner@demo.clinic'); const desk = await as('reception@demo.clinic');
+  const cfg = (await owner('GET', '/config')).body; const tenantId = cfg.tenant.id; const cat = cfg.feeCategories[0];
+  const pid = (await desk('POST', '/patients?force=1', { fullName: 'Booked Elsewhere', phone: '9848011223' })).body.id as string;
+  const v = (await desk('POST', '/visits', { patientId: pid, feeCategoryCode: cat.code, details: {}, idempotencyKey: `be-${Date.now()}`, payment: cat.amountPaise > 0 ? { method: 'cash', amountPaise: cat.amountPaise } : undefined })).body;
+  const enc = (await owner('POST', `/visits/${v.id}/encounter`)).body;
+  const [rec] = await db.insert(recommendation).values({ tenantId, patientId: pid, encounterId: enc.id, kind: 'followup', dueOn: today() }).returning();
+  await db.update(visit).set({ status: 'done' }).where(eq(visit.id, v.id)); // seen and gone home
+  const listed = async () => !!(await desk('GET', '/followups?tab=all')).body.rows.find((r: any) => r.refId === rec.id);
+  assert.ok(await listed(), 'due today: on the list');
+  // booked from the Calendar, not from the Calls row
+  const doc = cfg.practitioners[0].id; let w: any = null;
+  for (let n = 1; n < 9 && !w; n++) { const d = new Date(Date.now() + n * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); w = (await desk('GET', `/sessions?day=${d}&practitionerId=${doc}`)).body.find((x: any) => x.free > 0); }
+  assert.ok(w, 'a free window this week');
+  const bk = await desk('POST', '/appointments', { sessionId: w.id, patientId: pid }); assert.equal(bk.status, 200, JSON.stringify(bk.body));
+  assert.equal(await listed(), false, 'already coming in: nobody needs to call');
 });

@@ -26,8 +26,9 @@ export function platformRoutes(app: FastifyInstance) {
     guard(req);
     if (!can(req.perms, 'platform.write')) throw new HttpError(403, 'FORBIDDEN:platform.write');
     const body = z.object({ name: z.string().min(2), slug: z.string().min(2).max(40), address: z.string().optional(), phone: z.string().optional(), timezone: z.string().optional(),
-      owner: z.object({ name: z.string().min(1), email: z.string().email(), password: z.string().min(6), regNo: z.string().optional(), qualification: z.string().optional(), isDoctor: z.boolean().default(true) }) }).parse(req.body);
-    try { return await createClinic(body); }
+      owner: z.object({ name: z.string().min(1), email: z.string().email(), password: z.string().min(8).max(200), regNo: z.string().optional(), qualification: z.string().optional(), isDoctor: z.boolean().default(true) }) }).parse(req.body);
+    // the platform admin typed this password and handed it over: the owner picks their own at first sign-in, like staff do
+    try { return await createClinic({ ...body, owner: { ...body.owner, mustChangePassword: true } }); }
     catch (e: any) { if (e.message === 'SLUG_TAKEN') throw new HttpError(409, 'SLUG_TAKEN'); throw e; }
   });
 

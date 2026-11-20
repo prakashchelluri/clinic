@@ -140,7 +140,7 @@ async function insertDefaultServices(db: any, tid: string) {
   await db.insert(service).values(DEFAULT_SERVICES.map(({ fee: code, ...s }, i) => ({ ...s, tenantId: tid, sortOrder: i, feeCategoryId: fee(code)?.id ?? null, pricePaise: fee(code)?.amountPaise ?? null })));
 }
 
-export type NewClinic = { name: string; slug: string; timezone?: string; address?: string; phone?: string; owner: { name: string; email: string; password: string; regNo?: string; qualification?: string; isDoctor?: boolean }; pack?: 'dermatology' };
+export type NewClinic = { name: string; slug: string; timezone?: string; address?: string; phone?: string; owner: { name: string; email: string; password: string; regNo?: string; qualification?: string; isDoctor?: boolean; mustChangePassword?: boolean }; pack?: 'dermatology' };
 
 /** Onboard a clinic: tenant, branch, owner (also a doctor unless told otherwise), specialty pack, default fees, rooms. */
 export async function createClinic(input: NewClinic) {
@@ -160,7 +160,7 @@ export async function createClinic(input: NewClinic) {
   let ownerPrac: any = null;
   if (input.owner.isDoctor !== false) [ownerPrac] = await db.insert(practitioner).values({ tenantId: tid, name: input.owner.name, regNo: input.owner.regNo ?? null, qualification: input.owner.qualification ?? null, specialtyId: derm.id, routine }).returning();
   const roles = input.owner.isDoctor !== false ? ['owner', 'doctor'] : ['owner'];
-  await db.insert(appUser).values({ tenantId: tid, email: input.owner.email.toLowerCase(), name: input.owner.name, passwordHash: hashPassword(input.owner.password), role: 'owner', roles, practitionerId: ownerPrac?.id ?? null });
+  await db.insert(appUser).values({ tenantId: tid, email: input.owner.email.toLowerCase(), name: input.owner.name, passwordHash: hashPassword(input.owner.password), mustChangePassword: !!input.owner.mustChangePassword, role: 'owner', roles, practitionerId: ownerPrac?.id ?? null });
   await db.insert(formDefinition).values([
     { tenantId: tid, key: 'encounter', specialtyId: derm.id, version: DERM_ENCOUNTER_VERSION, schema: DERM_ENCOUNTER },
     { tenantId: tid, key: 'intake', specialtyId: derm.id, version: 1, schema: DERM_INTAKE },
