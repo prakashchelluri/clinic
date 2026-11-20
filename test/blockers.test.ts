@@ -39,6 +39,13 @@ test('invoice numbers go past 9999 instead of clashing with INV-1000', async () 
   assert.equal(await no(a.billId), 'INV-1000');
   assert.equal(await no(b.json().billId), 'INV-10000');
   assert.equal(await no(c.json().billId), 'INV-10001');
+  // an invoice is dated with its first line, so a line entered with an earlier time does not make it today's invoice
+  const at = await withTenant(t, 'x', async (tx) => {
+    const r: any = await tx.execute(sql`insert into charge (tenant_id, patient_id, description, amount_paise, created_at) values (${t}, ${p.id}, 'Old', 1000, '2026-01-05T10:00:00+05:30') returning bill_id`);
+    const id = (r.rows ?? r)[0].bill_id; const b: any = await tx.execute(sql`select created_at from bill where id = ${id}`);
+    return new Date((b.rows ?? b)[0].created_at).toISOString();
+  });
+  assert.equal(at, '2026-01-05T04:30:00.000Z');
 });
 
 test('an admin cannot give a role more than they hold, nor change roles through clinic settings', async () => {

@@ -116,7 +116,7 @@ export function Reports() {
 
 // [key, label, money?, lower is better?]
 const FIGS: [string, string, boolean, boolean][] = [['patients', 'Patients completed', false, false], ['newPatients', 'New patients', false, false], ['returning', 'Returning patients', false, false], ['collectedPaise', 'Collected', true, false],
-  ['duePaise', 'Still due', true, true], ['sittings', 'Procedure sessions done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'No show', false, true]];
+  ['duePaise', 'Still due on these dates’ bills', true, true], ['sittings', 'Procedure sessions done', false, false], ['waitMin', 'Wait before the doctor (min)', false, true], ['noShows', 'No show', false, true]];
 
 function Overview({ d }: { d: any }) {
   const span = d.overview.trend.length;

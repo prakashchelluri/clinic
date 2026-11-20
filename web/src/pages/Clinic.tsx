@@ -54,7 +54,7 @@ export function Clinic() {
     // one day: its money table; several: one row, each day listed in the drawer
     ...(s.unclosed.length === 1 ? s.unclosed.map((u: any): Need => ({ key: `day${u.day}`, red: true, title: `${dayLabel(u.day)} was never closed`, where: 'End of day', act: 'Open End of day', to: `/reports?day=${u.day}&view=eod`,
       body: <>{table(u.money)}<p className="text-[13px] text-muted">Payments for this day stay open until it is closed. Counting the cash and the diary is on the End of day screen.</p></> }))
-      : s.unclosed.length > 1 ? [{ key: 'days', red: true, title: `${s.unclosed.length} days were never closed`, where: 'End of day', act: 'Open End of day', to: '/reports',
+      : s.unclosed.length > 1 ? [{ key: 'days', red: true, title: `${s.unclosed.length} days were never closed`, where: 'End of day', act: 'Open the oldest', to: `/reports?day=${s.unclosed[0].day}&view=eod`,
         body: <><div>{s.unclosed.map((u: any) => <div key={u.day} className="flex justify-between gap-3 border-t border-line py-2.5 text-[14px] font-semibold tabular-nums"><span>{dayLabel(u.day)}</span><span className="font-medium text-muted">{money(u.money.total.total)} taken</span></div>)}</div>
           <p className="text-[13px] text-muted">Payments for these days stay open until each is closed. Counting the cash and the diary is on the End of day screen.</p></> }] : []),
     ...(reviews.length ? [{ key: 'stock', title: `${reviews.length} deliver${reviews.length === 1 ? 'y differs' : 'ies differ'} from the bill`, where: 'Inventory', act: 'Check deliveries', to: '/inventory',

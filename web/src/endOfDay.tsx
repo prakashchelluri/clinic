@@ -14,7 +14,7 @@ export function EndOfDay({ day }: { day: string }) {
   const [counted, setCounted] = useState(''); const [diary, setDiary] = useState<Record<string, string>>({}); const [notes, setNotes] = useState<Record<string, string>>({});
   const d = q.data;
   const close = useMutation({
-    mutationFn: () => post('/dayclose', { day, cashCountedPaise: toPaise(counted), diary: Object.fromEntries(d.countKeys.map((k: string) => [k, Number(diary[k] ?? d.counts[k])])), notes }),
+    mutationFn: () => post('/dayclose', { day, cashCountedPaise: toPaise(counted), diary: Object.fromEntries(d.countKeys.map((k: string) => [k, Number(diary[k])])), notes }),
     onSuccess: () => { ['dayclose', 'daily'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast('Day closed'); }, onError: (e) => toast(errText(e), 'err'),
   });
   if (!d) return <Skeleton rows={4} />;
@@ -24,6 +24,8 @@ export function EndOfDay({ day }: { day: string }) {
   const needNote = (k: string) => (k === 'cash' ? cashDiff !== null && cashDiff !== 0 : diff(k) !== 0);
   const lacking = [...d.countKeys, 'cash'].filter((k) => needNote(k) && (notes[k] ?? '').trim().length < 3);
   const locked = !!d.closed;
+  // the diary is typed from the paper, never copied from the app, or the comparison proves nothing
+  const untyped = d.countKeys.filter((k: string) => (diary[k] ?? '') === '');
   return (
     <div className="space-y-4">
       {locked && <div className="card flex items-center gap-2 text-sm"><Icon name="lock" className="h-4 w-4" />Closed by {d.closed.closedBy} on {fmtDate(d.closed.createdAt)}. This day takes no new payments; a mistake is put right by a refund today.</div>}
@@ -44,19 +46,19 @@ export function EndOfDay({ day }: { day: string }) {
       </Section>
       <Section title="Against the doctor's diary">
         <table className="table"><thead><tr><th className="pl-4">Type</th><th className="text-right">Diary</th><th className="text-right">App</th><th className="pr-4"></th></tr></thead>
-          <tbody>{d.countKeys.map((k: string) => { const shown = locked ? d.closed.diary[k] : diary[k] ?? String(d.counts[k]); const off = locked ? d.closed.diary[k] !== d.closed.counts[k] : diff(k) !== 0;
+          <tbody>{d.countKeys.map((k: string) => { const shown = locked ? d.closed.diary[k] : diary[k] ?? ''; const off = locked ? d.closed.diary[k] !== d.closed.counts[k] : diff(k) !== 0;
             return <tr key={k}><td className="pl-4">{k}</td>
-              <td className="text-right">{locked ? shown : <input aria-label={`Diary count for ${k}`} inputMode="numeric" className="input !w-20 !py-1 text-right" value={shown} onChange={(e) => setDiary({ ...diary, [k]: e.target.value.replace(/\D/g, '').slice(0, 4) })} />}</td>
+              <td className="text-right">{locked ? shown : <input aria-label={`Diary count for ${k}`} inputMode="numeric" className="input !w-20 !py-1 text-right" placeholder="–" value={shown} onChange={(e) => setDiary({ ...diary, [k]: e.target.value.replace(/\D/g, '').slice(0, 4) })} />}</td>
               <td className="text-right">{locked ? d.closed.counts[k] : d.counts[k]}</td>
-              <td className="pr-4">{off ? (locked ? <span className="text-xs text-muted">{d.closed.notes[k]}</span> : <input aria-label={`Why ${k} differs`} className="input !py-1" placeholder="Why do they differ?" maxLength={300} value={notes[k] ?? ''} onChange={(e) => setNotes({ ...notes, [k]: e.target.value })} />) : <Chip tone="sage">same</Chip>}</td></tr>; })}</tbody></table>
+              <td className="pr-4">{off ? (locked ? <span className="text-xs text-muted">{d.closed.notes[k]}</span> : <input aria-label={`Why ${k} differs`} className="input !py-1" placeholder="Why do they differ?" maxLength={300} value={notes[k] ?? ''} onChange={(e) => setNotes({ ...notes, [k]: e.target.value })} />) : !locked && (diary[k] ?? '') === '' ? null : <Chip tone="sage">Same</Chip>}</td></tr>; })}</tbody></table>
       </Section>
-      {!locked && can(perms, 'day.close') && <div className="flex items-center gap-3"><button className="btn btn-primary" disabled={close.isPending || counted === '' || lacking.length > 0} onClick={async () => {
+      {!locked && can(perms, 'day.close') && <div className="flex items-center gap-3"><button className="btn btn-primary" disabled={close.isPending || counted === '' || untyped.length > 0 || lacking.length > 0} onClick={async () => {
           const dayName = new Date(day + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
           const ok = await ask({ title: `Close ${dayName}?`, tone: 'danger', confirmLabel: 'Close the day',
             body: <>Collected <b>{money(m.total.total)}</b> (cash {money(m.total.cash)} · UPI {money(m.total.upi)} · card {money(m.total.card)}{m.total.other ? ` · other ${money(m.total.other)}` : ''}). Cash counted <b>{money(toPaise(counted))}</b>{cashDiff ? `, ${cashDiff > 0 ? 'over' : 'short'} by ${money(Math.abs(cashDiff))}` : ', matches the app'}. No more payments or refunds can be recorded for this day after this.</> });
           if (ok) close.mutate();
         }}><Icon name="lock" />Close the day…</button>
-        <span className="text-sm text-muted">{counted === '' ? 'Count the drawer first.' : lacking.length ? 'Each difference needs a note before the day can close.' : 'Nothing is left to explain.'}</span></div>}
+        <span className="text-sm text-muted">{counted === '' ? 'Count the drawer first.' : untyped.length ? 'Type each count from the diary.' : lacking.length ? 'Each difference needs a note before the day can close.' : 'Nothing is left to explain.'}</span></div>}
       {!locked && !can(perms, 'day.close') && <div className="text-sm text-muted">Closing the day needs the Close the day permission.</div>}
     </div>
   );

@@ -4,7 +4,7 @@ import { useNavigate, useParams, useOutletContext, useSearchParams } from 'react
 import { get, patch, post, qc, ApiError, errText } from '../api';
 import { can } from '../App';
 import { LayoutTemplate, Save, Eraser, History as HistoryIcon, CalendarDays, HeartPulse, ClipboardList, Activity, Stethoscope, ScanSearch, Pill, MessageSquareText, FlaskConical, TestTubes, CalendarClock, Syringe, NotebookPen, ArrowRightLeft, Camera, FolderOpen, PenLine, FileText, type LucideIcon } from 'lucide-react';
-import { BackButton, Chip, Drawer, Floating, Icon, Modal, MoreMenu, Skeleton, Tabs, fmtDate, money, toast, NumInput, ask } from '../ui';
+import { BackButton, Chip, Drawer, Empty, Floating, Icon, Modal, MoreMenu, Skeleton, Tabs, fmtDate, money, toast, NumInput, ask } from '../ui';
 import { type Pkg, fullPrice } from '../packages';
 import { openPrint } from '../printPreview';
 import { EncounterModal, UploadButton, asList, joinList } from '../encounterDetail';
@@ -470,6 +470,7 @@ export function Encounter() {
   };
   const saveTpl = useMutation({ mutationFn: (name: string) => post('/rx-templates', { name, data, prescription: cleanRx(), recommendations: recs }), onSuccess: (r: any) => { qc.invalidateQueries({ queryKey: ['rx-templates'] }); toast(`Saved as template “${r.name}”`); }, onError: (e) => toast(errText(e), 'err') });
 
+  if (enc.isError) return <div className="card anim-fade-in mx-auto mt-10 max-w-lg"><Empty icon="search" title="This consultation can't be opened" hint="It may not exist, or it belongs to another clinic. Open it again from Today or the patient's record." /></div>;
   if (!enc.data || !timeline.data) return <div className="card"><Skeleton rows={5} /></div>;
   const e = enc.data; const p = e.patient; const held = e.status === 'awaiting_reports'; const readOnly = e.status === 'completed' || (held && !canFinish);
   const testRecs: any[] = e.recommendations.filter((r: any) => r.kind === 'investigation' && r.status !== 'cancelled'); const testsIn = testRecs.filter((r: any) => r.status === 'done').length; const testsOpen = testRecs.length > testsIn;
