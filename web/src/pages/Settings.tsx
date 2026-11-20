@@ -15,6 +15,14 @@ import { AvailabilityTab, BookingRulesTab, MessagesTab, PhotoAreasTab } from './
 import { ConsultTypesTab } from '../consultTypes';
 import { StaffTab } from '../staff';
 import { PictureUpload } from '../pictureUpload';
+
+// A GSTIN: state code, PAN, entity number, Z, and the GST network's mod-36 check character (the same rule as the server).
+const GST_C = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function validGstin(g: string) {
+  if (!/^(0[1-9]|[1-3][0-9]|97|99)[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) return false;
+  let sum = 0; for (let k = 0; k < 14; k++) { const v = GST_C.indexOf(g[k]) * (k % 2 ? 2 : 1); sum += Math.floor(v / 36) + (v % 36); }
+  return GST_C[(36 - (sum % 36)) % 36] === g[14];
+}
 import '../settings.css';
 
 type Tab = 'clinic' | 'billing' | 'desk' | 'people' | 'roles' | 'types' | 'procedures' | 'rooms' | 'photos' | 'rules' | 'messages' | 'pad' | 'templates' | 'vitals' | 'labtests' | 'privacy' | 'testdata' | 'hours';
@@ -199,13 +207,13 @@ function BillingTab({ cfg, onSaved }: { cfg: any; onSaved: () => void }) {
   const [f, setF] = useState(init);
   const dirty = JSON.stringify(f) !== JSON.stringify(init);
   const upiBad = !!f.upiId.trim() && !/^[a-zA-Z0-9._-]{2,64}@[a-zA-Z0-9]{2,64}$/.test(f.upiId.trim());
-  const gstBad = !!f.gstin.trim() && !/^[0-9A-Z]{15}$/.test(f.gstin.trim().toUpperCase());
+  const gstBad = !!f.gstin.trim() && !validGstin(f.gstin.trim().toUpperCase());
   const save = useMutation({ mutationFn: () => patch('/admin/clinic', { settings: { upiId: f.upiId.trim(), gstin: f.gstin.trim().toUpperCase() } }), onSuccess: () => { toast('Billing saved'); onSaved(); }, onError: (e: any) => toast(errText(e), 'err') });
   return (
     <div className="space-y-4">
       <div className="card space-y-3">
         <div className="card-title">Tax and payments</div>
-        <div><label className="label" htmlFor="cl-gstin">GSTIN (leave empty if not registered)</label><input id="cl-gstin" className={`input uppercase ${gstBad ? '!border-rose' : ''}`} maxLength={15} value={f.gstin} onChange={(e) => setF((p) => ({ ...p, gstin: e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '') }))} /><div className={`mt-1 text-xs ${gstBad ? 'text-rose' : 'text-muted'}`}>{gstBad ? 'A GSTIN has 15 letters and numbers.' : 'With a GSTIN, receipts print as a Tax Invoice with CGST and SGST per rate. Without one, they print as a Bill of Supply with no tax lines.'}</div></div>
+        <div><label className="label" htmlFor="cl-gstin">GSTIN (leave empty if not registered)</label><input id="cl-gstin" className={`input uppercase ${gstBad ? '!border-rose' : ''}`} maxLength={15} value={f.gstin} onChange={(e) => setF((p) => ({ ...p, gstin: e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '') }))} /><div className={`mt-1 text-xs ${gstBad ? 'text-rose' : 'text-muted'}`}>{gstBad ? (f.gstin.trim().length < 15 ? 'A GSTIN has 15 letters and numbers.' : 'This is not a valid GSTIN: check each character against the registration certificate.') : 'With a GSTIN, invoices issued from now print as a Tax Invoice with CGST and SGST per rate. Without one, as a Bill of Supply. Invoices already issued do not change.'}</div></div>
         <div><label className="label" htmlFor="cl-upi">UPI ID for payments</label><input id="cl-upi" className={`input ${upiBad ? '!border-rose' : ''}`} maxLength={130} value={f.upiId} onChange={(e) => setF((p) => ({ ...p, upiId: e.target.value.replace(/\s/g, '') }))} placeholder="clinic@okhdfc" /><div className={`mt-1 text-xs ${upiBad ? 'text-rose' : 'text-muted'}`}>{upiBad ? 'Write it as name@bank, e.g. clinic@okhdfc.' : 'The pharmacy shows a QR code with the amount filled in.'}</div></div>
         <div className="flex justify-end gap-2"><button type="button" className="btn btn-ghost" disabled={!dirty} onClick={() => setF(init)}>Discard</button><button type="button" className="btn btn-primary" disabled={!dirty || save.isPending || upiBad || gstBad} onClick={() => save.mutate()}><Icon name="check" />Save</button></div>
       </div>

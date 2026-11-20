@@ -5,7 +5,7 @@ import { get, post, qc, errText } from './api';
 import { can } from './App';
 import { Chip, Icon, MoneyInput, Section, Skeleton, ask, fmtDate, money, toPaise, toast } from './ui';
 
-const ROWS: [string, string][] = [['consultation', 'Consultations'], ['procedure', 'Procedures'], ['pharmacy', 'Pharmacy'], ['other', 'Other']];
+const ROWS: [string, string][] = [['consultation', 'Consultations'], ['procedure', 'Procedures'], ['pharmacy', 'Pharmacy'], ['other', 'Advances & other'], ['refunds', 'Refunds given back']];
 
 /** The head receptionist reads one page against the paper diary: money by type and mode, the drawer, and the visit counts. A difference needs a note; closing locks the day. */
 export function EndOfDay({ day }: { day: string }) {
@@ -29,7 +29,7 @@ export function EndOfDay({ day }: { day: string }) {
       {locked && <div className="card flex items-center gap-2 text-sm"><Icon name="lock" className="h-4 w-4" />Closed by {d.closed.closedBy} on {fmtDate(d.closed.createdAt)}. This day takes no new payments; a mistake is put right by a refund today.</div>}
       <Section title="Money collected">
         <div className="overflow-x-auto"><table className="table min-w-[560px]"><thead><tr><th className="pl-4">Type</th><th className="text-right">Cash</th><th className="text-right">UPI</th><th className="text-right">Card</th><th className="text-right">EMI / other</th><th className="text-right pr-4">Total</th></tr></thead>
-          <tbody>{ROWS.map(([k, l]) => <tr key={k}><td className="pl-4">{l}</td>{cell(m[k].cash)}{cell(m[k].upi)}{cell(m[k].card)}{cell(m[k].other)}<td className="text-right pr-4 font-medium">{money(m[k].total)}</td></tr>)}
+          <tbody>{ROWS.filter(([k]) => m[k] && (k !== 'refunds' || m[k].total)).map(([k, l]) => <tr key={k}><td className="pl-4">{l}</td>{cell(m[k].cash)}{cell(m[k].upi)}{cell(m[k].card)}{cell(m[k].other)}<td className="text-right pr-4 font-medium">{money(m[k].total)}</td></tr>)}
             <tr className="font-semibold"><td className="pl-4">Total</td>{cell(m.total.cash)}{cell(m.total.upi)}{cell(m.total.card)}{cell(m.total.other)}<td className="text-right pr-4">{money(m.total.total)}</td></tr></tbody></table></div>
         {d.emiAwaitingPaise > 0 && <div className="px-4 pb-3 text-xs text-muted">{money(d.emiAwaitingPaise)} of the EMI figure is still waiting for the lender's money to reach the bank.</div>}
       </Section>
@@ -38,7 +38,7 @@ export function EndOfDay({ day }: { day: string }) {
           <div><div className="text-xs text-muted">The app says</div><div className="serif text-xl">{money(d.drawer.expectedCashPaise)}</div><div className="text-xs text-muted">cash taken, less {money(d.drawer.expensesCashPaise)} cash expenses</div></div>
           <div><label className="label" htmlFor="counted">Counted</label>{locked ? <div className="serif text-xl">{money(d.closed.cashCountedPaise)}</div> : <MoneyInput id="counted" value={counted} onChange={setCounted} />}</div>
           {cashDiff !== null && !locked && (cashDiff === 0 ? <Chip tone="sage">matches</Chip> : <Chip tone="amber">{cashDiff > 0 ? 'over' : 'short'} by {money(Math.abs(cashDiff))}</Chip>)}
-          {!locked && needNote('cash') && <div className="min-w-[220px] flex-1"><label className="label" htmlFor="n-cash">Why</label><input id="n-cash" className="input" maxLength={300} value={notes.cash ?? ''} onChange={(e) => setNotes({ ...notes, cash: e.target.value })} /></div>}
+          {!locked && needNote('cash') && <div className="min-w-[220px] flex-1"><label className="label" htmlFor="n-cash">Why the cash differs</label><input id="n-cash" className="input" maxLength={300} value={notes.cash ?? ''} onChange={(e) => setNotes({ ...notes, cash: e.target.value })} /></div>}
           {locked && d.closed.notes.cash && <div className="text-muted">Note: {d.closed.notes.cash}</div>}
         </div>
       </Section>

@@ -9,6 +9,7 @@ import { route } from '../lib/route.js';
 import { addDays, emit, todayIn } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { dayBounds } from './billing.js';
+import { chargeBalance } from '../lib/money.js';
 
 export const COUNT_KEYS = ['General', 'Review', 'Procedure', 'Procedure follow-up', 'Relatives and friends'] as const;
 type Bucket = { cash: number; upi: number; card: number; other: number; total: number };
@@ -26,13 +27,16 @@ export function visitType(code: string, name: string): (typeof COUNT_KEYS)[numbe
 /** A day's money by type and mode, the cash that should be in the drawer, and the visit counts: what the head receptionist reads against the paper diary. */
 // `to` makes it a range (the Dashboard); every money figure in the app comes from here so they always agree.
 // byDoctor: the same money by the doctor of the visit or sitting it paid for; pharmacy, course advances and anything else stay out (the rest of the total).
-export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; total: Bucket };
-export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), total: empty() });
+// refunds: money given back on a refund voucher, by the mode it left in (pharmacy returns stay under pharmacy, as before).
+export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; refunds: Bucket; total: Bucket };
+export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), refunds: empty(), total: empty() });
+type Alloc = { consultation: number; procedure: number; other: number };
 
 /** Money in over a range, each payment on the clinic's local day it came in: the one ledger End of day, Reports, Clinic and Accounts all read. */
 export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to = from) {
   const start = dayBounds(from, tz).start; const end = dayBounds(to, tz).end;
   const days: Record<string, Money> = {}; const total = emptyMoney(); const byDoctor: Record<string, number> = {};
+  const alloc: Record<string, Alloc> = {}; const allocTotal: Alloc = { consultation: 0, procedure: 0, other: 0 };
   const add = (at: string | Date, key: Exclude<keyof Money, 'total'>, method: string, amount: number) => {
     const m = (days[todayIn(tz, new Date(at))] ??= emptyMoney());
     put(m[key], method, amount); put(m.total, method, amount); put(total[key], method, amount); put(total.total, method, amount);
@@ -41,23 +45,28 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
     .leftJoin(visit, eq(visit.id, charge.visitId)).leftJoin(procedureSession, eq(procedureSession.id, charge.sessionId))
     .leftJoin(pharmacySale, and(eq(pharmacySale.tenantId, t), eq(pharmacySale.chargeId, payment.chargeId)))
     .where(and(eq(payment.tenantId, t), gte(payment.receivedAt, start), lt(payment.receivedAt, end)));
-  // ponytail: refunds are negative payment rows dated the day the money went back (billing.ts, /charges/:id/adjust), in the original mode, so they net out here with no extra rule.
-  // a refund of a whole invoice has no line of its own: it counts where the invoice's lines count
-  const refundBills = [...new Set(pays.filter((x) => !x.p.chargeId && x.p.billId).map((x) => x.p.billId!))];
-  const billLines = refundBills.length ? await tx.select({ billId: charge.billId, visitId: charge.visitId, courseId: charge.courseId }).from(charge).where(inArray(charge.billId, refundBills)) : [];
+  // Every row is money that changed hands, by the mode it moved in, so each row reconciles with the drawer and the bank:
+  // money in against a line counts under what the line is; deposits to the advance under "other"; refund vouchers under "refunds".
+  // The advance paying a line later moves no money, so it is not here; it is kept apart (alloc) for the Accounts chart, which shows what the
+  // money ended up paying for: that much moves from "other" to the line's kind on the day it is used (and back if it returns to the advance).
+  const allocate = (at: string | Date, key: keyof Alloc, amount: number) => {
+    if (key === 'other' || !amount) return; const a = (alloc[todayIn(tz, new Date(at))] ??= { consultation: 0, procedure: 0, other: 0 });
+    for (const b of [a, allocTotal]) { b[key] += amount; b.other -= amount; }
+  };
   for (const { p, c, vDoc, sDoc, sale } of pays) {
     if (sale) continue; // a pharmacy bill's payment and refund rows mirror the sale; the sale and its returns below are what count, once
-    if (p.method === 'advance') continue; // paid from the patient's advance: that money was counted the day the advance came in
-
-    const bl = !c && p.billId ? billLines.find((x) => x.billId === p.billId) : undefined;
-    add(p.receivedAt, p.courseId || c?.courseId || bl?.courseId ? 'procedure' : c?.visitId || bl?.visitId ? 'consultation' : 'other', p.method, p.amountPaise);
-    const doc = vDoc ?? sDoc; if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
+    const key = p.courseId || c?.courseId || c?.procedureId || c?.sessionId ? 'procedure' : c?.visitId ? 'consultation' : 'other';
+    const doc = vDoc ?? sDoc;
+    if (p.method === 'advance') { if (c) { allocate(p.receivedAt, key, p.amountPaise); if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise; } continue; }
+    if (p.advance) { add(p.receivedAt, p.amountPaise < 0 ? 'refunds' : 'other', p.method, p.amountPaise); continue; } // a deposit, or a refund voucher
+    add(p.receivedAt, key, p.method, p.amountPaise);
+    if (doc) byDoctor[doc] = (byDoctor[doc] ?? 0) + p.amountPaise;
   }
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
   for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) add(s.createdAt, 'pharmacy', x.method, x.amountPaise);
   const allSales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90))));
   for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) add(r.at, 'pharmacy', r.method, -r.refundPaise);
-  return { days, total, byDoctor };
+  return { days, total, byDoctor, alloc, allocTotal };
 }
 
 export async function dayFigures(tx: Tx, t: string, tz: string, day: string, to = day) {
@@ -127,11 +136,13 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const worked = await tx.select({ day: visit.day }).from(visit).where(and(eq(visit.tenantId, t), gte(visit.day, addDays(today, -14)), lt(visit.day, today))).groupBy(visit.day);
     const unclosed = [];
     for (const { day } of worked.sort((a, b) => a.day.localeCompare(b.day))) if (!closedOn.has(day)) { const f = day === yesterday ? y : await dayFigures(tx, t, tz, day); unclosed.push({ day, money: f.money }); }
-    const dues = await tx.select({ total: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId})::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
+    const dues = await tx.select({ total: sql<number>`coalesce(sum(${chargeBalance}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId}) filter (where ${chargeBalance} > 0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
+    const waiting = await tx.execute(sql`select coalesce(sum((l->>'offPaise')::int),0)::int as n from discount_ask a, jsonb_array_elements(a.lines) l where a.tenant_id = ${t} and a.status = 'pending' and l ? 'chargeId'`);
+    const waitingPaise = Number(((waiting as any).rows ?? waiting)[0]?.n ?? 0);
     const emi = await tx.select({ total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int`, n: sql<number>`count(*)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt)));
     return {
       today, yesterday: { day: yesterday, money: y.money, closed: yc ? { by: yc.closedBy, at: yc.createdAt, cashDiffPaise: (yc.cashCountedPaise ?? 0) - ((yc.totals as any)?.drawer?.expectedCashPaise ?? 0), notes: yc.notes } : null },
-      todayMoney: td.money, week, unclosed, dues: { totalPaise: dues[0]?.total ?? 0, patients: dues[0]?.patients ?? 0 }, emi: { totalPaise: emi[0]?.total ?? 0, n: emi[0]?.n ?? 0 },
+      todayMoney: td.money, week, unclosed, dues: { totalPaise: dues[0]?.total ?? 0, patients: dues[0]?.patients ?? 0, waitingPaise }, emi: { totalPaise: emi[0]?.total ?? 0, n: emi[0]?.n ?? 0 },
     };
   });
 
@@ -166,8 +177,14 @@ export function dayCloseRoutes(app: FastifyInstance) {
     const collected = async (a: string, b: string) => { if (!money) return null; const f = await dayFigures(tx, t, tz, a, b); return doc ? f.byDoctor[doc] ?? 0 : allMoney ? f.money.total.total : null; };
     const due = async (a: string, b: string) => {
       if (!money || (!allMoney && !doc)) return null;
-      const v = await tx.select({ n: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int` }).from(charge).innerJoin(visit, eq(visit.id, charge.visitId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
-      const s = await tx.select({ n: sql<number>`coalesce(sum(${charge.amountPaise}),0)::int` }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(procedureSession.day, a, b), byDoc(procedureSession.practitionerId)));
+      // what is still owed (part payments taken off). The whole clinic: everything billed in the period. One doctor: their visits and sessions.
+      // ponytail: a treatment invoiced as a whole is not split by doctor; split it by the plan's doctor if the per-doctor figure needs it
+      if (allMoney && !doc) {
+        const all = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), gte(charge.createdAt, dayBounds(a, tz).start), lt(charge.createdAt, dayBounds(b, tz).end)));
+        return all[0]?.n ?? 0;
+      }
+      const v = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).innerJoin(visit, eq(visit.id, charge.visitId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(visit.day, a, b), byDoc(visit.practitionerId)));
+      const s = await tx.select({ n: sql<number>`coalesce(sum(${chargeBalance}),0)::int` }).from(charge).innerJoin(procedureSession, eq(procedureSession.id, charge.sessionId)).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'), inRange(procedureSession.day, a, b), byDoc(procedureSession.practitionerId)));
       return (v[0]?.n ?? 0) + (s[0]?.n ?? 0);
     };
     const period = async (a: string, b: string) => {

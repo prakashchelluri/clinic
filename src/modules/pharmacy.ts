@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, desc, ilike, gte, lte, lt, or, inArray, gt, isNull } from 'drizzle-orm';
-import { encounter, prescriptionItem, patient, visit, charge, payment, medicine, pharmacySale, bill, tenant, practitioner, stockBatch, message, procedureSession, procedureCatalog, room, type SaleLine, type SupplyAsk } from '../db/schema.js';
+import { encounter, prescriptionItem, patient, visit, charge, creditLine, creditNote, payment, medicine, pharmacySale, bill, tenant, practitioner, stockBatch, message, procedureSession, procedureCatalog, room, type SaleLine, type SupplyAsk } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { auditView } from '../lib/audit.js';
@@ -396,7 +396,7 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
   const when = body.at ?? new Date().toISOString();
   const n = await nextNumber(tx, t, 'pharmacy_invoice', 'tenant');
   const invoiceNo = `PH-${String(n).padStart(5, '0')}`;
-  const [pb] = await tx.insert(bill).values({ tenantId: t, patientId: pid, invoiceNo, createdAt: when }).returning(); // the pharmacy's own number is the invoice number
+  const [pb] = await tx.insert(bill).values({ tenantId: t, patientId: pid, invoiceNo, createdAt: when, taxGstin: sql`(select nullif(settings->>'gstin', '') from tenant where id = ${t})` }).returning(); // the pharmacy's own number is the invoice number
   const [ch] = await tx.insert(charge).values({ billId: pb.id, tenantId: t, patientId: pid, description: `Pharmacy · ${body.encounterId ? 'Prescription' : 'Counter sale'} · ${invoiceNo}`, amountPaise: total, taxRateBp: 0, status: 'paid', createdAt: when }).returning();
   for (const p of pays) await tx.insert(payment).values({ tenantId: t, patientId: pid, chargeId: ch.id, amountPaise: p.amountPaise, method: p.method, reference: p.method === 'cash' ? null : p.reference, receivedBy: a.userId, receivedAt: when, createdAt: when });
   const method = pays.length > 1 ? 'split' : pays[0].method;
@@ -447,7 +447,12 @@ async function returnItems(tx: Tx, a: Actor, saleId: string, b: z.infer<typeof R
     }
     if (l.prescriptionItemId) await tx.update(prescriptionItem).set({ issuedQty: sql`greatest(0, ${prescriptionItem.issuedQty} - ${r.qty})` }).where(eq(prescriptionItem.id, l.prescriptionItemId));
   }
-  if (s.chargeId) await tx.insert(payment).values({ tenantId: t, patientId: s.patientId, chargeId: s.chargeId, amountPaise: -refund, method: b.method, reference: b.method === 'cash' ? cn : `${cn} · ${b.reference}`, receivedBy: a.userId });
+  if (s.chargeId) { // the pharmacy invoice is not changed: the return is its credit note, and the money goes back over the counter
+    const ch = await tx.select({ billId: charge.billId, what: charge.description }).from(charge).where(eq(charge.id, s.chargeId)).then((r) => r[0]);
+    if (ch?.billId) { const [note] = await tx.insert(creditNote).values({ tenantId: t, patientId: s.patientId, billId: ch.billId, creditNo: cn, reason: `Medicines returned: ${b.reason}`.slice(0, 200), totalPaise: refund, createdBy: a.userId }).returning();
+      await tx.insert(creditLine).values({ tenantId: t, creditNoteId: note.id, chargeId: s.chargeId, amountPaise: refund, what: ch.what }); }
+    await tx.insert(payment).values({ tenantId: t, patientId: s.patientId, chargeId: s.chargeId, amountPaise: -refund, method: b.method, reference: b.method === 'cash' ? cn : `${cn} · ${b.reference}`, receivedBy: a.userId });
+  }
   const ret = { creditNoteNo: cn, at: new Date().toISOString(), by: a.name, reason: b.reason, method: b.method, reference: b.reference ?? null, refundPaise: refund, lines };
   await tx.update(pharmacySale).set({ returns: [...s.returns, ret] }).where(eq(pharmacySale.id, s.id));
   await emit(tx, ctx, 'pharmacy.returned', 'pharmacy_sale', s.id, { creditNoteNo: cn, refundPaise: refund });

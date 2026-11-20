@@ -9,7 +9,7 @@ import '../frontdesk.css';
 
 const dayLabel = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const k = (p: number) => (Math.abs(p) >= 100000 ? `${(p / 100000).toFixed(1)}k` : String(Math.round(p / 100)));
-const SECTIONS: [string, string][] = [['consultation', 'Consultations'], ['procedure', 'Procedures'], ['pharmacy', 'Pharmacy'], ['other', 'Other']];
+const SECTIONS: [string, string][] = [['consultation', 'Consultations'], ['procedure', 'Procedures'], ['pharmacy', 'Pharmacy'], ['other', 'Advances & other'], ['refunds', 'Refunds given back']];
 type Need = { key: string; red?: boolean; title: string; where: string; body: React.ReactNode; act: string; to: string };
 
 /**
@@ -35,7 +35,7 @@ export function Clinic() {
 
   const visits: any[] = fd.data?.visits ?? [];
   const waiting = visits.filter((v) => ['waiting', 'intake', 'screened'].includes(v.status));
-  const longest = waiting.length ? Math.max(...waiting.map((v) => Math.round((Date.now() - new Date(v.arrivedAt).getTime()) / 60000))) : 0;
+  const longest = waiting.length ? Math.max(0, ...waiting.map((v) => Math.round((Date.now() - new Date(v.arrivedAt).getTime()) / 60000))) : 0; // never below 0 (a clock ahead of the server)
   const ps: any[] = procs.data ?? [];
   const reviews: any[] = stock.data?.reviews ?? [];
   const expired: number = stock.data?.tiles?.expired ?? 0;
@@ -43,7 +43,7 @@ export function Clinic() {
   const table = (m: any) => (
     <div className="grid grid-cols-[minmax(0,1.3fr)_repeat(3,minmax(0,1fr))] text-[13.5px] font-semibold tabular-nums">
       {['', 'Cash', 'UPI', 'Card'].map((h) => <span key={h} className={`pb-1.5 text-[12px] text-muted ${h ? 'text-right' : ''}`}>{h}</span>)}
-      {[...SECTIONS.filter(([key]) => m[key].total !== 0), ['total', 'Total'] as [string, string]].map(([key, label]) => [
+      {[...SECTIONS.filter(([key]) => (m[key]?.total ?? 0) !== 0), ['total', 'Total'] as [string, string]].map(([key, label]) => [
         <span key={key} className={`border-t border-line py-2 ${key === 'total' ? 'font-bold' : 'font-medium'}`}>{label}</span>,
         ...['cash', 'upi', 'card'].map((x) => <span key={key + x} className={`border-t border-line py-2 text-right ${key === 'total' ? 'font-bold' : ''}`}>{money(m[key][x])}</span>)])}
     </div>);
@@ -61,7 +61,7 @@ export function Clinic() {
       body: <div>{reviews.map((r: any) => <div key={r.id} className="flex justify-between gap-3 border-t border-line py-2.5 text-[14px] font-semibold"><span>{r.vendor ?? 'Vendor'}{r.billNo ? ` · bill ${r.billNo}` : ''}</span><span className="text-[13px] font-medium text-muted">{r.lines?.length ?? 0} line{r.lines?.length === 1 ? '' : 's'} to check</span></div>)}</div> }] : []),
     ...(expired > 0 ? [{ key: 'exp', title: `${expired} expired still on the shelf`, where: 'Inventory', act: 'Take them off', to: '/inventory?tab=batches', body: <p className="text-[14px]">They can no longer be sold. Taking them off writes them off the stock.</p> }] : []),
     ...(s.emi.n ? [{ key: 'emi', title: `${money(s.emi.totalPaise)} EMI not yet paid by the lender`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">{s.emi.n} EMI payment{s.emi.n === 1 ? '' : 's'} counted as received, waiting for the lender to settle.</p> }] : []),
-    ...(s.dues.totalPaise ? [{ key: 'due', title: `${money(s.dues.totalPaise)} still due from ${s.dues.patients} patient${s.dues.patients === 1 ? '' : 's'}`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">Consultations, sessions or other charges billed and not yet paid.</p> }] : []),
+    ...(s.dues.totalPaise ? [{ key: 'due', title: `${money(s.dues.totalPaise)} still due from ${s.dues.patients} patient${s.dues.patients === 1 ? '' : 's'}`, where: 'Accounts', act: 'Open Accounts', to: '/accounts?tab=due', body: <p className="text-[14px]">Consultations, sessions or other charges billed and not yet paid.{s.dues.waitingPaise ? ` ${money(s.dues.waitingPaise)} of it is discounts awaiting approval.` : ''}</p> }] : []),
   ];
   const yc = s.yesterday.closed;
   const max = Math.max(1, ...s.week.map((w: any) => w.totalPaise));
@@ -74,7 +74,7 @@ export function Clinic() {
         <section className="fd-sheet p-5 anim-fade-up">
           <div className="text-[11.5px] font-bold uppercase tracking-wider text-muted">Yesterday · {dayLabel(s.yesterday.day)}</div>
           <div className="my-2 text-[30px] font-bold tabular-nums">{money(s.yesterday.money.total.total)}</div>
-          {SECTIONS.filter(([key]) => s.yesterday.money[key].total !== 0).map(([key, label]) => <Row key={key} a={label} b={money(s.yesterday.money[key].total)} />)}
+          {SECTIONS.filter(([key]) => (s.yesterday.money[key]?.total ?? 0) !== 0).map(([key, label]) => <Row key={key} a={label} b={money(s.yesterday.money[key].total)} />)}
           <Row a="Cash · UPI · Card" b={mode(s.yesterday.money.total)} />
           <div className="mt-2 text-[13px] text-muted">{yc ? `Closed by ${yc.by}${yc.cashDiffPaise ? ` · cash ${money(Math.abs(yc.cashDiffPaise))} ${yc.cashDiffPaise < 0 ? 'short' : 'over'}${yc.notes?.cash ? `: “${yc.notes.cash}”` : ''}` : ' · cash matched'}` : <span className="font-semibold text-rose">Not closed yet</span>}</div>
         </section>
@@ -114,11 +114,11 @@ export function Clinic() {
               <span key={d.id + 'w'} className="border-t border-line py-2.5">{waiting.filter((v) => v.practitionerId === d.id).length}</span>,
               <span key={d.id + 'b'} className="border-t border-line py-2.5 text-right">{d.collectedPaise !== null ? money(d.collectedPaise) : '—'}</span>])}
           </div>
-          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sessions, less refunds, from the same figures as End of day. Pharmacy and course advances are not split by doctor.</div>
+          <div className="mt-2 text-[12.5px] text-muted">Collected is money received for each doctor's consultations and sessions, less refunds, from the same figures as End of day. Pharmacy, patient advances and whole-treatment invoices are not split by doctor.</div>
         </section>
       </div>
 
-      {open && <Drawer title={open.title} width="max-w-md" onClose={() => setOpen(null)}>
+      {open && <Drawer title={needs.find((n) => n.key === open.key)?.title ?? 'All done here'} width="max-w-md" onClose={() => setOpen(null)}>
         <div className="flex flex-1 flex-col gap-4">
           {open.body}
           <div className="mt-auto flex gap-2 border-t border-line pt-3.5"><button className="btn btn-primary" onClick={() => nav(open.to)}>{open.act}</button><button className="btn" onClick={() => setOpen(null)}>Later</button></div>

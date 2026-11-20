@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { appUser, charge, course, dayClose, expense, patient, payment, pharmacySale, procedureCatalog, stockBatch } from '../db/schema.js';
 import { route } from '../lib/route.js';
+import { chargeBalance } from '../lib/money.js';
 import { addDays, daysBetween, todayIn } from '../lib/core.js';
 import { HttpError } from '../lib/auth.js';
 import { dayBounds } from './billing.js';
@@ -40,7 +41,7 @@ export function financeRoutes(app: FastifyInstance) {
     for (let d = from; d <= to; d = addDays(d, 1)) {
       const m = cur.days[d]; const ex = exByDay[d] ?? 0;
       if (!m && !ex && d !== today) continue;
-      days.push({ day: d, money: m ?? null, expensesPaise: ex, closed: closedOn.get(d) ?? null, today: d === today });
+      days.push({ day: d, money: m ?? null, alloc: cur.alloc[d] ?? null, expensesPaise: ex, closed: closedOn.get(d) ?? null, today: d === today });
     }
 
     // pharmacy margin: bills made in the range, against the purchase price of the batch each line came from
@@ -57,18 +58,21 @@ export function financeRoutes(app: FastifyInstance) {
     }
 
     // not in yet: owed by patients (any date), EMI the lender has not paid, and what went back or was let go in the range
-    const dueRows = await tx.select({ c: charge, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(charge).innerJoin(patient, eq(patient.id, charge.patientId))
+    const dueRows = await tx.select({ c: charge, bal: chargeBalance, name: patient.fullName, phone: patient.phone, no: patient.patientNo }).from(charge).innerJoin(patient, eq(patient.id, charge.patientId))
       .where(and(eq(charge.tenantId, t), eq(charge.status, 'due'))).orderBy(asc(charge.createdAt));
     const owed = new Map<string, { patientId: string; name: string; phone: string | null; patientNo: string; totalPaise: number; since: string; items: string[] }>();
     for (const r of dueRows) {
+      if (r.bal <= 0) continue;
       const o = owed.get(r.c.patientId) ?? { patientId: r.c.patientId, name: r.name, phone: r.phone, patientNo: r.no, totalPaise: 0, since: todayIn(tz, new Date(r.c.createdAt)), items: [] };
-      o.totalPaise += r.c.amountPaise; o.items.push(r.c.description); owed.set(r.c.patientId, o);
+      o.totalPaise += r.bal; o.items.push(r.c.description); owed.set(r.c.patientId, o); // what is still owed on it, part payments taken off
     }
     const emi = (await tx.select({ n: sql<number>`count(*)::int`, total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int` }).from(payment)
       .where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt))))[0];
     const refunds = (await tx.select({ p: payment, name: patient.fullName, what: charge.description }).from(payment).innerJoin(patient, eq(patient.id, payment.patientId)).leftJoin(charge, eq(charge.id, payment.chargeId))
-      .where(and(eq(payment.tenantId, t), lt(payment.amountPaise, 0), gte(payment.receivedAt, start), lt(payment.receivedAt, end))).orderBy(asc(payment.receivedAt)))
-      .map((r) => ({ kind: 'refund', name: r.name, what: r.what ?? (r.p.courseId ? 'Course advance' : 'Payment'), method: r.p.method, day: todayIn(tz, new Date(r.p.receivedAt)), amountPaise: -r.p.amountPaise }));
+      .where(and(eq(payment.tenantId, t), lt(payment.amountPaise, 0), gte(payment.receivedAt, start), lt(payment.receivedAt, end),
+        sql`${payment.method} <> 'advance'`, // a move into or out of the advance is bookkeeping, not money out
+        sql`(${charge.description} is null or ${charge.description} not like 'Pharmacy%')`)).orderBy(asc(payment.receivedAt))) // pharmacy returns are counted from the sale below
+      .map((r) => ({ kind: 'refund', name: r.name, what: r.what ?? (r.p.receiptNo ? `Refund ${r.p.receiptNo}` : 'Refund'), method: r.p.method, day: todayIn(tz, new Date(r.p.receivedAt)), amountPaise: -r.p.amountPaise }));
     const pharmacyBack = (await tx.select({ s: pharmacySale, name: patient.fullName }).from(pharmacySale).innerJoin(patient, eq(patient.id, pharmacySale.patientId))
       .where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90)), lt(pharmacySale.createdAt, end))))
       .flatMap(({ s, name }) => (s.returns ?? []).filter((r) => r.at >= start && r.at < end).map((r) => ({ kind: 'refund', name: s.buyerName ?? name, what: `Pharmacy return, bill ${s.invoiceNo}`, method: r.method, day: todayIn(tz, new Date(r.at)), amountPaise: r.refundPaise })));

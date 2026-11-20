@@ -474,8 +474,12 @@ export const charge = pgTable('charge', {
   excludedReason: text('excluded_reason'),
   courseId: uuid('course_id'),            // a sitting of a procedure course
   sessionId: uuid('session_id'),          // the sitting this invoice came from (one invoice per sitting)
+  procedureId: uuid('procedure_id'),      // a procedure's charge (price list, treatment or session): counted under Procedures
+  originalPaise: integer('original_paise'), // the line's price before it was first lowered (cancelled sessions, a refund): what the invoice prints
   prepaid: boolean('prepaid').notNull().default(false), // paid from the course's advance
   billId: uuid('bill_id'),                 // the invoice this line is on; a trigger makes a new numbered bill when none is given
+  lineNo: integer('line_no'),              // its place on the invoice (set by a trigger): print order and payment order
+  sessions: integer('sessions'),           // a treatment line: how many sessions it bills
 });
 
 // An invoice: one number, one or more lines (charges). Paid, due and refunded come from its lines' payments and its refunds.
@@ -483,7 +487,30 @@ export const bill = pgTable('bill', {
   ...tenantCols,
   patientId: uuid('patient_id').notNull().references(() => patient.id),
   invoiceNo: text('invoice_no').notNull(),
+  taxGstin: text('tax_gstin'),              // the clinic's GSTIN when this invoice was issued (null = a Bill of Supply): it prints as issued forever
 }, (t) => [uniqueIndex('bill_no').on(t.tenantId, t.invoiceNo), index('bill_patient').on(t.tenantId, t.patientId)]);
+
+// A credit note: an issued invoice never changes; what comes off it (a session not given, a cancelled treatment, an approved discount,
+// money given back for something not done) is a numbered credit note against it. Money paid above what is then owed moves to the advance.
+export const creditNote = pgTable('credit_note', {
+  ...tenantCols,
+  patientId: uuid('patient_id').notNull().references(() => patient.id),
+  billId: uuid('bill_id').notNull(),
+  creditNo: text('credit_no').notNull(),
+  reason: text('reason').notNull(),
+  totalPaise: integer('total_paise').notNull(),
+  createdBy: uuid('created_by'),
+  refundNo: text('refund_no'),             // the refund voucher that paid it out, when one did
+}, (t) => [uniqueIndex('credit_no').on(t.tenantId, t.creditNo), index('credit_bill').on(t.tenantId, t.billId)]);
+export const creditLine = pgTable('credit_line', {
+  ...tenantCols,
+  creditNoteId: uuid('credit_note_id').notNull().references(() => creditNote.id),
+  chargeId: uuid('charge_id').notNull().references(() => charge.id),
+  amountPaise: integer('amount_paise').notNull(),
+  what: text('what').notNull(),            // what it is for, as printed ("1 session not given")
+  sessions: integer('sessions').notNull().default(0), // sessions it takes back (a treatment made shorter); they can be billed again if added back
+  listPaise: integer('list_paise').notNull().default(0), // those sessions' share of the list price
+}, (t) => [index('credit_line_charge').on(t.chargeId)]);
 
 export const payment = pgTable('payment', {
   ...tenantCols,
@@ -738,7 +765,7 @@ export const domainEvent = pgTable('domain_event', {
 
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
-  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'bill', 'callback', 'quote', 'day_close', 'charge', 'payment',
+  'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'bill', 'credit_note', 'credit_line', 'callback', 'quote', 'day_close', 'charge', 'payment',
   'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'lab_result',
 ];
 

@@ -36,7 +36,7 @@ async function plan(owner: any, reception: any, name: string, phone: string, amo
   return { peel, p, rec };
 }
 
-test("the doctor's amount is the course price; a sitting done before a course is billed its share; empty means standard", async () => {
+test("the doctor's amount is the course price; a sitting done before an invoice bills the whole of it; empty means standard", async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
 
   // custom: ₹24,000 for 4 sittings
@@ -50,12 +50,13 @@ test("the doctor's amount is the course price; a sitting done before a course is
   const row = fin.doctorPrices.find((x: any) => x.id === c.id);
   assert.ok(row, 'listed under Custom prices'); assert.equal(row.totalPaise, 2400000); assert.equal(row.doctor, 'Dr. Main Doctor'); assert.ok(row.recordedBy);
 
-  // custom, no course agreed: the done sitting is billed a quarter
+  // custom, no course agreed: the done sitting invoices the treatment, whole, at the doctor's amount
   const b = await plan(owner, reception, 'Price Share', '9848066602', 2400000);
   const ps = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: b.rec.id, day: today(), startTime: '10:00', minutes: 30, force: true })).json();
   assert.equal((await reception('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).statusCode, 200);
-  const ch = (await owner('GET', `/patients/${b.p.id}/timeline`)).json().charges.filter((x: any) => /Chemical peel session/.test(x.description));
-  assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 600000); assert.match(ch[0].description, /custom price/);
+  const ch = (await owner('GET', `/patients/${b.p.id}/timeline`)).json().charges.filter((x: any) => /^Chemical peel/.test(x.description));
+  assert.equal(ch.length, 1); assert.equal(ch[0].amountPaise, 2400000);
+  assert.equal((await owner('GET', `/courses?patientId=${b.p.id}`)).json()[0].priceSource, 'doctor');
 
   // the course carries its next booked sitting (the popup and the Procedures tab agree)
   const booked1 = (await reception('POST', '/procedure-sessions', { practitionerId: await drMain(reception), recommendationId: a.rec.id, day: plusDays(3), startTime: '10:00', minutes: 30, force: true })).json();

@@ -378,7 +378,7 @@ export function Modal({ title, subtitle, onClose, children, width = 'max-w-2xl',
 }
 
 /* ---------- Confirm and short questions, in the app's own style (replaces the browser's confirm / prompt / alert) ---------- */
-type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; /** a third answer between Cancel and the confirm: resolves { value: 'alt' } */ altLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; initial?: string; maxLength?: number } };
+type AskOpts = { title: string; body?: ReactNode; confirmLabel?: string; cancelLabel?: string; /** a third answer between Cancel and the confirm: resolves { value: 'alt' } */ altLabel?: string; tone?: 'default' | 'danger'; field?: { label: string; placeholder?: string; required?: boolean; minLength?: number; initial?: string; maxLength?: number } };
 type Pending = AskOpts & { resolve: (v: { value: string } | null) => void };
 let pending: Pending | null = null; const askSubs = new Set<() => void>();
 const setPending = (p: Pending | null) => { pending = p; askSubs.forEach((s) => s()); };
@@ -391,7 +391,7 @@ export function DialogHost() {
   useEffect(() => setVal(p?.field?.initial ?? ''), [p]);
   useScrollLock(!!p); useDialogFocus(panel, !!p);
   const done = (v: { value: string } | null) => { if (!p) return; p.resolve(v); setPending(null); };
-  const bad = !!p?.field?.required && !val.trim();
+  const bad = !!p?.field?.required && val.trim().length < (p.field.minLength ?? 1);
   useEffect(() => {
     if (!p) return;
     // Capture phase: this dialog sits on top, so Esc must not also close whatever is underneath.
@@ -480,11 +480,12 @@ export function cleanMoney(raw: string) {
   return f === undefined ? whole : `${whole || '0'}.${f}`;
 }
 export const toPaise = (s: string) => Math.round(Number(s || 0) * 100);
+// never above ₹10,00,000: the most the server takes in one go
 export function MoneyInput({ value, onChange, className = '', placeholder = '0', id, autoFocus, label }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string; id?: string; autoFocus?: boolean; label?: string }) {
   return (
     <div className={`relative ${className}`}>
       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none">₹</span>
-      <input id={id} autoFocus={autoFocus} className="input !pl-8" inputMode="decimal" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => onChange(cleanMoney(e.target.value))} aria-label={label ?? 'Amount in rupees'} />
+      <input id={id} autoFocus={autoFocus} className="input !pl-8" inputMode="decimal" autoComplete="off" placeholder={placeholder} value={value} onChange={(e) => { const v = cleanMoney(e.target.value); onChange(Number(v) > 1000000 ? "1000000" : v); }} aria-label={label ?? 'Amount in rupees'} />
     </div>
   );
 }

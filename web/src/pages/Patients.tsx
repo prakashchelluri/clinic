@@ -86,7 +86,7 @@ function Timeline({ id }: { id: string }) {
   const save = useMutation({ mutationFn: (b: any) => patch(`/patients/${id}`, b), onSuccess: () => { setEdit(null); qc.invalidateQueries({ queryKey: ['timeline', id] }); qc.invalidateQueries({ queryKey: ['patients'] }); toast('Saved'); }, onError: (e: any) => toast(errText(e), 'err') });
   const del = useMutation({ mutationFn: (docId: string) => api('DELETE', `/documents/${docId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['documents', id] }); toast('Removed', 'info'); } });
   if (!t.data) return <div className="card"><Skeleton rows={4} /></div>;
-  const { patient: p, encounters, recommendations, charges, outstandingPaise, visits, guardian, sharingPhone } = t.data;
+  const { patient: p, encounters, recommendations, charges, outstandingPaise, waitingPaise = 0, visits, guardian, sharingPhone } = t.data;
   const openPlans = recommendations.filter((r: any) => !['done', 'cancelled'].includes(r.status));
   const reports = (docs.data ?? []).filter((d: any) => d.kind !== 'photo' && d.kind !== 'canvas');
   const photos = (docs.data ?? []).filter((d: any) => d.kind === 'photo');
@@ -101,10 +101,10 @@ function Timeline({ id }: { id: string }) {
   // vitals as the desk took them at check-in, one column per visit (the last three that have any)
   const vf = enabledVitals(cfg?.tenant?.settings);
   const vCols = (visits as any[]).filter((v) => vf.some((f) => v.details?.[f.key] !== undefined && v.details[f.key] !== null && v.details[f.key] !== '')).slice(0, 3);
-  const showBills = can(perms, 'fees.see') || can(perms, 'payment.record');
+  const showBills = can(perms, 'fees.invoices'); // invoices and the patient's account: not for doctors by default
   const SECS: [Sec, number | undefined][] = [
     ['visits', encounters.length || undefined], ['reports', reports.length || undefined], ['photos', photos.length || undefined], ['plans', procPlans.length || undefined],
-    ...(showBills ? [['bills', charges.length || undefined] as [Sec, number | undefined]] : []),
+    ...(showBills ? [['bills', new Set(charges.map((c: any) => c.billId)).size || undefined] as [Sec, number | undefined]] : []),
     ...(can(perms, 'appointment.read') ? [['messages', undefined] as [Sec, number | undefined]] : []),
     ...(missed.length ? [['missed', missed.length] as [Sec, number | undefined]] : []),
   ];
@@ -129,11 +129,11 @@ function Timeline({ id }: { id: string }) {
             <div className="mt-0.5 text-[13px] text-muted">{[p.phone ?? 'no phone', p.patientNo, p.dob ? `born ${fmtDate(p.dob)}` : null, p.locality, visits.length ? `${visits.length} visit${visits.length === 1 ? '' : 's'}` : 'no visit yet'].filter(Boolean).join(' · ')}
               {guardian && <> · Guardian: <button className="font-medium text-ink-2 underline" onClick={() => nav(`/patients/${guardian.id}`)}>{guardian.fullName}</button></>}{p.contactLabel ? ` · contact is ${p.contactLabel}` : ''}{sharingPhone > 0 ? ` · phone shared with ${sharingPhone} other${sharingPhone === 1 ? '' : 's'}` : ''}{p.notes ? <span className="text-ink-2"> · {p.notes}</span> : null}</div>
           </div>
-          {outstandingPaise > 0 && <button type="button" className="text-sm font-bold text-rose hover:underline" onClick={() => setSec('bills')}>Due {money(outstandingPaise)}</button>}
+          {outstandingPaise > 0 && <button type="button" className={`text-sm font-bold hover:underline ${outstandingPaise > waitingPaise ? 'text-rose' : 'text-amber'}`} onClick={() => setSec('bills')}>{outstandingPaise > waitingPaise ? `Due ${money(outstandingPaise)}` : `${money(outstandingPaise)} discount awaiting approval`}</button>}
           {/* this patient's own next steps: check in today, or book a visit */}
           {can(perms, 'visit.write') && !p.mergedInto && <button className="btn btn-sm" onClick={() => nav(`/dashboard?arrive=1&patient=${id}&pname=${encodeURIComponent(p.fullName)}`)}><Icon name="door" className="h-3.5 w-3.5" />Check in</button>}
           {can(perms, 'appointment.write') && !p.mergedInto && <button className="btn btn-sm" onClick={() => nav(`/patients/${id}?book=1&patient=${id}&pname=${encodeURIComponent(p.fullName)}`)}><Icon name="calendar" className="h-3.5 w-3.5" />Book</button>}
-          {can(perms, 'payment.record') && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Add bill / payment</button>}
+          {can(perms, 'payment.record') && sec !== 'bills' && <button className={`btn btn-sm ${outstandingPaise > 0 ? 'btn-primary' : ''}`} onClick={() => setPaying(true)}><Icon name="plus" className="h-3.5 w-3.5" />Generate invoice</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={() => setFlagging(true)}><Icon name="spark" className="h-3.5 w-3.5" />{p.flags?.vip || p.flags?.family || p.flags?.careful ? 'Change flag' : 'Flag'}</button>}
           {can(perms, 'patient.write') && <button className="btn btn-sm" onClick={startEdit}><Icon name="edit" className="h-3.5 w-3.5" />Edit</button>}
           {isOwner && !p.mergedInto && <MoreMenu items={[{ label: 'Merge a duplicate into this record', onClick: () => setMerging(true) }]} />}

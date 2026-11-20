@@ -48,7 +48,7 @@ test('a procedure with its sessions: upfront total, each session its own length 
   assert.equal(ps.endTime, '17:15');
   // upfront: it does not start until the whole total is paid
   assert.equal((await owner('PATCH', `/procedure-sessions/${ps.id}`, { state: 'in_progress', consent: true })).body.code, 'PAY_UPFRONT_FIRST');
-  assert.equal((await owner('POST', `/courses/${c.id}/advance`, { amountPaise: 900000, method: 'cash', idempotencyKey: 'tattoo-upfront-1' })).status, 200);
+  assert.equal((await owner('POST', '/bills', { patientId: pt.id, idempotencyKey: 'tattoo-upfront-1', lines: [{ recommendationId: rec.id }], parts: [{ method: 'cash', amountPaise: 900000 }] })).status, 200, 'invoiced and paid in full');
   assert.equal((await owner('PATCH', `/procedure-sessions/${ps.id}`, { state: 'in_progress', consent: true })).status, 200);
   assert.equal((await owner('PATCH', `/procedure-sessions/${ps.id}`, { state: 'completed' })).status, 200);
   // the plan books session 2 ten days later (its own gap), 45 minutes long

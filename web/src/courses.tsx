@@ -17,18 +17,17 @@ export const useCourses = (patientId: string) => useQuery({ queryKey: ['courses'
  *  `action` is the next step (Book sitting N), shown on the Sittings row. */
 function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | null; action?: React.ReactNode }) {
   const day = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const paid = c.advancePaise - c.refundedPaise + c.paidOnDayPaise;
+  const paid = c.paidPaise ?? 0; const net = (c.netPaise ?? 0) + (c.uninvoicedPaise ?? 0); // what the treatment really costs the patient now
+  const less = [c.discountPaise ? `${money(c.discountPaise)} discount` : '', c.creditedPaise ? `${money(c.creditedPaise)} in credit notes` : ''].filter(Boolean).join(' and ');
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line py-2.5 first:border-t-0"><span className="text-muted">{label}</span><div>{children}</div></div>);
   return (
     <div className="rounded-[10px] border border-line px-4 py-1 text-[14px]">
-      <Row label="Price"><b>{money(c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· {money(c.perSittingPaise)} each</span>
+      <Row label="Price"><b>{money(c.invoiced ? net : c.totalPaise)}</b> for {c.sittings} sessions <span className="text-muted">· about {money(Math.round(c.perSittingPaise / 100) * 100)} each</span>{c.invoiced && less && <div className="text-[13px] text-muted">Invoiced at {money(c.invoicedPaise)}, less {less}</div>}
         <div className="text-[13px] text-muted">{c.priceSource === 'doctor' ? `Custom price${c.priceBy ? `, set by ${c.priceBy}` : ''}${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : c.priceSource === 'package' ? `Share of the ${c.packageName ?? 'clinic'} package${c.standardPaise ? ` · standard price ${money(c.standardPaise)}` : ''}` : 'Standard price'}</div>
         {c.validUntil && <div className={`text-[13px] ${c.expired ? 'text-rose' : 'text-muted'}`}>{c.expired ? `Expired on ${day(c.validUntil)}: sessions not done can only be refunded` : `Valid till ${day(c.validUntil)}`}</div>}</Row>
       <Row label="Agreed">By the patient on {day(c.createdAt)}<div className="text-[13px] text-muted">{c.agreedBy ? `Recorded by ${c.agreedBy}` : ''}</div></Row>
-      <Row label="Paid">{paid > 0 ? <b>{money(paid)}</b> : 'Nothing yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span>
-        {(c.creditPaise ?? 0) > 0 && <div className="text-[13px] text-muted">plus {money(c.creditPaise)} approved discount</div>}
-        {c.unusedPaise > 0 && <div className="text-[13px] text-muted">{money(c.unusedPaise)} in advance, covers {c.unusedSittings} session{c.unusedSittings === 1 ? '' : 's'}</div>}</Row>
+      <Row label="Invoice">{c.invoiced ? <>On an invoice · {paid > 0 ? <b>{money(paid)} paid</b> : 'nothing paid yet'}<span className="text-muted"> · {money(c.stillToPayPaise)} still to pay</span>{c.uninvoicedPaise > 0 && <div className="text-[13px] text-muted">{money(c.uninvoicedPaise)} for sessions added since: invoiced with Generate invoice, or when the next session is done</div>}</> : <span className="text-muted">Not invoiced yet: Generate invoice bills the whole treatment once, or it is invoiced when the first session is done</span>}</Row>
       <Row label="Sessions"><div className="flex flex-wrap items-center gap-2"><span>{c.doneSittings} of {c.sittings} done<span className="text-muted"> · {booked?.day ? `session ${(booked as any).sittingNo ?? c.doneSittings + 1} booked on ${day(booked.day)}${(booked as any).startTime ? ` ${(booked as any).startTime}` : ''}` : 'next not booked yet'}</span></span><span className="ml-auto" />{action}</div></Row>
     </div>
   );
@@ -49,7 +48,7 @@ export async function printQuote(id: string) {
   } catch (e) { toast(errText(e), 'err'); }
 }
 
-/** A procedure plan's money in one place for the desk: the fixed price (list or a clinic package), the quote, booking, and paying sittings ahead.
+/** A procedure plan's money in one place for the desk: the fixed price (list or a clinic package), the quote, booking, and invoicing the whole treatment.
  *  Nobody types a price here: a reduction is a discount on the bill, where above the clinic limit it waits for approval. */
 export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { id: string; procedureId: string; procedure?: string; sittings?: number; amountPaise?: number | null; package?: { name: string; pricePaise: number; listPaise: number } | null; patient?: any }; patientId: string; patientName: string; onClose: () => void }) {
   const [booking, setBooking] = useState(false); const [moving, setMoving] = useState<any>(null); const [paying, setPaying] = useState(false); // book a new sitting, or move the one booked
@@ -66,13 +65,8 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
     onSuccess: (r: any, send) => { qc.invalidateQueries({ queryKey: ['quotes', rec.id] }); if (r.whatsapp === 'opted_out') { toast(`Quote ${r.number} saved. ${NO_WHATSAPP}`, 'info', { label: 'Print', run: () => printQuote(r.id) }); return; }
       toast(send === 'whatsapp' ? `Quote ${r.number} is on its way` : `Quote ${r.number} ready`); if (send === 'print') printQuote(r.id); },
     onError: (e: any) => toast(e?.body?.code === 'NO_PHONE' ? 'This patient has no phone number for WhatsApp' : errText(e), 'err') });
-  // refund: how much, how it goes back (the way the patient paid, so the cash drawer still adds up) and why
-  const [rf, setRf] = useState<{ amount: string; mode: 'cash' | 'upi' | 'card' | 'bank'; why: string } | null>(null);
-  const rfPaise = rf ? toPaise(rf.amount) : 0;
-  const refund = useMutation({ mutationFn: () => post(`/courses/${c.id}/refund`, { amountPaise: rfPaise, method: rf!.mode, reason: rf!.why.trim() }),
-    onSuccess: () => { refresh(); toast(`Refund of ${money(rfPaise)} recorded · ${REFUND_MODES.find(([m]) => m === rf!.mode)?.[1]}`); setRf(null); }, onError: (e) => toast(errText(e), 'err') });
   const ledger: any[] = c?.ledger ?? []; const booked = c?.nextSitting ?? ledger.find((l: any) => l.state && !['done', 'planned'].includes(l.state)); // the next sitting already booked
-  const canPay = can(perms, 'payment.record'); const leftToPay = c ? c.stillToPayPaise > 0 && c.sittings - c.doneSittings - c.unusedSittings > 0 : true;
+  const canPay = can(perms, 'payment.record'); const toInvoice = c ? c.uninvoicedPaise > 0 && !c.expired : true;
   if (booking || moving) return <ScheduleModal rec={{ ...rec, patient: rec.patient ?? { id: patientId, fullName: patientName } }} sitting={moving ?? undefined} onClose={() => { setBooking(false); setMoving(null); refresh(); ['psessions', 'timeline', 'calendar'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); }} />;
   if (paying) return <TakePayment patientId={patientId} patientName={patientName} ahead={{ recommendationId: rec.id }} onClose={() => { setPaying(false); refresh(); }} />;
   return (
@@ -92,14 +86,7 @@ export function CourseDialog({ rec, patientId, patientName, onClose }: { rec: { 
       ) : (
         <div className="space-y-4">
           <Standing c={c} booked={booked} action={booked?.id ? <button className="btn btn-sm" onClick={() => setMoving(booked)}>Reschedule</button> : c.doneSittings < c.sittings && !booked && <button className="btn btn-sm btn-primary" onClick={() => setBooking(true)}>Book session {c.doneSittings + 1}</button>} />
-          {rf && <div className="rounded-xl border border-line p-3 space-y-3 anim-fade-up">
-            <div className="label !mb-0">Refund unused sessions · up to {money(c.refundablePaise)}</div>
-            <div><label className="label" htmlFor="rf-amt">Amount</label><MoneyInput id="rf-amt" value={rf.amount} onChange={(v) => setRf({ ...rf, amount: v })} /></div>
-            <div><span className="label">Given back by</span><div className="flex flex-wrap gap-1.5">{REFUND_MODES.map(([m, l]) => <button key={m} type="button" className={`toggle-opt !py-1 ${rf.mode === m ? 'on' : ''}`} aria-pressed={rf.mode === m} onClick={() => setRf({ ...rf, mode: m })}>{l}</button>)}</div></div>
-            <div><label className="label" htmlFor="rf-why">Why</label><input id="rf-why" className="input" maxLength={200} value={rf.why} onChange={(e) => setRf({ ...rf, why: e.target.value })} /></div>
-            <div className="flex gap-2"><button className="btn btn-ghost btn-sm" onClick={() => setRf(null)}>Cancel</button><button className="btn btn-primary btn-sm" disabled={refund.isPending || rfPaise <= 0 || rfPaise > c.refundablePaise || rf.why.trim().length < 3} onClick={() => refund.mutate()}>Give back {money(rfPaise)}</button></div>
-          </div>}
-          <div className="modal-foot">{can(perms, 'refund.course') && c.refundablePaise > 0 && !rf && <button className="btn btn-sm mr-auto" onClick={() => setRf({ amount: String(c.refundablePaise / 100), mode: 'upi', why: '' })}>Refund unused sessions</button>}<button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && leftToPay && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Take advance</button>}</div>
+          <div className="modal-foot"><button className="btn btn-ghost" onClick={onClose}>Close</button>{canPay && toInvoice && <button className="btn" onClick={() => setPaying(true)}><Icon name="plus" />Generate invoice</button>}</div>
         </div>
       )}
     </Drawer>
@@ -114,7 +101,7 @@ export function CoursesCard({ patientId, patientName }: { patientId: string; pat
   return (
     <Section title="Courses" delay={150}>
       {courses.map((c) => { const name = cfg?.procedures?.find((p: any) => p.id === c.procedureId)?.name;
-        return <div key={c.id} className="row"><div className="min-w-0 flex-1"><div className="text-sm font-medium">{name ?? 'Procedure'}{c.packageName && <span className="ml-1.5 text-xs font-normal text-clay-ink">{c.packageName} package</span>}{c.expired && <span className="ml-1.5 text-xs font-normal text-rose">Expired</span>}</div><div className="text-xs text-muted">{c.doneSittings} of {c.sittings} done · {c.unusedSittings} paid ahead · {money(c.stillToPayPaise)} still to pay</div></div>
+        return <div key={c.id} className="row"><div className="min-w-0 flex-1"><div className="text-sm font-medium">{name ?? 'Procedure'}{c.packageName && <span className="ml-1.5 text-xs font-normal text-clay-ink">{c.packageName} package</span>}{c.expired && <span className="ml-1.5 text-xs font-normal text-rose">Expired</span>}</div><div className="text-xs text-muted">{c.doneSittings} of {c.sittings} done · {c.invoiced ? `${money(c.stillToPayPaise)} still to pay` : 'not invoiced yet'}</div></div>
           <button className="btn btn-sm" onClick={() => setOpen({ id: c.recommendationId, procedureId: c.procedureId, procedure: name, sittings: c.sittings })}>Open</button></div>; })}
       {open && <CourseDialog rec={open} patientId={patientId} patientName={patientName} onClose={() => setOpen(null)} />}
     </Section>

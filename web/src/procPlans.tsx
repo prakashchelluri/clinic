@@ -73,7 +73,7 @@ export function ProcedurePlans({ patientId, patientName, plans, sessions, course
   // valid till: the course's date once agreed, else what the plan says (a package counts its months from the day it is agreed)
   const validText = (r: any) => { const c = courseOf(r); if (c) return c.validUntil ? ` · ${c.expired ? 'expired' : 'valid till'} ${fmtDate(c.validUntil)}` : r.package || r.validUntil || r.noExpiry ? ' · no expiry' : '';
     return r.noExpiry ? ' · no expiry' : r.validUntil ? ` · valid till ${fmtDate(r.validUntil)}` : r.package ? ` · valid ${r.package.validMonths} months from agreeing` : ''; };
-  const money1 = (r: any) => { const c = courseOf(r); return c ? `${c.unusedSittings > 0 ? `${c.unusedSittings} paid ahead · ` : ''}${c.stillToPayPaise > 0 ? `${money(c.stillToPayPaise)} still to pay` : 'Fully paid'}` : 'Price not agreed yet'; };
+  const money1 = (r: any) => { const c = courseOf(r); return c ? `${c.stillToPayPaise > 0 ? `${money(c.stillToPayPaise)} still to pay` : 'Fully paid'}` : 'Price not agreed yet'; };
   const acts = (g: any[]) => { const st = stageOfGroup(g); if (!manage || st === 'cancelled') return null; const what = g[0].package ? 'package' : 'procedure';
     return <span className="flex items-center gap-1">{st !== 'completed' && <button type="button" className="btn btn-sm btn-ghost text-rose" onClick={() => setCancelling(g)}>Cancel {what}</button>}<button type="button" className="btn btn-sm btn-ghost" onClick={() => setEditing(g)}><Icon name="edit" className="h-3.5 w-3.5" />Edit {what}</button></span>; };
   const head = (r: any, sub?: boolean) => (

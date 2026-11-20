@@ -44,7 +44,7 @@ test('review limit: one review after a paid consultation; a second needs the own
 test('end of day: figures by type and mode, differences need notes, closing locks the day; dashboard has per-doctor tiles', async () => {
   const owner = await as('owner@demo.clinic'); const reception = await as('reception@demo.clinic');
   const p = (await reception('POST', '/patients', { fullName: 'Close Wave6', phone: '9848077722' })).body;
-  const c = (await reception('POST', '/charges', { patientId: p.id, description: 'Laser sitting', amountPaise: 100000 })).body;
+  const c = (await owner('POST', '/charges', { patientId: p.id, description: 'Laser sitting', amountPaise: 100000 })).body;
   await reception('POST', '/payments/take', { patientId: p.id, chargeIds: [c.id], idempotencyKey: 'wave6-take-0001', parts: [{ method: 'cash', amountPaise: 40000 }, { method: 'upi', amountPaise: 60000, reference: '1234' }] });
   assert.equal((await reception('GET', '/dayclose')).status, 200);
   const f = (await owner('GET', `/dayclose?day=${today()}`)).body;
