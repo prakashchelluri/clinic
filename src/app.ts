@@ -74,14 +74,32 @@ export async function buildApp() {
 
   app.get('/api/health', async () => ({ ok: true }));
 
-  // Auth: signed cookie carries {u: userId, t: tenantId}; user row is re-read per request so deactivation is immediate.
+  // Auth: signed cookie carries {u: userId, t: tenantId}. The clinic and user rows are kept for a few seconds so every click does not pay
+  // two database round trips first (about 2.5 s when the database was far away). Any write empties the cache, so deactivating someone,
+  // changing roles or settings, or a new password still counts from the next request.
+  const SESSION_TTL_MS = 30_000;
+  const sessionCache = new Map<string, { at: number; ten: any; user: any }>();
+  let sessionGen = 0;
+  const sessionRows = async (t: string, u: string) => {
+    const key = `${t}|${u}`; const hit = sessionCache.get(key);
+    if (hit && Date.now() - hit.at < SESSION_TTL_MS) return hit;
+    const gen = sessionGen;
+    const [ten, user] = await Promise.all([
+      db.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]),
+      withTenant(t, u, (tx) => tx.select().from(appUser).where(and(eq(appUser.id, u), eq(appUser.tenantId, t))).then((r) => r[0])),
+    ]);
+    const row = { at: Date.now(), ten, user };
+    if (gen === sessionGen && ten && user) { if (sessionCache.size > 5000) sessionCache.clear(); sessionCache.set(key, row); } // a write landed meanwhile: do not keep what may be stale
+    return row;
+  };
+  // onSend runs after the write's transaction has committed and before the answer leaves, so the next request already sees the change
+  app.addHook('onSend', async (req, _reply, payload) => { if (req.method !== 'GET' && req.method !== 'HEAD') { sessionGen++; sessionCache.clear(); } return payload; });
   app.addHook('preHandler', async (req) => {
     if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth/login') || req.url.startsWith('/api/public/') || req.url === '/api/health') return;
     const raw = req.cookies.cc_session ? req.unsignCookie(req.cookies.cc_session) : null;
     if (!raw?.valid) throw new HttpError(401, 'UNAUTHENTICATED');
     const { u, t } = JSON.parse(raw.value);
-    const ten = await db.select().from(tenant).where(eq(tenant.id, t)).then((r) => r[0]);
-    const user = await withTenant(t, u, (tx) => tx.select().from(appUser).where(and(eq(appUser.id, u), eq(appUser.tenantId, t))).then((r) => r[0]));
+    const { ten, user } = await sessionRows(t, u);
     if (!ten || !user?.active) throw new HttpError(401, 'UNAUTHENTICATED');
     const roles = user.roles?.length ? user.roles : [user.role];
     req.ctx = { tenantId: t, userId: u, role: user.role, roles, name: user.name, practitionerId: user.practitionerId, timezone: ten.timezone, tenantKind: ten.kind, ip: cleanIp(req.ip), mustChangePassword: user.mustChangePassword };

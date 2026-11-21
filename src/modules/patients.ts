@@ -197,34 +197,36 @@ export function patientRoutes(app: FastifyInstance) {
   // Timeline: what the doctor sees when opening a patient.
   route(app, 'get', '/patients/:id/timeline', 'patient.read', async (req, tx) => {
     const id = (req.params as any).id; const t = req.ctx.tenantId;
-    const p = await tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]);
+    // These reads do not depend on each other: sent together they cost one round trip to the database instead of one each.
+    // Sittings and no-shows, with every call made about them, are evidence if progress is ever questioned.
+    const [p, visits, encounters, recs, charges, payments, sessions, noShows, calls] = await Promise.all([
+      tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]),
+      tx.select().from(visit).where(and(eq(visit.patientId, id), eq(visit.tenantId, t))).orderBy(desc(visit.arrivedAt)).limit(20),
+      tx.select().from(encounter).where(and(eq(encounter.patientId, id), eq(encounter.tenantId, t))).orderBy(desc(encounter.createdAt)).limit(200),
+      tx.select().from(recommendation).where(and(eq(recommendation.patientId, id), eq(recommendation.tenantId, t))).orderBy(desc(recommendation.createdAt)),
+      tx.select().from(charge).where(and(eq(charge.patientId, id), eq(charge.tenantId, t))).orderBy(desc(charge.createdAt)),
+      tx.select().from(payment).where(and(eq(payment.patientId, id), eq(payment.tenantId, t))).orderBy(desc(payment.receivedAt)),
+      tx.select({ ps: procedureSession, proc: procedureCatalog.name, doctor: practitioner.name }).from(procedureSession).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
+      .where(and(eq(procedureSession.patientId, id), eq(procedureSession.tenantId, t))).orderBy(desc(procedureSession.day)),
+      tx.select({ a: appointment, day: session.day, start: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.patientId, id), eq(appointment.tenantId, t), eq(appointment.status, 'no_show'))).orderBy(desc(session.day)),
+      tx.select().from(callback).where(and(eq(callback.patientId, id), eq(callback.tenantId, t))).orderBy(desc(callback.createdAt)),
+    ]);
     if (!p) throw new HttpError(404, 'NOT_FOUND');
-    await auditView(tx, req, id, 'Opened the patient record');
-    const visits = await tx.select().from(visit).where(and(eq(visit.patientId, id), eq(visit.tenantId, t))).orderBy(desc(visit.arrivedAt)).limit(20);
-    const encounters = await tx.select().from(encounter).where(and(eq(encounter.patientId, id), eq(encounter.tenantId, t))).orderBy(desc(encounter.createdAt)).limit(200);
-    const rx = encounters.length
-      ? await tx.select().from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), sql`${prescriptionItem.encounterId} in ${encounters.map((e) => e.id)}`))
-      : [];
-    const recs = await tx.select().from(recommendation).where(and(eq(recommendation.patientId, id), eq(recommendation.tenantId, t))).orderBy(desc(recommendation.createdAt));
-    const charges = await tx.select().from(charge).where(and(eq(charge.patientId, id), eq(charge.tenantId, t))).orderBy(desc(charge.createdAt));
-    const payments = await tx.select().from(payment).where(and(eq(payment.patientId, id), eq(payment.tenantId, t))).orderBy(desc(payment.receivedAt));
-    // Sittings, and the visits and sittings the patient did not come to with every call made about them: evidence if progress is ever questioned.
-    const sessions = await tx.select({ ps: procedureSession, proc: procedureCatalog.name, doctor: practitioner.name }).from(procedureSession).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
-      .where(and(eq(procedureSession.patientId, id), eq(procedureSession.tenantId, t))).orderBy(desc(procedureSession.day));
-    const noShows = await tx.select({ a: appointment, day: session.day, start: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).where(and(eq(appointment.patientId, id), eq(appointment.tenantId, t), eq(appointment.status, 'no_show'))).orderBy(desc(session.day));
-    const calls = await tx.select().from(callback).where(and(eq(callback.patientId, id), eq(callback.tenantId, t))).orderBy(desc(callback.createdAt));
     const missed = [
       ...noShows.map((x) => ({ kind: 'visit' as const, refId: x.a.id, day: x.day, time: x.start, what: 'Visit', calls: calls.filter((c) => c.refId === x.a.id) })),
       ...sessions.filter((s) => s.ps.state === 'missed').map((s) => ({ kind: 'sitting' as const, refId: s.ps.id, day: s.ps.day, time: s.ps.startTime, what: `${s.proc ?? 'Procedure'} session ${s.ps.sittingNo}`, calls: calls.filter((c) => c.refId === s.ps.id) })),
     ].sort((a, b) => b.day.localeCompare(a.day));
-    // what is still owed: a part-paid invoice counts only its balance
-    const lm = await lineMoney(tx, t, charges.map((c) => c.id));
-    const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - lm.credited(c.id) - lm.applied(c.id)), 0);
     const acct = can(req.perms, 'fees.invoices'); // the patient's invoices and account: not for doctors by default
-    const asks = acct ? await tx.select({ lines: discountAsk.lines }).from(discountAsk).where(and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, id), eq(discountAsk.status, 'pending'))) : [];
+    const [, rx, lm, asks, guardian, sharing] = await Promise.all([
+      auditView(tx, req, id, 'Opened the patient record'),
+      encounters.length ? tx.select().from(prescriptionItem).where(and(eq(prescriptionItem.tenantId, t), sql`${prescriptionItem.encounterId} in ${encounters.map((e) => e.id)}`)) : [],
+      lineMoney(tx, t, charges.map((c) => c.id)), // what is still owed: a part-paid invoice counts only its balance
+      acct ? tx.select({ lines: discountAsk.lines }).from(discountAsk).where(and(eq(discountAsk.tenantId, t), eq(discountAsk.patientId, id), eq(discountAsk.status, 'pending'))) : [],
+      p.guardianId ? tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }).from(patient).where(and(eq(patient.id, p.guardianId), eq(patient.tenantId, t))).then((r) => r[0] ?? null) : null,
+      p.phone ? tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0,
+    ]);
+    const due = charges.filter((c) => c.status === 'due').reduce((s, c) => s + Math.max(0, c.amountPaise - lm.credited(c.id) - lm.applied(c.id)), 0);
     const waitingPaise = Math.min(due, asks.reduce((s, a) => s + a.lines.reduce((n, l) => n + (l.chargeId ? l.offPaise : 0), 0), 0)); // owed, but a discount on it is waiting for a decision
-    const guardian = p.guardianId ? await tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo, phone: patient.phone }).from(patient).where(and(eq(patient.id, p.guardianId), eq(patient.tenantId, t))).then((r) => r[0] ?? null) : null;
-    const sharing = p.phone ? await tx.select({ n: sql<number>`count(*)::int` }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, p.phone), sql`${patient.id} <> ${id}`)).then((r) => r[0]?.n ?? 0) : 0;
     // roles without 'See fees and payments' see no prices, payments or amounts due
     const fees = can(req.perms, 'fees.see');
     return { patient: p, guardian, sharingPhone: sharing, feesHidden: !fees, sessions: sessions.map((s) => ({ ...s.ps, procedure: s.proc, doctor: s.doctor })), missed, visits, encounters: encounters.map((e) => ({ ...e, data: listData(e.data, clinical(req.perms)), prescription: rx.filter((i) => i.encounterId === e.id) })), recommendations: recs, charges: acct ? charges.map((c) => ({ ...c, creditedPaise: lm.credited(c.id) })) : [], payments: acct ? payments : [], outstandingPaise: acct ? due : 0, waitingPaise };
