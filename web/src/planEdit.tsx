@@ -79,7 +79,7 @@ export function EditPlanDrawer({ plans, sessions, courses, procName, onClose }: 
                 <button type="button" className="btn btn-sm btn-ghost" disabled={n >= 60} onClick={() => setNs((x) => ({ ...x, [r.id]: x[r.id] + 1 }))}><Icon name="plus" className="h-3.5 w-3.5" />Add session</button>
               </div>}
             </div>); })}
-        {delta !== 0 && <div className="rounded-lg bg-amber-soft px-3 py-2 text-sm text-amber">{delta > 0 ? `Added sessions cost the standard price: +${money(delta)}, invoiced with Generate invoice or when the next session is done` : `Removed sessions come off the invoice as a credit note, at what a session was charged: −${money(-delta)}`}. New total {money(total + delta)}.</div>}
+        {delta !== 0 && <div className="rounded-lg bg-amber-soft px-3 py-2 text-sm text-amber">{delta > 0 ? `Added sessions cost the standard price: +${money(delta)}, invoiced with Generate invoice or when the next session is done` : `Removed sessions come off the bill, at what a session was charged: −${money(-delta)}`}. New total {money(total + delta)}.</div>}
         <div className="modal-foot"><button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={(!changed.length && !validChanged) || save.isPending || (!none && !date)} onClick={() => save.mutate()}><Icon name="check" />Save changes</button></div>
       </div>
     </Drawer>

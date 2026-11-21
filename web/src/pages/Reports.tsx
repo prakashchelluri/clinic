@@ -225,7 +225,7 @@ function DailyReport() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
           <Section title="By visit category" delay={160}>
             {d.byCategory.length === 0 ? <Empty icon="users" title="No visits recorded" /> : (
-              <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Credited</th></tr></thead>
+              <div className="overflow-x-auto"><table className="table min-w-[540px]"><thead><tr><th className="pl-4">Category</th><th className="text-right">Visits</th><th className="text-right">Billed</th><th className="text-right">Waived</th><th className="text-right pr-4">Refunded</th></tr></thead>
                 <tbody>{d.byCategory.map((c: any) => <tr key={c.code}><td className="pl-4">{c.name}</td><td className="text-right">{c.visits}</td><td className="text-right">{money(c.billed)}</td><td className="text-right text-muted">{money(c.waived)}</td><td className="text-right pr-4 text-muted">{money(c.refunded)}</td></tr>)}</tbody></table></div>)}
           </Section>
           <Section title="Expenses" delay={200}>
@@ -252,8 +252,8 @@ const REPORTS: { kind: Kind; group: 'Money' | 'Pharmacy' | 'Clinical'; title: st
   { kind: 'daily', group: 'Money', title: 'Daily collection', about: 'Every receipt, advance, refund and pharmacy bill of one day, with the totals by mode.', icon: 'wallet' },
   { kind: 'collection', group: 'Money', title: 'Collection report', about: 'What came in by bill type and mode: for the period, day by day, or every payment.', icon: 'rupee',
     types: [{ value: 'general', label: 'General' }, { value: 'detailed', label: 'Detailed' }, { value: 'daywise', label: 'Day-wise' }] },
-  { kind: 'threec', group: 'Money', title: '3C report', about: 'Cash memos, invoices and credit notes issued in the period.', icon: 'list',
-    types: [{ value: '', label: 'All' }, { value: 'cash', label: 'Cash memos' }, { value: 'invoice', label: 'Invoices' }, { value: 'credit', label: 'Credit notes' }] },
+  { kind: 'threec', group: 'Money', title: '3C report', about: 'Cash memos, invoices and refunds in the period.', icon: 'list',
+    types: [{ value: '', label: 'All' }, { value: 'cash', label: 'Cash memos' }, { value: 'invoice', label: 'Invoices' }, { value: 'credit', label: 'Refunds' }] },
   { kind: 'billing', group: 'Money', title: 'Billing overall', about: 'Revenue line by line with discount and GST, or cash flow: money in against expenses.', icon: 'chart',
     types: [{ value: 'revenue', label: 'Revenue' }, { value: 'cashflow', label: 'Cash flow' }] },
   { kind: 'pharmacy', group: 'Pharmacy', title: 'Pharmacy billing', about: 'Bill by bill with discount, GST and returns; every line for GST filing; returns; or month by month.', icon: 'pill',

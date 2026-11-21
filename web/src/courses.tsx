@@ -18,7 +18,7 @@ export const useCourses = (patientId: string) => useQuery({ queryKey: ['courses'
 function Standing({ c, booked, action }: { c: any; booked?: { day?: string } | null; action?: React.ReactNode }) {
   const day = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
   const paid = c.paidPaise ?? 0; const net = (c.netPaise ?? 0) + (c.uninvoicedPaise ?? 0); // what the treatment really costs the patient now
-  const less = [c.discountPaise ? `${money(c.discountPaise)} discount` : '', c.creditedPaise ? `${money(c.creditedPaise)} in credit notes` : ''].filter(Boolean).join(' and ');
+  const less = [c.discountPaise ? `${money(c.discountPaise)} discount` : '', c.creditedPaise ? `${money(c.creditedPaise)} refunded or removed` : ''].filter(Boolean).join(' and ');
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-t border-line py-2.5 first:border-t-0"><span className="text-muted">{label}</span><div>{children}</div></div>);
   return (

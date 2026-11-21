@@ -163,7 +163,7 @@ export function reportFileRoutes(app: FastifyInstance) {
         for (const { s, name, no } of sales) out.push(['Pharmacy invoice', s.invoiceNo, todayIn(tz, new Date(s.createdAt)), s.buyerName ?? name, no, `${s.items.map((i) => `${i.name} × ${i.qty}`).join('; ')} · GST ${rs(s.gstPaise)}`, mode(s.method), rs(s.totalPaise)]);
       }
       if (!type || type === 'credit') for (const x of (await ledger(tx, t, tz, from, to)).filter((x) => x.amountPaise < 0 && x.counted))
-        out.push(['Credit note', x.receiptNo, x.day, x.patient, x.patientNo, `${x.kind} · ${x.for}${x.invoiceNo ? ` · invoice ${x.invoiceNo}` : ''}`, mode(x.method), rs(-x.amountPaise)]);
+        out.push(['Refund', x.receiptNo, x.day, x.patient, x.patientNo, `${x.kind} · ${x.for}${x.invoiceNo ? ` · invoice ${x.invoiceNo}` : ''}`, mode(x.method), rs(-x.amountPaise)]);
       rows = [['Document', 'Number', 'Date', 'Patient', 'Patient no', 'Details', 'Mode', 'Amount (Rs)'], ...out.sort((a, b) => String(a[2]).localeCompare(String(b[2])))];
     } else if (kind === 'billing') {
       const start = dayBounds(from, tz).start; const end = dayBounds(to, tz).end;

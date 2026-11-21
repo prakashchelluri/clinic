@@ -30,15 +30,16 @@ export function moneyErr(e: any): string {
   if (c === 'NOTHING_TO_BILL') return 'Add an item, or type an amount to take as advance.';
   if (c === 'EMI_MORE_THAN_DUE') return `EMI pays a bill: at most the ${money(b.duePaise)} due. Take any extra in another mode.`;
   if (c === 'EMI_NOT_SETTLED') return `${money(b.emiPaise)} of the advance is EMI the lender has not paid yet: at most ${money(b.refundablePaise)} can go back now.`;
-  if (c === 'HAS_MONEY_USE_A_CREDIT_NOTE') return 'Money or a credit note is already on this line: use Take item off instead.';
-  if (c === 'MORE_THAN_PAID_ON_THE_ITEM') return `Only ${money(b.paidPaise)} was paid on ${b.what}. To take an unpaid item off, use Take item off.`;
+  if (c === 'MORE_GIVEN_BACK_THAN_TAKEN_OFF') return `More is being refunded on ${b.what} than comes off the bill.`;
+  if (c === 'HAS_MONEY_USE_A_CREDIT_NOTE') return 'Money was already paid or refunded on this item: use Refund on the bill instead.';
+  if (c === 'MORE_THAN_PAID_ON_THE_ITEM') return `Only ${money(b.paidPaise)} was paid on ${b.what}. To take an unpaid item off the bill, use Remove item.`;
   if (c === 'EXTRA_DISCOUNT_TOO_BIG') return 'The discount on the bill is too big: every item must still cost something.';
   if (c === 'NOTHING_TO_SAVE') return 'Nothing to save: take money, add an item, or give a discount.';
   if (c === 'FEE_MORE_THAN_PAYMENT') return 'The fee is more than the EMI amount. Check what the lender kept.';
   if (c === 'SAY_WHICH_ITEM') return 'Say how much comes off each item.';
   if (c === 'ITEMS_DO_NOT_ADD_UP') return 'The amounts off the items must add up to the refund.';
   if (c === 'MORE_THAN_THE_LINE') return `That is more than is left of ${b.what}${b.leftPaise != null ? ` (${money(b.leftPaise)})` : ''}.`;
-  if (c === 'ISSUED_INVOICE_LINE_IS_FROZEN') return 'An issued invoice cannot be changed. Use a credit note (refund or discount) instead.';
+  if (c === 'ISSUED_INVOICE_LINE_IS_FROZEN') return 'A bill cannot be changed once it is issued. Use Refund or Remove item on it instead.';
   return errText(e);
 }
 const MODE_NAME: Record<string, string> = { cash: 'cash', upi: 'UPI', card: 'card', emi: 'EMI', bank: 'bank transfer', advance: 'the advance' };
@@ -121,7 +122,7 @@ function BillForm({ patientId, patientName, ahead, onlyBill, invoiceNo, tl, cour
       const paid = paidOn(c.id); const credited = c.creditedPaise ?? 0; const tookMoney = tl.payments.some((p: any) => p.chargeId === c.id && p.amountPaise > 0); const owing = c.amountPaise - credited - paid - (waiting.get(c.id) ?? 0);
       if (owing <= 0) return null;
       const no = c.visitId ? 'Consultation fees take no discount' : c.description.startsWith('Pharmacy') ? 'Pharmacy discounts are given at the counter' : paid > 0 || credited > 0 || tookMoney ? 'Money was taken on it: no discount now' : waiting.has(c.id) ? 'A discount is waiting for approval' : undefined;
-      return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${credited ? ` · ${money(credited)} credited` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
+      return { key: `c:${c.id}`, kind: 'charge', id: c.id, what: c.description, sub: `${invoiceNo[c.billId] ? invoiceNo[c.billId] + ' · ' : ''}due since ${fmtDate(c.createdAt)}${paid ? ` · ${money(paid)} paid` : ''}${credited ? ` · ${money(credited)} refunded` : ''}${waiting.has(c.id) ? ` · ${money(waiting.get(c.id)!)} discount waiting` : ''}`, unitPaise: owing, qty: 1, maxQty: 1, on: !onlyBill || c.billId === onlyBill, dv: '', unit: 'pct', noDiscount: no, prior: c.discountPaise, taxBp: c.taxRateBp ?? 0 };
     }).filter(Boolean);
     const a = ahead ? withPackage(ahead.recommendationId) : [];
     // the doctor's treatments not invoiced yet are listed, unticked: tick what goes on this invoice
@@ -336,7 +337,7 @@ export function EmiAwaiting() {
 export function DiscountAsks() {
   const q = useQuery({ queryKey: ['discount-asks', 'pending'], queryFn: () => get('/discount-asks'), refetchInterval: 60000 });
   const decide = useMutation({ mutationFn: (b: { id: string; action: 'approve' | 'reject' }) => post(`/discount-asks/${b.id}/decide`, { action: b.action }),
-    onSuccess: (r: any) => { refresh(); toast(r.status === 'approved' ? 'Discount approved: a credit note takes it off the invoice' : 'Said no: the full amount stays due'); }, onError: (e) => toast(moneyErr(e), 'err') });
+    onSuccess: (r: any) => { refresh(); toast(r.status === 'approved' ? 'Discount approved: it comes off the bill' : 'Said no: the full amount stays due'); }, onError: (e) => toast(moneyErr(e), 'err') });
   const rows: any[] = q.data ?? [];
   return <>{rows.map((a) => <div key={a.id} className="row flex-wrap">
     <span className="flex h-11 min-w-14 items-center justify-center rounded-xl bg-amber/15 px-2 text-[15px] font-extrabold tabular-nums">{a.pct}%</span>
