@@ -60,7 +60,7 @@ export async function pharmacyFile(tx: Tx, t: string, tz: string, kind: Pharmacy
       const l = s.items[rl.line]; total += rl.amountPaise;
       out.push([todayIn(tz, new Date(r.at)), r.creditNoteNo, s.invoiceNo, todayIn(tz, new Date(s.createdAt)), s.buyerName ?? name, no, l?.name ?? '', l?.batchNo ?? '', l?.expiry ?? '', rl.qty, rs(l?.mrpPaise ?? 0), rs(rl.amountPaise), rl.restock === false ? 'No' : 'Yes', mode(r.method), r.reason, r.by]);
     }
-    return { title: `Medicine returns ${span}`, rows: [['Return date', 'Credit note', 'Bill no', 'Bill date', 'Patient', 'Patient no', 'Medicine', 'Batch', 'Expiry', 'Qty returned', 'MRP (Rs)', 'Refund (Rs)', 'Back on shelf', 'Refund mode', 'Reason', 'By'],
+    return { title: `Medicine returns ${span}`, rows: [['Return date', 'Refund no', 'Bill no', 'Bill date', 'Patient', 'Patient no', 'Medicine', 'Batch', 'Expiry', 'Qty returned', 'MRP (Rs)', 'Refund (Rs)', 'Back on shelf', 'Refund mode', 'Reason', 'By'],
       ...out.sort((a, b) => String(a[0]).localeCompare(String(b[0]))), [], ['Total refunded', '', '', '', '', '', '', '', '', '', '', rs(total)]] };
   }
 

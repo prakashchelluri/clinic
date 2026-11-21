@@ -35,12 +35,12 @@ export async function printReceipt(no: string) {
   try {
     const r: any = await get(`/receipts/${encodeURIComponent(no)}`);
     const when = new Date(r.at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-    const title = r.voucher ? 'Refund voucher' : 'Receipt'; const sign = r.voucher ? -1 : 1;
+    const title = r.voucher ? 'Refund receipt' : 'Receipt'; const sign = r.voucher ? -1 : 1;
     printWindow(`<!doctype html><title>${title} ${esc(r.receiptNo)}</title><style>body{font:14px system-ui,sans-serif;margin:24px;color:#17191A}h1{font-size:18px;margin:0}table{width:100%;border-collapse:collapse;margin-top:12px}td{padding:5px 0;border-bottom:1px solid #ddd}.r{text-align:right}.s{color:#625F59;font-size:12px}</style>
       ${r.clinic.print?.logoUrl ? `<img src="${esc(r.clinic.print?.logoUrl)}" alt="" style="display:block;height:44px;max-width:150px;object-fit:contain;margin-bottom:6px">` : ''}<h1>${esc(r.clinic.name)}</h1><div class="s">${esc(r.clinic.print?.address ?? '')} ${esc(r.clinic.print?.phone ?? '')}</div>
       <p><b>${title} ${esc(r.receiptNo)}</b><br><span class="s">${esc(when)} · ${esc(r.patient.fullName)} (${esc(r.patient.patientNo)})</span></p>
       <table>${r.lines.map((l: any) => `<tr><td>${esc(l.description)}<div class="s">${esc(MODE[l.method] ?? l.method)}${l.lender ? ' · ' + esc(l.lender) : ''}${l.reference ? ' · ' + esc(l.reference) : ''}</div></td><td class="r">${esc(money(sign * l.amountPaise))}</td></tr>`).join('')}
-      <tr><td><b>${r.voucher ? 'Total given back' : 'Total paid'}</b></td><td class="r"><b>${esc(money(sign * r.totalPaise))}</b></td></tr></table>
-      <p class="s">${r.voucher ? 'Given back' : 'Received'} by ${esc(r.receivedBy)}. ${esc(r.clinic.print?.footer ?? '')}</p>`, r.voucher ? 'voucher' : 'receipt', 'width=420,height=640');
+      <tr><td><b>${r.voucher ? 'Total refunded' : 'Total paid'}</b></td><td class="r"><b>${esc(money(sign * r.totalPaise))}</b></td></tr></table>
+      <p class="s">${r.voucher ? 'Refunded' : 'Received'} by ${esc(r.receivedBy)}. ${esc(r.clinic.print?.footer ?? '')}</p>`, r.voucher ? 'refund receipt' : 'receipt', 'width=420,height=640');
   } catch (e) { toast(errText(e), 'err'); }
 }

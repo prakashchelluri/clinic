@@ -28,7 +28,7 @@ export function visitType(code: string, name: string): (typeof COUNT_KEYS)[numbe
 /** A day's money by type and mode, the cash that should be in the drawer, and the visit counts: what the head receptionist reads against the paper diary. */
 // `to` makes it a range (the Dashboard); every money figure in the app comes from here so they always agree.
 // byDoctor: the same money by the doctor of the visit it paid for, and course money by the doctor of each session done (below); pharmacy, deposits and anything else stay out.
-// refunds: money given back on a refund voucher, by the mode it left in (pharmacy returns stay under pharmacy, as before).
+// refunds: money given back, by the mode it left in: refund vouchers and pharmacy returns, so a return shows as a refund, not as a smaller pharmacy figure.
 export type Money = { consultation: Bucket; procedure: Bucket; pharmacy: Bucket; other: Bucket; refunds: Bucket; total: Bucket };
 export const emptyMoney = (): Money => ({ consultation: empty(), procedure: empty(), pharmacy: empty(), other: empty(), refunds: empty(), total: empty() });
 type Alloc = { consultation: number; procedure: number; other: number };
@@ -79,7 +79,7 @@ export async function moneyByDay(tx: Tx, t: string, tz: string, from: string, to
   const sales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, start), lt(pharmacySale.createdAt, end)));
   for (const s of sales) for (const x of (s.payments?.length ? s.payments : [{ method: s.method, amountPaise: s.totalPaise }])) add(s.createdAt, 'pharmacy', x.method, x.amountPaise);
   const allSales = await tx.select().from(pharmacySale).where(and(eq(pharmacySale.tenantId, t), gte(pharmacySale.createdAt, addDays(from, -90))));
-  for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) add(r.at, 'pharmacy', r.method, -r.refundPaise);
+  for (const s of allSales) for (const r of s.returns ?? []) if (r.at >= start && r.at < end) add(r.at, 'refunds', r.method, -r.refundPaise);
   return { days, total, byDoctor, alloc, allocTotal };
 }
 

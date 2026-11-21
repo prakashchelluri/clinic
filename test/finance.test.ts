@@ -52,7 +52,8 @@ test('accounts: income matches End of day, expenses and dues line up, reception 
   assert.equal(ret.status, 200, JSON.stringify(ret.body));
   const after = (await O('GET', '/dayclose')).body.money;
   const net = sale.body.totalPaise - ret.body.refundPaise;
-  assert.equal(after.pharmacy.total - before.pharmacy.total, net, 'pharmacy is up by the sale less the return');
+  assert.equal(after.pharmacy.total - before.pharmacy.total, sale.body.totalPaise, 'pharmacy is up by the sale');
+  assert.equal(after.refunds.total - before.refunds.total, -ret.body.refundPaise, 'the return shows as a refund given back');
   assert.equal(after.other.total, before.other.total, 'the bill does not count a second time as other');
   assert.equal(after.total.total - before.total.total, net, 'the day total moves by the sale once');
   const f2 = (await O('GET', '/finance')).body;
