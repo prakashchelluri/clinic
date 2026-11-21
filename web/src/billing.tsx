@@ -172,7 +172,7 @@ function RefundForm({ b, closed, onClose }: { b: any; closed: boolean; onClose: 
   const [key] = useState(() => crypto.randomUUID()); // one refund, however many times it is sent
   const [why, setWhy] = useState(''); const [offs, setOffs] = useState<Record<string, string>>({});
   const [dest, setDest] = useState<'back' | 'advance'>('back'); const [mistake, setMistake] = useState(false);
-  const [parts, setParts] = useState<RPart[]>([{ method: 'cash', amount: '', reference: '' }]); const [typed, setTyped] = useState(false);
+  const [typedParts, setParts] = useState<RPart[] | null>(null); // null until someone changes the refund lines by hand
   const items = (b.lines ?? []).filter((c: any) => !['cancelled', 'waived'].includes(c.status))
     .map((c: any) => ({ id: c.id, what: c.description, paid: b.paidOn?.[c.id] ?? 0, left: c.amountPaise - (b.creditedOn?.[c.id] ?? 0) }))
     .filter((c: any) => (mistake ? c.paid : c.left) > 0);
@@ -181,8 +181,8 @@ function RefundForm({ b, closed, onClose }: { b: any; closed: boolean; onClose: 
     const paidPart = mistake ? typedOff : Math.max(0, Math.min(typedOff, c.paid - (c.left - typedOff))); return { ...c, max, off: typedOff, paidPart }; });
   const offTotal = rows.reduce((s: number, r: any) => s + r.off, 0); const paidTotal = rows.reduce((s: number, r: any) => s + r.paidPart, 0);
   const unpaidTotal = mistake ? 0 : offTotal - paidTotal; const back = mistake || dest === 'back' ? paidTotal : 0; const toAdv = paidTotal - back;
-  // the money going back: one method takes all of it until someone splits it
-  useEffect(() => { if (!typed) setParts((ps) => [{ ...ps[0], amount: back ? String(back / 100) : '' }]); }, [back, typed]);
+  // the money going back: one cash line takes all of it until someone changes or splits it (worked out as the screen draws, so it is never a step behind)
+  const parts: RPart[] = typedParts ?? [{ method: 'cash', amount: back ? String(back / 100) : '', reference: '' }];
   const partsTotal = parts.reduce((s, p) => s + toPaise(p.amount), 0);
   const over = rows.find((r: any) => r.off > r.max);
   const bad = !offTotal ? (mistake ? 'Type how much is given back' : 'Type how much comes off') : over ? `Only ${money(over.max)} ${mistake ? 'was paid on' : 'is on the bill for'} ${over.what}`
@@ -204,7 +204,7 @@ function RefundForm({ b, closed, onClose }: { b: any; closed: boolean; onClose: 
     },
     onError: (e: any) => toast(e?.body?.code === 'MORE_THAN_PAID' ? `Only ${money(e.body.refundablePaise)} can be refunded` : moneyErr(e), 'err'),
   });
-  const set = (i: number, patch: Partial<RPart>) => { setTyped(true); setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p))); };
+  const set = (i: number, patch: Partial<RPart>) => setParts(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const title = b.paidPaise > 0 ? `Refund on ${b.invoiceNo}` : `Remove from ${b.invoiceNo}`;
   return (
     <Modal title={title} subtitle={`${b.patient.fullName} · billed ${money(b.billedPaise - b.creditedPaise)} · paid ${money(b.paidPaise)} · due ${money(b.duePaise)}`} onClose={onClose} width="max-w-lg">
@@ -229,13 +229,13 @@ function RefundForm({ b, closed, onClose }: { b: any; closed: boolean; onClose: 
             <div className="grid grid-cols-[110px_minmax(0,1fr)_28px] items-center gap-1.5">
               <select className="input !px-2" aria-label={`Refund by, line ${i + 1}`} value={p.method} onChange={(e) => set(i, { method: e.target.value as RPart['method'] })}>{(['cash', 'upi', 'card', 'bank'] as const).map((m) => <option key={m} value={m}>{MODE[m]}</option>)}</select>
               <MoneyInput value={p.amount} label={`Refund by ${MODE[p.method]}`} onChange={(v) => set(i, { amount: v })} />
-              {parts.length > 1 ? <button type="button" className="btn btn-ghost btn-sm !px-1.5" aria-label="Remove this refund line" onClick={() => { setTyped(true); setParts(parts.filter((_, j) => j !== i)); }}><Icon name="x" className="h-3.5 w-3.5" /></button> : <span />}
+              {parts.length > 1 ? <button type="button" className="btn btn-ghost btn-sm !px-1.5" aria-label="Remove this refund line" onClick={() => setParts(parts.filter((_, j) => j !== i))}><Icon name="x" className="h-3.5 w-3.5" /></button> : <span />}
             </div>
             {p.method !== 'cash' && <input className="input" maxLength={60} aria-label="Reference" placeholder={p.method === 'card' ? 'Card reference' : 'Reference (optional)'} value={p.reference} onChange={(e) => set(i, { reference: e.target.value })} />}
           </div>)}</div>
           {parts.length < 4 && <button type="button" className="inline-flex items-center gap-1 text-[13px] font-medium text-clay hover:underline" onClick={() => {
             const used = new Set(parts.map((p) => p.method)); const next = (['cash', 'upi', 'card', 'bank'] as const).find((m) => !used.has(m)) ?? 'upi';
-            setTyped(true); setParts([...parts, { method: next, amount: back > partsTotal ? String((back - partsTotal) / 100) : '', reference: '' }]);
+            setParts([...parts, { method: next, amount: back > partsTotal ? String((back - partsTotal) / 100) : '', reference: '' }]);
           }}><Icon name="plus" className="h-3.5 w-3.5" />Split: add another method</button>}
         </>}
         <div><label className="label" htmlFor="rb-why">Why</label><input id="rb-why" className="input" maxLength={200} placeholder="for example: procedure not done" value={why} onChange={(e) => setWhy(e.target.value)} /></div>
