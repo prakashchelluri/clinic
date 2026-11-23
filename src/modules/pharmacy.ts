@@ -110,7 +110,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     const meds = await tx.select().from(medicine).where(eq(medicine.tenantId, t)).orderBy(asc(medicine.name));
     const bs = await tx.select().from(stockBatch).where(and(eq(stockBatch.tenantId, t), gt(stockBatch.qty, 0), gte(stockBatch.expiry, day))).orderBy(asc(stockBatch.expiry), asc(stockBatch.createdAt));
     return meds.map((m) => { const mine = bs.filter((b) => b.medicineId === m.id);
-      return { id: m.id, name: m.name, form: m.form, packSize: m.packSize, mrpPaise: m.mrpPaise, gstBp: m.gstBp, scheduleClass: m.scheduleClass, onHand: mine.reduce((n, b) => n + b.qty, 0),
+      return { id: m.id, name: m.name, generic: m.generic, form: m.form, packSize: m.packSize, mrpPaise: m.mrpPaise, gstBp: m.gstBp, scheduleClass: m.scheduleClass, onHand: mine.reduce((n, b) => n + b.qty, 0),
         batches: mine.map((b) => ({ id: b.id, batchNo: b.batchNo, expiry: b.expiry, qty: b.qty, mrpPaise: b.mrpPaise || m.mrpPaise })) }; });
   });
 
@@ -168,8 +168,8 @@ export function pharmacyRoutes(app: FastifyInstance) {
       const c = cls.get(l.medicineId); if (!c || (q.cls !== 'all' && c !== q.cls)) return;
       const returned = s.returns.reduce((n, r) => n + (r.lines.find((x) => x.line === i)?.qty ?? 0), 0);
       // per line: an item added to a prescription bill was not prescribed, so it is never put under the doctor's name
-      const noRx = !s.encounterId || !l.prescriptionItemId; const walk = p.patientNo === WALK_IN_NO;
-      out.push({ at: s.createdAt, invoiceNo: s.invoiceNo, patient: walk ? s.buyerName || 'Walk-in' : p.fullName, patientNo: walk ? '' : p.patientNo, age: p.ageYears, sex: p.sex, address: p.locality, doctor: noRx ? null : doctor ?? null, regNo: noRx ? null : regNo ?? null,
+      const ours = !!s.encounterId && !!l.prescriptionItemId; const noRx = !ours && !l.outsideRx; const walk = p.patientNo === WALK_IN_NO;
+      out.push({ at: s.createdAt, invoiceNo: s.invoiceNo, patient: walk ? s.buyerName || 'Walk-in' : p.fullName, patientNo: walk ? '' : p.patientNo, age: p.ageYears, sex: p.sex, address: p.locality, doctor: ours ? doctor ?? null : l.outsideRx?.doctor ?? null, regNo: ours ? regNo ?? null : l.outsideRx?.regNo ?? null, rxDate: ours ? null : l.outsideRx?.date ?? null,
         medicine: l.name, cls: c, batchNo: l.batchNo ?? null, expiry: l.expiry ?? null, qty: l.qty, returned, noRx });
     });
     return out;
@@ -203,7 +203,7 @@ export function pharmacyRoutes(app: FastifyInstance) {
     return {
       rows: rows.map(({ s, p, doctor }) => {
         const its = left.filter((x) => x.e === s.encounterId).map((x) => ({ ...x.i, prescribed: prescribedQty(x.i, x.form ? { form: x.form, packSize: x.packSize ?? 1 } : null) }));
-        return { id: s.id, invoiceNo: s.invoiceNo, at: s.createdAt, patient: p.patientNo === WALK_IN_NO ? { ...p, fullName: s.buyerName || 'Walk-in', phone: s.buyerPhone, patientNo: '' } : p, doctor, encounterId: s.encounterId, items: s.items.length, detail: s.items.map((i) => `${i.name} ×${i.qty}`).join(', '),
+        return { id: s.id, invoiceNo: s.invoiceNo, at: s.createdAt, patient: p.patientNo === WALK_IN_NO ? { ...p, fullName: s.buyerName || 'Walk-in', phone: s.buyerPhone, patientNo: '' } : p, doctor, encounterId: s.encounterId, outsideRx: s.items.some((i) => i.outsideRx), items: s.items.length, detail: s.items.map((i) => `${i.name} ×${i.qty}`).join(', '),
           totalPaise: s.totalPaise, method: s.method, payments: s.payments, refundPaise: s.returns.reduce((n, r) => n + r.refundPaise, 0), returns: s.returns.length,
           balance: its.filter((i) => i.issuedQty > 0 && i.issuedQty < i.prescribed).map((i) => ({ name: i.name, left: i.prescribed - i.issuedQty })),
           notIssued: its.filter((i) => i.issuedQty === 0).length };
@@ -306,8 +306,10 @@ const returnedQty = (s: { returns: { lines: { line: number; qty: number }[] }[] 
 const Pay = z.object({ method: z.enum(['cash', 'upi', 'card']), amountPaise: z.number().int().min(1).max(100000000), reference: z.string().trim().max(40).optional().nullable() });
 export const SaleIn = z.object({
   patientId: z.string().uuid().optional(),
-  newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^[0-9]{10}$/).optional().nullable(), ageYears: z.number().int().min(0).max(120).optional(), sex: z.enum(['M', 'F', 'O']).optional() }).optional(),
-  walkIn: z.object({ fullName: z.string().trim().max(100).optional().nullable(), phone: z.string().regex(/^[0-9]{10}$/).optional().nullable() }).optional(), // no patient record
+  newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^[0-9]{10}$/), ageYears: z.number().int().min(0).max(120).optional(), sex: z.enum(['M', 'F', 'O']).optional() }).optional(),
+  walkIn: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.string().regex(/^[0-9]{10}$/) }).optional(), // no patient record; the name and phone stay on the bill
+  // a prescription from a doctor outside the clinic: what lets a Schedule H / H1 / X line be sold without our own prescription line
+  outsideRx: z.object({ doctor: z.string().trim().min(2).max(100), regNo: z.string().trim().min(2).max(40), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).optional(),
   encounterId: z.string().uuid().optional(),
   idempotencyKey: z.string().trim().min(8).max(80).optional(), // made once per bill at the counter; a retry returns the same sale
   items: z.array(z.object({ medicineId: z.string().uuid(), qty: z.number().int().min(1).max(999), batchId: z.string().uuid().optional().nullable(), prescriptionItemId: z.string().uuid().optional().nullable(),
@@ -341,8 +343,8 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
   else if (walkIn) pid = await walkInPatient(tx, t);
   else if (body.newPatient) {
     const np = body.newPatient;
-    pid = np.phone ? (await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, np.phone), ilike(patient.fullName, np.fullName))).limit(1))[0]?.id : undefined;
-    if (!pid) { const n = await nextNumber(tx, t, 'patient_no', 'tenant'); pid = (await tx.insert(patient).values({ tenantId: t, patientNo: `P${String(n).padStart(5, '0')}`, fullName: np.fullName, phone: np.phone ?? null, ageYears: np.ageYears ?? null, sex: np.sex ?? null }).returning({ id: patient.id }))[0].id; }
+    pid = (await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, np.phone), ilike(patient.fullName, np.fullName))).limit(1))[0]?.id;
+    if (!pid) { const n = await nextNumber(tx, t, 'patient_no', 'tenant'); pid = (await tx.insert(patient).values({ tenantId: t, patientNo: `P${String(n).padStart(5, '0')}`, fullName: np.fullName, phone: np.phone, ageYears: np.ageYears ?? null, sex: np.sex ?? null }).returning({ id: patient.id }))[0].id; }
   } else throw new HttpError(400, 'PATIENT_REQUIRED');
 
   // the prescription lines are locked, so two counters cannot both fill the same line
@@ -354,13 +356,14 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
   }
   for (const id of [...body.items.map((i) => i.prescriptionItemId).filter(Boolean), ...body.notIssued.map((n) => n.prescriptionItemId)]) if (!rxItems.some((r) => r.id === id)) throw new HttpError(400, 'NOT_ON_THIS_RX');
 
+  if (body.outsideRx && body.outsideRx.date > day) throw new HttpError(400, 'BAD_RX_DATE', { message: 'The prescription date cannot be after today.' });
   const meds = await tx.select().from(medicine).where(and(eq(medicine.tenantId, t), inArray(medicine.id, body.items.map((i) => i.medicineId))));
   for (const i of body.items) {
     const m = meds.find((x) => x.id === i.medicineId); if (!m) throw new HttpError(400, 'UNKNOWN_MEDICINE');
     const rxLine = i.prescriptionItemId ? rxItems.find((r) => r.id === i.prescriptionItemId) : undefined;
     if (rxLine && rxLine.medicineId && rxLine.medicineId !== m.id) throw new HttpError(400, 'NOT_ON_THIS_RX', { name: m.name });
-    // Schedule H / H1 / X: per line, only against the doctor's prescription line for this medicine
-    if (SCHEDULED.includes(m.scheduleClass ?? '') && !rxLine) throw new HttpError(400, 'NEEDS_PRESCRIPTION', { name: m.name, message: `${m.name} needs a doctor's prescription.` });
+    // Schedule H / H1 / X: per line, only against our doctor's prescription line for this medicine, or an outside doctor's prescription with its details
+    if (SCHEDULED.includes(m.scheduleClass ?? '') && !rxLine && !body.outsideRx) throw new HttpError(400, 'NEEDS_PRESCRIPTION', { name: m.name, message: `${m.name} needs a doctor's prescription.` });
   }
   // more than the doctor prescribed (counting what earlier bills issued) needs a reason
   for (const it of rxItems) {
@@ -378,7 +381,8 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
     for (const p of parts) {
       const mrp = p.batch.mrpPaise || m.mrpPaise; if (mrp <= 0) throw new HttpError(400, 'NO_PRICE', { name: m.name });
       takes.push({ line: lines.length, batchId: p.batch.id, qty: p.qty });
-      lines.push({ medicineId: m.id, name: m.name, hsn: m.hsn, qty: p.qty, mrpPaise: mrp, gstBp: m.gstBp, amountPaise: p.qty * mrp, batchId: p.batch.id, batchNo: p.batch.batchNo, expiry: p.batch.expiry, prescriptionItemId: i.prescriptionItemId ?? null, ...(i.overReason ? { overReason: i.overReason } : {}) });
+      lines.push({ medicineId: m.id, name: m.name, hsn: m.hsn, qty: p.qty, mrpPaise: mrp, gstBp: m.gstBp, amountPaise: p.qty * mrp, batchId: p.batch.id, batchNo: p.batch.batchNo, expiry: p.batch.expiry, prescriptionItemId: i.prescriptionItemId ?? null, ...(i.overReason ? { overReason: i.overReason } : {}),
+        ...(body.outsideRx && !i.prescriptionItemId && SCHEDULED.includes(m.scheduleClass ?? '') ? { outsideRx: body.outsideRx } : {}) });
     }
   }
   const gross = lines.reduce((n, l) => n + l.amountPaise, 0);
@@ -408,7 +412,7 @@ export async function recordSale(tx: Tx, a: Actor, body: z.infer<typeof SaleIn>,
   const [sale] = await tx.insert(pharmacySale).values({ tenantId: t, invoiceNo, patientId: pid, chargeId: ch.id, encounterId: body.encounterId ?? null, items: lines, grossPaise: gross, discountPaise: body.discountPaise, gstPaise: gst, totalPaise: total,
     method, reference: pays.filter((p) => p.method !== 'cash').map((p) => p.reference).join(' · ') || null, payments: pays.map((p) => ({ method: p.method, amountPaise: p.amountPaise, reference: p.method === 'cash' ? null : p.reference ?? null })),
     receivedPaise: cash ? body.receivedPaise ?? cash : null, createdBy: a.userId, createdAt: when, idempotencyKey: body.idempotencyKey ?? null,
-    buyerName: walkIn ? body.walkIn!.fullName || null : null, buyerPhone: walkIn ? body.walkIn!.phone || null : null }).returning();
+    buyerName: walkIn ? body.walkIn!.fullName : null, buyerPhone: walkIn ? body.walkIn!.phone : null }).returning();
   for (const x of takes) await moveStock(tx, a, x.batchId, -x.qty, 'sale', { id: sale.id, no: invoiceNo, at: body.at });
 
   for (const it of rxItems) {

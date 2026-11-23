@@ -46,7 +46,7 @@ test('accounts: income matches End of day, expenses and dues line up, reception 
   const exp = new Date(); exp.setUTCMonth(exp.getUTCMonth() + 18);
   assert.equal((await P('POST', '/stock/receipts', { lines: [{ medicineId: cet.id, qty: 20, ratePaise: 1000, batchNo: 'F1', expiry: exp.toISOString().slice(0, 7) }] })).status, 200);
   const before = (await O('GET', '/dayclose')).body.money;
-  const sale = await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' });
+  const sale = await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' });
   assert.equal(sale.status, 200, JSON.stringify(sale.body));
   const ret = await P('POST', `/pharmacy/sale/${sale.body.id}/return`, { lines: [{ line: 0, qty: 1 }], reason: 'Patient brought it back', method: 'cash' });
   assert.equal(ret.status, 200, JSON.stringify(ret.body));

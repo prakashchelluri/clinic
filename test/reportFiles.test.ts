@@ -90,7 +90,7 @@ test('pharmacy files: bills, GST lines, returns, margin, purchase, moving and ad
   const cet = (await O('GET', '/config')).body.medicines.find((m: any) => m.name === 'Cetirizine 10 mg'); // MRP 30, GST 12%
   const exp = new Date(); exp.setUTCMonth(exp.getUTCMonth() + 18);
   assert.equal((await P('POST', '/stock/receipts', { lines: [{ medicineId: cet.id, qty: 20, ratePaise: 1000, batchNo: 'RF1', expiry: exp.toISOString().slice(0, 7) }] })).status, 200);
-  const sale = (await P('POST', '/pharmacy/sale', { walkIn: { name: 'Pharmacy File Buyer' }, items: [{ medicineId: cet.id, qty: 3 }], discountPaise: 600, method: 'upi', reference: 'UTR998877' })).body;
+  const sale = (await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Pharmacy File Buyer', phone: '9000000002' }, items: [{ medicineId: cet.id, qty: 3 }], discountPaise: 600, method: 'upi', reference: 'UTR998877' })).body;
   assert.ok(sale.id, JSON.stringify(sale));
   const ret = (await P('POST', `/pharmacy/sale/${sale.id}/return`, { lines: [{ line: 0, qty: 1 }], reason: 'Patient brought it back', method: 'cash' })).body;
   const batch = (await O('GET', `/stock/medicines/${cet.id}`)).body.batches.find((b: any) => b.batchNo === 'RF1');

@@ -69,7 +69,7 @@ test('an admin cannot give a role more than they hold, nor change roles through 
 test('a closed day takes no pharmacy sale, return or expense', async () => {
   const O = await as('owner@demo.clinic'); const P = await as('pharmacy@demo.clinic'); const R = await as('reception@demo.clinic');
   const med = (await P('GET', '/stock')).json().items.find((m: any) => m.onHand > 2 && ['Aloe vera cooling gel', 'Calamine lotion', 'Biotin 10 mg'].includes(m.name)); // sold without a prescription
-  const sell = (key: string) => P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: med.id, qty: 1 }], method: 'cash', idempotencyKey: key });
+  const sell = (key: string) => P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: med.id, qty: 1 }], method: 'cash', idempotencyKey: key });
   const sold = await sell('blk-sale-1'); assert.equal(sold.statusCode, 200, sold.body);
   const exp = await R('POST', '/expenses', { description: 'Tea', amountPaise: 5000, method: 'cash', category: 'Other' }); assert.equal(exp.statusCode, 200, exp.body);
   const f = (await O('GET', '/dayclose')).json();

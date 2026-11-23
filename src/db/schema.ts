@@ -556,7 +556,9 @@ export const pharmacySale = pgTable('pharmacy_sale', {
 }, (t) => [uniqueIndex('pharmacy_invoice').on(t.tenantId, t.invoiceNo), index('pharmacy_sale_at').on(t.tenantId, t.createdAt), uniqueIndex('pharmacy_sale_idem').on(t.tenantId, t.idempotencyKey)]);
 
 export type SaleLine = { medicineId: string; name: string; hsn: string | null; qty: number; mrpPaise: number; gstBp: number; amountPaise: number;
-  batchId?: string | null; batchNo?: string | null; expiry?: string | null; prescriptionItemId?: string | null; overReason?: string | null };
+  batchId?: string | null; batchNo?: string | null; expiry?: string | null; prescriptionItemId?: string | null; overReason?: string | null;
+  /** sold on a prescription from a doctor outside the clinic (Schedule H / H1 / X) */
+  outsideRx?: { doctor: string; regNo: string; date: string } };
 export type SaleReturn = { creditNoteNo: string; at: string; by: string; reason: string; method: string; reference: string | null; refundPaise: number; lines: { line: number; qty: number; amountPaise: number; restock?: boolean }[] };
 
 // --- pharmacy stock ---

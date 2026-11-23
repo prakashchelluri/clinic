@@ -49,7 +49,7 @@ test('Dashboard, Reports, End of day and the Clinic page agree: consult, sitting
   // a pharmacy sale, and a return the caller does not mark as sealed
   const cet = cfg.medicines.find((m: any) => m.name === 'Cetirizine 10 mg');
   assert.equal((await P('POST', '/stock/receipts', { lines: [{ medicineId: cet.id, qty: 20, ratePaise: 1000, batchNo: 'L1', expiry: ym(18) }] })).status, 200);
-  const sale = await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' });
+  const sale = await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' });
   assert.equal(sale.status, 200, JSON.stringify(sale.body));
   const onHand = async () => (await P('GET', `/stock/medicines/${cet.id}`)).body.onHand;
   const before = await onHand();
