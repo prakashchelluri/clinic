@@ -555,9 +555,9 @@ function BillDetail({ id, onClose, onIssue }: { id: string; onClose: () => void;
   const m = method || paidBy;
   const done = () => { setQty({}); setSealed({}); setReason(''); setRef(''); ['pharmacy', 'stock', 'reports'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); };
   const ret = useMutation({ mutationFn: () => post(`/pharmacy/sale/${id}/return`, { lines, reason: reason.trim(), method: m, reference: m === 'cash' ? undefined : ref.trim() }),
-    onSuccess: (r: any) => { toast(`Refund slip ${r.creditNoteNo} · refund ${money(r.refundPaise)}`); done(); }, onError: (e) => toast(errText(e), 'err') });
+    onSuccess: (r: any) => { toast(`Refunded ${money(r.refundPaise)} · slip ${r.creditNoteNo}`); done(); }, onError: (e) => toast(errText(e), 'err') });
   const cancel = useMutation({ mutationFn: (why: string) => post(`/pharmacy/sale/${id}/cancel`, { reason: why, method: m, reference: m === 'cash' ? undefined : ref.trim() || undefined }),
-    onSuccess: (r: any) => { toast(`Bill cancelled · refund slip ${r.creditNoteNo} · refund ${money(r.refundPaise)}`); done(); }, onError: (e) => toast(errText(e), 'err') });
+    onSuccess: (r: any) => { toast(`Bill cancelled · refunded ${money(r.refundPaise)} · slip ${r.creditNoteNo}`); done(); }, onError: (e) => toast(errText(e), 'err') });
   if (q.isLoading || !s) return <Drawer title="Bill" onClose={onClose} width="max-w-xl"><Skeleton rows={4} /></Drawer>;
   const orx = s.items.find((l: any) => l.outsideRx)?.outsideRx;
   const tooMuch = lines.some((l) => l.qty > back[l.line]);
@@ -574,7 +574,7 @@ function BillDetail({ id, onClose, onIssue }: { id: string; onClose: () => void;
         {s.discountPaise > 0 && <div className="flex justify-between pt-1.5 text-muted"><span>Discount</span><span>− {money(s.discountPaise)}</span></div>}
         <div className="flex justify-between pt-1.5 text-[15px] font-semibold"><span>Total</span><span>{money(s.totalPaise)}</span></div>
       </div>
-      {s.returns.length > 0 && <div className="space-y-1">{s.returns.map((r: any) => <div key={r.creditNoteNo} className="text-xs rounded-xl bg-rose-soft/60 px-3 py-2"><b>{r.creditNoteNo}</b> · refund {money(r.refundPaise)} by {r.method.toUpperCase()} · {r.reason} · {r.by}</div>)}</div>}
+      {s.returns.length > 0 && <div className="space-y-1">{s.returns.map((r: any) => <div key={r.creditNoteNo} className="text-xs rounded-xl bg-rose-soft/60 px-3 py-2"><b>Refund {money(r.refundPaise)}</b> · {r.creditNoteNo} by {r.method.toUpperCase()} · {r.reason} · {r.by}</div>)}</div>}
       {can(perms, 'pharmacy.return') && back.some((n: number) => n > 0) && <>
         <div className="label !mb-0">Return items</div>
         <table className="table"><thead><tr><th className="!pl-0">Item · batch</th><th className="!text-right">Sold</th><th className="!text-right">Return</th><th>Sealed, can be sold again?</th><th className="!text-right !pr-0">Refund</th></tr></thead>
@@ -621,7 +621,7 @@ ${x.clinic.logoUrl ? `<img src="${esc(x.clinic.logoUrl)}" alt="" style="display:
 ${taxRows}
 <table class="t"><tr><td>Items total</td><td>${rupees2(x.grossPaise)}</td></tr>${x.discountPaise ? `<tr><td>Discount</td><td>-${rupees2(x.discountPaise)}</td></tr>` : ''}${gstin ? `<tr><td>GST included</td><td>${rupees2(rates.reduce((n, [, r]) => n + r.tax, 0))}</td></tr>` : ''}<tr class="b"><td>TOTAL</td><td>₹${rupees2(x.totalPaise)}</td></tr>
 ${x.payments.map((p: any) => `<tr><td>${esc(p.method.toUpperCase())}${p.reference ? ' ' + esc(p.reference) : ''}${p.method === 'cash' && x.receivedPaise > p.amountPaise ? ` · received ${rupees2(x.receivedPaise)}, change ${rupees2(x.receivedPaise - p.amountPaise)}` : ''}</td><td>${rupees2(p.amountPaise)}</td></tr>`).join('')}
-${x.returns.map((r: any) => `<tr><td>${esc(r.creditNoteNo)} refund (${esc(r.method.toUpperCase())})</td><td>-${rupees2(r.refundPaise)}</td></tr>`).join('')}</table>
+${x.returns.map((r: any) => `<tr><td>Refund ${esc(r.creditNoteNo)} (${esc(r.method.toUpperCase())})</td><td>-${rupees2(r.refundPaise)}</td></tr>`).join('')}</table>
 ${x.notIssued?.length ? `<hr><div class="m">Not taken today: ${x.notIssued.map((n: any) => `${esc(n.name)} (${n.left})`).join(', ')}. Available here for 30 days if needed.</div>` : ''}
 <div class="m" style="margin-top:8px">${gstin ? 'Prices include GST.' : 'Not registered for GST, so no tax is shown on this bill.'} Thank you.</div>`;
     openPrint({ title: `Receipt ${x.invoiceNo}`, html });

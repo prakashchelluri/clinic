@@ -13,7 +13,25 @@ if (url) {
   const { drizzle } = await import('drizzle-orm/postgres-js');
   const { migrate: m } = await import('drizzle-orm/postgres-js/migrator');
   const postgres = (await import('postgres')).default;
-  const client = postgres(url, { max: 10, prepare: false });
+  // Prepared statements: without them postgres.js sends every query that has parameters as two round trips (describe, then run)
+  // and cannot send several at once, so a far database made each screen seconds slower. A transaction pooler (PgBouncer in
+  // transaction mode, Neon's "-pooler" or Supabase's port 6543 address) cannot keep them: they are off for such addresses, and
+  // DATABASE_PREPARE=false|true decides when the address does not tell.
+  const pooled = /-pooler\.|pooler\.supabase\.com|:6543\//.test(url);
+  const prepare = process.env.DATABASE_PREPARE ? process.env.DATABASE_PREPARE !== 'false' : !pooled;
+  const client = postgres(url, { max: 10, prepare });
+  // Drizzle asks for an unprepared statement on every query that is not given a name, which overrides the setting above.
+  // Let the client's own setting decide, in transactions and savepoints too.
+  const usePrepare = (s: any) => {
+    const unsafe = s.unsafe;
+    s.unsafe = (q: string, args?: any[], opts?: any) => unsafe.call(s, q, args, { ...opts, prepare });
+    for (const k of ['begin', 'savepoint'] as const) {
+      const orig = s[k]; if (typeof orig !== 'function') continue;
+      s[k] = (...a: any[]) => { const fn = a.pop(); return orig.call(s, ...a, (tx: any) => fn(usePrepare(tx))); };
+    }
+    return s;
+  };
+  if (prepare) usePrepare(client);
   db = drizzle(client, { schema });
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });
 } else {

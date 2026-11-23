@@ -59,9 +59,9 @@ test('owner: every report downloads with its header, each audited; the money one
   // 3C: cash memos, invoices and the credit note for the refund
   const c3 = (await O('GET', `/reports/files/threec?${range}`)).body;
   const docs = new Set(c3.rows.slice(1).map((r: any[]) => r[0]));
-  for (const d of ['Cash memo', 'Invoice', 'Credit note']) assert.ok(docs.has(d), d);
+  for (const d of ['Cash memo', 'Invoice', 'Refund']) assert.ok(docs.has(d), d);
   const credit = (await O('GET', `/reports/files/threec?${range}&type=credit`)).body;
-  assert.ok(credit.rows.slice(1).every((r: any[]) => r[0] === 'Credit note') && credit.count >= 1);
+  assert.ok(credit.rows.slice(1).every((r: any[]) => r[0] === 'Refund') && credit.count >= 1);
 
   // billing: revenue lists the refunded line as Refunded; cash flow's money in = Collected
   const rev = (await O('GET', `/reports/files/billing?${range}`)).body;

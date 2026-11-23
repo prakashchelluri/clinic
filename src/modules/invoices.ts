@@ -194,12 +194,17 @@ export function invoiceRoutes(app: FastifyInstance) {
    * Money back on an invoice. It always leaves from the patient's advance, with a voucher, and only money that was paid on the items named:
    * a refund never takes a payment off one item to give back for another. With "take it off the invoice" (the usual case) a credit note takes
    * the same amount off those items, so what is still due stays as it was; without, the invoice is unchanged and that much is due again.
+   * An item can come off the bill by more than is given back on it (offPaise): the screen's one Refund, where taking an item off gives back
+   * what was paid on it and the unpaid rest simply stops being due, in one step with one GST record.
    * A request key makes a retry return the first refund.
    */
   route(app, 'post', '/bills/:id/refund', 'payment.refund', async (req, tx) => {
     const b0 = z.object({ parts: z.array(z.object({ method: z.enum(['cash', 'upi', 'card', 'bank']), amountPaise: z.number().int().positive().max(100_000_000), reference: z.string().trim().max(60).optional() })).min(1).max(4),
       reason: z.string().trim().min(3, 'Say why').max(200), lower: z.boolean().default(true), idempotencyKey: z.string().min(8).max(80).optional(),
-      lines: z.array(z.object({ chargeId: z.string().uuid(), amountPaise: z.number().int().positive().max(100_000_000) })).max(20).optional() }).parse(req.body);
+      // offPaise: how much comes off the bill for the item when that is more than what is given back on it (the unpaid rest of an item
+      // that is not being given simply stops being due). Without it, the bill comes down by what is given back.
+      lines: z.array(z.object({ chargeId: z.string().uuid(), amountPaise: z.number().int().min(0).max(100_000_000), offPaise: z.number().int().positive().max(100_000_000).optional() })
+        .refine((l) => l.amountPaise > 0 || (l.offPaise ?? 0) > 0, 'Nothing on this item')).max(20).optional() }).parse(req.body);
     const b = { ...b0, amountPaise: b0.parts.reduce((s, p) => s + p.amountPaise, 0) };
     const t = req.ctx.tenantId;
     const done = await refundDone(tx, t, b.idempotencyKey); if (done) return { ...done, refundedPaise: b.amountPaise };
@@ -209,17 +214,20 @@ export function invoiceRoutes(app: FastifyInstance) {
     if (b.amountPaise > v.paidPaise) throw new HttpError(400, 'MORE_THAN_PAID', { refundablePaise: v.paidPaise });
     const live = v.lines.filter((c) => !['cancelled', 'waived'].includes(c.status));
     // the items it comes off (an invoice of one item needs no naming); each gives back at most what was paid on it
-    const named = b.lines ?? (live.length === 1 ? [{ chargeId: live[0].id, amountPaise: b.amountPaise }] : null);
+    const named: { chargeId: string; amountPaise: number; offPaise?: number }[] | null = b.lines ?? (live.length === 1 ? [{ chargeId: live[0].id, amountPaise: b.amountPaise }] : null);
     if (!named) throw new HttpError(400, 'SAY_WHICH_ITEM');
     if (named.reduce((s, l) => s + l.amountPaise, 0) !== b.amountPaise) throw new HttpError(400, 'ITEMS_DO_NOT_ADD_UP', { amountPaise: b.amountPaise });
     const items = named.map((l) => { const c = live.find((x) => x.id === l.chargeId); if (!c) throw new HttpError(400, 'NOT_ON_THIS_INVOICE');
       const paid = v.paidOn[c.id] ?? 0; if (l.amountPaise > paid) throw new HttpError(400, 'MORE_THAN_PAID_ON_THE_ITEM', { what: c.description, paidPaise: paid });
-      const left = c.amountPaise - (v.creditedOn[c.id] ?? 0); if (b.lower && l.amountPaise > left) throw new HttpError(400, 'MORE_THAN_THE_LINE', { what: c.description, leftPaise: left });
-      return { c, amountPaise: l.amountPaise }; });
+      const off = b.lower ? l.offPaise ?? l.amountPaise : 0;
+      if (b.lower && off < l.amountPaise) throw new HttpError(400, 'MORE_GIVEN_BACK_THAN_TAKEN_OFF', { what: c.description });
+      if (!b.lower && l.offPaise) throw new HttpError(400, 'NOTHING_COMES_OFF_THE_BILL');
+      const left = c.amountPaise - (v.creditedOn[c.id] ?? 0); if (b.lower && off > left) throw new HttpError(400, 'MORE_THAN_THE_LINE', { what: c.description, leftPaise: left });
+      return { c, amountPaise: l.amountPaise, off }; });
     let creditNo: string | null = null; let creditId: string | null = null;
     const movedBefore = new Map<string, number>();
     if (b.lower) {
-      const r = await issueCredit(tx, req.ctx, { billId: v.id, patientId: v.patient.id, reason: `Refunded: ${b.reason}`, lines: items.map((i) => ({ chargeId: i.c.id, amountPaise: i.amountPaise, what: i.c.description })) });
+      const r = await issueCredit(tx, req.ctx, { billId: v.id, patientId: v.patient.id, reason: `Refunded: ${b.reason}`, lines: items.map((i) => ({ chargeId: i.c.id, amountPaise: i.off, what: i.c.description })) });
       creditNo = r.creditNo; creditId = r.creditId;
     }
     // each item's money into the advance, as much as is being given back off it (the credit note may already have moved some)

@@ -84,6 +84,7 @@ export function Clinic() {
           <Row a="Patients" b={`${visits.length} · ${waiting.length} waiting`} />
           {can(perms, 'worklist.read') && <Row a="Procedures" b={`${ps.filter((p) => p.state === 'completed').length} of ${ps.length} done`} />}
           <Row a="Pharmacy" b={money(s.todayMoney.pharmacy.total)} />
+          {s.todayMoney.refunds?.total ? <Row a="Refunds" b={`−${money(-s.todayMoney.refunds.total)}`} /> : null}
           <Row a="Longest wait now" b={waiting.length ? `${longest} min` : '—'} />
         </section>
         <section className="fd-sheet overflow-hidden anim-fade-up">

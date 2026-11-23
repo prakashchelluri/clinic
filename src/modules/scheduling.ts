@@ -42,24 +42,29 @@ const weekday = (day: string) => new Date(day + 'T00:00:00Z').getUTCDay();
  * Lazy materialisation: the first time a day is looked at, every doctor with a weekly routine gets their OP windows
  * for that day created from it. Doctors never fill a calendar; they only record exceptions.
  */
-export async function ensureDaySessions(tx: Tx, t: string, day: string) {
-  const docs = await tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true)));
+/** The routine windows a day is still missing (none for most days, once they have been filled). Reads only. */
+export async function missingWindows(tx: Tx, t: string, day: string) {
+  const [docs, existing] = await Promise.all([
+    tx.select().from(practitioner).where(and(eq(practitioner.tenantId, t), eq(practitioner.active, true))),
+    tx.select({ p: session.practitionerId, s: session.startTime, e: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day))),
+  ]);
   const withRoutine = docs.filter((d) => d.routine?.days?.[String(weekday(day))]?.length);
-  if (!withRoutine.length) return;
-  const missing = async () => {
-    const existing = await tx.select({ p: session.practitionerId, s: session.startTime, e: session.endTime }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day)));
-    const values: any[] = [];
-    for (const d of withRoutine) {
-      // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
-      const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
-      const r = d.routine as Routine; const len = r.windowMinutes || 60;
-      for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < endMin(end); m += len) {
-        const e = Math.min(m + len, endMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
-        if (!mine.some(([s, x]) => s < e && x > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(e), capacity: r.capacity || 7, source: 'routine' });
-      }
+  if (!withRoutine.length) return [];
+  const values: any[] = [];
+  for (const d of withRoutine) {
+    // Fill only the routine hours the day is missing: a booked hour kept through a routine change, or extra hours, never block the rest.
+    const mine = existing.filter((x) => x.p === d.id).map((x) => [toMin(x.s), toMin(x.e)]);
+    const r = d.routine as Routine; const len = r.windowMinutes || 60;
+    for (const [start, end] of r.days[String(weekday(day))]) for (let m = toMin(start); m < endMin(end); m += len) {
+      const e = Math.min(m + len, endMin(end)); // the last hour may be short: "till 11:59 pm" keeps 23:00–23:59
+      if (!mine.some(([s, x]) => s < e && x > m)) values.push({ tenantId: t, practitionerId: d.id, day, startTime: toHHMM(m), endTime: toHHMM(e), capacity: r.capacity || 7, source: 'routine' });
     }
-    return values;
-  };
+  }
+  return values;
+}
+
+export async function ensureDaySessions(tx: Tx, t: string, day: string) {
+  const missing = () => missingWindows(tx, t, day);
   if (!(await missing()).length) return;
   // Two screens opening the same day at once (the calendar asks for it several ways) must not both fill it: that left every
   // hour twice, and an hour with two windows offers no "+ Book". One request fills the day; the other waits, then finds it full.
@@ -75,14 +80,14 @@ export async function ensureDaySessions(tx: Tx, t: string, day: string) {
  * A block (break, leave, procedure) on the window's doctor removes a proportional share of places:
  * 7 places/hour with a 30-minute procedure → 4 (rounded). This is the rule reception described.
  */
-export async function windowsForDay(tx: Tx, t: string, day: string, practitionerId?: string | null) {
-  await ensureDaySessions(tx, t, day);
-  const rows = await tx.select({
+export async function windowsForDay(tx: Tx, t: string, day: string, practitionerId?: string | null, ensure = true) {
+  if (ensure) await ensureDaySessions(tx, t, day);
+  const [rows, blocks] = await Promise.all([tx.select({
     s: session,
     // explicit "session"."id": an embedded column renders unqualified here and would match a.id instead
     allocated: sql<number>`(select coalesce(sum(coalesce(sv.places, 1)), 0)::int from appointment a left join service sv on sv.id = a.service_id where a.session_id = "session"."id" and a.status in ('booked','confirmed','arrived'))`,
-  }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day), ...(practitionerId ? [eq(session.practitionerId, practitionerId)] : []))).orderBy(asc(session.startTime));
-  const blocks = await tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day)));
+  }).from(session).where(and(eq(session.tenantId, t), eq(session.day, day), ...(practitionerId ? [eq(session.practitionerId, practitionerId)] : []))).orderBy(asc(session.startTime)),
+    tx.select().from(calendarBlock).where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day)))]);
   return rows.map((r) => {
     const s = r.s; const sS = toMin(s.startTime), sE = toMin(s.endTime); const len = Math.max(1, sE - sS);
     const hits = blocks.filter((b) => b.practitionerId && b.practitionerId === s.practitionerId).map((b) => ({ ...b, minutes: overlapMin(sS, sE, toMin(b.startTime), toMin(b.endTime)) })).filter((b) => b.minutes > 0);
@@ -178,18 +183,20 @@ export function schedulingRoutes(app: FastifyInstance) {
 
   // --- calendar: one view of a day for a doctor, rooms and the clinic ---
   /** A day with each window's patients (booked, arrived, no-show) so the calendar can show names, not just counts. */
-  async function calendarDay(tx: Tx, t: string, day: string, pid: string | null) {
-    const windows = await windowsForDay(tx, t, day, pid);
-    const appts = windows.length ? await tx.select({ id: appointment.id, sessionId: appointment.sessionId, status: appointment.status, note: appointment.note, source: appointment.source, seriesId: appointment.seriesId, patientId: patient.id, name: patient.fullName, phone: patient.phone, serviceId: appointment.serviceId, service: service.name, color: service.color,
+  async function calendarDay(tx: Tx, t: string, day: string, pid: string | null, ensure = true) {
+    // The day's windows are filled first; then the four reads go out together (one round trip to the database, not four).
+    if (ensure) await ensureDaySessions(tx, t, day);
+    const [windows, appts, blocks, procs] = await Promise.all([windowsForDay(tx, t, day, pid, false), tx.select({ id: appointment.id, sessionId: appointment.sessionId, status: appointment.status, note: appointment.note, source: appointment.source, seriesId: appointment.seriesId, patientId: patient.id, name: patient.fullName, phone: patient.phone, serviceId: appointment.serviceId, service: service.name, color: service.color,
       visitStatus: sql<string | null>`(select v.status from visit v where v.appointment_id = ${appointment.id} order by v.arrived_at desc limit 1)` }) // seen or with the doctor, not just arrived
       .from(appointment).innerJoin(patient, eq(patient.id, appointment.patientId)).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(service, eq(service.id, appointment.serviceId))
-      .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('booked','confirmed','arrived','no_show','cancelled')`)).orderBy(asc(appointment.createdAt)) : []; // cancelled stay on the calendar, struck through
-    const blocks = (await tx.select({ b: calendarBlock, patient: patient.fullName }).from(calendarBlock).leftJoin(patient, eq(patient.id, calendarBlock.patientId))
-      .where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : [])))).map((r) => ({ ...r.b, patient: r.patient }));
-    const procs = await tx.select({ ps: procedureSession, patient: patient.fullName, phone: patient.phone, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, review: procedureCatalog.requiresReview })
+      .where(and(eq(appointment.tenantId, t), eq(session.day, day), sql`${appointment.status} in ('booked','confirmed','arrived','no_show','cancelled')`)).orderBy(asc(appointment.createdAt)), // cancelled stay on the calendar, struck through; only those in the day's windows are shown
+      tx.select({ b: calendarBlock, patient: patient.fullName }).from(calendarBlock).leftJoin(patient, eq(patient.id, calendarBlock.patientId))
+        .where(and(eq(calendarBlock.tenantId, t), eq(calendarBlock.day, day), ...(pid ? [eq(calendarBlock.practitionerId, pid)] : []))).then((rows) => rows.map((r) => ({ ...r.b, patient: r.patient }))),
+      tx.select({ ps: procedureSession, patient: patient.fullName, phone: patient.phone, procedure: procedureCatalog.name, room: room.name, doctor: practitioner.name, of: recommendation.sittings, review: procedureCatalog.requiresReview })
       .from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
       .leftJoin(room, eq(room.id, procedureSession.roomId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
-      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, day), sql`${procedureSession.state} not in ('cancelled','postponed')`, ...(pid ? [eq(procedureSession.practitionerId, pid)] : []))).orderBy(asc(procedureSession.startTime));
+      .where(and(eq(procedureSession.tenantId, t), eq(procedureSession.day, day), sql`${procedureSession.state} not in ('cancelled','postponed')`, ...(pid ? [eq(procedureSession.practitionerId, pid)] : []))).orderBy(asc(procedureSession.startTime)),
+    ]);
     return { day, windows: windows.map((w) => ({ ...w, appointments: appts.filter((a) => a.sessionId === w.id) })), blocks: blocks.filter((b) => b.kind !== 'procedure'),
       procedures: procs.map((p) => ({ ...p.ps, patient: p.patient, phone: p.phone, procedure: p.procedure, room: p.room, doctor: p.doctor, of: p.of, requiresReview: p.review })) };
   }
@@ -200,12 +207,14 @@ export function schedulingRoutes(app: FastifyInstance) {
   /** Several days at once for the week view (at most 14). */
   route(app, 'get', '/calendar/range', 'appointment.read', async (req, tx) => {
     const q = z.object({ from: DAY.refine((d) => { const x = new Date(d + 'T00:00:00Z'); return !isNaN(+x) && x.toISOString().startsWith(d); }, 'BAD_DATE'), days: z.coerce.number().int().min(1).max(14).default(7), practitionerId: z.string().uuid().optional() }).parse(req.query);
-    const out = [];
-    for (let i = 0; i < q.days; i++) {
-      const d = new Date(q.from + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i);
-      out.push(await calendarDay(tx, req.ctx.tenantId, d.toISOString().slice(0, 10), q.practitionerId ?? null));
-    }
-    return out;
+    const t = req.ctx.tenantId;
+    const days = Array.from({ length: q.days }, (_, i) => { const d = new Date(q.from + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0, 10); });
+    // Days are read together: one after another cost a round trip per query per day (20 s for a week with a far database).
+    // Filling a day takes a lock per day, so the few days still missing windows are filled one at a time in date order:
+    // two requests taking those locks in different orders could deadlock.
+    const missing = await Promise.all(days.map((d) => missingWindows(tx, t, d)));
+    for (const [i, d] of days.entries()) if (missing[i].length) await ensureDaySessions(tx, t, d);
+    return Promise.all(days.map((d) => calendarDay(tx, t, d, q.practitionerId ?? null, false)));
   });
   /** A room booked for a time is busy for sittings and other room bookings; nothing else may be in the room then. */
   async function roomFree(tx: Tx, t: string, b: { roomId: string; day: string; startTime: string; endTime: string }, self?: string) {

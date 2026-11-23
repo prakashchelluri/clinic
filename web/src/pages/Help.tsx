@@ -165,7 +165,7 @@ function Reception() {
       <>Tap <Btn>Generate invoice</Btn>. The treatment is one line for all its sessions. Take what the patient pays now; the rest stays due on the patient.</>,
       <>A discount is given on that screen, never on the price (see Taking a payment).</>,
     ]}</Steps>
-    <Tip>If the patient stops, <b>Cancel</b> the procedure on the patient&rsquo;s Procedures. A credit note takes the sessions not done off the invoice, and money paid for them moves to the patient&rsquo;s advance. <Btn>Refund</Btn> on Bills &amp; payments gives it back.</Tip>
+    <Tip>If the patient stops, <b>Cancel</b> the procedure on the patient&rsquo;s Procedures. The sessions not done come off the bill, and money paid for them is kept as the patient&rsquo;s advance. <Btn>Refund</Btn> on Bills &amp; payments gives it back.</Tip>
     <P>The <b>Procedures</b> page has three tabs. <b>Today&rsquo;s sessions</b> shows today by the hour. <b>Week plan</b> shows a week of sessions by the hour, with their status. <b>All courses</b> lists every course and where it stands.</P>
     <P>Every session has a doctor, and the doctor approves every session. A session the doctor books for themselves is approved at once. Any other booking is <b>Not sent</b>. The Procedures menu, the Week plan tab and the desk&rsquo;s Action panel show how many are waiting. Each week, open <b>Week plan</b>, check the next week and press <Btn>Send for doctor approval</Btn>. Each doctor sees only their own sessions under <b>Needs your attention</b> and can approve, move or send them back with a note. The patient gets the reminder only after approval. Once a week has been sent, a change in that week goes to the doctor straight away. A session booked for the current week also goes to the doctor straight away.</P>
     <P>To put a second doctor on a session as supervisor, open the session on the Week plan and use <Btn>Change doctor</Btn> then <b>Supervised by</b>.</P>
@@ -266,7 +266,7 @@ function Pharmacy() {
       <>Open the prescription, check the items against what the patient wants, and bill it. Batches are chosen oldest-expiry first.</>,
       <>Take the payment. It can be split across cash, UPI and card.</>,
       <>For someone with no prescription, tap <Btn>Walk-in sale</Btn>.</>,
-      <>If the patient brings something back, use returns on the bill. A refund is recorded with a credit note.</>,
+      <>If the patient brings something back, use returns on the bill. The refund is shown on the bill and in today&rsquo;s refunds.</>,
     ]}</Steps>
   </>);
 }
