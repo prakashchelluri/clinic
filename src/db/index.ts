@@ -22,7 +22,10 @@ if (url) {
   // DATABASE_PREPARE=false|true decides when the address does not tell.
   const pooled = /-pooler\.|pooler\.supabase\.com|:6543\//.test(url);
   const prepare = process.env.DATABASE_PREPARE ? process.env.DATABASE_PREPARE !== 'false' : !pooled;
-  const client = postgres(url, { max: 10, prepare });
+  // A small pool: Aiven's free plan takes few connections in all, and during a deploy the old server still holds its own while the new
+  // one starts ("too many clients already" on 24 Nov). Queries in a request go out together on one connection, so five serve a clinic.
+  const max = Math.max(1, Math.min(20, Number(process.env.DATABASE_POOL) || 5));
+  const client = postgres(url, { max, prepare });
   // Drizzle asks for an unprepared statement on every query that is not given a name, which overrides the setting above.
   // Let the client's own setting decide, in transactions and savepoints too.
   const usePrepare = (s: any) => {
@@ -38,9 +41,13 @@ if (url) {
   db = drizzle(client, { schema });
   // Each new connection is a TLS handshake and a password check with the database: ~250 ms each on the free server's tenth of a CPU.
   // Opened lazily, the first screen after a restart paid for ten of them at once; opened at start-up, nobody is waiting yet.
+  // Opened at start-up, a few of them: if the database is full, whatever did open is handed back and the rest open when needed.
   warmPool = async () => {
-    const held = await Promise.all(Array.from({ length: 10 }, () => client.reserve()));
-    await Promise.all(held.map((c) => c`select 1`)); held.forEach((c) => c.release());
+    const got = await Promise.allSettled(Array.from({ length: Math.min(3, max) }, () => client.reserve()));
+    const held = got.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+    try { await Promise.allSettled(held.map((c) => c`select 1`)); } finally { held.forEach((c) => c.release()); }
+    const failed = got.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+    if (failed) throw failed.reason;
   };
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });
 } else {

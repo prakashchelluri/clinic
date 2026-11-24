@@ -1,11 +1,16 @@
 import { buildApp } from './app.js';
-import { migrate, applyRls, warmPool } from './db/index.js';
+import { sql } from 'drizzle-orm';
+import { db, migrate, applyRls, warmPool } from './db/index.js';
 import { seedIfEmpty, ensureFormsCurrent, ensurePlatform, healEmptyTenants } from './db/seed.js';
 import { startDispatcher } from './lib/messaging.js';
 import { usingObjectStorage } from './lib/storage.js';
 
 await migrate();
 await applyRls();
+// how close to the database's connection limit we are (Aiven's free plan has few): shown in Render's log at each start
+await db.execute(sql`select current_setting('max_connections')::int as max, (select count(*)::int from pg_stat_activity where datname = current_database()) as used`)
+  .then((r: any) => { const x = (r.rows ?? r)[0]; console.log(`database: ${x.used} of ${x.max} connections in use (this server takes up to ${process.env.DATABASE_POOL || 5})`); })
+  .catch(() => {});
 await healEmptyTenants();
 await ensurePlatform();
 await seedIfEmpty();
