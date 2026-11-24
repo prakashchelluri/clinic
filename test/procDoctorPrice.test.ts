@@ -93,7 +93,8 @@ test('the doctor sends a whole set back with one note: they stay booked, flagged
   const { rec } = await plan(owner, reception, 'Send Back All', '9848066605', null);
   const ids: string[] = [];
   for (const at of ['15:00', '16:00']) ids.push((await reception('POST', '/procedure-sessions', { recommendationId: rec.id, day: today(), startTime: at, minutes: 30, practitionerId: drA.id, force: true })).json().id);
-  const r = await owner('POST', '/procedure-approvals', { ids, action: 'change', note: 'At a conference' });
+  assert.equal((await reception('POST', `/procedure-weeks/${today()}/send`)).statusCode, 200); // this week's bookings wait until the week is sent
+  const r =await owner('POST', '/procedure-approvals', { ids, action: 'change', note: 'At a conference' });
   assert.equal(r.json().updated, 2);
   const wk = (await reception('GET', `/procedure-sessions?from=${today()}&to=${today()}&active=1`)).json().filter((x: any) => ids.includes(x.id));
   assert.equal(wk.length, 2); for (const x of wk) { assert.equal(x.state, 'confirmed'); assert.equal(x.approval, 'change'); assert.equal(x.approvalNote, 'At a conference'); }
