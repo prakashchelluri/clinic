@@ -141,7 +141,7 @@ export function ProcWeek() {
               {byPlan > 0 && <Chip>{`Booked by the plan ${byPlan}`}</Chip>}
             </span>
             {canWrite && <button type="button" className="btn btn-primary" disabled={!sendable.length} title={sendWhy || undefined} onClick={() => setReview(true)}><Icon name="check" />{sendable.length ? `Send ${sendable.length} for doctor approval` : 'Send for doctor approval'}</button>}
-            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent && mon > mondayOf(t) ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
+            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
           </div>
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">

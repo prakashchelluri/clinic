@@ -101,11 +101,11 @@ test('week plan: draft, send, approve, change after sending, send back, own move
   assert.equal((await pending(s2.id)).length, 1);
   assert.equal((await D2('POST', '/procedure-sessions/place', { sittingId: s2.id, day: addDays(mon, 2), hour: 17 })).status, 403, 'another doctor cannot move it');
 
-  // this week needs no send: a sitting booked for it goes to the doctor at once
+  // this week waits for a send too, unless it was already sent
   const c = await course('Week Plan Three', '9848012203');
   const soon = addDays(today(), 1);
   const s3 = await C('POST', '/procedure-sessions/place', { recommendationId: c.rec.id, day: soon, hour: 19 });
-  if (s3.status === 200) assert.equal(s3.body.approval, weekOf(soon) <= weekOf(today()) ? 'sent' : 'draft');
+  if (s3.status === 200) assert.equal(s3.body.approval, (await C('GET', `/procedure-weeks/${weekOf(soon)}`)).body.sent ? 'sent' : 'draft');
 
   // unscheduling puts the course back in Pending schedules
   assert.equal((await C('PATCH', `/procedure-sessions/${s1.id}`, { state: 'cancelled', reason: 'Unscheduled' })).status, 200);
@@ -132,6 +132,7 @@ test('every session needs a doctor, and only its own doctor booking it counts as
   assert.equal(none.status, 400); assert.equal(none.body.code, 'DOCTOR_REQUIRED');
 
   // reception books it with the doctor: not approved, it waits to be sent with the week
+  const before = (await R('GET', '/followups/menu-counts')).body.toSend.n; // earlier tests may leave drafts (this week's too)
   const s = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: mon, startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
   assert.equal(s.approval, 'draft');
   assert.equal((await R('POST', `/procedure-sessions/${s.id}/assign`, { practitionerId: null })).body.code, 'DOCTOR_REQUIRED');
@@ -143,8 +144,8 @@ test('every session needs a doctor, and only its own doctor booking it counts as
 
   // the desk's to-do: the Procedures menu badge and the Action panel count what is not sent, and name the first week
   const mc = (await R('GET', '/followups/menu-counts')).body.toSend;
-  assert.equal(mc.n, 1); assert.equal(mc.week, mon);
-  assert.equal((await O('GET', '/followups/menu-counts')).body.toSend.n, 1, 'the owner schedules too');
+  assert.equal(mc.n, before + 1); assert.ok(mc.week <= mon);
+  assert.equal((await O('GET', '/followups/menu-counts')).body.toSend.n, before + 1, 'the owner schedules too');
   assert.equal((await as(await login('doctor2@demo.clinic'))('GET', '/followups/menu-counts')).body.toSend.n, 0, 'a doctor who does not schedule is not asked to send');
 
   // a session with no doctor (none can be booked now) is never approved by default and is not sent to anybody
@@ -153,7 +154,7 @@ test('every session needs a doctor, and only its own doctor booking it counts as
   assert.equal((await C('GET', `/procedure-weeks/${mon}`)).body.sent, false);
   const sent = (await C('POST', `/procedure-weeks/${mon}/send`)).body;
   assert.equal(sent.sent, 1);
-  assert.equal((await R('GET', '/followups/menu-counts')).body.toSend.n, 0, 'sent: off the to-do');
+  assert.equal((await R('GET', '/followups/menu-counts')).body.toSend.n, before, 'sent: off the to-do');
   assert.equal((await C('GET', `/procedure-sessions/${old.id}`)).body.approval, 'draft');
   assert.equal((await C('GET', `/procedure-sessions/${s.id}`)).body.approval, 'sent');
   // the coordinator picks the doctor: it goes to them straight away, as the week was sent

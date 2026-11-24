@@ -85,7 +85,7 @@ export const weekOf = (day: string) => addDays(day, -((new Date(day + 'T00:00:00
 
 /**
  * The doctor's say on a sitting someone books or moves. Its own doctor booking or moving it approves it. Anyone else's goes to
- * that doctor: straight away when its week was already sent (or is this week or earlier), otherwise it waits as a draft until
+ * that doctor: straight away when its week was already sent, otherwise it waits as a draft (this week too) until
  * the coordinator sends the week. Every sitting has a doctor (required since 15 Nov 2026; older ones were given their course's).
  */
 export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string) {
@@ -94,7 +94,6 @@ export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | nul
   if (!practitionerId) return set('draft', false);
   if (practitionerId === ctx.practitionerId) return set('approved', false);
   const wk = weekOf(day);
-  if (wk <= weekOf(todayIn(ctx.timezone))) return set('sent', false);
   const sent = await tx.select({ id: procedureWeek.id }).from(procedureWeek).where(and(eq(procedureWeek.tenantId, ctx.tenantId), eq(procedureWeek.weekStart, wk))).then((r) => r[0]);
   return sent ? set('sent', true) : set('draft', false);
 }
