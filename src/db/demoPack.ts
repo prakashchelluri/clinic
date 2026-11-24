@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { appUser, formDefinition, medicine, procedureCatalog, rxTemplate, stockBatch, tmpl, type FormSchema } from './schema.js';
 import { receiveStock } from '../modules/stock.js';
 import { addDays } from '../lib/core.js';
@@ -140,7 +140,6 @@ const SETS: SetRow[] = [
 type F = FormSchema['sections'][number]['fields'][number];
 const f = (key: string, label: string, type: F['type'], x: Partial<F> = {}): F => ({ key, label, type, ...x } as F);
 const SKIN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
-const consent = f('consent', 'Consent signed', 'checkbox', { required: true });
 const nextDate = f('next_session', 'Next session', 'date');
 const notes = f('notes', 'Notes', 'textarea', { width: 4 });
 
@@ -154,7 +153,6 @@ const LHR: Omit<FormSchema, 'products'> = { sections: [
     f('recent_tan', 'Sun tan in the last 2 weeks', 'checkbox'),
     f('photosensitive_meds', 'On photosensitising medicine', 'checkbox', { help: 'Isotretinoin, doxycycline, St John’s wort…' }),
     f('patch_test', 'Patch test', 'chips', { options: ['Not needed', 'Done, no reaction', 'Done, reaction'] }),
-    consent,
   ] },
   { key: 'during', title: 'During', fields: [
     f('machine', 'Machine', 'select', { options: ['Diode 808 nm', 'Alexandrite 755 nm', 'Nd:YAG 1064 nm', 'Triple wavelength (755/808/1064)'], required: true, carry: true }),
@@ -187,7 +185,6 @@ const PEEL: Omit<FormSchema, 'products'> = { sections: [
     f('isotretinoin_6m', 'Isotretinoin in the last 6 months', 'checkbox', { help: 'If yes, no peel today' }),
     f('active_lesions', 'Cold sore, cut or active infection', 'checkbox'),
     f('pregnant', 'Pregnant or breastfeeding', 'checkbox'),
-    consent,
   ] },
   { key: 'during', title: 'During', fields: [
     f('agent', 'Peel', 'select', { options: ['Glycolic acid', 'Salicylic acid', 'Mandelic acid', 'Lactic acid', "Jessner's", 'TCA', 'Yellow peel'], required: true, carry: true }),
@@ -211,7 +208,7 @@ const PEEL: Omit<FormSchema, 'products'> = { sections: [
 
 /** A short form for every other procedure, with the one or two numbers that matter for it. */
 const basic = (during: F[]): Omit<FormSchema, 'products'> => ({ sections: [
-  { key: 'before', title: 'Before', fields: [f('indication', 'Treating', 'text', { carry: true }), f('area', 'Area', 'text', { carry: true }), consent] },
+  { key: 'before', title: 'Before', fields: [f('indication', 'Treating', 'text', { carry: true }), f('area', 'Area', 'text', { carry: true })] },
   { key: 'during', title: 'During', fields: during },
   { key: 'after', title: 'After', fields: [f('reaction', 'Reaction', 'chips', { options: ['None', 'Mild', 'Moderate', 'Severe'] }), f('advice', 'After-care advice given', 'checkbox'), nextDate, notes] },
 ] });
@@ -270,9 +267,13 @@ export async function ensureDemoPack(db: any, tid: string, today: string) {
   // a form for every procedure that has none yet
   const procs: any[] = await db.select().from(procedureCatalog).where(eq(procedureCatalog.tenantId, tid));
   for (const p of procs) {
+    const [cur] = await db.select().from(formDefinition).where(and(eq(formDefinition.tenantId, tid), eq(formDefinition.key, `procedure:${p.id}`))).orderBy(desc(formDefinition.version)).limit(1);
+    if (cur) { // older demo forms asked 'Consent signed' again; Start takes the consent now, so a new version drops it (old sessions keep theirs)
+      const sc = cur.schema as FormSchema; const dup = (x: F) => x.key === 'consent' && x.label === 'Consent signed';
+      if (sc.sections.some((sec) => sec.fields.some(dup))) await db.insert(formDefinition).values({ tenantId: tid, key: cur.key, specialtyId: cur.specialtyId, version: cur.version + 1, schema: { ...sc, sections: sc.sections.map((sec) => ({ ...sec, fields: sec.fields.filter((x) => !dup(x)) })) } });
+      continue;
+    }
     const def = FORMS[p.name]; if (!def) continue;
-    const exists = await db.select({ id: formDefinition.id }).from(formDefinition).where(and(eq(formDefinition.tenantId, tid), eq(formDefinition.key, `procedure:${p.id}`))).limit(1);
-    if (exists.length) continue;
     const products = def.products.map(([name, qty]) => { const m = med(name); return m && { medicineId: m.id, name, qty }; }).filter(Boolean) as FormSchema['products'];
     await db.insert(formDefinition).values({ tenantId: tid, key: `procedure:${p.id}`, specialtyId: p.specialtyId ?? null, version: 1, schema: { ...def.form, products } });
   }
