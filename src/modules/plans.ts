@@ -99,7 +99,7 @@ export function planRoutes(app: FastifyInstance) {
       const lastDone = done.at(-1)?.ps.day ?? null;
       const missed = mine.filter((s) => (s.ps.state === 'missed' || (s.ps.state === 'confirmed' && s.ps.day < today)) && (!lastDone || s.ps.day > lastDone)).at(-1);
       const quoteState = q ? (q.status === 'open' && q.validUntil < today ? 'expired' : q.status) : null;
-      const stage = x.r.status === 'done' || done.length >= sit ? 'finished' : next ? 'booked' : state === 'advised' ? 'advised' : missed || (x.r.dueOn && x.r.dueOn < today) ? 'behind' : 'due';
+      const stage = done.length >= sit ? 'finished' : next ? 'booked' : state === 'advised' ? 'advised' : missed || (x.r.dueOn && x.r.dueOn < today) ? 'behind' : 'due';
       const m = standings.get(x.r.id);
       return { id: x.r.id, patient: x.p, procedure: x.proc ?? 'Procedure', procedureId: x.r.procedureId, sittings: sit, gapDays: x.r.gapDays, doneSittings: done.length, state, stage, dueOn: x.r.dueOn, lastDone, finishedOn: stage === 'finished' ? lastDone : null,
         doctor: next?.doctor ?? done.at(-1)?.doctor ?? x.prescriber ?? null, advisedOn: x.r.createdAt,

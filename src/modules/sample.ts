@@ -193,7 +193,6 @@ export async function loadSample(tx: Tx, t: string, userId: string, tz: string) 
   for (const [i, r] of oldRecs.entries()) {
     if (i % 4 === 0) await tx.update(recommendation).set({ status: 'scheduled', contactLog: [{ at: at(addDays(today, -3), '11:00'), by: 'Sunita (Procedures)', outcome: 'Will come', note: 'confirmed Monday 11 am' }] }).where(eq(recommendation.id, r.id));
     else if (i % 4 === 1) await tx.update(recommendation).set({ status: 'contacted', contactLog: [{ at: at(addDays(today, -5), '16:20'), by: 'Sunita (Procedures)', outcome: 'No answer' }, { at: at(addDays(today, -2), '10:05'), by: 'Sunita (Procedures)', outcome: 'Wants another date', note: 'after Diwali' }] }).where(eq(recommendation.id, r.id));
-    else if (i % 4 === 2) await tx.update(recommendation).set({ status: 'done' }).where(eq(recommendation.id, r.id));
   }
   const oldFu = await tx.select().from(recommendation).where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'followup')));
   for (const [i, r] of oldFu.entries()) if (i % 2 === 0) await tx.update(recommendation).set({ status: 'done' }).where(eq(recommendation.id, r.id));
