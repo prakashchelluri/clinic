@@ -46,11 +46,17 @@ export function documentRoutes(app: FastifyInstance) {
   /** Record or withdraw a consent (photos today; the key list can grow). Withdrawing keeps old photos but blocks new ones. */
   route(app, 'post', '/patients/:id/consents', null, async (req, tx) => {
     if (!can(req.perms, 'patient.write') && !can(req.perms, 'document.write')) throw new HttpError(403, 'FORBIDDEN:document.write');
-    const body = z.object({ key: z.enum(['photos']), granted: z.boolean() }).parse(req.body); const t = req.ctx.tenantId; const id = (req.params as any).id;
+    // granting takes proof: the signed page saved as the patient's document, or paper: true when the paper form is filed
+    const body = z.object({ key: z.enum(['photos']), granted: z.boolean(), documentId: z.string().uuid().optional(), paper: z.literal(true).optional() }).parse(req.body); const t = req.ctx.tenantId; const id = (req.params as any).id;
     const p = await tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]);
     if (!p) throw new HttpError(404, 'NOT_FOUND');
+    if (body.granted && !body.documentId && !body.paper) throw new HttpError(400, 'CONSENT_PROOF_REQUIRED');
+    if (body.documentId) {
+      const doc = await tx.select({ id: document.id }).from(document).where(and(eq(document.id, body.documentId), eq(document.tenantId, t), eq(document.patientId, id), eq(document.kind, 'consent'))).then((r) => r[0]);
+      if (!doc) throw new HttpError(400, 'CONSENT_NOT_FOR_PATIENT');
+    }
     const consents = { ...(p.consents ?? {}) };
-    if (body.granted) consents[body.key] = { grantedAt: new Date().toISOString(), by: req.ctx.name }; else delete consents[body.key];
+    if (body.granted) consents[body.key] = { grantedAt: new Date().toISOString(), by: req.ctx.name, ...(body.documentId ? { how: 'signed', documentId: body.documentId } : { how: 'signed paper form filed' }) }; else delete consents[body.key];
     await tx.update(patient).set({ consents }).where(eq(patient.id, id));
     await emit(tx, req.ctx, body.granted ? 'consent.granted' : 'consent.withdrawn', 'patient', id, { key: body.key });
     return { consents };

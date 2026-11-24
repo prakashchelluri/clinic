@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { get, patch, post, api, qc, errText } from './api';
 import { Chip, Empty, Icon, Section, Skeleton, ask, toast, useScrollLock } from './ui';
+import { ConsentForm, ConsentNote, photoConsentText } from './consent';
 
 /* Clinical photos: consent, capture with a faint copy of the last photo, timeline by area and sitting, before/after compare. */
 
@@ -32,14 +33,17 @@ const fileToShrunk = (f: File) => new Promise<string>((res, rej) => {
 export const usePhotos = (patientId: string) => useQuery({ queryKey: ['photos', patientId], queryFn: () => get(`/patients/${patientId}/photos`), enabled: !!patientId });
 
 /* ---------------- Consent ---------------- */
-function ConsentStep({ patientId, name, onDone, dark = false }: { patientId: string; name: string; onDone: () => void; dark?: boolean }) {
-  const m = useMutation({ mutationFn: () => post(`/patients/${patientId}/consents`, { key: 'photos', granted: true }), onSuccess: () => { refresh(patientId); toast('Photo consent recorded'); onDone(); }, onError: (e) => toast(errText(e), 'err') });
+/** Photo consent before the first photo: the patient signs the wording on the tablet, or staff confirm the paper form is filed. */
+function ConsentStep({ patientId, name, dark = false }: { patientId: string; name: string; dark?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const m = useMutation({ mutationFn: (documentId?: string) => post(`/patients/${patientId}/consents`, { key: 'photos', granted: true, ...(documentId ? { documentId } : { paper: true }) }), onSuccess: () => { setOpen(false); refresh(patientId); toast('Photo consent recorded'); }, onError: (e) => toast(errText(e), 'err') });
   return (
     <div className={`mx-auto max-w-md space-y-4 rounded-[10px] p-6 ${dark ? 'bg-white/10 text-white' : 'card'}`}>
       <div className="text-lg font-semibold">Photo consent for {name}</div>
-      <p className={`text-sm ${dark ? 'text-white/80' : 'text-ink-2'}`}>Ask the patient: “We take photos of the treated area to track how the treatment is working. They stay in your profile at this clinic and are not shared. Is that all right?”</p>
-      <p className={`text-xs ${dark ? 'text-white/60' : 'text-muted'}`}>Recording consent once covers all later photos. It can be withdrawn from the patient’s profile at any time.</p>
-      <button className="btn btn-accent w-full justify-center" disabled={m.isPending} onClick={() => m.mutate()}><Icon name="check" />Patient agrees, record consent</button>
+      <p className={`text-sm ${dark ? 'text-white/80' : 'text-ink-2'}`}>Before the first photo the patient reads the photo consent and signs it on this tablet, or signs the paper form.</p>
+      <p className={`text-xs ${dark ? 'text-white/60' : 'text-muted'}`}>Signing once covers all later photos. It can be withdrawn from the patient’s profile at any time.</p>
+      <button className="btn btn-accent w-full justify-center" onClick={() => setOpen(true)}><Icon name="edit" />Take photo consent</button>
+      {open && <ConsentForm title="Photo consent" text={photoConsentText(name)} patient={{ id: patientId, fullName: name }} okLabel="Save consent" onClose={() => setOpen(false)} onDone={(id) => m.mutate(id)} />}
     </div>
   );
 }
@@ -105,13 +109,13 @@ export function PhotoCapture({ patient, sitting, phase, onClose }: { patient: { 
   const addArea = () => { const a = custom.trim().slice(0, 40); if (a) { setArea(a); setAdding(false); } };
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#0f1011] text-white anim-fade-in" role="dialog" aria-label="Take photos">
+    <div className="fixed inset-0 z-40 flex flex-col bg-[#0f1011] text-white anim-fade-in" role="dialog" aria-label="Take photos">
       <div className="flex items-center gap-3 px-4 pb-2 pt-4" style={{ paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
         <button className="grid h-10 w-10 place-items-center rounded-full bg-white/15" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
         <div className="min-w-0 flex-1"><div className="truncate font-semibold">{patient.fullName}</div><div className="truncate text-xs text-white/70">{sitting?.label ?? 'Not tied to a session'}</div></div>
         {consent && <span className="rounded-full bg-sage-soft px-2.5 py-1 text-[11px] font-bold text-sage">consent ✓</span>}
       </div>
-      {q.isLoading ? <div className="p-6"><Skeleton rows={3} /></div> : !consent ? <div className="flex flex-1 items-center p-4"><ConsentStep dark patientId={patient.id} name={patient.fullName} onDone={() => {}} /></div> : (<>
+      {q.isLoading ? <div className="p-6"><Skeleton rows={3} /></div> : !consent ? <div className="flex flex-1 items-center p-4"><ConsentStep dark patientId={patient.id} name={patient.fullName} /></div> : (<>
         <div className="no-scrollbar flex gap-1.5 overflow-x-auto px-4 pb-2" role="radiogroup" aria-label="Area">
           {allAreas.map((a) => <button key={a} role="radio" aria-checked={curArea === a} onClick={() => setArea(a)} className={`whitespace-nowrap rounded-full px-3.5 py-2 text-[13.5px] font-semibold ${curArea === a ? 'bg-white text-ink' : 'bg-white/15'}`}>{a}</button>)}
           {adding ? <span className="flex items-center gap-1"><input autoFocus aria-label="New area" maxLength={40} className="w-32 rounded-full bg-white/15 px-3 py-2 text-[13.5px] outline-none placeholder:text-white/50" placeholder="Area name" value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addArea()} /><button className="rounded-full bg-white/15 px-3 py-2 text-[13.5px]" onClick={addArea}>Add</button></span>
@@ -180,7 +184,7 @@ export function PhotoTimeline({ patient, canWrite }: { patient: { id: string; fu
       <div className="space-y-3 p-4">
         {q.isLoading ? <Skeleton rows={2} /> : (<>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-            {consent ? <><Chip tone="sage">photo consent</Chip><span>given {shortDay(consent.grantedAt)} · {consent.by}</span>{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the patient’s history. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>Withdraw</button>}</>
+            {consent ? <><Chip tone="sage">photo consent</Chip>{consent.how ? <ConsentNote c={consent} /> : <span>given {shortDay(consent.grantedAt)} · {consent.by}</span>}{canWrite && <button className="underline hover:text-ink" onClick={async () => { const r = await ask({ title: `Withdraw photo consent for ${patient.fullName}?`, body: 'Existing photos stay in the patient’s history. No new photos can be taken until consent is recorded again.', confirmLabel: 'Withdraw consent', tone: 'danger' }); if (r) withdraw.mutate(); }}>Withdraw</button>}</>
               : <><Chip tone="amber">no photo consent yet</Chip><span>Asked when you first take photos.</span></>}
             {photos.length > 1 && <span className="ml-auto">Pick two photos to compare</span>}
           </div>

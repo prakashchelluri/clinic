@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { get, patch, post, qc, today, errText } from './api';
-import { Chip, Drawer, Icon, Modal, Skeleton, ask, money, toast } from './ui';
+import { Chip, Drawer, Icon, Skeleton, ask, money, toast } from './ui';
 import { FlagChips } from './flags';
 import { PhotoCapture, usePhotos } from './photos';
 import { ScheduleModal } from './pages/Worklist';
+import { ConsentForm, ConsentNote, procedureConsentText } from './consent';
 
 // invoiced: the whole treatment is on an invoice; amountPaise is what is still owed on it. on_done: not invoiced yet; marking a session done invoices the whole treatment (amountPaise)
 type Money = { kind: 'invoiced' | 'on_done' | 'due' | 'paid' | 'none'; amountPaise: number } | null | undefined;
@@ -20,70 +21,13 @@ export function ConsentChip({ s }: { s: Consent }) {
   if (s.consentNeeded) return <Chip tone="amber">Consent needed</Chip>;
   return s.consent ? <Chip tone="sage">Consent on file</Chip> : null;
 }
-const shortDay = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
-/** How the consent was given, next to the chip: a signature on the tablet is a link that opens the signed image. */
-export function ConsentNote({ c }: { c: NonNullable<Consent['consent']> }) {
-  if (c.documentId) return <a className="text-xs font-semibold text-clay underline" href={`/api/documents/${c.documentId}/file`} target="_blank" rel="noreferrer">Signed {shortDay(c.grantedAt)}{c.by ? ` · ${c.by}` : ''}</a>;
-  return <span className="text-xs text-muted">{c.grantedAt ? `${c.how ?? 'recorded'} · ${c.by} · ${new Date(c.grantedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : c.how}</span>;
-}
+export { ConsentNote };
 
-/** A plain signature pad: draw with a finger, stylus or mouse. Calls onInk(true) after the first stroke. */
-function SignaturePad({ pad, onInk }: { pad: React.RefObject<HTMLCanvasElement | null>; onInk: (v: boolean) => void }) {
-  const drawing = useRef(false);
-  useEffect(() => {
-    const c = pad.current; if (!c) return;
-    // offsetWidth ignores the dialog's opening animation; strokes are drawn in the canvas's own pixels
-    const k = window.devicePixelRatio || 1;
-    c.width = Math.round(c.offsetWidth * k); c.height = Math.round(c.offsetHeight * k);
-    const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
-    g.lineWidth = 2.2 * k; g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#111';
-  }, [pad]);
-  const at = (e: React.PointerEvent<HTMLCanvasElement>) => { const c = e.currentTarget; const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * (c.width / r.width), (e.clientY - r.top) * (c.height / r.height)] as const; };
-  return (
-    <canvas ref={pad} aria-label="Signature pad: the patient signs here" className="block h-48 w-full cursor-crosshair rounded-[10px] border border-line bg-white" style={{ touchAction: 'none' }}
-      onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); drawing.current = true; const g = e.currentTarget.getContext('2d')!; const [x, y] = at(e); g.beginPath(); g.moveTo(x, y); g.lineTo(x + 0.1, y + 0.1); g.stroke(); onInk(true); }}
-      onPointerMove={(e) => { if (!drawing.current) return; const g = e.currentTarget.getContext('2d')!; const [x, y] = at(e); g.lineTo(x, y); g.stroke(); }}
-      onPointerUp={() => { drawing.current = false; }} onPointerCancel={() => { drawing.current = false; }} />
-  );
-}
-
-/** Before the first sitting of a procedure: the patient signs on the tablet (saved as the patient's document), or staff confirm the paper form is filed. */
+/** Before the first sitting of a procedure: the patient reads the wording and signs on the tablet (saved as the patient's document), or staff confirm the paper form is filed. */
 export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string }) => void }) {
-  const [how, setHow] = useState<'sign' | 'paper'>('sign'); const [ink, setInk] = useState(false); const [saving, setSaving] = useState(false);
-  const pad = useRef<HTMLCanvasElement>(null);
   const what = s.procedure ?? 'this procedure';
-  const clear = () => { const c = pad.current; if (!c) return; const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); setInk(false); };
-  const save = async () => {
-    if (!pad.current || !ink) return;
-    setSaving(true);
-    try {
-      const d: any = await post('/documents', { patientId: s.patient.id, kind: 'consent', procedureSessionId: s.id, title: `Consent for ${what} · signed ${shortDay(new Date().toISOString())}`, mime: 'image/png', dataBase64: pad.current.toDataURL('image/png') });
-      qc.invalidateQueries({ queryKey: ['documents', s.patient.id] });
-      onStart({ state: 'in_progress', consent: true, consentDocumentId: d.id });
-    } catch (e) { toast(errText(e), 'err'); } finally { setSaving(false); }
-  };
-  return (
-    <Modal title={`Consent for ${what}`} subtitle={`${s.patient.fullName} · asked once, before the first session`} onClose={onClose} width="max-w-lg" dirty={ink}>
-      <div className="mb-3 flex gap-2">
-        <button className={`btn btn-sm ${how === 'sign' ? 'btn-primary' : ''}`} aria-pressed={how === 'sign'} onClick={() => setHow('sign')}><Icon name="edit" />Patient signs here</button>
-        <button className={`btn btn-sm ${how === 'paper' ? 'btn-primary' : ''}`} aria-pressed={how === 'paper'} onClick={() => setHow('paper')}>Paper form filed</button>
-      </div>
-      {how === 'sign' ? (<>
-        <p className="mb-2 text-sm text-ink-2">Hand the tablet to the patient. They read the consent for {what} and sign in the box with a finger.</p>
-        <SignaturePad pad={pad} onInk={setInk} />
-        <div className="modal-foot">
-          <button className="btn btn-ghost" disabled={!ink || saving} onClick={clear}>Clear</button>
-          <button className="btn btn-primary" disabled={!ink || saving} onClick={save}><Icon name="check" />{saving ? 'Saving…' : 'Save and start'}</button>
-        </div>
-      </>) : (<>
-        <p className="text-sm text-ink-2">Start only after the patient has signed the paper consent form and it is filed. It is recorded on the patient and not asked again.</p>
-        <div className="modal-foot">
-          <button className="btn btn-ghost" onClick={onClose}>Not yet</button>
-          <button className="btn btn-primary" onClick={() => onStart({ state: 'in_progress', consent: true })}><Icon name="check" />Yes, signed and filed</button>
-        </div>
-      </>)}
-    </Modal>
-  );
+  return <ConsentForm title={`Consent for ${what}`}text={procedureConsentText(s.patient.fullName, what)} patient={s.patient} procedureSessionId={s.id} okLabel="Save and start" onClose={onClose}
+    onDone={(id) => onStart({ state: 'in_progress', consent: true, ...(id ? { consentDocumentId: id } : {}) })} />;
 }
 /** Marking done makes the charge, so say what it will be first. */
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {

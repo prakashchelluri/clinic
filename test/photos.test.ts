@@ -42,8 +42,13 @@ test('photos need consent, carry area/view/sitting, and form a timeline', async 
 
   assert.equal((await pharmacy('POST', `/patients/${p.id}/consents`, { key: 'photos', granted: true })).status, 403);
   assert.equal((await doctor('POST', `/patients/${p.id}/consents`, { key: 'tattoos', granted: true })).status, 400);
-  const c = await doctor('POST', `/patients/${p.id}/consents`, { key: 'photos', granted: true });
-  assert.ok(c.body.consents.photos.grantedAt);
+  // consent needs proof: a signed page that is this patient's consent document, or the paper form filed
+  assert.equal((await doctor('POST', `/patients/${p.id}/consents`, { key: 'photos', granted: true })).body.code, 'CONSENT_PROOF_REQUIRED');
+  const otherSig = (await doctor('POST', '/documents', { patientId: other.id, kind: 'consent', title: 'Photo consent', mime: 'image/jpeg', dataBase64: JPG })).body;
+  assert.equal((await doctor('POST', `/patients/${p.id}/consents`, { key: 'photos', granted: true, documentId: otherSig.id })).body.code, 'CONSENT_NOT_FOR_PATIENT');
+  const sig = (await doctor('POST', '/documents', { patientId: p.id, kind: 'consent', title: 'Photo consent', mime: 'image/jpeg', dataBase64: JPG })).body;
+  const c = await doctor('POST', `/patients/${p.id}/consents`, { key: 'photos', granted: true, documentId: sig.id });
+  assert.ok(c.body.consents.photos.grantedAt); assert.equal(c.body.consents.photos.documentId, sig.id); assert.equal(c.body.consents.photos.how, 'signed');
 
   // validation of every photo field
   assert.equal((await doctor('POST', '/documents', { ...shot, view: 'diagonal' })).status, 400);
@@ -100,7 +105,7 @@ test('photos need consent, carry area/view/sitting, and form a timeline', async 
   const b = await doctor('POST', '/documents', { ...shot, view: 'left' });
   assert.equal(b.status, 200);
   // a sitting of a different patient cannot be used
-  await doctor('POST', `/patients/${other.id}/consents`, { key: 'photos', granted: true });
+  await doctor('POST', `/patients/${other.id}/consents`, { key: 'photos', granted: true, paper: true });
   assert.equal((await doctor('POST', '/documents', { ...shot, patientId: other.id, procedureSessionId: sittingId })).body.code, 'SITTING_NOT_FOR_PATIENT');
 
   const tl = await doctor('GET', `/patients/${p.id}/photos`);
