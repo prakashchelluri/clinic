@@ -9,6 +9,8 @@ export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 const url = process.env.DATABASE_URL;
 let db: Db;
 let migrate: () => Promise<void>;
+/** Open the database connections now, before anyone is waiting (Postgres only; a no-op for the embedded database). */
+let warmPool: () => Promise<void> = async () => {};
 
 if (url) {
   const { drizzle } = await import('drizzle-orm/postgres-js');
@@ -34,6 +36,12 @@ if (url) {
   };
   if (prepare) usePrepare(client);
   db = drizzle(client, { schema });
+  // Each new connection is a TLS handshake and a password check with the database: ~250 ms each on the free server's tenth of a CPU.
+  // Opened lazily, the first screen after a restart paid for ten of them at once; opened at start-up, nobody is waiting yet.
+  warmPool = async () => {
+    const held = await Promise.all(Array.from({ length: 10 }, () => client.reserve()));
+    await Promise.all(held.map((c) => c`select 1`)); held.forEach((c) => c.release());
+  };
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });
 } else {
   // ponytail: embedded Postgres for local dev/tests; superuser bypasses RLS, so app-level tenant filters still apply
@@ -56,7 +64,7 @@ if (url) {
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });
 }
 
-export { db, migrate };
+export { db, migrate, warmPool };
 
 /** Run fn inside a transaction with the tenant set for RLS. */
 export async function withTenant<T>(tenantId: string, userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
