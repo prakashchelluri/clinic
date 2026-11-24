@@ -55,17 +55,29 @@ test('sale guards: idempotent bill, Schedule H per line, over-issue, walk-in wit
 
   // 13. walk-in with no record: one shared record, name and phone kept on the sale only
   const pts0 = (await db.select().from(S.patient)).length;
-  const w2 = await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: sun.id, qty: 1 }], method: 'upi' });
+  const w2 = await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: sun.id, qty: 1 }], method: 'upi' });
   assert.equal(w2.statusCode, 200, w2.body); assert.equal(w2.json().patientId, a1.json().patientId, 'the same Walk-in record');
   assert.equal((await db.select().from(S.patient)).length, pts0, 'no new patient record');
   assert.equal(a1.json().buyerName, 'Ravi');
   assert.equal((await P('GET', `/pharmacy/sale/${a1.json().id}`)).json().patient.fullName, 'Ravi');
   // 10. UPI without a transaction number is fine; card still needs its approval code
-  assert.equal((await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: sun.id, qty: 1 }], method: 'card' })).json().code, 'REFERENCE_REQUIRED');
+  assert.equal((await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: sun.id, qty: 1 }], method: 'card' })).json().code, 'REFERENCE_REQUIRED');
 
   // 4. Schedule H: never to a walk-in
-  const nx = await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: doxy.id, qty: 1 }], method: 'cash' });
+  const nx = await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: doxy.id, qty: 1 }], method: 'cash' });
   assert.equal(nx.statusCode, 400); assert.equal(nx.json().code, 'NEEDS_PRESCRIPTION'); assert.match(nx.json().message, /Doxycycline 100 mg needs a doctor's prescription/);
+  // a walk-in gives a name and a 10-digit phone
+  for (const w of [{}, { fullName: 'Ravi' }, { fullName: 'Ravi', phone: '12345' }, { fullName: 'R', phone: '9000000001' }]) assert.equal((await P('POST', '/pharmacy/sale', { walkIn: w, items: [{ medicineId: cet.id, qty: 1 }], method: 'cash' })).statusCode, 400, JSON.stringify(w));
+  // ...unless they bring another doctor's prescription: its doctor, registration number and date go on the line and in the register
+  const out = { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: doxy.id, qty: 1 }, { medicineId: cet.id, qty: 1 }], method: 'cash' };
+  const rxDay = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+  assert.equal((await P('POST', '/pharmacy/sale', { ...out, outsideRx: { doctor: 'Dr Outside', regNo: '', date: rxDay } })).statusCode, 400, 'registration number is needed');
+  assert.equal((await P('POST', '/pharmacy/sale', { ...out, outsideRx: { doctor: 'Dr Outside', regNo: 'TSMC 4521', date: '2999-01-01' } })).json().code, 'BAD_RX_DATE');
+  const ox = await P('POST', '/pharmacy/sale', { ...out, outsideRx: { doctor: 'Dr Outside', regNo: 'TSMC 4521', date: rxDay } });
+  assert.equal(ox.statusCode, 200, ox.body);
+  assert.deepEqual(ox.json().items.map((l: any) => l.outsideRx?.doctor ?? null), ['Dr Outside', null], 'only the scheduled line carries it');
+  const oreg = (await P("GET", "/pharmacy/schedule-register")).json().find((r: any) => r.invoiceNo === ox.json().invoiceNo);
+  assert.equal(oreg.noRx, false); assert.equal(oreg.doctor, "Dr Outside"); assert.equal(oreg.regNo, "TSMC 4521"); assert.equal(oreg.rxDate, rxDay); assert.equal(oreg.patient, "Walk In");
   const [t] = await db.select().from(S.tenant).where(eq(S.tenant.slug, 'sahitya'));
   const [br] = await db.select().from(S.branch).where(eq(S.branch.tenantId, t.id));
   const [fee] = await db.select().from(S.feeCategory).where(eq(S.feeCategory.tenantId, t.id));
@@ -101,7 +113,7 @@ test('sale guards: idempotent bill, Schedule H per line, over-issue, walk-in wit
 
   // 8. an expired batch cannot be sold, even when picked by id
   const [old] = await db.insert(S.stockBatch).values({ tenantId: t.id, medicineId: cet.id, batchNo: 'OLD1', expiry: '2020-01-31', qty: 5, mrpPaise: 3000 }).returning();
-  assert.equal((await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: cet.id, qty: 1, batchId: old.id }], method: 'cash' })).json().code, 'BATCH_NOT_SELLABLE');
+  assert.equal((await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: cet.id, qty: 1, batchId: old.id }], method: 'cash' })).json().code, 'BATCH_NOT_SELLABLE');
 
   // 6. returns: not back on the shelf unless the pharmacist says it is sealed; written off instead
   const bill = s1.json(); const cetLine = bill.items.findIndex((l: any) => l.medicineId === cet.id); const doxyLine = bill.items.findIndex((l: any) => l.medicineId === doxy.id);
@@ -114,13 +126,13 @@ test('sale guards: idempotent bill, Schedule H per line, over-issue, walk-in wit
   assert.deepEqual(moves.map((m) => `${m.kind}:${m.change}`).sort(), ['adjust:-1', 'patient_return:1', 'patient_return:1'], 'the write-off is on record');
 
   // 5. void takes a reason and never reuses the patient's UTR as the refund reference
-  const v = (await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: sun.id, qty: 1 }], payments: [{ method: 'upi', amountPaise: sun.mrpPaise, reference: '123456789012' }] }));
+  const v = (await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: sun.id, qty: 1 }], payments: [{ method: 'upi', amountPaise: sun.mrpPaise, reference: '123456789012' }] }));
   assert.equal(v.statusCode, 200, v.body);
   const vd = (await P('POST', `/pharmacy/sale/${v.json().id}/void`, { reason: 'Wrong item' })).json();
   assert.equal(vd.reason, 'Undone at the counter: Wrong item'); assert.notEqual(vd.reference, '123456789012');
 
   // cancelling a whole bill (owner) writes the items off unless the owner says they are sealed
-  const cb = (await P('POST', '/pharmacy/sale', { walkIn: {}, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' })).json();
+  const cb = (await P('POST', '/pharmacy/sale', { walkIn: { fullName: 'Walk In', phone: '9000000001' }, items: [{ medicineId: cet.id, qty: 2 }], method: 'cash' })).json();
   const cBefore = await onHand(cet.id);
   assert.equal((await O('POST', `/pharmacy/sale/${cb.id}/cancel`, { reason: 'Wrong patient', method: 'cash' })).statusCode, 200);
   assert.equal(await onHand(cet.id), cBefore, 'not back on the shelf by default');

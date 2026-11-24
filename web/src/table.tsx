@@ -169,7 +169,9 @@ export function DataTable<T>(p: Props<T>) {
               </th>)}
             </tr></thead>
             <tbody>{slice.map((r) => { const k = p.rowKey(r), on = sel.has(k); return (
-              <tr key={k} className={`${on || p.selected === k ? 'sel' : ''} ${p.onRow ? 'cursor-pointer' : ''}`} onClick={p.onRow ? (e) => { if (!(e.target as HTMLElement).closest('button,a,input,select,label,textarea')) p.onRow!(r); } : undefined}>
+              <tr key={k} className={`${on || p.selected === k ? 'sel' : ''} ${p.onRow ? 'cursor-pointer' : ''}`} onClick={p.onRow ? (e) => { if (!(e.target as HTMLElement).closest('button,a,input,select,label,textarea')) p.onRow!(r); } : undefined}
+                tabIndex={p.onRow ? 0 : undefined} onKeyDown={p.onRow ? (e) => { if (e.target !== e.currentTarget) return; const to = e.key === 'ArrowDown' ? e.currentTarget.nextElementSibling : e.key === 'ArrowUp' ? e.currentTarget.previousElementSibling : null;
+                  if (e.key === 'Enter') p.onRow!(r); else if (to instanceof HTMLElement) { e.preventDefault(); to.focus(); } } : undefined}>
                 {p.bulk && <td className="chk"><input type="checkbox" className="dt-cb" aria-label="Select this row" checked={on} onChange={() => setSel((s) => { const n = new Set(s); on ? n.delete(k) : n.add(k); return n; })} /></td>}
                 {cols.map((c, i) => <td key={c.key} className={`${i === 0 ? 'dt-first' : ''} ${c.align === 'right' ? 'r' : ''} ${c.hideOnPhone ? 'dt-hide-phone' : ''} ${c.className ?? ''}`}>{c.cell(r)}</td>)}
               </tr>); })}</tbody>

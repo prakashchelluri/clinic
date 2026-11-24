@@ -10,7 +10,7 @@ const day = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'n
 const exp = (d: string | null) => (d ? d.slice(5, 7) + '/' + d.slice(2, 4) : '');
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 const COLS = ['Date', 'Bill', 'Patient', 'Age / sex', 'Address', 'Prescriber', 'Reg. no.', 'Medicine', 'Class', 'Batch', 'Expiry', 'Qty', 'Returned'];
-const cells = (r: any) => [day(r.at), r.invoiceNo, r.patientNo ? `${r.patient} (${r.patientNo})` : r.patient, [r.age, r.sex].filter(Boolean).join(' '), r.address ?? '', r.noRx ? 'No Rx (not prescribed)' : r.doctor ?? '', r.regNo ?? '', r.medicine, r.cls, r.batchNo ?? '', exp(r.expiry), r.qty, r.returned || ''];
+const cells = (r: any) => [day(r.at), r.invoiceNo, r.patientNo ? `${r.patient} (${r.patientNo})` : r.patient, [r.age, r.sex].filter(Boolean).join(' '), r.address ?? '', r.noRx ? 'No Rx (not prescribed)' : r.rxDate ? `${r.doctor} (outside, prescription of ${day(r.rxDate)})` : r.doctor ?? '', r.regNo ?? '', r.medicine, r.cls, r.batchNo ?? '', exp(r.expiry), r.qty, r.returned || ''];
 
 const RANGE: FilterDef<any> = { key: 'range', label: 'Dates', icon: 'calendar', initial: '30', options: [{ value: '30', label: 'Last 30 days' }, { value: '90', label: 'Last 90 days' }, { value: '365', label: 'Last year' }, { value: 'custom', label: 'Pick dates' }] };
 const SCHED: FilterDef<any> = { key: 'sched', label: 'Schedule', icon: 'pill', options: [{ value: 'all', label: 'All schedules' }, { value: 'H', label: 'Schedule H' }, { value: 'H1', label: 'Schedule H1' }, { value: 'X', label: 'Schedule X' }] };
