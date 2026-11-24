@@ -16,17 +16,17 @@ export function MoneyChip({ m }: { m: Money }) {
   return m.kind === 'invoiced' ? <Chip tone="sky">On invoice · {money(m.amountPaise)} to pay</Chip> : m.kind === 'paid' ? <Chip tone="sage">Paid</Chip> : m.kind === 'on_done' ? <Chip>{money(m.amountPaise)} to invoice when done</Chip> : m.kind === 'due' ? <Chip tone="amber">{money(m.amountPaise)} due</Chip> : <Chip tone="rose">No price on the list</Chip>;
 }
 /** Consent kept on the patient per procedure: "Consent on file" or "Consent needed". */
-type Consent = { consentNeeded?: boolean; consent?: { grantedAt: string; by: string; how?: string; documentId?: string } | null };
+type Consent = { consentNeeded?: boolean; consentExpired?: boolean; consent?: { grantedAt: string; by: string; how?: string; documentId?: string } | null };
 export function ConsentChip({ s }: { s: Consent }) {
-  if (s.consentNeeded) return <Chip tone="amber">Consent needed</Chip>;
+  if (s.consentNeeded) return <Chip tone="amber">{s.consentExpired ? 'Consent expired, sign again' : 'Consent needed'}</Chip>;
   return s.consent ? <Chip tone="sage">Consent on file</Chip> : null;
 }
 export { ConsentNote };
 
 /** Before the first sitting of a procedure: the patient reads the wording and signs on the tablet (saved as the patient's document), or staff confirm the paper form is filed. */
-export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string }) => void }) {
+export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; consentText?: string | null; consentExpired?: boolean; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string }) => void }) {
   const what = s.procedure ?? 'this procedure';
-  return <ConsentForm title={`Consent for ${what}`}text={procedureConsentText(s.patient.fullName, what)} patient={s.patient} procedureSessionId={s.id} okLabel="Save and start" onClose={onClose}
+  return <ConsentForm title={`Consent for ${what}`} subtitle={s.consentExpired ? `${s.patient.fullName} · the last consent has run out, so it is signed again` : undefined} text={procedureConsentText(s.patient.fullName, what, s.consentText)} patient={s.patient} procedureSessionId={s.id} okLabel="Save and start" onClose={onClose}
     onDone={(id) => onStart({ state: 'in_progress', consent: true, ...(id ? { consentDocumentId: id } : {}) })} />;
 }
 /** Marking done makes the charge, so say what it will be first. */

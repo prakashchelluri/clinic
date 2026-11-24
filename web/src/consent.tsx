@@ -5,8 +5,12 @@ import { Icon, Modal, toast } from './ui';
 /* Signed consent: the patient reads the wording and signs on the tablet, or staff confirm the paper form is filed.
    The saved image holds the wording, the signature, the name and the time together, so the record shows what was agreed. */
 
-export const procedureConsentText = (name: string, what: string) =>
-  `I, ${name}, agree to have ${what} at this clinic. The doctor has explained what it involves, the results I can expect, the number of sessions, and the possible side effects, such as redness, swelling, irritation, a change in skin colour and, rarely, infection or scarring. Results differ from person to person and are not guaranteed. I have been able to ask questions. I agree to follow the aftercare advice, and I may stop the treatment at any time.`;
+/** The procedure's own wording when it has one (Settings › Procedures), else the standard text. */
+export const procedureConsentText = (name: string, what: string, own?: string | null) => own?.trim()
+  ? `I, ${name}, have read the following about ${what} and agree to it.
+
+${own.trim()}`
+  : `I, ${name}, agree to have ${what} at this clinic. The doctor has explained what it involves, the results I can expect, the number of sessions, and the possible side effects, such as redness, swelling, irritation, a change in skin colour and, rarely, infection or scarring. Results differ from person to person and are not guaranteed. I have been able to ask questions. I agree to follow the aftercare advice, and I may stop the treatment at any time.`;
 export const photoConsentText = (name: string) =>
   `I, ${name}, agree that this clinic may take photos of the treated area to record my treatment and see how it is working. The photos stay in my record at this clinic, are seen only by clinic staff, and are not shared or published without my separate written permission. I may withdraw this consent at any time; photos already taken stay in my record.`;
 
@@ -43,8 +47,10 @@ function signedPage(title: string, text: string, sig: HTMLCanvasElement, name: s
   const W = 1200, P = 60, LH = 34;
   const m = document.createElement('canvas').getContext('2d')!; m.font = '24px sans-serif';
   const lines: string[] = []; let line = '';
-  for (const w of text.split(' ')) { const t = line ? `${line} ${w}` : w; if (m.measureText(t).width > W - 2 * P && line) { lines.push(line); line = w; } else line = t; }
-  if (line) lines.push(line);
+  for (const para of text.split('\n')) { // each line break starts a new line; an empty one leaves a gap
+    for (const w of para.split(' ').filter(Boolean)) { const t = line ? `${line} ${w}` : w; if (m.measureText(t).width > W - 2 * P && line) { lines.push(line); line = w; } else line = t; }
+    lines.push(line); line = '';
+  }
   const sigH = Math.round(sig.height * ((W - 2 * P) / sig.width));
   const c = document.createElement('canvas'); c.width = W; c.height = P + 50 + lines.length * LH + 30 + sigH + 90;
   const g = c.getContext('2d')!; g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#111';
@@ -60,8 +66,8 @@ function signedPage(title: string, text: string, sig: HTMLCanvasElement, name: s
  * The consent pop-up: the wording on top, then the patient signs here or staff confirm the paper form.
  * onDone gets the signed page's document id, or nothing for a paper form.
  */
-export function ConsentForm({ title, text, patient, procedureSessionId, okLabel, onClose, onDone }: {
-  title: string; text: string; patient: { id: string; fullName: string }; procedureSessionId?: string; okLabel: string;
+export function ConsentForm({ title, subtitle, text, patient, procedureSessionId, okLabel, onClose, onDone }: {
+  title: string; subtitle?: string; text: string; patient: { id: string; fullName: string }; procedureSessionId?: string; okLabel: string;
   onClose: () => void; onDone: (documentId?: string) => void;
 }) {
   const [how, setHow] = useState<'sign' | 'paper'>('sign'); const [ink, setInk] = useState(false); const [saving, setSaving] = useState(false);
@@ -77,14 +83,14 @@ export function ConsentForm({ title, text, patient, procedureSessionId, okLabel,
     } catch (e) { toast(errText(e), 'err'); } finally { setSaving(false); }
   };
   return (
-    <Modal title={title} subtitle={`${patient.fullName} · asked once`} onClose={onClose} width="max-w-lg" dirty={ink}>
+    <Modal title={title} subtitle={subtitle ?? `${patient.fullName} · asked once`} onClose={onClose} width="max-w-lg" dirty={ink}>
       <div className="mb-3 flex gap-2">
         <button className={`btn btn-sm ${how === 'sign' ? 'btn-primary' : ''}`} aria-pressed={how === 'sign'} onClick={() => setHow('sign')}><Icon name="edit" />Patient signs here</button>
         <button className={`btn btn-sm ${how === 'paper' ? 'btn-primary' : ''}`} aria-pressed={how === 'paper'} onClick={() => setHow('paper')}>Paper form filed</button>
       </div>
       {how === 'sign' ? (<>
         <p className="mb-2 text-sm text-ink-2">Hand the tablet to the patient. They read this and sign in the box with a finger.</p>
-        <div className="mb-3 max-h-44 overflow-y-auto rounded-[10px] border border-line bg-surface-2 p-3 text-[13.5px] leading-relaxed text-ink">{text}</div>
+        <div className="mb-3 max-h-44 overflow-y-auto rounded-[10px] border border-line bg-surface-2 p-3 text-[13.5px] leading-relaxed whitespace-pre-line text-ink">{text}</div>
         <SignaturePad pad={pad} onInk={setInk} />
         <div className="modal-foot">
           <button className="btn btn-ghost" disabled={!ink || saving} onClick={clear}>Clear</button>

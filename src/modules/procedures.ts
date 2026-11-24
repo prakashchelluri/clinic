@@ -19,15 +19,21 @@ import { sessionDef } from '../lib/procPrice.js';
 type Consent = { grantedAt: string; by: string; how?: string; documentId?: string };
 const consentKey = (procedureId: string) => `procedure:${procedureId}`;
 /** The patient's consent for this procedure, kept on the patient (one per procedure type, recorded at the first Start).
- *  A sitting started before consent was stored counts as consent given: the old Start asked for the signed form on the first sitting. */
-export async function procedureConsent(tx: Tx, t: string, ps: { id: string; patientId: string; procedureId: string | null }): Promise<{ consentNeeded: boolean; consent: Consent | null }> {
+ *  It lasts the procedure's consentMonths (empty = for good); after that Start asks for it again (consentExpired).
+ *  A sitting started before consent was stored, within that time, counts as consent given: the old Start asked for the signed form on the first sitting.
+ *  consentText: the procedure's own wording, when it has one. */
+export async function procedureConsent(tx: Tx, t: string, ps: { id: string; patientId: string; procedureId: string | null }): Promise<{ consentNeeded: boolean; consent: Consent | null; consentExpired?: boolean; consentText?: string | null }> {
   if (!ps.procedureId) return { consentNeeded: false, consent: null };
+  const pr = await tx.select({ text: procedureCatalog.consentText, months: procedureCatalog.consentMonths }).from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]);
+  const since = pr?.months ? new Date(Date.now() - pr.months * 30.44 * 864e5) : null; // consent given before this has run out
+  const x = { consentText: pr?.text ?? null };
   const p = await tx.select({ consents: patient.consents }).from(patient).where(and(eq(patient.id, ps.patientId), eq(patient.tenantId, t))).then((r) => r[0]);
   const on = p?.consents?.[consentKey(ps.procedureId)];
-  if (on) return { consentNeeded: false, consent: on };
+  if (on && (!since || new Date(on.grantedAt) >= since)) return { consentNeeded: false, consent: on, ...x };
+  if (on) return { consentNeeded: true, consent: null, consentExpired: true, ...x };
   const [{ n }] = await tx.select({ n: sql<number>`count(*)::int` }).from(procedureSession).where(and(eq(procedureSession.tenantId, t), eq(procedureSession.patientId, ps.patientId), eq(procedureSession.procedureId, ps.procedureId),
-    sql`${procedureSession.state} in ('in_progress','completed')`, sql`${procedureSession.id} <> ${ps.id}`));
-  return n ? { consentNeeded: false, consent: { grantedAt: '', by: '', how: 'given at an earlier session' } } : { consentNeeded: true, consent: null };
+    sql`${procedureSession.state} in ('in_progress','completed')`, sql`${procedureSession.id} <> ${ps.id}`, ...(since ? [gte(procedureSession.day, since.toISOString().slice(0, 10))] : [])));
+  return n ? { consentNeeded: false, consent: { grantedAt: '', by: '', how: 'given at an earlier session' }, ...x } : { consentNeeded: true, consent: null, ...x };
 }
 
 /** A procedure's form: the version this session was filled with, else the procedure's latest. */

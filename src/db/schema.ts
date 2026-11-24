@@ -125,6 +125,8 @@ export const procedureCatalog = pgTable('procedure_catalog', {
   totalPaise: integer('total_paise'),                        // upfront: the total for all its sessions (pricePaise is then its share per session)
   practitionerId: uuid('practitioner_id'),                   // the doctor who conducts it; booking picks them first
   validFor: integer('valid_for'), validUnit: text('valid_unit'), // a course of it is valid for N days | months from the day it is agreed; empty = no expiry
+  consentText: text('consent_text'),                          // what the patient signs before the first session; empty = the standard text
+  consentMonths: integer('consent_months').default(12),       // the signed consent is asked again after this many months; empty = never
   active: boolean('active').notNull().default(true),
 });
 export type SessionDef = { name: string; minutes: number; gapDays: number; note?: string };

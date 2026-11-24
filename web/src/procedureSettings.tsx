@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { patch, post, errText } from './api';
+import { procedureConsentText } from './consent';
 import { Icon, Modal, MoneyInput, NumInput, money, toPaise, toast } from './ui';
 
 export type SessionDef = { name: string; minutes: number; gapDays: number; note?: string };
@@ -24,6 +25,7 @@ export function ProcedureForm({ value, cfg, onClose, onSaved }: { value: any; cf
     total: value.totalPaise ? String(value.totalPaise / 100) : '', per: value.pricePaise != null ? String(value.pricePaise / 100) : '',
     validFor: value.validFor ? String(value.validFor) : '', validUnit: (value.validUnit ?? 'months') as 'days' | 'months', noExpiry: !value.validFor,
     bufferMinutes: String(value.bufferMinutes ?? 0), requiredCapability: value.requiredCapability ?? '', taxRateBp: value.taxRateBp ?? 0, requiresMainDoctor: !!value.requiresMainDoctor, active: value.active !== false,
+    consentText: value.consentText ?? '', consentMonths: value.id && value.consentMonths == null ? '' : String(value.consentMonths ?? 12),
   });
   const [rows, setRows] = useState<Row[]>(value.id ? sessionsOf(value).map(toRow) : [toRow({ name: 'Session 1', minutes: 30, gapDays: 0 })]);
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
@@ -35,14 +37,15 @@ export function ProcedureForm({ value, cfg, onClose, onSaved }: { value: any; cf
   const caps = [...new Set<string>(cfg.rooms.flatMap((r: any) => r.capabilities))];
   const n = rows.length; const total = toPaise(f.total); const per = toPaise(f.per);
   const rowBad = (x: Row, i: number) => !x.name.trim() || !(Number(x.minutes) >= 5 && Number(x.minutes) <= 600) || (i > 0 && !(Number(x.gapDays) >= 0 && Number(x.gapDays) <= 365));
-  const bad = { name: !f.name.trim(), price: f.pricing === 'upfront' ? !(total > 0) : f.per === '' || per < 0, valid: !f.noExpiry && !(Number(f.validFor) >= 1 && Number(f.validFor) <= 60), rows: rows.some(rowBad) };
+  const bad = { name: !f.name.trim(), price: f.pricing === 'upfront' ? !(total > 0) : f.per === '' || per < 0, valid: !f.noExpiry && !(Number(f.validFor) >= 1 && Number(f.validFor) <= 60), rows: rows.some(rowBad), consent: f.consentMonths !== '' && !(Number(f.consentMonths) >= 1 && Number(f.consentMonths) <= 120) };
   const save = useMutation({
     mutationFn: () => {
       const b = { name: f.name.trim(), practitionerId: f.practitionerId || null, pricing: f.pricing,
         ...(f.pricing === 'upfront' ? { totalPaise: total } : { pricePaise: per, totalPaise: null }),
         validFor: f.noExpiry ? null : Number(f.validFor), validUnit: f.noExpiry ? null : f.validUnit,
         sessions: rows.map((x, i) => ({ name: x.name.trim(), minutes: Number(x.minutes), gapDays: i ? Number(x.gapDays) || 0 : 0, ...(x.note.trim() ? { note: x.note.trim() } : {}) })),
-        bufferMinutes: Number(f.bufferMinutes) || 0, requiredCapability: f.requiredCapability || null, taxRateBp: f.taxRateBp, requiresMainDoctor: f.requiresMainDoctor, ...(value.id ? { active: f.active } : {}) };
+        bufferMinutes: Number(f.bufferMinutes) || 0, requiredCapability: f.requiredCapability || null, taxRateBp: f.taxRateBp, requiresMainDoctor: f.requiresMainDoctor,
+        consentText: f.consentText.trim() || null, consentMonths: f.consentMonths === '' ? null : Number(f.consentMonths), ...(value.id ? { active: f.active } : {}) };
       return value.id ? patch(`/admin/procedures/${value.id}`, b) : post('/admin/procedures', b);
     },
     onSuccess: () => { toast(value.id ? 'Procedure saved' : 'Procedure added'); onSaved(); onClose(); },
@@ -88,6 +91,19 @@ export function ProcedureForm({ value, cfg, onClose, onSaved }: { value: any; cf
         </div>
 
         <details className="rounded-lg border border-line px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium">Consent {f.consentText.trim() ? '· own wording' : '· standard wording'}</summary>
+          <div className="mt-3 space-y-3">
+            <div><label className="label" htmlFor="pf-consent">What the patient reads and signs before the first session</label>
+              <textarea id="pf-consent" rows={6} maxLength={4000} className="input" placeholder={procedureConsentText('<patient name>', f.name.trim() || 'this procedure')} value={f.consentText} onChange={(e) => set('consentText', e.target.value)} />
+              <div className="mt-1 text-xs text-muted">Leave empty to use the standard text shown. Your own text starts with the patient's name: "I, &lt;name&gt;, have read the following about {f.name.trim() || 'this procedure'} and agree to it."</div></div>
+            <div><span className="label">Ask again after</span><div className="flex flex-wrap items-center gap-2 text-sm">
+              <NumInput aria-label="Consent lasts months" max={120} disabled={f.consentMonths === ''} className={`input !w-16 ${bad.consent ? '!border-rose' : ''}`} value={f.consentMonths} onChange={(e) => set('consentMonths', e.target.value)} /><span className="text-muted">months</span>
+              <label className="flex items-center gap-1.5"><input type="checkbox" className="accent-ink" checked={f.consentMonths === ''} onChange={(e) => set('consentMonths', e.target.checked ? '' : '12')} />Never</label></div>
+              <div className="mt-1 text-xs text-muted">After this, the next Start asks the patient to sign again.</div></div>
+          </div>
+        </details>
+
+        <details className="rounded-lg border border-line px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium">Room, GST and other rules</summary>
           <div className="mt-3 space-y-3">
             <div><span className="label">Needs a room with</span><div className="flex flex-wrap gap-1"><button type="button" className={`toggle-opt ${!f.requiredCapability ? 'on' : ''}`} onClick={() => set('requiredCapability', '')}>Any room</button>{caps.map((c) => <button key={c} type="button" className={`toggle-opt ${f.requiredCapability === c ? 'on' : ''}`} onClick={() => set('requiredCapability', c)}>{c}</button>)}</div></div>
@@ -99,7 +115,7 @@ export function ProcedureForm({ value, cfg, onClose, onSaved }: { value: any; cf
           </div>
         </details>
 
-        <div className="modal-foot"><span className="mr-auto text-xs text-rose">{bad.rows ? 'Each session needs a name, at least 5 minutes, and a gap of 0–365 days.' : bad.valid ? 'Valid for 1 to 60, or tick No expiry.' : ''}</span>
+        <div className="modal-foot"><span className="mr-auto text-xs text-rose">{bad.rows ? 'Each session needs a name, at least 5 minutes, and a gap of 0–365 days.' : bad.valid ? 'Valid for 1 to 60, or tick No expiry.' : bad.consent ? 'Ask for consent again after 1 to 120 months, or tick Never.' : ''}</span>
           <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
           <button type="button" className="btn btn-primary" disabled={Object.values(bad).some(Boolean) || save.isPending} onClick={() => save.mutate()}><Icon name="check" />{value.id ? 'Save procedure' : 'Add procedure'}</button></div>
       </div>

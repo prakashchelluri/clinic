@@ -335,7 +335,8 @@ export function adminRoutes(app: FastifyInstance) {
   // Upfront: the total for all sessions, its share per session is kept as the session price (for a session added later).
   const More = z.object({ sessions: z.array(z.object({ name: z.string().trim().min(1).max(40), minutes: z.number().int().min(5).max(600), gapDays: z.number().int().min(0).max(365), note: z.string().trim().max(200).optional() })).min(1).max(60).optional(),
     pricing: z.enum(['upfront', 'per_session']).optional(), totalPaise: z.number().int().min(0).nullable().optional(), practitionerId: z.string().uuid().nullable().optional(),
-    validFor: z.number().int().min(1).max(60).nullable().optional(), validUnit: z.enum(['days', 'months']).nullable().optional() });
+    validFor: z.number().int().min(1).max(60).nullable().optional(), validUnit: z.enum(['days', 'months']).nullable().optional(),
+    consentText: z.string().trim().max(4000).nullable().optional().transform((v) => v || null), consentMonths: z.number().int().min(1).max(120).nullable().optional() });
   const procBody = (raw: any, partial: boolean) => {
     const b: any = { ...(partial ? ProcIn.partial() : ProcIn).parse(raw), ...More.parse(raw) };
     if (b.sessions) { b.typicalSittings = b.sessions.length; b.typicalMinutes = b.sessions[0].minutes; }

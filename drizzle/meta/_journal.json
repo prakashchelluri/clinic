@@ -379,6 +379,13 @@
       "when": 1797100000000,
       "tag": "0053_bill_dated_with_charge",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1797200000000,
+      "tag": "0054_procedure_consent",
+      "breakpoints": true
     }
   ]
 }
