@@ -9,6 +9,7 @@ import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { MSG, patientLang } from '../lib/patientText.js';
 import { clinical } from './patients.js';
 import { dayBounds } from './billing.js';
+import { shortCache } from '../lib/writes.js';
 
 const KINDS = ['review', 'missed_visit', 'missed_sitting', 'schedule', 'advised', 'confirm_week', 'confirm_day'] as const;
 type Kind = (typeof KINDS)[number];
@@ -133,6 +134,8 @@ export async function markMissed(tx: Tx, ctx: Ctx) {
   return rows.length;
 }
 
+const menuCounts = shortCache<{ calls: number; sittings: number; unconfirmed: number; toSend: { n: number; week: string | null } }>(60_000);
+
 export function followupRoutes(app: FastifyInstance) {
   route(app, 'get', '/followups', 'worklist.read', async (req, tx) => {
     await markMissed(tx, req.ctx);
@@ -145,7 +148,9 @@ export function followupRoutes(app: FastifyInstance) {
 
   /** The side menu's badges. Calls: what the Calls page lists for today.
    *  Procedures: today's sittings still to happen, and how many of them nobody has confirmed with the patient. */
-  route(app, 'get', '/followups/menu-counts', 'worklist.read', async (req, tx) => {
+  // The menu badges, asked for every 30 seconds by every open screen: the same answer is kept for a minute per clinic, and made again
+  // as soon as anything is saved. Building the whole Calls list to count it took 250-700 ms on the free server.
+  route(app, 'get', '/followups/menu-counts', 'worklist.read', async (req, tx) => menuCounts(`${req.ctx.tenantId}|${todayIn(req.ctx.timezone)}|${can(req.perms, 'worklist.write')}`, async () => {
     await markMissed(tx, req.ctx);
     const t = req.ctx.tenantId; const today = todayIn(req.ctx.timezone);
     // what the Calls page shows for today: due today, or late by up to 30 days (older ones sit behind a link); a call-back day replaces the due day
@@ -157,7 +162,7 @@ export function followupRoutes(app: FastifyInstance) {
       .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, today), eq(procedureSession.state, 'confirmed'), eq(procedureSession.approval, 'draft'), sql`${procedureSession.practitionerId} is not null`)) : [{ n: 0, first: null }];
     const week = d.first ? addDays(d.first, -((new Date(d.first + 'T00:00:00Z').getUTCDay() + 6) % 7)) : null;
     return { calls, sittings: s.n, unconfirmed: s.unconfirmed, toSend: { n: d.n, week } };
-  });
+  }));
 
   /** One call attempt. Call later needs a date (a Sunday asks to be confirmed); Not interested needs a reason; No answer can send a short message. */
   route(app, 'post', '/followups/log', 'worklist.write', async (req, tx) => {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import * as schema from './schema.js';
@@ -8,6 +9,8 @@ export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 const url = process.env.DATABASE_URL;
 let db: Db;
 let migrate: () => Promise<void>;
+/** Open the database connections now, before anyone is waiting (Postgres only; a no-op for the embedded database). */
+let warmPool: () => Promise<void> = async () => {};
 
 if (url) {
   const { drizzle } = await import('drizzle-orm/postgres-js');
@@ -33,6 +36,12 @@ if (url) {
   };
   if (prepare) usePrepare(client);
   db = drizzle(client, { schema });
+  // Each new connection is a TLS handshake and a password check with the database: ~250 ms each on the free server's tenth of a CPU.
+  // Opened lazily, the first screen after a restart paid for ten of them at once; opened at start-up, nobody is waiting yet.
+  warmPool = async () => {
+    const held = await Promise.all(Array.from({ length: 10 }, () => client.reserve()));
+    await Promise.all(held.map((c) => c`select 1`)); held.forEach((c) => c.release());
+  };
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });
 } else {
   // ponytail: embedded Postgres for local dev/tests; superuser bypasses RLS, so app-level tenant filters still apply
@@ -55,7 +64,7 @@ if (url) {
   migrate = () => m(db as any, { migrationsFolder: 'drizzle' });
 }
 
-export { db, migrate };
+export { db, migrate, warmPool };
 
 /** Run fn inside a transaction with the tenant set for RLS. */
 export async function withTenant<T>(tenantId: string, userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -65,18 +74,31 @@ export async function withTenant<T>(tenantId: string, userId: string, fn: (tx: T
   });
 }
 
-/** Enable + force RLS on every tenant table. Idempotent; run after migrations. */
+/** Enable + force RLS on every tenant table, with the tenant policy, and the login lookup on app_user. Idempotent; run after migrations.
+ *  Each start first checks, in one query, that every table still has it at this version (stamped on each policy as a comment) and then does
+ *  nothing: re-creating ~190 policies one by one was half of the start-up time, and a sleeping free server starts on the first click. */
 export async function applyRls() {
-  for (const t of schema.TENANT_TABLES) {
-    const stmts = [
-      `alter table "${t}" enable row level security`,
-      `alter table "${t}" force row level security`,
-      `drop policy if exists tenant_isolation on "${t}"`,
-      `create policy tenant_isolation on "${t}" using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid) with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)`,
-    ];
-    for (const q of stmts) await db.execute(sql.raw(q));
-  }
+  const tables = [...schema.TENANT_TABLES];
+  const tenantPolicy = `using (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid) with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)`;
   // Login runs before a tenant is known: permit reads of app_user only when app.tenant_id is unset.
-  await db.execute(sql.raw(`drop policy if exists login_lookup on "app_user"`));
-  await db.execute(sql.raw(`create policy login_lookup on "app_user" for select using (coalesce(current_setting('app.tenant_id', true), '') = '')`));
+  const loginPolicy = `for select using (coalesce(current_setting('app.tenant_id', true), '') = '')`;
+  const stamp = 'rls:' + createHash('sha256').update(JSON.stringify([tables, tenantPolicy, loginPolicy])).digest('hex').slice(0, 16);
+  const r: any = await db.execute(sql`select
+    (select count(*)::int from pg_class c join pg_namespace ns on ns.oid = c.relnamespace and ns.nspname = 'public'
+      join pg_policy p on p.polrelid = c.oid and p.polname = 'tenant_isolation' join pg_description d on d.objoid = p.oid and d.classoid = 'pg_policy'::regclass
+      where c.relname in ${tables} and c.relrowsecurity and c.relforcerowsecurity and d.description = ${stamp}) as ok,
+    (select count(*)::int from pg_policy p join pg_class c on c.oid = p.polrelid join pg_description d on d.objoid = p.oid and d.classoid = 'pg_policy'::regclass
+      where c.relname = 'app_user' and p.polname = 'login_lookup' and d.description = ${stamp}) as login`);
+  const row = (r.rows ?? r)[0];
+  if (Number(row.ok) === tables.length && Number(row.login) === 1) return;
+  const stmts = tables.flatMap((t) => [
+    `alter table "${t}" enable row level security`,
+    `alter table "${t}" force row level security`,
+    `drop policy if exists tenant_isolation on "${t}"`,
+    `create policy tenant_isolation on "${t}" ${tenantPolicy}`,
+    `comment on policy tenant_isolation on "${t}" is '${stamp}'`,
+  ]);
+  stmts.push(`drop policy if exists login_lookup on "app_user"`, `create policy login_lookup on "app_user" ${loginPolicy}`, `comment on policy login_lookup on "app_user" is '${stamp}'`);
+  // all or nothing, and sent together (they run in order on the one connection)
+  await db.transaction(async (tx) => { await Promise.all(stmts.map((q) => tx.execute(sql.raw(q)))); });
 }

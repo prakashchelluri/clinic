@@ -138,22 +138,29 @@ export function dayCloseRoutes(app: FastifyInstance) {
    *  (days never closed, money still due, EMI the lender has not paid). Stock and doctors come from their own endpoints. */
   route(app, 'get', '/owner/summary', 'finance.read', async (req, tx) => {
     const t = req.ctx.tenantId; const tz = req.ctx.timezone; const today = todayIn(tz); const yesterday = addDays(today, -1);
-    const closedRows = await tx.select().from(dayClose).where(and(eq(dayClose.tenantId, t), gte(dayClose.day, addDays(today, -14))));
+    // Every figure here is money by day, so it is read once for the last two weeks (the week so far and any unclosed day are in it),
+    // not once per day: twenty separate reads made this the slowest screen. The other reads go out together.
+    const from = addDays(today, -14);
+    const [closedRows, range, worked, dues, waiting, emi] = await Promise.all([
+      tx.select().from(dayClose).where(and(eq(dayClose.tenantId, t), gte(dayClose.day, from))),
+      moneyByDay(tx, t, tz, from, today),
+      // a day with patients or money in the last two weeks that nobody closed
+      tx.select({ day: visit.day }).from(visit).where(and(eq(visit.tenantId, t), gte(visit.day, from), lt(visit.day, today))).groupBy(visit.day),
+      tx.select({ total: sql<number>`coalesce(sum(${chargeBalance}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId}) filter (where ${chargeBalance} > 0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due'))),
+      tx.execute(sql`select coalesce(sum((l->>'offPaise')::int),0)::int as n from discount_ask a, jsonb_array_elements(a.lines) l where a.tenant_id = ${t} and a.status = 'pending' and l ? 'chargeId'`),
+      tx.select({ total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int`, n: sql<number>`count(*)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt))),
+    ]);
     const closedOn = new Map(closedRows.map((r) => [r.day, r]));
-    const y = await dayFigures(tx, t, tz, yesterday); const yc = closedOn.get(yesterday);
-    const td = await dayFigures(tx, t, tz, today);
+    const moneyOn = (d: string) => range.days[d] ?? emptyMoney();
+    const y = { money: moneyOn(yesterday) }; const yc = closedOn.get(yesterday);
+    const td = { money: moneyOn(today) };
     // Monday of this week up to today
     const dow = (new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7;
     const week = [];
-    for (let i = dow; i >= 0; i--) { const d = addDays(today, -i); week.push({ day: d, totalPaise: d === today ? td.money.total.total : d === yesterday ? y.money.total.total : (await dayFigures(tx, t, tz, d)).money.total.total }); }
-    // a day with patients or money in the last two weeks that nobody closed
-    const worked = await tx.select({ day: visit.day }).from(visit).where(and(eq(visit.tenantId, t), gte(visit.day, addDays(today, -14)), lt(visit.day, today))).groupBy(visit.day);
+    for (let i = dow; i >= 0; i--) { const d = addDays(today, -i); week.push({ day: d, totalPaise: moneyOn(d).total.total }); }
     const unclosed = [];
-    for (const { day } of worked.sort((a, b) => a.day.localeCompare(b.day))) if (!closedOn.has(day)) { const f = day === yesterday ? y : await dayFigures(tx, t, tz, day); unclosed.push({ day, money: f.money }); }
-    const dues = await tx.select({ total: sql<number>`coalesce(sum(${chargeBalance}),0)::int`, patients: sql<number>`count(distinct ${charge.patientId}) filter (where ${chargeBalance} > 0)::int` }).from(charge).where(and(eq(charge.tenantId, t), eq(charge.status, 'due')));
-    const waiting = await tx.execute(sql`select coalesce(sum((l->>'offPaise')::int),0)::int as n from discount_ask a, jsonb_array_elements(a.lines) l where a.tenant_id = ${t} and a.status = 'pending' and l ? 'chargeId'`);
+    for (const { day } of worked.sort((a, b) => a.day.localeCompare(b.day))) if (!closedOn.has(day)) unclosed.push({ day, money: moneyOn(day) });
     const waitingPaise = Number(((waiting as any).rows ?? waiting)[0]?.n ?? 0);
-    const emi = await tx.select({ total: sql<number>`coalesce(sum(${payment.amountPaise}),0)::int`, n: sql<number>`count(*)::int` }).from(payment).where(and(eq(payment.tenantId, t), eq(payment.method, 'emi'), isNull(payment.settledAt)));
     return {
       today, yesterday: { day: yesterday, money: y.money, closed: yc ? { by: yc.closedBy, at: yc.createdAt, cashDiffPaise: (yc.cashCountedPaise ?? 0) - ((yc.totals as any)?.drawer?.expectedCashPaise ?? 0), notes: yc.notes } : null },
       todayMoney: td.money, week, unclosed, dues: { totalPaise: dues[0]?.total ?? 0, patients: dues[0]?.patients ?? 0, waitingPaise }, emi: { totalPaise: emi[0]?.total ?? 0, n: emi[0]?.n ?? 0 },
