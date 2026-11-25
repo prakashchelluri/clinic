@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
-import { get, patch, post, qc, today, errText } from './api';
+import { get, patch, post, qc, today, errText, useMe } from './api';
 import { Chip, Drawer, Icon, Skeleton, ask, money, toast } from './ui';
 import { FlagChips } from './flags';
 import { PhotoCapture, usePhotos } from './photos';
@@ -55,6 +55,12 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
     onSuccess: (_r, b) => { setSigning(false); if (b.state === 'in_progress' && s?.form) nav(`/procedure-sessions/${id}`); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist', 'timeline', 'bills', 'courses', 'advance', 'procedure-plans'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'on_done' ? ` · treatment invoiced, ${money(s.money.amountPaise)}` : s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
     onError: (e) => toast(errText(e), 'err') });
   const s = q.data;
+  // waiting for the signed-in doctor: approve or send back right here, as on the Calendar
+  const me = useMe(); const toApprove = !!s && s.state === 'confirmed' && s.approval === 'sent' && !!me.data?.practitionerId && s.practitionerId === me.data.practitionerId;
+  const decide = useMutation({ mutationFn: (b: { action: 'approve' | 'change'; note?: string }) => post('/procedure-approvals', { ids: [id], ...b }),
+    onSuccess: (_r, b) => { ['procedure-session', 'calendar', 'psessions', 'pcounts', 'pweek', 'worklist', 'followups'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.action === 'approve' ? 'Approved. The patient gets a reminder the day before.' : 'Sent back to the coordinator with your note.'); },
+    onError: (e) => toast(errText(e), 'err') });
+  const sendBack = async () => { const a = await ask({ title: 'Send this session back to the coordinator?', body: 'It stays booked, flagged for the coordinator to move.', confirmLabel: 'Send back', cancelLabel: 'Keep it', field: { label: 'What should change', maxLength: 200 } }); if (a) decide.mutate({ action: 'change', note: a.value || undefined }); };
   const p = s?.patient;
   const conditions: any[] = p?.history?.conditions ?? [];
   const asked = conditions.length > 0 || (p?.history?.none ?? []).includes('conditions');
@@ -159,6 +165,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           )}
 
           <div className="mt-auto flex flex-wrap gap-2 border-t border-line pt-4">
+            {toApprove && <><button className="btn btn-sm btn-primary" disabled={decide.isPending} onClick={() => decide.mutate({ action: 'approve' })}><Icon name="check" />Approve</button><button className="btn btn-sm" disabled={decide.isPending} onClick={sendBack}>Send back</button></>}
             {extra}<button className="btn btn-sm" onClick={() => { onClose(); nav(`/patients/${p.id}`); }}><Icon name="eye" />View full profile</button>
           </div>
         </>)}
