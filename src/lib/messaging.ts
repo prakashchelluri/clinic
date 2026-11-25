@@ -62,9 +62,16 @@ export async function dispatchDue(now = new Date()) {
   return done;
 }
 
+let busy = false, again = false;
+/** Send what is due now (a chat reply should not wait for the next minute). A call during a run makes it run once more. */
+export async function sendNow() {
+  if (busy) { again = true; return; }
+  busy = true;
+  try { do { again = false; await dispatchDue(); } while (again); } catch (e) { console.warn('message dispatch failed', (e as Error).message); } finally { busy = false; }
+}
+
 export function startDispatcher(everyMs = 60_000) {
-  let busy = false;
-  const tick = async () => { if (busy) return; busy = true; try { await dispatchDue(); } catch (e) { console.warn('message dispatch failed', (e as Error).message); } finally { busy = false; } };
-  const h = setInterval(tick, everyMs); h.unref?.(); void tick();
+  const tick = () => void sendNow();
+  const h = setInterval(tick, everyMs); h.unref?.(); tick();
   return () => clearInterval(h);
 }

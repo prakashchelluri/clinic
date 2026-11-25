@@ -8,7 +8,7 @@ import { HttpError, can } from '../lib/auth.js';
 import { route } from '../lib/route.js';
 import { originOf } from '../lib/booking.js';
 import { assistantReady, handleIncoming, say } from '../lib/assistant.js';
-import { whatsappReady } from '../lib/messaging.js';
+import { sendNow, whatsappReady } from '../lib/messaging.js';
 
 /** Which clinic a WhatsApp number belongs to: the clinic's own Settings value, else WHATSAPP_CLINIC (one test number, one clinic). */
 async function clinicFor(phoneNumberId: string) {
@@ -35,6 +35,8 @@ function textOf(m: any): string {
 }
 
 export function chatRoutes(app: FastifyInstance) {
+  // A staff reply goes out once its transaction has committed, not at the next minute's run.
+  app.addHook('onResponse', async (req, rep) => { if (rep.statusCode < 300 && req.routeOptions.url?.endsWith('/chats/:id/reply')) void sendNow(); });
   // --- WhatsApp Cloud API webhook (public: Meta calls it). The raw body is kept for the signature check. ---
   app.register(async (hook) => {
     hook.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
@@ -56,7 +58,7 @@ export function chatRoutes(app: FastifyInstance) {
         if (!v.messages?.length) continue; // delivery receipts: nothing to do yet
         const t = await clinicFor(String(v.metadata?.phone_number_id ?? ''));
         if (!t) { req.log.warn({ id: v.metadata?.phone_number_id }, 'whatsapp message for an unknown number'); continue; }
-        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), ref: m.id, origin }).catch((e) => req.log.error(e, 'whatsapp message failed')));
+        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), ref: m.id, origin }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
       }
       // Meta wants a quick 200 and resends otherwise; the replies are worked out after answering (lines are kept once by their WhatsApp id)
       void Promise.all(work);

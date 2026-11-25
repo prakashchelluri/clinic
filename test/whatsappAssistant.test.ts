@@ -59,7 +59,7 @@ test('webhook: Meta verification, unsigned calls refused, a resent message kept 
   const lines = await linesOf(c.id);
   assert.deepEqual(lines.map((l: any) => [l.direction, l.by]), [['in', 'patient'], ['out', 'WhatsApp assistant']], 'one patient line, one holding reply');
   const out = await inT((tx) => tx.select().from(schema.message).where(and(eq(schema.message.tenantId, T.id), eq(schema.message.kind, 'chat'), eq(schema.message.toPhone, '9848011111'))));
-  assert.equal(out.length, 1, 'the holding reply is queued for WhatsApp'); assert.equal(out[0].status, 'pending');
+  assert.equal(out.length, 1, 'the holding reply is queued for WhatsApp'); assert.equal(out[0].status, 'logged', 'and handed to the sender at once, not at the next minute (logged: no WhatsApp token in tests)');
 });
 
 test('test chat: same path, nothing queued for a real phone; the Inbox lists it and staff replies go out', async () => {
