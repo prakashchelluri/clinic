@@ -101,11 +101,15 @@ test('week plan: draft, send, approve, change after sending, send back, own move
   assert.equal((await pending(s2.id)).length, 1);
   assert.equal((await D2('POST', '/procedure-sessions/place', { sittingId: s2.id, day: addDays(mon, 2), hour: 17 })).status, 403, 'another doctor cannot move it');
 
-  // this week waits for a send too, unless it was already sent
+  // a new booking waits as Not sent, this week too, even in a week already sent; sending the week again sends just it
   const c = await course('Week Plan Three', '9848012203');
+  const late = await C('POST', '/procedure-sessions/place', { recommendationId: c.rec.id, day: addDays(mon, 3), hour: 12 });
+  assert.equal(late.status, 200, JSON.stringify(late.body)); assert.equal(late.body.approval, 'draft', 'sent week: the new booking still waits');
+  assert.equal((await C('POST', `/procedure-weeks/${mon}/send`)).body.sent, 1);
+  assert.equal((await C('GET', `/procedure-sessions/${late.body.id}`)).body.approval, 'sent');
   const soon = addDays(today(), 1);
   const s3 = await C('POST', '/procedure-sessions/place', { recommendationId: c.rec.id, day: soon, hour: 19 });
-  if (s3.status === 200) assert.equal(s3.body.approval, (await C('GET', `/procedure-weeks/${weekOf(soon)}`)).body.sent ? 'sent' : 'draft');
+  if (s3.status === 200) assert.equal(s3.body.approval, 'draft');
 
   // unscheduling puts the course back in Pending schedules
   assert.equal((await C('PATCH', `/procedure-sessions/${s1.id}`, { state: 'cancelled', reason: 'Unscheduled' })).status, 200);

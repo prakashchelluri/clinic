@@ -92,14 +92,15 @@ export const weekOf = (day: string) => addDays(day, -((new Date(day + 'T00:00:00
 
 /**
  * The doctor's say on a sitting someone books or moves. Its own doctor booking or moving it approves it. Anyone else's goes to
- * that doctor: straight away when its week was already sent, otherwise it waits as a draft (this week too) until
+ * that doctor: a new booking always waits as a draft until it is sent from Week plan; a move or doctor change goes straight away when its week was already sent, otherwise it waits as a draft until
  * the coordinator sends the week. Every sitting has a doctor (required since 15 Nov 2026; older ones were given their course's).
  */
-export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string) {
+export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string, isNew = false) {
   const now = new Date().toISOString();
   const set = (approval: 'approved' | 'sent' | 'draft', changed: boolean) => ({ approval, approvalNote: null, approvedBy: approval === 'approved' ? ctx.name : null, approvedAt: approval === 'approved' ? now : null, changed, bookedBy: ctx.userId });
   if (!practitionerId) return set('draft', false);
   if (practitionerId === ctx.practitionerId) return set('approved', false);
+  if (isNew) return set('draft', false); // a new booking waits to be sent from Week plan, even in a week already sent
   const wk = weekOf(day);
   const sent = await tx.select({ id: procedureWeek.id }).from(procedureWeek).where(and(eq(procedureWeek.tenantId, ctx.tenantId), eq(procedureWeek.weekStart, wk))).then((r) => r[0]);
   return sent ? set('sent', true) : set('draft', false);
@@ -154,7 +155,7 @@ async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$i
       if ((await conflicts(tx, t, day, startTime, endTime, done.roomId, doctor)).length) continue;
       const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, done.recommendationId), sql`${procedureSession.state} <> 'cancelled'`));
       const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: done.recommendationId, patientId: done.patientId, procedureId: done.procedureId, practitionerId: doctor, roomId: done.roomId,
-        sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, doctor, day)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
+        sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, doctor, day, true)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
       await planSittingReminder(tx, t, ps.id);
       if (doctor) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doctor, roomId: done.roomId, day, startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
       await emit(tx, ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day, startTime, endTime, roomId: done.roomId, practitionerId: doctor, byPlan: true });
@@ -216,7 +217,7 @@ export function procedureRoutes(app: FastifyInstance) {
     // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
     const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
-      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).returning();
+      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, true)) }).returning();
     await planSittingReminder(tx, t, ps.id);
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
     await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
