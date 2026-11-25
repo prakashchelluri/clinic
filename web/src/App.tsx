@@ -75,6 +75,9 @@ const GROUP: Record<string, string> = { '/worklist': 'Care', '/pharmacy': 'Stock
 
 /** The side menu (v61 · Pro): dark, every allowed page by name, counts as small badges, quiet group headings.
  *  The same menu on desktop (fixed) and on phones (the drawer). */
+// tables, lists and calendars fill wide screens; forms, settings, help and records keep the readable width
+const WIDE = /^\/(dashboard|patients|worklist|calls|tests|pharmacy|inventory|clinic|billing|accounts|reports|expenses|audit|platform)\/?$/;
+
 function Sidebar({ items, active, clinic, me, roles, badges = {}, onSignOut, onNavigate, slim = false, theme, onTheme, onCollapse }: { /** shrink the menu to icons, or open it again (at its foot, not by the back button) */ onCollapse?: () => void; items: NavItem[]; active: NavItem | null; clinic: string; me: any; roles: string[]; badges?: Badges; onSignOut: () => void; onNavigate?: () => void; slim?: boolean; theme?: string; onTheme?: (e: React.MouseEvent) => void }) {
   const link = (n: NavItem) => (
     <Link key={n.to} to={n.to} viewTransition onClick={onNavigate} aria-current={active?.to === n.to ? 'page' : undefined} title={slim ? n.label : undefined} className={`nav-item ${active?.to === n.to ? 'active' : ''}`}>
@@ -138,7 +141,8 @@ export function App() {
   const [, setPageSearch] = useState<string | null>(null); // a hook: before the early returns below. What this page's list is searched by, when it has one
   const [theme, toggleTheme] = useTheme();
   // the menu as icons only, kept on this computer; an open record slims it anyway
-  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('side.collapsed') === '1'; } catch { return false; } });
+  // with no choice saved yet, a tablet-width screen starts with icons only so the page gets the room
+  const [collapsed, setCollapsed] = useState(() => { try { const v = localStorage.getItem('side.collapsed'); return v === null ? window.innerWidth < 1280 : v === '1'; } catch { return false; } });
   const toggleSide = () => { const n = !collapsed; setCollapsed(n); try { localStorage.setItem('side.collapsed', n ? '1' : '0'); } catch { /* storage blocked */ } };
   const online = useOnline(); const offlineAt = useOffline();
   // menu badges (a hook: above the early returns), under the Calls list's own key so logging a call refreshes them too
@@ -248,7 +252,7 @@ export function App() {
 
         {offlineAt !== null && <div role="status" className="no-print sticky top-[64px] z-30 bg-amber-soft px-4 py-1.5 text-center text-[13px] font-semibold text-amber md:px-7">Offline{offlineAt ? ` · showing what was loaded at ${offlineAt}` : ''}. Nothing you change is saved until the internet is back.</div>}
 
-        <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || loc.pathname === '/dashboard' ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
+        <div className={`mx-auto w-full px-4 py-4 md:px-7 md:py-5 ${loc.pathname.startsWith('/encounter') || WIDE.test(loc.pathname) ? 'max-w-none' : 'max-w-[1520px]'} ${fit ? 'md:flex md:min-h-0 md:flex-1 md:flex-col' : 'pb-16'}`}>
           <main key={loc.pathname.split('/')[1]} className={`page ${fit ? 'md:flex-1 md:min-h-0 md:flex md:flex-col' : ''}`}>{blocked ? <NoAccess what={pageRule?.label} /> : <PageSearchCtx.Provider value={setPageSearch}><PageError key={loc.pathname}><Outlet context={{ me: me.data, perms, cfg: cfg.data }} /></PageError></PageSearchCtx.Provider>}</main>
         </div>
       </div>
