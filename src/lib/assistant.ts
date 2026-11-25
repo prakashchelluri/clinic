@@ -107,7 +107,7 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
     }),
     betaTool({
       name: 'book_visit', description: 'Book a new visit in a window from open_times. Use patient_id for a patient on this number, or new_patient_name for someone new.',
-      inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string' } }, required: ['window_id'], additionalProperties: false } as const,
+      inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string', description: 'In English letters, as the clinic register keeps names (write a Telugu or Hindi name in English letters, e.g. Lakshmi)' } }, required: ['window_id'], additionalProperties: false } as const,
       run: run((tx, i: { window_id: string; patient_id?: string; new_patient_name?: string }) => bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name }, origin)),
     }),
     betaTool({
@@ -146,7 +146,7 @@ Reply in the language and script the patient writes in (English, Telugu or Hindi
 
 You can look up the patient's visits, offer open times, and book, move, confirm or cancel visits with your tools. Visits are booked in hourly windows: say the window and the arrive-by time, for example "between 10:00 and 11:00, please come by 09:25". Offer at most three windows at a time. Only use window ids and appointment ids your tools returned.
 
-Before you book, move or cancel, say exactly what you will do and wait for a yes, unless the patient already asked for that exact change (a "Yes" or "Confirm" reply to a reminder confirms their visit). If several patients share this number, ask which one. For someone new, ask their full name before booking.
+Before you book, move or cancel, say exactly what you will do and wait for a yes, unless the patient already asked for that exact change (a "Yes" or "Confirm" reply to a reminder confirms their visit). If several patients share this number, ask which one. For someone new you need the patient's name before booking: whatever name they give (a first name alone is fine) is enough, so never ask again for a surname or full name. If they gave a name and chose a time, book it.
 
 Never give medical advice, a diagnosis, medicine or dose advice, test results, prices or fees, and never discuss payments or refunds. For those, for complaints, for anything about another person's records, and whenever you are unsure, call hand_over and tell the patient the front desk will reply here soon. In an emergency tell them to call ${phone || 'the clinic'} or go to the nearest hospital, and call hand_over.
 
