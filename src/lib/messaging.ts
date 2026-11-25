@@ -1,4 +1,4 @@
-import { and, asc, eq, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 import { db, withTenant } from '../db/index.js';
 import { message, tenant } from '../db/schema.js';
 import { bookingSettings } from './booking.js';
@@ -34,22 +34,30 @@ async function sendWhatsapp(m: Outgoing, providerTemplates: Record<string, strin
   } catch (e: any) { return { status: 'failed', error: String(e?.message ?? e).slice(0, 300) }; }
 }
 
-/** Send everything due, clinic by clinic (each inside its own RLS scope). Failures retry up to 3 times. */
+const LEASE_MS = 10 * 60_000;           // a claimed message is hidden this long: a crash mid-send frees it again, a second server never takes it
+const REMINDER_LATE_MS = 6 * 3_600_000; // a reminder this overdue (the server was asleep) is dropped, never sent after the visit
+
+/** Send everything due, clinic by clinic. Rows are claimed in a short transaction and sent outside it, so a slow WhatsApp call holds no
+ *  database lock and two servers never send the same message. Failures retry up to 3 times. */
 export async function dispatchDue(now = new Date()) {
   let done = 0;
   for (const t of await db.select().from(tenant).where(eq(tenant.kind, 'clinic'))) {
     const cfg = bookingSettings(t.settings).messages;
-    await withTenant(t.id, SYSTEM_USER, async (tx) => {
-      const due = await tx.select().from(message).where(and(eq(message.tenantId, t.id), eq(message.status, 'pending'), lte(message.sendAfter, now.toISOString()))).orderBy(asc(message.sendAfter)).limit(50);
-      for (const m of due) {
-        const r = await sendWhatsapp(m, cfg.providerTemplates, cfg.language);
-        const attempts = m.attempts + 1;
-        const status = r.status === 'failed' && attempts < 3 ? 'pending' : r.status;
-        await tx.update(message).set({ status, attempts, sentAt: r.status === 'failed' ? null : now.toISOString(), providerRef: r.ref ?? null, error: r.error ?? null,
-          sendAfter: status === 'pending' ? new Date(now.getTime() + attempts * 5 * 60_000).toISOString() : m.sendAfter }).where(eq(message.id, m.id));
-        done++;
-      }
+    const due = await withTenant(t.id, SYSTEM_USER, async (tx) => {
+      await tx.update(message).set({ status: 'skipped', error: 'too late to send' })
+        .where(and(eq(message.tenantId, t.id), eq(message.kind, 'reminder'), inArray(message.status, ['pending', 'sending']), lte(message.sendAfter, new Date(now.getTime() - REMINDER_LATE_MS).toISOString())));
+      const ids = (await tx.select({ id: message.id }).from(message).where(and(eq(message.tenantId, t.id), inArray(message.status, ['pending', 'sending']), lte(message.sendAfter, now.toISOString())))
+        .orderBy(asc(message.sendAfter)).limit(50).for('update', { skipLocked: true })).map((r) => r.id);
+      return ids.length ? tx.update(message).set({ status: 'sending', sendAfter: new Date(now.getTime() + LEASE_MS).toISOString() }).where(inArray(message.id, ids)).returning() : [];
     });
+    for (const m of due) {
+      const r = await sendWhatsapp(m, cfg.providerTemplates, cfg.language);
+      const attempts = m.attempts + 1;
+      const status = r.status === 'failed' && attempts < 3 ? 'pending' : r.status;
+      await withTenant(t.id, SYSTEM_USER, (tx) => tx.update(message).set({ status, attempts, sentAt: r.status === 'failed' ? null : now.toISOString(), providerRef: r.ref ?? null, error: r.error ?? null,
+        sendAfter: status === 'pending' ? new Date(now.getTime() + attempts * 5 * 60_000).toISOString() : now.toISOString() }).where(eq(message.id, m.id)));
+      done++;
+    }
   }
   return done;
 }

@@ -225,6 +225,24 @@ export const message = pgTable('message', {
   procedureSessionId: uuid('procedure_session_id'), // the sitting a day-before reminder is for
 }, (t) => [index('msg_due').on(t.status, t.sendAfter), index('msg_appt').on(t.tenantId, t.appointmentId), index('msg_sitting').on(t.tenantId, t.procedureSessionId)]);
 
+// One WhatsApp conversation per phone number. The assistant answers until it hands over; then staff reply from the Inbox.
+export const chat = pgTable('chat', {
+  ...tenantCols,
+  phone: text('phone').notNull(),                       // 10-digit mobile
+  status: text('status').notNull().default('assistant'), // assistant | staff | closed
+  reason: text('reason'),                               // why the front desk is needed
+  lastAt: ts('last_at').notNull().defaultNow(),
+  unread: integer('unread').notNull().default(0),       // patient lines since staff last opened it
+}, (t) => [uniqueIndex('chat_phone').on(t.tenantId, t.phone), index('chat_last').on(t.tenantId, t.lastAt)]);
+export const chatMessage = pgTable('chat_message', {
+  ...tenantCols,
+  chatId: uuid('chat_id').notNull().references(() => chat.id),
+  direction: text('direction').notNull(), // in | out
+  by: text('by').notNull(),               // patient | assistant | the staff member's name
+  body: text('body').notNull(),
+  providerRef: text('provider_ref'),      // WhatsApp's id for an incoming line: Meta resends, we keep one
+}, (t) => [index('chatmsg_chat').on(t.chatId, t.createdAt), uniqueIndex('chatmsg_ref').on(t.tenantId, t.providerRef)]);
+
 // A bulk message to many patients: what was said, to whom (as messages), by whom. Demo until WhatsApp is connected.
 export const broadcast = pgTable('broadcast', {
   ...tenantCols,
@@ -770,7 +788,7 @@ export const domainEvent = pgTable('domain_event', {
 export const TENANT_TABLES = [
   'branch', 'app_user', 'specialty', 'practitioner', 'form_definition', 'fee_category', 'medicine', 'procedure_catalog',
   'patient', 'session', 'appointment', 'visit', 'encounter', 'prescription_item', 'recommendation', 'course', 'discount_ask', 'bill', 'credit_note', 'credit_line', 'callback', 'quote', 'day_close', 'charge', 'payment',
-  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'lab_result',
+  'expense', 'pharmacy_sale', 'rx_template', 'tmpl', 'waitlist', 'audit_log', 'vendor', 'stock_doc', 'stock_batch', 'stock_move', 'vendor_owed', 'broadcast', 'document', 'room', 'calendar_block', 'procedure_session', 'procedure_week', 'numbering_sequence', 'domain_event', 'service', 'message', 'lab_result', 'chat', 'chat_message',
 ];
 
 export type FormField = {

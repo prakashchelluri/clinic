@@ -11,7 +11,7 @@ export const STATUS: Record<string, { label: string; tone: '' | 'clay' | 'sage' 
 };
 export const StatusChip = ({ s }: { s: string }) => <Chip tone={STATUS[s]?.tone ?? ''}>{STATUS[s]?.label ?? s}</Chip>;
 const MSG: Record<string, string> = { confirmation: 'Confirmation', reminder: 'Reminder', moved: 'Moved', cancelled: 'Cancelled', late: 'Doctor running late', reschedule: 'Asked to pick a new time' };
-const MSG_STATUS: Record<string, string> = { pending: 'due', sent: 'sent', logged: 'Not sent: WhatsApp not connected', failed: 'failed', skipped: 'not sent' };
+const MSG_STATUS: Record<string, string> = { pending: 'due', sending: 'sending', sent: 'sent', logged: 'Not sent: WhatsApp not connected', failed: 'failed', skipped: 'not sent' };
 
 /**
  * What the server says happened to the patient's WhatsApp (`whatsapp` on booking, move, cancel and remind responses).
@@ -48,7 +48,7 @@ export function AppointmentDrawer({ id, cfg, canWrite, onClose, onArrive }: { id
         {!a ? <Skeleton rows={6} /> : (<>
           <div className="flex items-center gap-2">
             <StatusChip s={a.status} />
-            <span className="truncate text-xs text-muted">{a.source === 'repeat' ? 'Repeat booking' : a.source === 'walk_in' ? 'Walk-in' : 'Booked by phone'} · {when(a.createdAt)}</span>
+            <span className="truncate text-xs text-muted">{a.source === 'repeat' ? 'Repeat booking' : a.source === 'walk_in' ? 'Walk-in' : a.source === 'whatsapp' ? 'Booked on WhatsApp' : 'Booked by phone'} · {when(a.createdAt)}</span>
           </div>
           <div>
             <div className="flex flex-wrap gap-1.5 text-xs">

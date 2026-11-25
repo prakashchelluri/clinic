@@ -26,11 +26,11 @@ async function clinicBySlug(slug: string) {
   if (!t) throw new HttpError(404, 'CLINIC_NOT_FOUND');
   return t;
 }
-const ctxFor = (t: any): Ctx => ({ tenantId: t.id, userId: SYSTEM_USER, role: 'patient', roles: ['patient'], name: 'Patient (online)', practitionerId: null, timezone: t.timezone, tenantKind: t.kind });
+export const ctxFor = (t: any, name = 'Patient (online)'): Ctx => ({ tenantId: t.id, userId: SYSTEM_USER, role: 'patient', roles: ['patient'], name, practitionerId: null, timezone: t.timezone, tenantKind: t.kind });
 const inTenant = <T>(t: any, fn: (tx: Tx) => Promise<T>) => withTenant(t.id, SYSTEM_USER, fn);
 
-/** Windows a patient may move their visit to: within 30 days, at least 2 hours ahead, room left for the visit type. */
-async function openSlots(tx: Tx, t: any, from: string, days: number, svc: any, practitionerId?: string | null) {
+/** Windows a patient may book or move to: within 30 days, at least 2 hours ahead, room left for the visit type. */
+export async function openSlots(tx: Tx, t: any, from: string, days: number, svc: any, practitionerId?: string | null) {
   // ponytail: fixed rules (the old online-booking defaults); clinic settings again if online booking comes back
   const cfg = { maxDaysAhead: 30, minNoticeHours: 2 }; const today = todayIn(t.timezone);
   const last = addDays(today, cfg.maxDaysAhead);
@@ -55,8 +55,39 @@ async function openSlots(tx: Tx, t: any, from: string, days: number, svc: any, p
   return out;
 }
 
+type View = NonNullable<Awaited<ReturnType<typeof appointmentView>>>;
+const fresh = async (tx: Tx, v: View) => patientView((await appointmentView(tx, v.t.id, v.a.id))!);
+
+/** What a patient may do to their own booking, from the link or from WhatsApp: the same rules either way. `by` names who did it in the history. */
+export async function confirmByPatient(tx: Tx, v: View, by = 'patient') {
+  if (!patientView(v).canConfirm) throw new HttpError(409, 'CANNOT_CONFIRM', { status: v.a.status });
+  await tx.update(appointment).set({ status: 'confirmed', confirmedAt: new Date().toISOString() }).where(eq(appointment.id, v.a.id));
+  await emit(tx, ctxFor(v.t), 'appointment.updated', 'appointment', v.a.id, { status: 'confirmed', by });
+  return fresh(tx, v);
+}
+export async function cancelByPatient(tx: Tx, v: View, reason?: string, by = 'patient') {
+  if (!(OPEN_STATUSES as readonly string[]).includes(v.a.status)) throw new HttpError(409, 'NOT_OPEN', { status: v.a.status });
+  if (!patientView(v).canCancel) throw new HttpError(409, 'TOO_LATE_TO_CANCEL', { hours: bookingSettings(v.t.settings).booking.cancelWindowHours });
+  await tx.update(appointment).set({ status: 'cancelled', cancelReason: reason ? `patient: ${reason}` : 'cancelled by patient' }).where(eq(appointment.id, v.a.id));
+  await dropReminders(tx, v.t.id, [v.a.id]);
+  await emit(tx, ctxFor(v.t), 'appointment.updated', 'appointment', v.a.id, { status: 'cancelled', by, reason });
+  return fresh(tx, v);
+}
+export async function moveByPatient(tx: Tx, v: View, sessionId: string, origin: string, by = 'patient') {
+  if (!patientView(v).canReschedule) throw new HttpError(409, 'CANNOT_RESCHEDULE');
+  const s = await tx.select().from(session).where(and(eq(session.id, sessionId), eq(session.tenantId, v.t.id))).for('update').then((r) => r[0]);
+  if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
+  if (s.practitionerId !== v.s.practitionerId) throw new HttpError(409, 'SLOT_TAKEN'); // a patient keeps their doctor; reception can hand over
+  const day = (await openSlots(tx, v.t, s.day, 1, v.svc, s.practitionerId)).find((d) => d.day === s.day);
+  if (!day?.slots.some((x) => x.id === s.id)) throw new HttpError(409, 'SLOT_TAKEN');
+  await tx.update(appointment).set({ sessionId: s.id }).where(eq(appointment.id, v.a.id));
+  await emit(tx, ctxFor(v.t), 'appointment.moved', 'appointment', v.a.id, { from: v.a.sessionId, to: s.id, by });
+  await planReminders(tx, v.t.id, v.a.id, origin);
+  return fresh(tx, v);
+}
+
 /** The patient's view of one booking, plus what they are allowed to do with it. */
-function patientView(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>) {
+export function patientView(v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>) {
   const cfg = bookingSettings(v.t.settings);
   const hours = hoursUntil(v.s.day, v.s.startTime, v.t.timezone);
   const open = (OPEN_STATUSES as readonly string[]).includes(v.a.status);
@@ -92,27 +123,13 @@ export function publicRoutes(app: FastifyInstance) {
   app.post('/public/a/:slug/:token/confirm', async (req) => {
     const { slug, token } = req.params as any; limit('link:' + ip(req), 60, 60_000);
     const { t, find } = await byToken(slug, token);
-    return inTenant(t, async (tx) => {
-      const v = await find(tx);
-      if (!patientView(v).canConfirm) throw new HttpError(409, 'CANNOT_CONFIRM', { status: v.a.status });
-      await tx.update(appointment).set({ status: 'confirmed', confirmedAt: new Date().toISOString() }).where(eq(appointment.id, v.a.id));
-      await emit(tx, ctxFor(t), 'appointment.updated', 'appointment', v.a.id, { status: 'confirmed', by: 'patient' });
-      return patientView((await find(tx)));
-    });
+    return inTenant(t, async (tx) => confirmByPatient(tx, await find(tx)));
   });
   app.post('/public/a/:slug/:token/cancel', async (req) => {
     const { slug, token } = req.params as any; limit('link:' + ip(req), 60, 60_000);
     const { reason } = z.object({ reason: z.string().trim().max(300).optional() }).parse(req.body ?? {});
     const { t, find } = await byToken(slug, token);
-    return inTenant(t, async (tx) => {
-      const v = await find(tx);
-      if (!(OPEN_STATUSES as readonly string[]).includes(v.a.status)) throw new HttpError(409, 'NOT_OPEN', { status: v.a.status });
-      if (!patientView(v).canCancel) throw new HttpError(409, 'TOO_LATE_TO_CANCEL', { hours: bookingSettings(t.settings).booking.cancelWindowHours });
-      await tx.update(appointment).set({ status: 'cancelled', cancelReason: reason ? `patient: ${reason}` : 'cancelled by patient' }).where(eq(appointment.id, v.a.id));
-      await dropReminders(tx, t.id, [v.a.id]);
-      await emit(tx, ctxFor(t), 'appointment.updated', 'appointment', v.a.id, { status: 'cancelled', by: 'patient', reason });
-      return patientView((await find(tx)));
-    });
+    return inTenant(t, async (tx) => cancelByPatient(tx, await find(tx), reason));
   });
   app.get('/public/a/:slug/:token/slots', async (req) => {
     const { slug, token } = req.params as any; limit('slots:' + ip(req), 120, 60_000);
@@ -128,19 +145,7 @@ export function publicRoutes(app: FastifyInstance) {
     const { slug, token } = req.params as any; limit('book:' + ip(req), 10, 10 * 60_000);
     const { sessionId } = z.object({ sessionId: z.string().uuid() }).parse(req.body);
     const { t, find } = await byToken(slug, token);
-    return inTenant(t, async (tx) => {
-      const v = await find(tx);
-      if (!patientView(v).canReschedule) throw new HttpError(409, 'CANNOT_RESCHEDULE');
-      const s = await tx.select().from(session).where(and(eq(session.id, sessionId), eq(session.tenantId, t.id))).for('update').then((r) => r[0]);
-      if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
-      if (s.practitionerId !== v.s.practitionerId) throw new HttpError(409, 'SLOT_TAKEN'); // a patient keeps their doctor; reception can hand over
-      const day = (await openSlots(tx, t, s.day, 1, v.svc, s.practitionerId)).find((d) => d.day === s.day);
-      if (!day?.slots.some((x) => x.id === s.id)) throw new HttpError(409, 'SLOT_TAKEN');
-      await tx.update(appointment).set({ sessionId: s.id }).where(eq(appointment.id, v.a.id));
-      await emit(tx, ctxFor(t), 'appointment.moved', 'appointment', v.a.id, { from: v.a.sessionId, to: s.id, by: 'patient' });
-      await planReminders(tx, t.id, v.a.id, originOf(req));
-      return patientView((await find(tx)));
-    });
+    return inTenant(t, async (tx) => moveByPatient(tx, await find(tx), sessionId, originOf(req)));
   });
 
   /** The waiting-room screen: tokens only, no names. Who is in with each doctor and who is next. */

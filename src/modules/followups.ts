@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
-import { appointment, callback, course, encounter, message, patient, practitioner, procedureCatalog, procedureSession, recommendation, session, tenant } from '../db/schema.js';
+import { appointment, callback, chat, course, encounter, message, patient, practitioner, procedureCatalog, procedureSession, recommendation, session, tenant } from '../db/schema.js';
 import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
@@ -134,7 +134,7 @@ export async function markMissed(tx: Tx, ctx: Ctx) {
   return rows.length;
 }
 
-const menuCounts = shortCache<{ calls: number; sittings: number; unconfirmed: number; toSend: { n: number; week: string | null } }>(60_000);
+const menuCounts = shortCache<{ calls: number; sittings: number; unconfirmed: number; toSend: { n: number; week: string | null }; chats: number }>(60_000);
 
 export function followupRoutes(app: FastifyInstance) {
   route(app, 'get', '/followups', 'worklist.read', async (req, tx) => {
@@ -161,7 +161,9 @@ export function followupRoutes(app: FastifyInstance) {
     const [d] = can(req.perms, 'worklist.write') ? await tx.select({ n: sql<number>`count(*)::int`, first: sql<string | null>`min(${procedureSession.day})::text` }).from(procedureSession)
       .where(and(eq(procedureSession.tenantId, t), gte(procedureSession.day, today), eq(procedureSession.state, 'confirmed'), eq(procedureSession.approval, 'draft'), sql`${procedureSession.practitionerId} is not null`)) : [{ n: 0, first: null }];
     const week = d.first ? addDays(d.first, -((new Date(d.first + 'T00:00:00Z').getUTCDay() + 6) % 7)) : null;
-    return { calls, sittings: s.n, unconfirmed: s.unconfirmed, toSend: { n: d.n, week } };
+    // WhatsApp chats waiting for the front desk (the assistant handed them over)
+    const [w] = await tx.select({ n: sql<number>`count(*)::int` }).from(chat).where(and(eq(chat.tenantId, t), eq(chat.status, 'staff')));
+    return { calls, sittings: s.n, unconfirmed: s.unconfirmed, toSend: { n: d.n, week }, chats: w.n };
   }));
 
   /** One call attempt. Call later needs a date (a Sunday asks to be confirmed); Not interested needs a reason; No answer can send a short message. */

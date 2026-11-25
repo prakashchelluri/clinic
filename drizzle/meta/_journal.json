@@ -386,6 +386,13 @@
       "when": 1797200000000,
       "tag": "0054_procedure_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1797400000000,
+      "tag": "0056_whatsapp_chat",
+      "breakpoints": true
     }
   ]
 }

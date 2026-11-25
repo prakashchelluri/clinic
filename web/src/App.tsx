@@ -29,6 +29,7 @@ export const NAV: NavItem[] = [
   { to: '/patients', label: 'Patients', icon: 'users', show: (c) => c('patient.read') },
   { to: '/worklist', label: 'Procedures', icon: 'syringe', show: (c) => c('worklist.read') },
   { to: '/calls', label: 'Calls', icon: 'phone', show: (c) => c('worklist.read') },
+  { to: '/whatsapp', label: 'WhatsApp', icon: 'message', show: (c) => c('appointment.write') },
   { to: '/tests', label: 'Test reports', icon: 'tubes', show: (c) => c('worklist.read') || c('encounter.complete') },
   { to: '/pharmacy', label: 'Pharmacy', icon: 'pill', show: (c) => c('pharmacy.read') },
   { to: '/inventory', label: 'Inventory', icon: 'box', show: (c) => c('stock.read') },
@@ -195,6 +196,7 @@ export function App() {
   const mc = counts.data;
   const badges: Badges = mc ? {
     '/calls': mc.calls ? { n: mc.calls, hint: `${mc.calls} to call today` } : undefined,
+    '/whatsapp': mc.chats ? { n: mc.chats, warn: true, hint: `${mc.chats} WhatsApp chat${mc.chats === 1 ? '' : 's'} waiting for a reply` } : undefined,
     // sessions still to send for the doctor's approval come first (amber): that is the desk's to-do; otherwise today's sessions
     '/worklist': mc.toSend?.n ? { n: mc.toSend.n, warn: true, hint: `${mc.toSend.n} session${mc.toSend.n === 1 ? '' : 's'} not sent for doctor approval` }
       : mc.sittings ? { n: mc.sittings, warn: mc.unconfirmed > 0, hint: mc.unconfirmed ? `${mc.sittings} session${mc.sittings === 1 ? '' : 's'} today, ${mc.unconfirmed} not confirmed` : `${mc.sittings} session${mc.sittings === 1 ? '' : 's'} today` } : undefined,
