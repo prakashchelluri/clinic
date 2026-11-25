@@ -9,6 +9,7 @@ import { db, withTenant } from './db/index.js';
 import { tenant, appUser } from './db/schema.js';
 import { type Ctx, permsFor, HttpError } from './lib/auth.js';
 import { route } from './lib/route.js';
+import { writes } from './lib/writes.js';
 import { cleanIp, securityOf, privacyFor, ipExempt, ipAllowed, writeAudit, throttleOnce } from './lib/audit.js';
 import { securityRoutes } from './modules/security.js';
 import { identityRoutes } from './modules/identity.js';
@@ -93,7 +94,7 @@ export async function buildApp() {
     return row;
   };
   // onSend runs after the write's transaction has committed and before the answer leaves, so the next request already sees the change
-  app.addHook('onSend', async (req, _reply, payload) => { if (req.method !== 'GET' && req.method !== 'HEAD') { sessionGen++; sessionCache.clear(); } return payload; });
+  app.addHook('onSend', async (req, _reply, payload) => { if (req.method !== 'GET' && req.method !== 'HEAD') { sessionGen++; sessionCache.clear(); writes.n++; } return payload; });
   app.addHook('preHandler', async (req) => {
     if (!req.url.startsWith('/api/') || req.url.startsWith('/api/auth/login') || req.url.startsWith('/api/public/') || req.url === '/api/health') return;
     const raw = req.cookies.cc_session ? req.unsignCookie(req.cookies.cc_session) : null;
