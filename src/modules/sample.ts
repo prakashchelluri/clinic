@@ -27,12 +27,12 @@ export async function clearClinicData(tx: Tx, t: string) {
   return order.length;
 }
 
-/** Test data only where it cannot hurt: a clinic whose patients are all sample ones (none real yet), or a server started with ALLOW_TEST_RESET=1.
- *  The test suite counts as a test server unless it sets ALLOW_TEST_RESET=0 to check this rule. */
+/** Test data is always on away from production (local and test servers), unless a server sets ALLOW_TEST_RESET=0.
+ *  In production only where it cannot hurt: a clinic whose patients are all sample ones (none real yet), or ALLOW_TEST_RESET=1. */
 export async function testDataAllowed(tx: Tx, t: string, tenantKind?: string) {
   if (tenantKind === 'platform') return false;
   const flag = process.env.ALLOW_TEST_RESET;
-  if (flag === '1' || (process.env.NODE_ENV === 'test' && flag !== '0')) return true;
+  if (flag === '1' || (process.env.NODE_ENV !== 'production' && flag !== '0')) return true;
   const real = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), sql`coalesce(${patient.legacyId}, '') <> 'SAMPLE'`, sql`${patient.patientNo} <> 'WALKIN'`)).limit(1); // WALKIN: the shared counter-sale record, not a person
   return real.length === 0;
 }

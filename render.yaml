@@ -18,6 +18,9 @@ services:
       # This deployment is the demo: make the demo clinic (six demo1234 accounts) on an empty database. Never set it for a real clinic.
       - key: SEED_DEMO
         value: "1"
+      # Settings › Test data (wipe and reload sample data) always on: this deployment is a test site. Remove before a real clinic uses it.
+      - key: ALLOW_TEST_RESET
+        value: "1"
       # The CUBOTT platform admin (superadmin@cubott.in). Without it the account is switched off. Paste a long password in the dashboard.
       - key: SUPERADMIN_PASSWORD
         sync: false
