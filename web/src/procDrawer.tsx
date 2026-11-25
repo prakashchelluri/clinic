@@ -24,10 +24,10 @@ export function ConsentChip({ s }: { s: Consent }) {
 export { ConsentNote };
 
 /** Before the first sitting of a procedure: the patient reads the wording and signs on the tablet (saved as the patient's document), or staff confirm the paper form is filed. */
-export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; consentText?: string | null; consentExpired?: boolean; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string }) => void }) {
-  const what = s.procedure ?? 'this procedure';
-  return <ConsentForm title={`Consent for ${what}`} subtitle={s.consentExpired ? `${s.patient.fullName} · the last consent has run out, so it is signed again` : undefined} text={procedureConsentText(s.patient.fullName, what, s.consentText)} patient={s.patient} procedureSessionId={s.id} okLabel="Save and start" onClose={onClose}
-    onDone={(id) => onStart({ state: 'in_progress', consent: true, ...(id ? { consentDocumentId: id } : {}) })} />;
+export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; procedure?: string | null; consentText?: string | null; consentExpired?: boolean; patient: { id: string; fullName: string } }; onClose: () => void; onStart: (b: { state: 'in_progress'; consent: true; consentDocumentId?: string; consentWording?: string }) => void }) {
+  const what = s.procedure ?? 'this procedure'; const text = procedureConsentText(s.patient.fullName, what, s.consentText);
+  return <ConsentForm title={`Consent for ${what}`} subtitle={s.consentExpired ? `${s.patient.fullName} · the last consent has run out, so it is signed again` : undefined} text={text} patient={s.patient} procedureSessionId={s.id} okLabel="Save and start" onClose={onClose}
+    onDone={(id) => onStart({ state: 'in_progress', consent: true, ...(id ? { consentDocumentId: id, consentWording: text } : {}) })} />;
 }
 /** Marking done makes the charge, so say what it will be first. */
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
@@ -51,7 +51,7 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
   const q = useQuery({ queryKey: ['procedure-session', id], queryFn: () => get(`/procedure-sessions/${id}`) });
   const [signing, setSigning] = useState(false);
   const [shoot, setShoot] = useState<'before' | 'after' | null>(null); const [booking, setBooking] = useState(false); const [moving, setMoving] = useState(false);
-  const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string }) => patch(`/procedure-sessions/${id}`, b),
+  const setState = useMutation({ mutationFn: (b: { state: 'in_progress' | 'completed'; consent?: boolean; consentDocumentId?: string; consentWording?: string }) => patch(`/procedure-sessions/${id}`, b),
     onSuccess: (_r, b) => { setSigning(false); if (b.state === 'in_progress' && s?.form) nav(`/procedure-sessions/${id}`); ['procedure-session', 'calendar', 'psessions', 'pcounts', 'worklist', 'timeline', 'bills', 'courses', 'advance', 'procedure-plans'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); toast(b.state === 'completed' ? `Session marked done${s?.money?.kind === 'on_done' ? ` · treatment invoiced, ${money(s.money.amountPaise)}` : s?.money?.kind === 'due' ? ` · ${money(s.money.amountPaise)} due` : ''}` : 'Session started'); },
     onError: (e) => toast(errText(e), 'err') });
   const s = q.data;

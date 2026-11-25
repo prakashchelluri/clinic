@@ -719,6 +719,7 @@ export const document = pgTable('document', {
   mime: text('mime').notNull(),
   sizeBytes: integer('size_bytes').notNull(),
   storageKey: text('storage_key').notNull(),
+  sha256: text('sha256'),                     // fingerprint of the file as saved; a later check spots a changed file
   note: text('note'),
   uploadedBy: uuid('uploaded_by').notNull(),
   // clinical photos: where on the body, which angle, and the procedure sitting they were taken at

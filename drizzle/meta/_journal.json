@@ -386,6 +386,13 @@
       "when": 1797200000000,
       "tag": "0054_procedure_consent",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1797300000000,
+      "tag": "0055_document_sha256",
+      "breakpoints": true
     }
   ]
 }

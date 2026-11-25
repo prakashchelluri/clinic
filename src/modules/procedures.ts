@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, gte, lte, inArray, desc } from 'drizzle-orm';
 import { procedureSession, procedureWeek, course, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant, formDefinition, medicine, type FormSchema, type SupplyAsk } from '../db/schema.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { missingRequired, cleanValues } from '../lib/procForm.js';
 import { bookingSettings, localToUtc } from '../lib/booking.js';
 import { MSG, patientLang } from '../lib/patientText.js';
@@ -15,8 +15,9 @@ import { HttpError, can, type Ctx } from '../lib/auth.js';
 import { toMin, toHHMM } from './scheduling.js';
 import { drawSitting, reverseSitting, sittingMoney, standing } from './courses.js';
 import { sessionDef } from '../lib/procPrice.js';
+import { signedRecord } from './documents.js';
 
-type Consent = { grantedAt: string; by: string; how?: string; documentId?: string };
+type Consent = { grantedAt: string; by: string; how?: string; documentId?: string; sha256?: string; wording?: string };
 const consentKey = (procedureId: string) => `procedure:${procedureId}`;
 /** The patient's consent for this procedure, kept on the patient (one per procedure type, recorded at the first Start).
  *  It lasts the procedure's consentMonths (empty = for good); after that Start asks for it again (consentExpired).
@@ -445,7 +446,7 @@ export function procedureRoutes(app: FastifyInstance) {
   route(app, 'patch', '/procedure-sessions/:id', null, async (req, tx) => {
     // consent: on starting, true when the patient signed the procedure consent form (sent only when none is on file for this procedure)
     // consentDocumentId: the patient signed on the tablet; the signature was first saved as one of this patient's documents
-    const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional(), consent: z.boolean().optional(), consentDocumentId: z.string().uuid().optional() }).parse(req.body);
+    const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional(), consent: z.boolean().optional(), consentDocumentId: z.string().uuid().optional(), consentWording: z.string().trim().max(8000).optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const cur = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
@@ -466,15 +467,16 @@ export function procedureRoutes(app: FastifyInstance) {
       if ((await procedureConsent(tx, t, cur)).consentNeeded) {
         if (body.consent !== true) throw new HttpError(409, 'CONSENT_NEEDED');
         // a signature from the tablet must be a document of this same patient, in this clinic
+        let doc: { id: string; sha256: string | null } | undefined;
         if (body.consentDocumentId) {
-          const doc = await tx.select({ id: document.id }).from(document).where(and(eq(document.id, body.consentDocumentId), eq(document.tenantId, t), eq(document.patientId, cur.patientId))).then((r) => r[0]);
+          doc = await tx.select({ id: document.id, sha256: document.sha256 }).from(document).where(and(eq(document.id, body.consentDocumentId), eq(document.tenantId, t), eq(document.patientId, cur.patientId), eq(document.kind, 'consent'))).then((r) => r[0]);
           if (!doc) throw new HttpError(400, 'CONSENT_NOT_FOR_PATIENT');
         }
         const p = await tx.select({ consents: patient.consents }).from(patient).where(eq(patient.id, cur.patientId)).then((r) => r[0]);
         const key = consentKey(cur.procedureId); const at = new Date().toISOString();
-        const rec: Consent = body.consentDocumentId ? { grantedAt: at, by: req.ctx.name, how: 'signed', documentId: body.consentDocumentId } : { grantedAt: at, by: req.ctx.name, how: 'signed paper form filed' };
+        const rec: Consent = { grantedAt: at, by: req.ctx.name, ...(doc ? signedRecord(doc, body.consentWording) : { how: 'signed paper form filed' }) };
         await tx.update(patient).set({ consents: { ...(p?.consents ?? {}), [key]: rec } }).where(eq(patient.id, cur.patientId));
-        await emit(tx, req.ctx, 'consent.granted', 'patient', cur.patientId, { key, procedureSessionId: id, ...(body.consentDocumentId ? { documentId: body.consentDocumentId } : {}) });
+        await emit(tx, req.ctx, 'consent.granted', 'patient', cur.patientId, { key, procedureSessionId: id, ...(doc ? { documentId: doc.id, sha256: doc.sha256, wordingSha256: body.consentWording ? createHash('sha256').update(body.consentWording).digest('hex') : null } : {}) });
       }
     }
     const form = ['in_progress', 'completed'].includes(body.state) ? await procForm(tx, t, cur.procedureId, cur.formDefinitionId) : null;

@@ -36,7 +36,7 @@ export const usePhotos = (patientId: string) => useQuery({ queryKey: ['photos', 
 /** Photo consent before the first photo: the patient signs the wording on the tablet, or staff confirm the paper form is filed. */
 function ConsentStep({ patientId, name, dark = false }: { patientId: string; name: string; dark?: boolean }) {
   const [open, setOpen] = useState(false);
-  const m = useMutation({ mutationFn: (documentId?: string) => post(`/patients/${patientId}/consents`, { key: 'photos', granted: true, ...(documentId ? { documentId } : { paper: true }) }), onSuccess: () => { setOpen(false); refresh(patientId); toast('Photo consent recorded'); }, onError: (e) => toast(errText(e), 'err') });
+  const m = useMutation({ mutationFn: (documentId?: string) => post(`/patients/${patientId}/consents`, { key: 'photos', granted: true, ...(documentId ? { documentId, wording: photoConsentText(name) } : { paper: true }) }), onSuccess: () => { setOpen(false); refresh(patientId); toast('Photo consent recorded'); }, onError: (e) => toast(errText(e), 'err') });
   return (
     <div className={`mx-auto max-w-md space-y-4 rounded-[10px] p-6 ${dark ? 'bg-white/10 text-white' : 'card'}`}>
       <div className="text-lg font-semibold">Photo consent for {name}</div>

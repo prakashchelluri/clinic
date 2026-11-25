@@ -98,6 +98,7 @@ const MESSAGES: Record<string, string> = {
   OFFLINE: OFFLINE_MSG,
   CONSENT_NEEDED: 'No consent is on file for this procedure. Have the patient sign first, on the tablet or on the paper form.',
   PAY_UPFRONT_FIRST: 'This procedure is paid upfront: take the full amount before the first session starts (Price & payments).',
+  CONSENT_DOCUMENT_KEPT: 'A signed consent is kept as the record of what was agreed. It cannot be deleted.',
   CONSENT_NOT_FOR_PATIENT: 'That signature belongs to another patient. Ask the patient to sign again.',
   NO_FORM: 'This procedure has no form yet. Set one up under Settings › Procedures & packages.',
   ALREADY_HANDLED: 'The pharmacy has already dealt with this request.', UNKNOWN_FORM: 'That form does not exist.',
