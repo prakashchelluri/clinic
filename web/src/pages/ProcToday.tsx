@@ -30,6 +30,7 @@ export function ProcToday() {
   const q = useQuery({ queryKey: ['psessions', 'day', day], queryFn: () => get(`/procedure-sessions?day=${day}&active=1&detail=1`), refetchInterval: 15000 });
   const DONE: Record<string, string> = { in_progress: 'Session started', completed: 'Marked done', missed: 'Moved to missed', cancelled: 'Session cancelled' };
   const setState = useMutation({ mutationFn: ({ id, ...b }: any) => patch(`/procedure-sessions/${id}`, b), onSuccess: (_r, v: any) => { refreshProcedures(); toast(DONE[v.state] ?? 'Updated'); }, onError: (e) => toast(errText(e), 'err') });
+  const send = useMutation({ mutationFn: (ids: string[]) => post('/procedure-sessions/send', { ids }), onSuccess: (r: any) => { refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval`); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: (_r, v: any) => { refreshProcedures(); toast(v.confirmed ? 'Noted: the patient said yes' : 'Patient answer removed', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
   const all: any[] = q.data ?? [];
@@ -38,6 +39,7 @@ export function ProcToday() {
   const past = (h: number) => day < t || (day === t && (h + 1) * 60 <= Number(now.slice(0, 2)) * 60 + Number(now.slice(3, 5)));
   const hours = procHours(all);
   const live = all.filter((s) => ['confirmed', 'in_progress'].includes(s.state));
+  const drafts = live.filter((s) => s.state === 'confirmed' && s.approval === 'draft' && s.practitionerId);
   const notYes = live.filter((s) => s.state === 'confirmed' && s.approval === 'approved' && !s.patientConfirmedAt).length;
 
   const drag = useBoxDrag((item, key) => {
@@ -53,6 +55,7 @@ export function ProcToday() {
   const opened = all.find((s) => s.id === openId);
   const act = (label: string, run: () => void, primary = false) => <button className={`btn btn-sm ${primary ? 'btn-primary' : ''}`} onClick={run}>{label}</button>;
   const actions = (s: any) => canWrite && s.state === 'confirmed' ? <>
+    {s.approval === 'draft' && s.practitionerId && act('Send for approval', () => { setOpenId(null); send.mutate([s.id]); }, true)}
     {s.approval === 'approved' && act(s.patientConfirmedAt ? 'Undo: patient said yes' : 'Patient said yes', () => confirm.mutate({ id: s.id, confirmed: !s.patientConfirmedAt }))}
     {act(s.practitionerId ? 'Change doctor' : 'Pick doctor', () => { setOpenId(null); setAssigning(s); })}
     {act('Reschedule', () => { setOpenId(null); setMoving(s); })}
@@ -68,6 +71,7 @@ export function ProcToday() {
         <button type="button" className="btn btn-icon !h-8 !w-8" aria-label="Next day" onClick={() => setDay(addDay(day, 1))}><Icon name="chevR" className="h-4 w-4" /></button>
         {day !== t && <button type="button" className="btn btn-sm" onClick={() => setDay(t)}>Today</button>}
         <span className="ml-auto text-[13.5px] text-muted">{live.length ? `${live.length} session${live.length === 1 ? '' : 's'}${notYes ? ` · ${notYes} not confirmed` : ''}` : ''}</span>
+        {canWrite && drafts.length > 0 && <button type="button" className="btn btn-sm btn-primary" disabled={send.isPending} onClick={() => send.mutate(drafts.map((s) => s.id))}>{`Send ${drafts.length} for approval`}</button>}
       </div>
       {q.isLoading ? <div className="p-4"><Skeleton rows={4} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div>
         : !all.length ? <div className="border-t border-line"><Empty icon="calendar" title={day === t ? 'No sessions today' : 'No sessions this day'} hint="Sessions are planned on Week plan." /></div> : (

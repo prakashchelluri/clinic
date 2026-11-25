@@ -159,4 +159,14 @@ test('every session needs a doctor, and only its own doctor booking it counts as
   assert.equal((await C('GET', `/procedure-sessions/${s.id}`)).body.approval, 'sent');
   // the coordinator picks the doctor: it goes to them straight away, as the week was sent
   assert.equal((await C('POST', `/procedure-sessions/${old.id}/assign`, { practitionerId: drMain, force: true })).body.approval, 'sent');
+
+  // Today's sessions sends one draft on its own: the rest of its week stays a draft and the week is not marked sent
+  const wk2 = addDays(mon, 7);
+  const a = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: wk2, startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  const b = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(wk2, 1), startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  assert.equal((await R('POST', '/procedure-sessions/send', { ids: [a.id, own.id] })).body.sent, 1, 'only drafts go');
+  assert.equal((await C('GET', `/procedure-sessions/${a.id}`)).body.approval, 'sent');
+  assert.equal((await C('GET', `/procedure-sessions/${b.id}`)).body.approval, 'draft');
+  assert.equal((await C('GET', `/procedure-weeks/${wk2}`)).body.sent, false);
+  assert.equal((await as(await login('doctor2@demo.clinic'))('POST', '/procedure-sessions/send', { ids: [b.id] })).status, 403, 'needs worklist.write');
 });
