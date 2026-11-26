@@ -275,6 +275,103 @@ test('tap-to-book with a visit already booked: Book another (not on the same day
   assert.deepEqual(events, ['Booked', 'Booked', 'Cancelled'], 'staff see what was done from the menu');
 });
 
+test('procedure sessions on WhatsApp: book the next session, the doctor\'s answer comes back, change time, cancel; reminder buttons; never someone else\'s', async () => {
+  const owner = as(await login('owner@demo.clinic')); const desk = as(await login('reception@demo.clinic')); const coord = as(await login('procedures@demo.clinic'));
+  const phone = '9848088881';
+  const cfg = (await owner('GET', '/config')).body;
+  const peel = cfg.procedures.find((x: any) => x.name === 'Chemical peel');
+  const p = (await desk('POST', '/patients', { fullName: 'Divya Rao', phone })).body;
+  const v = (await owner('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
+  const e = (await owner('POST', `/visits/${v.id}/encounter`, {})).body;
+  await owner('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Acne'] }, assessment: { diagnosis: [{ name: 'Acne' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 3, gapDays: 30 }] });
+  const { last, say, tap } = patientOn(desk, phone);
+  const sessions = () => inT((tx) => tx.select().from(schema.procedureSession).where(eq(schema.procedureSession.patientId, p.id)));
+
+  // "Hi": the course's first session is not booked yet → one tap to the open times, one to book it
+  await say('Hi');
+  let out = await last();
+  assert.match(out.body, /^Hello Divya Rao, welcome back to .+\.\nYour Chemical peel session 1\/3 is not booked yet\.$/);
+  assert.deepEqual(out.options.options.map((x: any) => x.id.split(':')[0]), ['pb', 'm', 'p']);
+  await tap((x) => x.id.startsWith('pb:'));
+  out = await last();
+  assert.match(out.body, /^Open times for your Chemical peel session/); assert.equal(out.options.kind, 'list');
+  assert.ok(out.options.options.every((x: any) => /^(ph:\d{4}-\d\d-\d\d\|\d+|pl:.+)$/.test(x.id)), JSON.stringify(out.options.options));
+  await tap((x) => x.id.startsWith('ph:'));
+  out = await last();
+  assert.match(out.body, /^Booked: Divya Rao's Chemical peel session 1\/3, .+ at \d\d:\d\d\. The doctor will confirm this time; you will get a message here\.$/);
+  let [s] = await sessions();
+  assert.equal(s.state, 'confirmed'); assert.equal(s.approval, 'draft', 'goes to the doctor like any booking not made by them'); assert.ok(s.patientConfirmedAt, 'the patient picked it: their yes');
+  assert.ok(s.practitionerId, 'the course\'s doctor');
+
+  // the coordinator sends it; the doctor approves → the patient hears it on their chat
+  assert.equal((await coord('POST', '/procedure-sessions/send', { ids: [s.id] })).status, 200);
+  const ap = await owner('POST', '/procedure-approvals', { ids: [s.id], action: 'approve' });
+  assert.equal(ap.status, 200, JSON.stringify(ap.body)); assert.equal(ap.body.updated, 1);
+  assert.match((await last()).body, /^Your Chemical peel session is confirmed: .+ at \d\d:\d\d\.$/);
+
+  // "Hi" now shows the session; My visit opens its card: already confirmed by the patient, so Change time and Cancel
+  await say('Hi');
+  out = await last();
+  assert.match(out.body, /\nYour next Chemical peel session: .+ at \d\d:\d\d\.$/);
+  await tap((x) => x.id === `pv:${s.id}`);
+  out = await last();
+  assert.match(out.body, /^Divya Rao: Chemical peel session 1\/3, .+ at \d\d:\d\d\.$/);
+  assert.deepEqual(out.options.options.map((x: any) => x.id.split(':')[0]), ['pm', 'px']);
+  // Change time: another hour; the move goes to the doctor, the patient's pick counts as their yes
+  await tap((x) => x.id === `pm:${s.id}`);
+  const before = s.startTime + s.day;
+  await tap((x) => x.id.startsWith('ph:'));
+  out = await last();
+  assert.match(out.body, /^Changed: your Chemical peel session is now .+ at \d\d:\d\d\. The doctor will confirm/);
+  [s] = await sessions();
+  assert.notEqual(s.startTime + s.day, before); assert.notEqual(s.approval, 'approved'); assert.ok(s.patientConfirmedAt);
+
+  // the doctor sends that time back → the patient is told, and the chat goes to the front desk
+  await coord('POST', '/procedure-sessions/send', { ids: [s.id] });
+  assert.equal((await owner('POST', '/procedure-approvals', { ids: [s.id], action: 'change', note: 'Not on Thursdays' })).body.updated, 1);
+  assert.match((await last()).body, /^Sorry, the doctor cannot do your Chemical peel session at the time you chose\./);
+  let c = await chatOf(phone);
+  assert.equal(c.status, 'staff'); assert.match(c.reason, /Not on Thursdays/);
+
+  // someone else's phone can never touch it
+  await desk('POST', '/chats/simulate', { phone: '9848088882', text: 'Hi' });
+  await desk('POST', '/chats/simulate', { phone: '9848088882', text: 'Yes, cancel', action: `pxy:${s.id}` });
+  assert.equal((await sessions())[0].state, 'confirmed');
+
+  // the day-before reminder carries Confirm / Change time (and the template's quick-reply payloads)
+  const far = new Date(Date.now() + 5 * 86400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const mv = await desk('POST', `/procedure-sessions/${s.id}/reschedule`, { day: far, startTime: '11:00', minutes: 30, practitionerId: s.practitionerId, roomId: s.roomId, force: true });
+  assert.equal(mv.status, 200, JSON.stringify(mv.body));
+  await coord('POST', '/procedure-sessions/send', { ids: [s.id] }); await owner('POST', '/procedure-approvals', { ids: [s.id], action: 'approve' });
+  const rem = (await inT((tx) => tx.select().from(schema.message).where(and(eq(schema.message.procedureSessionId, s.id), eq(schema.message.status, 'pending')))))[0];
+  assert.ok(rem, 'a reminder is planned');
+  assert.deepEqual(JSON.parse(rem.params.buttons), [`pc:${s.id}`, `pm:${s.id}`]);
+  assert.deepEqual(JSON.parse(rem.params.interactive).options.map((x: any) => x.title), ['Confirm', 'Change time']);
+  assert.match(rem.body, /Please tap Confirm, or Change time/);
+  // a reminder tap (answered even with the chat at the front desk): Confirm
+  await desk('POST', '/chats/simulate', { phone, text: 'Confirm', action: `pc:${s.id}` });
+  assert.match((await last()).body, /^Thank you, your Chemical peel session on .+ at 11:00 is confirmed\.$/);
+  assert.ok((await sessions())[0].patientConfirmedAt);
+
+  // the assistant's tools see the same
+  c = await chatOf(phone);
+  const mine = await call(c, 'my_visits', {});
+  assert.equal(mine.procedure_sessions.length, 1); assert.equal(mine.procedure_sessions[0].sitting_id, s.id);
+  const times = await call(c, 'session_times', { sitting_id: s.id, from: far });
+  assert.ok(Array.isArray(times) && times.length > 0 && times.every((x: any) => x.date && Number.isInteger(x.hour)), JSON.stringify(times));
+  assert.equal((await call(await chatOf('9848088882'), 'confirm_session', { sitting_id: s.id })).error, 'NOT_YOURS');
+
+  // Cancel (two taps): the session is cancelled, the course is open again, and "Hi" offers to book it
+  await desk('POST', '/chats/simulate', { phone, text: 'Cancel', action: `px:${s.id}` });
+  await tap((x) => x.id === `pxy:${s.id}`);
+  assert.match((await last()).body, /^Your session is cancelled\./);
+  assert.equal((await sessions())[0].state, 'cancelled');
+  await say('Hi');
+  assert.match((await last()).body, /Your Chemical peel session 1\/3 is not booked yet\./);
+  const events = (await linesOf(c.id)).filter((l: any) => l.direction === 'event').map((l: any) => l.body.split(' ')[0]);
+  assert.deepEqual(events, ['Booked', 'Moved', 'Confirmed', 'Cancelled'], 'staff see each change');
+});
+
 test('sender: two runs at once send each message once; a reminder long overdue is dropped, not sent', async () => {
   const p = (await as(await login('reception@demo.clinic'))('POST', '/patients', { fullName: 'Send Once', phone: '9848055555' })).body;
   const old = new Date(Date.now() - 7 * 3_600_000).toISOString();

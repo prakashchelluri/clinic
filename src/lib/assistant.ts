@@ -2,12 +2,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { betaTool } from '@anthropic-ai/sdk/helpers/beta/json-schema';
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { withTenant, type Tx } from '../db/index.js';
-import { appointment, chat, chatMessage, message, patient, practitioner, recommendation, session, visit, waitlist, OPEN_STATUSES } from '../db/schema.js';
+import { appointment, chat, chatMessage, message, patient, practitioner, recommendation, session, tenant as tenantTable, visit, waitlist, OPEN_STATUSES } from '../db/schema.js';
 import { HttpError } from './auth.js';
 import { emit, nextNumber, todayIn } from './core.js';
 import { appointmentView, bookingSettings, checkOneADay, newToken, planReminders } from './booking.js';
 import { cancelByPatient, confirmByPatient, ctxFor, moveByPatient, openSlots, patientView } from '../modules/public.js';
 import { menuTurn, tapOrGreeting } from './chatMenu.js';
+import { bookSessionByPatient, cancelSessionByPatient, confirmSessionByPatient, courseOf, moveSessionByPatient, sessionHours, sessionOf, sessionsOnPhone } from '../modules/procedures.js';
 
 const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
 export const BY = 'WhatsApp assistant';
@@ -108,11 +109,55 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
     catch (e: any) { if (e instanceof HttpError) return JSON.stringify({ error: e.message, ...e.extra }); throw e; }
   };
   const noted = (tx: Tx, done: string, v: ReturnType<typeof visitOut>) => noteVisit(tx, t, c.id, done, v);
+  /** A procedure session changed from the chat: a line staff see, and what the assistant is told back. */
+  const noteSession = async (tx: Tx, done: string, ps: { id: string; day: string; startTime: string; sittingNo: number; approval: string }) => {
+    await tx.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'event', by: BY, body: `${done} procedure session ${ps.sittingNo}: ${ps.day}, ${ps.startTime}` });
+    return { sitting_id: ps.id, date: ps.day, time: ps.startTime, session_no: ps.sittingNo, approval: ps.approval };
+  };
   return [
     betaTool({
-      name: 'my_visits', description: 'The patients registered on this WhatsApp number and their upcoming visits, with what each visit allows (confirm, cancel, move).',
+      name: 'my_visits', description: 'The patients registered on this WhatsApp number: their upcoming visits (with what each allows: confirm, cancel, move), their upcoming procedure sessions (sitting_id), and procedure courses with a session still to book (course_id).',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false } as const,
-      run: run(async (tx) => ({ patients: (await patientsOn(tx, t, c.phone)).map((p) => ({ patient_id: p.id, name: p.fullName })), upcoming_visits: await myVisits(tx, t, c.phone) })),
+      run: run(async (tx) => {
+        const { sessions, to_book } = await sessionsOnPhone(tx, t.id, t.timezone, c.phone);
+        return { patients: (await patientsOn(tx, t, c.phone)).map((p) => ({ patient_id: p.id, name: p.fullName })), upcoming_visits: await myVisits(tx, t, c.phone), procedure_sessions: sessions, sessions_to_book: to_book };
+      }),
+    }),
+    betaTool({
+      name: 'session_times', description: 'Open hours for a procedure session, from a date (up to 2 weeks, at most 8): give sitting_id to move a booked session, or course_id to book a course\'s next session. Each has a date and hour to pass to move_session or book_session.',
+      inputSchema: { type: 'object', properties: { sitting_id: { type: 'string' }, course_id: { type: 'string' }, from: { type: 'string', description: 'YYYY-MM-DD' } }, required: ['from'], additionalProperties: false } as const,
+      run: run(async (tx, i: { sitting_id?: string; course_id?: string; from: string }) => {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(i.from)) throw new HttpError(400, 'BAD_DATE');
+        if (i.sitting_id) return sessionHours(tx, ctxFor(t, BY), { ps: await sessionOf(tx, t.id, c.phone, i.sitting_id) }, i.from, 14);
+        if (!i.course_id) throw new HttpError(400, 'SITTING_OR_COURSE_NEEDED');
+        return sessionHours(tx, ctxFor(t, BY), { ps: null, recommendationId: (await courseOf(tx, t.id, c.phone, i.course_id)).id }, i.from, 14);
+      }),
+    }),
+    betaTool({
+      name: 'move_session', description: 'Move a booked procedure session to a date and hour from session_times. The doctor confirms the new time unless the result says approval "approved"; the patient gets a message when they do.',
+      inputSchema: { type: 'object', properties: { sitting_id: { type: 'string' }, date: { type: 'string' }, hour: { type: 'integer' } }, required: ['sitting_id', 'date', 'hour'], additionalProperties: false } as const,
+      run: run(async (tx, i: { sitting_id: string; date: string; hour: number }) => {
+        const row = await moveSessionByPatient(tx, ctxFor(t, BY), await sessionOf(tx, t.id, c.phone, i.sitting_id), i.date, i.hour);
+        return noteSession(tx, row.approval === 'approved' ? 'Moved' : 'Moved (waiting for the doctor)', row);
+      }),
+    }),
+    betaTool({
+      name: 'book_session', description: 'Book a course\'s next procedure session at a date and hour from session_times (only courses in sessions_to_book). The doctor confirms it unless the result says approval "approved".',
+      inputSchema: { type: 'object', properties: { course_id: { type: 'string' }, date: { type: 'string' }, hour: { type: 'integer' } }, required: ['course_id', 'date', 'hour'], additionalProperties: false } as const,
+      run: run(async (tx, i: { course_id: string; date: string; hour: number }) => {
+        const row = await bookSessionByPatient(tx, ctxFor(t, BY), c.phone, i.course_id, i.date, i.hour);
+        return noteSession(tx, row.approval === 'approved' ? 'Booked' : 'Booked (waiting for the doctor)', row);
+      }),
+    }),
+    betaTool({
+      name: 'confirm_session', description: 'Mark a procedure session as confirmed by the patient (they will come).',
+      inputSchema: { type: 'object', properties: { sitting_id: { type: 'string' } }, required: ['sitting_id'], additionalProperties: false } as const,
+      run: run(async (tx, i: { sitting_id: string }) => noteSession(tx, 'Confirmed', await confirmSessionByPatient(tx, ctxFor(t, BY), await sessionOf(tx, t.id, c.phone, i.sitting_id)))),
+    }),
+    betaTool({
+      name: 'cancel_session', description: 'Cancel a booked procedure session. The course stays open; the front desk helps book another time.',
+      inputSchema: { type: 'object', properties: { sitting_id: { type: 'string' } }, required: ['sitting_id'], additionalProperties: false } as const,
+      run: run(async (tx, i: { sitting_id: string }) => noteSession(tx, 'Cancelled', await cancelSessionByPatient(tx, ctxFor(t, BY), await sessionOf(tx, t.id, c.phone, i.sitting_id)))),
     }),
     betaTool({
       name: 'open_times', description: 'Hourly windows with room left, from a date for up to 7 days. Give appointment_id when moving an existing visit (keeps its doctor and visit type).',
@@ -179,7 +224,9 @@ Before you book, move or cancel, say exactly what you will do and wait for a yes
 
 Never give medical advice, a diagnosis, medicine or dose advice, test results, prices or fees, and never discuss payments or refunds. For those, for complaints, for anything about another person's records, and whenever you are unsure, call hand_over and tell the patient the front desk will reply here soon. In an emergency tell them to call ${phone || 'the clinic'} or go to the nearest hospital, and call hand_over.
 
-When you book, pass the patient's reason for the visit in book_visit's reason.`;
+When you book, pass the patient's reason for the visit in book_visit's reason.
+
+Procedure sessions (laser, peels and the like, done in a course of sessions the doctor prescribed) are separate from visits. my_visits lists them (procedure_sessions, and sessions_to_book for a course whose next session is not booked). You can tell the patient when their next session is and how many are done or left, confirm one, cancel one, move one with session_times then move_session, and book a course's next session with session_times then book_session. Offer at most three times, as "Thu 4 Dec at 11:00". A new or moved session waits for the doctor unless the result's approval is "approved": then say the doctor will confirm it and they will get a message here. Never book a procedure the doctor has not prescribed (only courses in sessions_to_book); for a new procedure, offer a visit with the doctor. Questions about a procedure itself (what it does, after-care, price, packages) go to hand_over.`;
 }
 
 /** Who is writing (the patients registered on this number, with their last and next visit) and the date: changes per chat, so kept out of the cached block. */
@@ -187,12 +234,15 @@ async function aboutChat(t: Tenant, c: Chat, done: string[] = []) {
   const today = todayIn(t.timezone);
   const people = await inTenant(t, async (tx) => {
     const family = await patientsOn(tx, t, c.phone);
+    const procs = family.length ? await sessionsOnPhone(tx, t.id, t.timezone, c.phone) : { sessions: [], to_book: [] };
     const out = [];
     for (const p of family) {
       const last = (await tx.select({ day: sql<string>`max(${visit.day})` }).from(visit).where(and(eq(visit.tenantId, t.id), eq(visit.patientId, p.id))))[0]?.day;
       const next = (await tx.select({ day: session.day, from: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
         .where(and(eq(appointment.tenantId, t.id), eq(appointment.patientId, p.id), inArray(appointment.status, [...OPEN_STATUSES]), sql`${session.day} >= ${today}`)).orderBy(asc(session.day)).limit(1))[0];
-      out.push(`- ${p.fullName} (patient_id ${p.id})${last ? `, last visited ${last}` : ', no visit yet'}${next ? `, next visit booked on ${next.day} at ${next.from}` : ''}`);
+      out.push(`- ${p.fullName} (patient_id ${p.id})${last ? `, last visited ${last}` : ', no visit yet'}${next ? `, next visit booked on ${next.day} at ${next.from}` : ''}`
+        + procs.sessions.filter((s) => s.patient_id === p.id).slice(0, 1).map((s) => `, next ${s.procedure} session ${s.session_no}${s.of ? ` of ${s.of}` : ''} on ${s.date} at ${s.time}`).join('')
+        + procs.to_book.filter((x) => x.patient_id === p.id).map((x) => `, ${x.procedure} session ${x.session_no}${x.of ? ` of ${x.of}` : ''} not booked yet`).join(''));
     }
     return out;
   });
@@ -257,7 +307,19 @@ export async function say(tx: Tx, t: Tenant, c: Chat, body: string, by: string, 
     status: cfg.enabled && cfg.channel !== 'none' ? 'pending' : 'skipped', error: cfg.enabled && cfg.channel !== 'none' ? null : 'messages are switched off' });
 }
 
-const OFF_REPLY = 'Thank you for your message. Our front desk will reply here soon.';
+/** A line from the clinic to a patient outside a conversation (e.g. the doctor's answer to a time they picked): kept on their chat and sent.
+ *  `staffReason` also hands the chat to the front desk, who take it from there. */
+export async function tellPatient(tx: Tx, tenantId: string, phone: string | null, body: string, staffReason?: string) {
+  if (!phone || !/^\d{10}$/.test(phone)) return;
+  const t = await tx.select().from(tenantTable).where(eq(tenantTable.id, tenantId)).then((r) => r[0]) as Tenant | undefined;
+  if (!t) return;
+  let c = await tx.select().from(chat).where(and(eq(chat.tenantId, t.id), eq(chat.phone, phone))).then((r) => r[0]);
+  if (!c) c = (await tx.insert(chat).values({ tenantId: t.id, phone }).returning())[0];
+  await say(tx, t, c, body, BY, false);
+  if (staffReason) await tx.update(chat).set({ status: 'staff', reason: staffReason.slice(0, 200) }).where(eq(chat.id, c.id));
+}
+
+const OFF_REPLY ='Thank you for your message. Our front desk will reply here soon.';
 
 /**
  * One line from a patient (WhatsApp or the test chat). Kept once (WhatsApp resends), then answered by the assistant

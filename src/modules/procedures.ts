@@ -16,6 +16,7 @@ import { toMin, toHHMM, nowHHMM } from './scheduling.js';
 import { drawSitting, reverseSitting, sittingMoney, standing } from './courses.js';
 import { sessionDef } from '../lib/procPrice.js';
 import { signedRecord } from './documents.js';
+import { tellPatient } from '../lib/assistant.js';
 
 type Consent = { grantedAt: string; by: string; how?: string; documentId?: string; sha256?: string; wording?: string };
 const consentKey = (procedureId: string) => `procedure:${procedureId}`;
@@ -77,7 +78,9 @@ export async function planSittingReminder(tx: Tx, t: string, sittingId: string) 
   const noPhone = !r.p.phone || !/^\d{10}$/.test(r.p.phone);
   const status = !cfg.enabled || cfg.channel === 'none' || noPhone || r.p.noWhatsapp ? 'skipped' : 'pending';
   const [row] = await tx.insert(message).values({ tenantId: t, patientId: r.p.id, procedureSessionId: sittingId, kind: 'sitting_reminder', channel: cfg.channel, toPhone: r.p.phone, body,
-    params: { patient: r.p.fullName, date, time: r.ps.startTime, doctor: '', link: '', lang }, status, sendAfter: at.toISOString(),
+    // Confirm / Change time buttons (lib/chatMenu.ts answers the taps); `buttons` fills a template's quick replies, in this order
+    params: { patient: r.p.fullName, date, time: r.ps.startTime, doctor: '', link: '', lang, buttons: JSON.stringify([`pc:${sittingId}`, `pm:${sittingId}`]),
+      interactive: JSON.stringify({ kind: 'buttons', options: [{ id: `pc:${sittingId}`, title: lang === 'te' ? 'కన్ఫర్మ్' : 'Confirm' }, { id: `pm:${sittingId}`, title: lang === 'te' ? 'సమయం మార్చండి' : 'Change time' }] }) }, status, sendAfter: at.toISOString(),
     error: status === 'skipped' ? (noPhone ? 'no mobile number' : r.p.noWhatsapp ? 'patient asked for no WhatsApp messages' : 'messages are switched off') : null }).returning();
   return row;
 }
@@ -165,6 +168,110 @@ async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$i
   return null;
 }
 
+const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), autoMinutes: z.boolean().optional(), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
+  // planned: placed on the coordinator's week, not booked with the patient, so it does not count as the patient's yes
+  planned: z.boolean().default(false) });
+/** A session cannot be booked or moved into a time that has already started (the manual time too). */
+const notPast = (ctx: Ctx, day: string, startTime: string) => {
+  const today = todayIn(ctx.timezone);
+  if (day < today || (day === today && startTime < nowHHMM(ctx.timezone))) throw new HttpError(409, 'PAST_TIME');
+};
+/** Schedule a sitting. Blocks the doctor's OP time when a doctor is assigned, so booking capacity drops automatically. */
+const book = async (req: { ctx: Ctx; body: unknown }, tx: Tx) => {
+  const body = ScheduleIn.parse(req.body); const t = req.ctx.tenantId;
+  if (!body.force) notPast(req.ctx, body.day, body.startTime); // force (API only; the drawer sends it just after a clash) may record one already done
+  const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t))).then((r) => r[0]);
+  if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
+  const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
+  if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
+  if (proc?.requiredCapability && body.roomId) {
+    const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
+    if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
+  }
+  // the next number after every sitting still on the plan (done or booked ahead), so two booked ahead never share a number
+  const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), sql`${procedureSession.state} <> 'cancelled'`));
+  const minutes = body.autoMinutes ? sessionDef(proc, n + 1)?.minutes ?? body.minutes : body.minutes; // that session's length from Settings, unless the desk picked one
+  const endTime = toHHMM(toMin(body.startTime) + minutes + (proc?.bufferMinutes ?? 0));
+  const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId);
+  if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
+  // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
+  const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
+  const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
+    sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, true)) }).returning();
+  await planSittingReminder(tx, t, ps.id);
+  if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
+  await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
+  await emit(tx, req.ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day: body.day, startTime: body.startTime, endTime, roomId: body.roomId, practitionerId: body.practitionerId, forced: c.length > 0 });
+  return { ...ps, warnings: c };
+};
+
+/** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */
+const move = async (req: { ctx: Ctx; body: unknown; params: unknown }, tx: Tx) => {
+  const body = ScheduleIn.omit({ recommendationId: true }).extend({ reason: z.string().trim().max(200).optional() }).parse(req.body);
+  if (!body.force) notPast(req.ctx, body.day, body.startTime); // force (API only; the drawer sends it just after a clash) may record one already done
+  const t = req.ctx.tenantId; const id = (req.params as any).id;
+  const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
+  if (!ps) throw new HttpError(404, 'NOT_FOUND');
+  if (!['confirmed', 'postponed', 'missed'].includes(ps.state)) throw new HttpError(409, 'NOT_RESCHEDULABLE', { state: ps.state });
+  const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
+  if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
+  if (proc?.requiredCapability && body.roomId) {
+    const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
+    if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
+  }
+  const endTime = toHHMM(toMin(body.startTime) + body.minutes + (proc?.bufferMinutes ?? 0));
+  const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId, id);
+  if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
+  // a move inside the week counts as the week's confirmation; the day-before call is still made (the clinic may have moved it)
+  const ahead = daysFrom(todayIn(req.ctx.timezone), body.day);
+  const [moved] = await tx.update(procedureSession).set({ autoBooked: false, day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 && !body.planned ? new Date().toISOString() : null, notes: body.notes ?? ps.notes, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, ps.approval === 'draft')) }).where(eq(procedureSession.id, id)).returning();
+  await planSittingReminder(tx, t, id);
+  await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
+  if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${ps.sittingNo}`, procedureSessionId: id });
+  const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
+  if (rec) await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Session rescheduled', note: `${ps.day} ${ps.startTime} → ${body.day} ${body.startTime}${body.reason ? ` · ${body.reason}` : ''}` }] }).where(eq(recommendation.id, rec.id));
+  await emit(tx, req.ctx, 'procedure_session.rescheduled', 'procedure_session', id, { from: { day: ps.day, startTime: ps.startTime, roomId: ps.roomId }, to: { day: body.day, startTime: body.startTime, roomId: body.roomId }, reason: body.reason, forced: c.length > 0 });
+  return { ...moved, warnings: c };
+};
+
+type Sitting = typeof procedureSession.$inferSelect;
+/**
+ * Where a course's next session (or a booked one being moved) fits in an hour: the first start, in 15-minute steps, where the whole
+ * session fits a suitable room and its doctor. A new session goes to the course's doctor; a moved one keeps its doctor and tries its
+ * room first. NO_FIT says why nothing does.
+ */
+export async function fitHour(tx: Tx, ctx: Ctx, target: { ps: Sitting | null; recommendationId?: string }, day: string, hour: number) {
+  const t = ctx.tenantId; const ps = target.ps;
+  const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, ps?.recommendationId ?? target.recommendationId!), eq(recommendation.tenantId, t))).then((r) => r[0]);
+  if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
+  const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
+  const buffer = proc?.bufferMinutes ?? 0;
+  const minutes = ps ? Math.max(5, toMin(ps.endTime) - toMin(ps.startTime) - buffer) : proc?.typicalMinutes ?? 30;
+  const doctor = ps ? ps.practitionerId ?? await courseDoctor(tx, rec) : await courseDoctor(tx, rec);
+  if (!doctor) throw new HttpError(409, 'NO_FIT', { why: 'pick a doctor for this session first' });
+  const rooms = (await tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true)))).filter((r) => !proc?.requiredCapability || r.capabilities.includes(proc.requiredCapability))
+    .sort((a, b) => Number(b.id === ps?.roomId) - Number(a.id === ps?.roomId));
+  const today = todayIn(ctx.timezone);
+  const nowMin = toMin(nowHHMM(ctx.timezone));
+  let why = day < today ? 'that day is past' : !rooms.length ? (proc?.requiredCapability ? `No room has ${proc.requiredCapability}` : 'No rooms are set up') : '';
+  if (!why) for (let m = hour * 60; m < hour * 60 + 60; m += 15) {
+    if (day === today && m < nowMin) { why = 'that time is past'; continue; }
+    if (m + minutes + buffer > DAY_END) { why = `${minutes} min runs past ${toHHMM(DAY_END)}, closing time`; break; }
+    for (const r of rooms) {
+      const c = await conflicts(tx, t, day, toHHMM(m), toHHMM(m + minutes + buffer), r.id, doctor, ps?.id);
+      if (!c.length) return { rec, proc, args: { day, startTime: toHHMM(m), minutes, roomId: r.id, practitionerId: doctor, force: false } };
+      why = c[0].kind === 'room' ? `${c[0].who.replace(' · ', ' has ')} till ${c[0].endTime}` : c[0].kind === 'doctor' ? `the doctor has ${c[0].who} till ${c[0].endTime}` : c[0].kind === 'leave' ? 'the doctor is away' : c[0].who;
+    }
+  }
+  throw new HttpError(409, 'NO_FIT', { why: why || 'no free time in that hour' });
+}
+
+/** Book (or move) a session into an hour, at the first start that fits. planned: on the coordinator's week, not agreed with the patient. */
+export async function placeAt(tx: Tx, ctx: Ctx, target: { ps: Sitting | null; recommendationId?: string }, day: string, hour: number, planned: boolean) {
+  const { rec, args } = await fitHour(tx, ctx, target, day, hour);
+  return target.ps ? move({ ctx, body: { ...args, planned }, params: { id: target.ps.id } }, tx) : book({ ctx, body: { ...args, planned, recommendationId: rec.id } }, tx);
+}
+
 export function procedureRoutes(app: FastifyInstance) {
   /** Feasible slots for a procedure on a day: rooms with the needed capability, free of conflicts. */
   route(app, 'get', '/procedure-sessions/slots', 'worklist.read', async (req, tx) => {
@@ -188,42 +295,6 @@ export function procedureRoutes(app: FastifyInstance) {
     return { minutes, rooms: rooms.map((r) => ({ id: r.id, name: r.name })), requiredCapability: proc.requiredCapability, slots, courseDoctorId: rec ? await courseDoctor(tx, rec) : null };
   });
 
-  const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), autoMinutes: z.boolean().optional(), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
-    // planned: placed on the coordinator's week, not booked with the patient, so it does not count as the patient's yes
-    planned: z.boolean().default(false) });
-  /** A session cannot be booked or moved into a time that has already started (the manual time too). */
-  const notPast = (ctx: Ctx, day: string, startTime: string) => {
-    const today = todayIn(ctx.timezone);
-    if (day < today || (day === today && startTime < nowHHMM(ctx.timezone))) throw new HttpError(409, 'PAST_TIME');
-  };
-  /** Schedule a sitting. Blocks the doctor's OP time when a doctor is assigned, so booking capacity drops automatically. */
-  const book = async (req: { ctx: Ctx; body: unknown }, tx: Tx) => {
-    const body = ScheduleIn.parse(req.body); const t = req.ctx.tenantId;
-    if (!body.force) notPast(req.ctx, body.day, body.startTime); // force (API only; the drawer sends it just after a clash) may record one already done
-    const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t))).then((r) => r[0]);
-    if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
-    const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
-    if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
-    if (proc?.requiredCapability && body.roomId) {
-      const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
-      if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
-    }
-    // the next number after every sitting still on the plan (done or booked ahead), so two booked ahead never share a number
-    const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), sql`${procedureSession.state} <> 'cancelled'`));
-    const minutes = body.autoMinutes ? sessionDef(proc, n + 1)?.minutes ?? body.minutes : body.minutes; // that session's length from Settings, unless the desk picked one
-    const endTime = toHHMM(toMin(body.startTime) + minutes + (proc?.bufferMinutes ?? 0));
-    const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId);
-    if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
-    // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
-    const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
-    const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
-      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, true)) }).returning();
-    await planSittingReminder(tx, t, ps.id);
-    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
-    await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
-    await emit(tx, req.ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day: body.day, startTime: body.startTime, endTime, roomId: body.roomId, practitionerId: body.practitionerId, forced: c.length > 0 });
-    return { ...ps, warnings: c };
-  };
   route(app, 'post', '/procedure-sessions', 'worklist.write', book);
 
   /** Sittings per day for the date strip. Cancelled and postponed ones are not counted. */
@@ -317,34 +388,6 @@ export function procedureRoutes(app: FastifyInstance) {
       plan: r.rec ? { notes: r.rec.notes, sittings: r.rec.sittings, plannedOn: enc?.at ?? null, diagnosis: names((enc?.data as any)?.assessment?.diagnosis) } : null, sittings };
   });
 
-  /** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */
-  const move = async (req: { ctx: Ctx; body: unknown; params: unknown }, tx: Tx) => {
-    const body = ScheduleIn.omit({ recommendationId: true }).extend({ reason: z.string().trim().max(200).optional() }).parse(req.body);
-    if (!body.force) notPast(req.ctx, body.day, body.startTime); // force (API only; the drawer sends it just after a clash) may record one already done
-    const t = req.ctx.tenantId; const id = (req.params as any).id;
-    const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
-    if (!ps) throw new HttpError(404, 'NOT_FOUND');
-    if (!['confirmed', 'postponed', 'missed'].includes(ps.state)) throw new HttpError(409, 'NOT_RESCHEDULABLE', { state: ps.state });
-    const proc = ps.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, ps.procedureId)).then((r) => r[0]) : null;
-    if (!body.practitionerId) throw new HttpError(400, 'DOCTOR_REQUIRED'); // every session has a doctor, who approves it
-    if (proc?.requiredCapability && body.roomId) {
-      const rm = await tx.select().from(room).where(eq(room.id, body.roomId)).then((r) => r[0]);
-      if (!rm?.capabilities.includes(proc.requiredCapability)) throw new HttpError(409, 'ROOM_LACKS_CAPABILITY', { required: proc.requiredCapability, room: rm?.name });
-    }
-    const endTime = toHHMM(toMin(body.startTime) + body.minutes + (proc?.bufferMinutes ?? 0));
-    const c = await conflicts(tx, t, body.day, body.startTime, endTime, body.roomId, body.practitionerId, id);
-    if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
-    // a move inside the week counts as the week's confirmation; the day-before call is still made (the clinic may have moved it)
-    const ahead = daysFrom(todayIn(req.ctx.timezone), body.day);
-    const [moved] = await tx.update(procedureSession).set({ autoBooked: false, day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 && !body.planned ? new Date().toISOString() : null, notes: body.notes ?? ps.notes, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, ps.approval === 'draft')) }).where(eq(procedureSession.id, id)).returning();
-    await planSittingReminder(tx, t, id);
-    await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
-    if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${ps.sittingNo}`, procedureSessionId: id });
-    const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
-    if (rec) await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day, contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Session rescheduled', note: `${ps.day} ${ps.startTime} → ${body.day} ${body.startTime}${body.reason ? ` · ${body.reason}` : ''}` }] }).where(eq(recommendation.id, rec.id));
-    await emit(tx, req.ctx, 'procedure_session.rescheduled', 'procedure_session', id, { from: { day: ps.day, startTime: ps.startTime, roomId: ps.roomId }, to: { day: body.day, startTime: body.startTime, roomId: body.roomId }, reason: body.reason, forced: c.length > 0 });
-    return { ...moved, warnings: c };
-  };
   // the desk moves any sitting; a doctor moves their own (from the approval list), and that move counts as approved
   route(app, 'post', '/procedure-sessions/:id/reschedule', null, async (req, tx) => {
     if (!can(req.perms, 'worklist.write')) {
@@ -367,31 +410,7 @@ export function procedureRoutes(app: FastifyInstance) {
     if (body.sittingId && !ps) throw new HttpError(404, 'NOT_FOUND');
     const ownMove = !!ps && !!req.ctx.practitionerId && ps.practitionerId === req.ctx.practitionerId && can(req.perms, 'encounter.complete');
     if (!can(req.perms, 'worklist.write') && !ownMove) throw new HttpError(403, 'FORBIDDEN:worklist.write');
-    const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, ps?.recommendationId ?? body.recommendationId!), eq(recommendation.tenantId, t))).then((r) => r[0]);
-    if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
-    const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
-    const buffer = proc?.bufferMinutes ?? 0;
-    const minutes = ps ? Math.max(5, toMin(ps.endTime) - toMin(ps.startTime) - buffer) : proc?.typicalMinutes ?? 30;
-    const doctor = ps ? ps.practitionerId ?? await courseDoctor(tx, rec) : await courseDoctor(tx, rec);
-    if (!doctor) throw new HttpError(409, 'NO_FIT', { why: 'pick a doctor for this session first' });
-    const rooms = (await tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true)))).filter((r) => !proc?.requiredCapability || r.capabilities.includes(proc.requiredCapability))
-      .sort((a, b) => Number(b.id === ps?.roomId) - Number(a.id === ps?.roomId));
-    const today = todayIn(req.ctx.timezone);
-    const nowMin = toMin(new Intl.DateTimeFormat('en-GB', { timeZone: req.ctx.timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()));
-    let why = body.day < today ? 'that day is past' : !rooms.length ? (proc?.requiredCapability ? `No room has ${proc.requiredCapability}` : 'No rooms are set up') : '';
-    let at: { startTime: string; roomId: string } | null = null;
-    if (!why) for (let m = body.hour * 60; m < body.hour * 60 + 60 && !at; m += 15) {
-      if (body.day === today && m < nowMin) { why = 'that time is past'; continue; }
-      if (m + minutes + buffer > DAY_END) { why = `${minutes} min runs past ${toHHMM(DAY_END)}, closing time`; break; }
-      for (const r of rooms) {
-        const c = await conflicts(tx, t, body.day, toHHMM(m), toHHMM(m + minutes + buffer), r.id, doctor, ps?.id);
-        if (!c.length) { at = { startTime: toHHMM(m), roomId: r.id }; break; }
-        why = c[0].kind === 'room' ? `${c[0].who.replace(' · ', ' has ')} till ${c[0].endTime}` : c[0].kind === 'doctor' ? `the doctor has ${c[0].who} till ${c[0].endTime}` : c[0].kind === 'leave' ? 'the doctor is away' : c[0].who;
-      }
-    }
-    if (!at) throw new HttpError(409, 'NO_FIT', { why: why || 'no free time in that hour' });
-    const args = { day: body.day, startTime: at.startTime, minutes, roomId: at.roomId, practitionerId: doctor, force: false, planned: true };
-    return ps ? move({ ctx: req.ctx, body: args, params: { id: ps.id } }, tx) : book({ ctx: req.ctx, body: { ...args, recommendationId: rec.id } }, tx);
+    return placeAt(tx, req.ctx, { ps, recommendationId: body.recommendationId }, body.day, body.hour, true);
   });
 
   /** A week of sittings, for the coordinator: whether it went to the doctors, and the doctors' leave in it. This week and earlier count as sent. */
@@ -454,9 +473,10 @@ export function procedureRoutes(app: FastifyInstance) {
     if (!me) throw new HttpError(403, 'NOT_A_DOCTOR');
     const set = body.action === 'approve' ? { approval: 'approved', approvedBy: req.ctx.name, approvedAt: new Date().toISOString(), approvalNote: null, changed: false } : { approval: 'change', approvalNote: body.note || 'Change asked' };
     const rows = await tx.update(procedureSession).set(set)
-      .where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.id, body.ids), eq(procedureSession.practitionerId, me), eq(procedureSession.approval, 'sent'))).returning({ id: procedureSession.id });
+      .where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.id, body.ids), eq(procedureSession.practitionerId, me), eq(procedureSession.approval, 'sent'))).returning();
     for (const r of rows) {
       if (body.action === 'approve') await planSittingReminder(tx, t, r.id);
+      if (pickedOnWhatsapp(r)) await tellDecision(tx, t, r, body.action === 'approve');
       await emit(tx, req.ctx, body.action === 'approve' ? 'procedure_session.approved' : 'procedure_session.change_asked', 'procedure_session', r.id, body.action === 'change' ? { note: set.approvalNote } : {});
     }
     return { updated: rows.length };
@@ -583,4 +603,129 @@ export function procedureRoutes(app: FastifyInstance) {
     for (const s of [latest?.schema, ...older.map((o) => o.schema)]) for (const sec of s?.sections ?? []) for (const f of sec.fields) if (sec.key !== 'consult' && !seen.has(f.key)) { seen.add(f.key); fields.push(f); }
     return { hasForm: !!latest, fields, sessions: sessions.map((s) => ({ ...s, products: s.supplies.flatMap((a) => a.issued ?? []).map((x) => `${x.name} × ${x.qty}`) })) };
   });
+}
+
+// --- Procedure sessions from WhatsApp (lib/chatMenu.ts and the assistant's tools). Always limited to the patients on the chat's
+// phone. A time the patient picks goes to the doctor like any other move (approvalFor); the doctor's answer is sent back to them.
+const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
+/** A time the patient may pick, cancel or change: at least this far ahead (the same notice as a visit). */
+const NOTICE_MIN = 120;
+const soonest = (tz: string) => ({ today: todayIn(tz), from: toMin(nowHHMM(tz)) + NOTICE_MIN });
+const changeable = (tz: string, ps: { day: string; startTime: string }) => { const s = soonest(tz); return ps.day > s.today || (ps.day === s.today && toMin(ps.startTime) >= s.from); };
+
+/** Upcoming sessions of the patients on a phone, and their courses with a session still to book (the first one, or the next one when none is booked). */
+export async function sessionsOnPhone(tx: Tx, t: string, tz: string, phone: string) {
+  const today = todayIn(tz);
+  const rows = await tx.select({ ps: procedureSession, patient: patient.fullName, procedure: procedureCatalog.name, of: recommendation.sittings, doctor: practitioner.name }).from(procedureSession)
+    .innerJoin(patient, eq(patient.id, procedureSession.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, procedureSession.procedureId))
+    .leftJoin(recommendation, eq(recommendation.id, procedureSession.recommendationId)).leftJoin(practitioner, eq(practitioner.id, procedureSession.practitionerId))
+    .where(and(eq(procedureSession.tenantId, t), eq(patient.phone, phone), sql`${patient.mergedInto} is null`, eq(procedureSession.state, 'confirmed'), gte(procedureSession.day, today)))
+    .orderBy(asc(procedureSession.day), asc(procedureSession.startTime));
+  const sessions = rows.filter((r) => r.ps.day > today || r.ps.startTime >= nowHHMM(tz)).map((r) => ({
+    sitting_id: r.ps.id, patient_id: r.ps.patientId, patient: r.patient, procedure: r.procedure ?? 'Procedure', session_no: r.ps.sittingNo, of: r.of, date: r.ps.day, time: r.ps.startTime, doctor: r.doctor,
+    waiting_for_clinic: r.ps.approval !== 'approved', confirmed_by_patient: !!r.ps.patientConfirmedAt, can_change: changeable(tz, r.ps) }));
+  const booked = new Set(rows.map((r) => r.ps.recommendationId));
+  const recs = await tx.select({ rec: recommendation, patient: patient.fullName, procedure: procedureCatalog.name }).from(recommendation)
+    .innerJoin(patient, eq(patient.id, recommendation.patientId)).leftJoin(procedureCatalog, eq(procedureCatalog.id, recommendation.procedureId))
+    .where(and(eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'), eq(patient.phone, phone), sql`${patient.mergedInto} is null`, sql`${recommendation.status} not in ('done','cancelled')`,
+      sql`(${recommendation.validUntil} is null or ${recommendation.validUntil} >= ${today})`)).orderBy(asc(recommendation.createdAt));
+  const to_book = [];
+  for (const r of recs) {
+    if (booked.has(r.rec.id)) continue;
+    const [{ done, used }] = await tx.select({ done: sql<number>`(count(*) filter (where ${procedureSession.state} = 'completed'))::int`, used: sql<number>`(count(*) filter (where ${procedureSession.state} <> 'cancelled'))::int` })
+      .from(procedureSession).where(eq(procedureSession.recommendationId, r.rec.id));
+    if (r.rec.sittings && done >= r.rec.sittings) continue;
+    to_book.push({ course_id: r.rec.id, patient_id: r.rec.patientId, patient: r.patient, procedure: r.procedure ?? 'Procedure', session_no: Math.max(done, used) + 1, of: r.rec.sittings, due: r.rec.dueOn });
+  }
+  return { sessions, to_book };
+}
+
+/** A session of a patient on this phone, else NOT_YOURS. */
+export async function sessionOf(tx: Tx, t: string, phone: string, sittingId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(sittingId)) throw new HttpError(404, 'NOT_FOUND');
+  const r = await tx.select({ ps: procedureSession, phone: patient.phone }).from(procedureSession).innerJoin(patient, eq(patient.id, procedureSession.patientId))
+    .where(and(eq(procedureSession.id, sittingId), eq(procedureSession.tenantId, t))).then((x) => x[0]);
+  if (!r || r.phone !== phone) throw new HttpError(404, 'NOT_YOURS');
+  return r.ps;
+}
+/** A procedure course of a patient on this phone, else NOT_YOURS. */
+export async function courseOf(tx: Tx, t: string, phone: string, recId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(recId)) throw new HttpError(404, 'NOT_FOUND');
+  const r = await tx.select({ rec: recommendation, phone: patient.phone }).from(recommendation).innerJoin(patient, eq(patient.id, recommendation.patientId))
+    .where(and(eq(recommendation.id, recId), eq(recommendation.tenantId, t), eq(recommendation.kind, 'procedure'))).then((x) => x[0]);
+  if (!r || r.phone !== phone) throw new HttpError(404, 'NOT_YOURS');
+  return r.rec;
+}
+const upcoming = (ps: Sitting) => { if (ps.state !== 'confirmed') throw new HttpError(409, 'NOT_CHANGEABLE', { state: ps.state }); };
+
+/** Hours a session fits in (its doctor, a suitable room), from a day, at least two hours ahead: one per hour, up to `limit`. Days the doctor does not work are skipped. */
+export async function sessionHours(tx: Tx, ctx: Ctx, target: { ps: Sitting | null; recommendationId?: string }, from: string, days: number, limit = 8) {
+  const rec = await tx.select().from(recommendation).where(eq(recommendation.id, target.ps?.recommendationId ?? target.recommendationId!)).then((r) => r[0]);
+  const doctor = target.ps?.practitionerId ?? (rec ? await courseDoctor(tx, rec) : null);
+  const routine = doctor ? await tx.select({ r: practitioner.routine }).from(practitioner).where(eq(practitioner.id, doctor)).then((r) => r[0]?.r) : null;
+  const s = soonest(ctx.timezone); const out: { date: string; hour: number; time: string }[] = [];
+  const start = from < s.today ? s.today : from;
+  for (let d = 0; d < days && out.length < limit; d++) {
+    const day = addDays(start, d);
+    if (routine?.days && !(routine.days as any)[String(new Date(day + 'T00:00:00Z').getUTCDay())]?.length) continue; // the doctor's day off
+    for (let h = 9; h < 20 && out.length < limit; h++) {
+      if (day === s.today && h * 60 < s.from) continue;
+      if (target.ps && day === target.ps.day && Math.floor(toMin(target.ps.startTime) / 60) === h) continue; // the hour it is in now
+      try { const f = await fitHour(tx, ctx, target, day, h); out.push({ date: day, hour: h, time: f.args.startTime }); }
+      catch (e) { if (!(e instanceof HttpError && e.message === 'NO_FIT')) throw e; }
+    }
+  }
+  return out;
+}
+const pickable = (ctx: Ctx, day: string, hour: number) => { const s = soonest(ctx.timezone); if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || day < s.today || (day === s.today && hour * 60 < s.from)) throw new HttpError(409, 'TOO_SOON'); };
+
+/** The patient says they will come. */
+export async function confirmSessionByPatient(tx: Tx, ctx: Ctx, ps: Sitting) {
+  upcoming(ps);
+  const now = new Date().toISOString();
+  const [row] = await tx.update(procedureSession).set({ patientConfirmedAt: now, weekConfirmedAt: ps.weekConfirmedAt ?? now }).where(eq(procedureSession.id, ps.id)).returning();
+  await emit(tx, ctx, 'procedure_session.patient_confirmed', 'procedure_session', ps.id, { by: 'whatsapp' });
+  return row;
+}
+/** The patient picks another hour: moved like any other move (it goes to the doctor), and it counts as the patient's yes. */
+export async function moveSessionByPatient(tx: Tx, ctx: Ctx, ps: Sitting, day: string, hour: number) {
+  upcoming(ps); if (!changeable(ctx.timezone, ps)) throw new HttpError(409, 'TOO_LATE'); pickable(ctx, day, hour);
+  await placeAt(tx, ctx, { ps }, day, hour, false);
+  const [row] = await tx.update(procedureSession).set({ patientConfirmedAt: new Date().toISOString() }).where(eq(procedureSession.id, ps.id)).returning();
+  return row;
+}
+/** The patient books a course's next session (the first, or the next when none is booked) in an hour. It goes to the doctor. */
+export async function bookSessionByPatient(tx: Tx, ctx: Ctx, phone: string, recId: string, day: string, hour: number) {
+  const rec = await courseOf(tx, ctx.tenantId, phone, recId);
+  pickable(ctx, day, hour);
+  if (['done', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'COURSE_CLOSED');
+  const ahead = await tx.select({ id: procedureSession.id }).from(procedureSession).where(and(eq(procedureSession.recommendationId, rec.id), eq(procedureSession.state, 'confirmed'), gte(procedureSession.day, todayIn(ctx.timezone)))).limit(1);
+  if (ahead.length) throw new HttpError(409, 'SESSION_BOOKED', { sitting_id: ahead[0].id });
+  const ps = await placeAt(tx, ctx, { ps: null, recommendationId: rec.id }, day, hour, false);
+  const [row] = await tx.update(procedureSession).set({ patientConfirmedAt: new Date().toISOString() }).where(eq(procedureSession.id, ps.id)).returning();
+  return row;
+}
+/** The patient cancels: the session is cancelled, the doctor's time freed, and the course stays open for the desk to rebook. */
+export async function cancelSessionByPatient(tx: Tx, ctx: Ctx, ps: Sitting) {
+  upcoming(ps); if (!changeable(ctx.timezone, ps)) throw new HttpError(409, 'TOO_LATE');
+  const reason = 'Cancelled by the patient on WhatsApp';
+  const [row] = await tx.update(procedureSession).set({ state: 'cancelled', stateReason: reason }).where(eq(procedureSession.id, ps.id)).returning();
+  await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, ps.id));
+  const rec = await tx.select().from(recommendation).where(eq(recommendation.id, ps.recommendationId)).then((r) => r[0]);
+  if (rec) await tx.update(recommendation).set({ status: 'open', contactLog: [...rec.contactLog, { at: new Date().toISOString(), by: ctx.name, outcome: 'Session cancelled', note: reason }] }).where(eq(recommendation.id, rec.id));
+  await planSittingReminder(tx, ctx.tenantId, ps.id); // drops its reminder
+  await emit(tx, ctx, 'procedure_session.cancelled', 'procedure_session', ps.id, { reason, by: 'whatsapp' });
+  return row;
+}
+/** Picked by the patient on WhatsApp, and not moved by anyone since: they hear the doctor's answer. */
+const pickedOnWhatsapp = (ps: { bookedBy: string | null }) => ps.bookedBy === SYSTEM_USER;
+/** The doctor approved, or sent back, a time the patient picked on WhatsApp: the patient hears it; a time sent back goes to the front desk. */
+async function tellDecision(tx: Tx, t: string, ps: Sitting, approved: boolean) {
+  const r = await tx.select({ p: patient, proc: procedureCatalog.name, settings: tenant.settings }).from(patient).innerJoin(tenant, eq(tenant.id, patient.tenantId))
+    .leftJoin(procedureCatalog, eq(procedureCatalog.id, sql`${ps.procedureId}`)).where(eq(patient.id, ps.patientId)).then((x) => x[0]);
+  if (!r) return;
+  const lang = patientLang(r.p, r.settings); const proc = r.proc ?? "procedure";
+  const date = new Date(ps.day + "T00:00:00Z").toLocaleDateString(`${lang}-IN`, { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  await tellPatient(tx, t, r.p.phone, approved ? MSG[lang].sessionApproved(proc, date, ps.startTime) : MSG[lang].sessionSentBack(proc),
+    approved ? undefined : `The doctor sent back the ${proc} time the patient picked (${ps.day} ${ps.startTime})${ps.approvalNote ? `: ${ps.approvalNote}` : ""}`);
 }

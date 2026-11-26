@@ -34,7 +34,7 @@ function textOf(m: any): string {
   return `[${m.type ?? 'unknown'} message: not readable yet]`; // ponytail: voice notes need speech-to-text; until then the assistant hands these over
 }
 /** The id of a tapped button or list row (the tap-to-book menu acts on it; lib/chatMenu.ts). */
-const actionOf = (m: any): string | undefined => m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id ?? undefined;
+const actionOf = (m: any): string | undefined => m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id ?? m.button?.payload ?? undefined; // button: a template's quick reply
 
 export function chatRoutes(app: FastifyInstance) {
   // A staff reply goes out once its transaction has committed, not at the next minute's run.

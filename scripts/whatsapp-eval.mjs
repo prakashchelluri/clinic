@@ -36,7 +36,23 @@ async function registered(fullName, { booked = false, phoneNo = phone() } = {}) 
   return { ...p, phone: phoneNo };
 }
 
-const TIME = /\b([01]?\d|2[0-3])[:.][0-5]\d\b|\b\d{1,2}\s?(am|pm)\b/i;
+/** A registered patient with a Chemical peel course (3 sessions) and its first session booked two days ahead at 11:00, approved by the doctor. */
+async function withCourse(fullName) {
+  const p = await registered(fullName);
+  const me = cookie; await api('POST', '/auth/login', { email: 'owner@demo.clinic', password: 'demo1234', tenant: 'sahitya' });
+  const cfg = (await api('GET', '/config')).body; const peel = cfg.procedures.find((x) => x.name === 'Chemical peel');
+  const v = (await api('POST', '/visits', { patientId: p.id, feeCategoryCode: 'GEN', payment: { method: 'cash', amountPaise: 30000 } })).body;
+  const e = (await api('POST', `/visits/${v.id}/encounter`, {})).body;
+  await api('PATCH', `/encounters/${e.id}`, { data: { complaint: { chief_complaint: ['Acne'] }, assessment: { diagnosis: [{ name: 'Acne' }] } }, complete: true, recommendations: [{ kind: 'procedure', procedureId: peel.id, sittings: 3, gapDays: 30 }] });
+  const rec = (await api('GET', '/worklist?kind=procedure')).body.find((x) => x.patientId === p.id);
+  let day = new Date(Date.now() + 2 * 86400_000); if (day.getDay() === 0) day = new Date(day.getTime() + 86400_000);
+  const d = day.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  await api('POST', '/procedure-sessions', { recommendationId: rec.id, day: d, startTime: '11:00', minutes: 30, practitionerId: cfg.practitioners[0].id, force: true }); // the owner's own: approved
+  cookie = me;
+  return { ...p, recId: rec.id, day: d, time: '11:00' };
+}
+
+const TIME =/\b([01]?\d|2[0-3])[:.][0-5]\d\b|\b\d{1,2}\s?(am|pm)\b/i;
 const TELUGU = /[ఀ-౿]/;
 // checks that apply to every reply
 const always = [
@@ -87,6 +103,10 @@ const scenarios = [
     async end(p, turns) { return [['no phone numbers leaked', !/\b[6-9]\d{9}\b/.test(turns[0][1].reply)]]; } },
   { name: 'family on one number', async setup() { const a = await registered('Ramesh Kumar'); await registered('Arjun Kumar', { phoneNo: a.phone }); return a; }, msgs: ['Hi, I want to book a visit'],
     async end(p, turns) { const r = turns[0][1].reply; return [['asks which person or the problem', /Ramesh|Arjun|who|which|whom|for/i.test(r)]]; } },
+  { name: 'procedure session: when, then move it', async setup() { return withCourse('Swathi Reddy'); }, msgs: ['When is my next peel session?', 'Can I move it to the day after?', 'The first one is fine'],
+    async end(p, turns, s) {
+      const ps = (await api('GET', `/procedure-sessions?recommendationId=${s.recId}`)).body.filter((x) => x.state === 'confirmed');
+      return [['says the session time', turns[0][1].reply.includes(s.time.replace(/^0/, '')) || turns[0][1].reply.includes(s.time)], ['still one session', ps.length === 1], ['moved', ps[0] && ps[0].day !== s.day]]; } },
   { name: 'thanks at the end', msgs: ['Ok thank you'], async end(p, turns) { return [['short goodbye', turns[0][1].reply.length < 200], ['no times offered', !TIME.test(turns[0][1].reply)]]; } },
 ];
 

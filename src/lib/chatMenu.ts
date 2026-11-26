@@ -5,11 +5,12 @@
 // typed outside them goes to the assistant as before (lib/assistant.ts).
 import { and, eq } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { appointment, chat } from '../db/schema.js';
+import { appointment, chat, chatMessage } from '../db/schema.js';
 import { HttpError } from './auth.js';
-import { todayIn } from './core.js';
+import { addDays, todayIn } from './core.js';
 import { appointmentView, bookingSettings } from './booking.js';
-import { cancelByPatient, confirmByPatient, moveByPatient } from '../modules/public.js';
+import { cancelByPatient, confirmByPatient, ctxFor, moveByPatient } from '../modules/public.js';
+import { bookSessionByPatient, cancelSessionByPatient, confirmSessionByPatient, moveSessionByPatient, sessionHours, sessionOf, sessionsOnPhone } from '../modules/procedures.js';
 import { BY, bookFromChat, inTenant, mine, myVisits, noteVisit, openWindows, patientsOn, say, visitOut, type Menu } from './assistant.js';
 
 type Tenant = Parameters<typeof say>[1];
@@ -22,6 +23,8 @@ type Flow = {
   patientId?: string; newName?: string; moving?: string; another?: boolean;
   pendingWindow?: string; // a time tapped before the name was known: booked once the name comes
   noteFor?: string;       // the visit just booked, waiting for "what is it about?" (optional)
+  movingSession?: string; // a procedure session whose time is being changed
+  bookingCourse?: string; // a procedure course whose next session is being booked
 };
 
 const FLOW_MS = 2 * 3_600_000;
@@ -61,6 +64,19 @@ const TXT = {
     inClinic: 'You are at the clinic now. Please ask at the front desk.',
     locked: 'This visit can no longer be changed here. Please call the clinic.',
     today: 'Today', tomorrow: 'Tomorrow',
+    // procedure sessions
+    sCard: (s: Sess, d: string) => `${s.patient}: ${s.procedure} session ${part(s)}, ${d} at ${s.time}${s.waiting_for_clinic ? ' (the clinic will confirm it)' : ''}.`,
+    sNext: (s: Sess, d: string) => `Your next ${s.procedure} session: ${d} at ${s.time}.`,
+    sToBook: (c: Course) => `Your ${c.procedure} session ${part(c)} is not booked yet.`,
+    sBook: 'Book session', sBookRow: (c: Course) => `Book ${c.procedure}`,
+    sTimes: (proc: string) => `Open times for your ${proc} session. Please choose one.`, later: 'Later dates…',
+    sNone: 'Sorry, there are no open times for this session in the next 2 weeks. Our front desk will reply here soon.',
+    sConfirmed: (s: Sess, d: string) => `Thank you, your ${s.procedure} session on ${d} at ${s.time} is confirmed.`,
+    sMoved: (s: Sess, d: string) => `Changed: your ${s.procedure} session is now ${d} at ${s.time}.`,
+    sBooked: (s: Sess, d: string) => `Booked: ${s.patient}'s ${s.procedure} session ${part(s)}, ${d} at ${s.time}.`,
+    sWait: 'The doctor will confirm this time; you will get a message here.',
+    sCancel: 'Cancel session', sCancelAsk: 'Cancel this session?', sCancelled: 'Your session is cancelled. Our front desk will help you book another time.',
+    sLocked: 'This session can no longer be changed here. Please call the clinic.',
   },
   te: {
     hello: (name: string | null, clinic: string, back: boolean) => name ? `నమస్తే ${name} గారు, ${clinic}కి ${back ? 'మళ్ళీ ' : ''}స్వాగతం.` : `నమస్తే, ${clinic}కి స్వాగతం.`,
@@ -91,10 +107,26 @@ const TXT = {
     inClinic: 'మీరు ఇప్పుడు క్లినిక్‌లో ఉన్నారు. దయచేసి ఫ్రంట్ డెస్క్‌లో అడగండి.',
     locked: 'ఈ అపాయింట్‌మెంట్‌ను ఇక్కడ మార్చలేము. దయచేసి క్లినిక్‌కు కాల్ చేయండి.',
     today: 'ఈ రోజు', tomorrow: 'రేపు',
+    sCard: (s: Sess, d: string) => `${s.patient}: ${s.procedure} సిట్టింగ్ ${part(s)}, ${d}, ${s.time}${s.waiting_for_clinic ? ' (క్లినిక్ కన్ఫర్మ్ చేస్తుంది)' : ''}.`,
+    sNext: (s: Sess, d: string) => `మీ తదుపరి ${s.procedure} సిట్టింగ్: ${d}, ${s.time}.`,
+    sToBook: (c: Course) => `మీ ${c.procedure} సిట్టింగ్ ${part(c)} ఇంకా బుక్ కాలేదు.`,
+    sBook: 'సిట్టింగ్ బుక్', sBookRow: (c: Course) => `${c.procedure} బుక్`,
+    sTimes: (proc: string) => `మీ ${proc} సిట్టింగ్ కోసం ఖాళీ సమయాలు. ఒకటి ఎంచుకోండి.`, later: 'తర్వాతి తేదీలు…',
+    sNone: 'క్షమించండి, వచ్చే 2 వారాల్లో ఈ సిట్టింగ్‌కు ఖాళీ సమయాలు లేవు. మా ఫ్రంట్ డెస్క్ త్వరలో ఇక్కడ సమాధానం ఇస్తారు.',
+    sConfirmed: (s: Sess, d: string) => `ధన్యవాదాలు, ${d} ${s.time} మీ ${s.procedure} సిట్టింగ్ కన్ఫర్మ్ అయింది.`,
+    sMoved: (s: Sess, d: string) => `మార్చాము: మీ ${s.procedure} సిట్టింగ్ ఇప్పుడు ${d}, ${s.time}.`,
+    sBooked: (s: Sess, d: string) => `బుక్ అయింది: ${s.patient} గారి ${s.procedure} సిట్టింగ్ ${part(s)}, ${d}, ${s.time}.`,
+    sWait: 'డాక్టర్ గారు ఈ సమయాన్ని కన్ఫర్మ్ చేస్తారు; ఇక్కడ మెసేజ్ వస్తుంది.',
+    sCancel: 'సిట్టింగ్ రద్దు', sCancelAsk: 'ఈ సిట్టింగ్ రద్దు చేయాలా?', sCancelled: 'మీ సిట్టింగ్ రద్దు అయింది. వేరే సమయం బుక్ చేయడానికి మా ఫ్రంట్ డెస్క్ సహాయం చేస్తారు.',
+    sLocked: 'ఈ సిట్టింగ్‌ను ఇక్కడ మార్చలేము. దయచేసి క్లినిక్‌కు కాల్ చేయండి.',
   },
 };
 
 const win = (w: string) => w.replace('-', ' to ');
+type Mine = Awaited<ReturnType<typeof sessionsOnPhone>>;
+type Sess = Mine['sessions'][number];
+type Course = Mine['to_book'][number];
+const part = (s: { session_no: number; of: number | null }) => s.of ? `${s.session_no}/${s.of}` : String(s.session_no);
 /** One window per hour, in time order. */
 const hours = <W extends { time: string }>(ws: W[]) => [...ws].sort((a, b) => a.time.localeCompare(b.time)).filter((w, i, all) => all.findIndex((x) => x.time === w.time) === i);
 
@@ -188,6 +220,47 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
       flow.step = 'who';
       return send(L.who, opts.length <= 3 ? { kind: 'buttons', options: opts } : { kind: 'list', button: L.choose, options: opts.slice(0, 10) });
     };
+    // --- procedure sessions: the patient's own (and their family's on this phone), as the desk books them
+    const pctx = ctxFor(t, BY);
+    const mineS = () => sessionsOnPhone(tx, t.id, t.timezone, c.phone);
+    const sessionView = async (id: string) => (await mineS()).sessions.find((s) => s.sitting_id === id);
+    const noteSession = (sp: Tx, done: string, s: Sess) => sp.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'event', by: BY, body: `${done} ${s.patient}'s ${s.procedure} session ${part(s)}: ${s.date}, ${s.time}` });
+    const sessionCard = (s: Sess) => {
+      const opts = [
+        ...(!s.waiting_for_clinic && !s.confirmed_by_patient ? [{ id: `pc:${s.sitting_id}`, title: L.confirm }] : []),
+        ...(s.can_change ? [{ id: `pm:${s.sitting_id}`, title: L.move }, { id: `px:${s.sitting_id}`, title: L.sCancel }] : []),
+      ];
+      return opts.length ? send(L.sCard(s, dayLabel(s.date)), { kind: 'buttons', options: opts }) : send(`${L.sCard(s, dayLabel(s.date))}${s.can_change ? '' : ` ${L.sLocked}`}`);
+    };
+    /** Open hours for the session being moved or booked (flow.movingSession / flow.bookingCourse), from a day: one list, then Later dates…. */
+    const sendSessionTimes = async (from = today) => {
+      const target = flow.movingSession ? { ps: await sessionOf(tx, t.id, c.phone, flow.movingSession) } : { ps: null, recommendationId: flow.bookingCourse };
+      const all = await mineS();
+      const proc = flow.movingSession ? all.sessions.find((s) => s.sitting_id === flow.movingSession)?.procedure : all.to_book.find((x) => x.course_id === flow.bookingCourse)?.procedure;
+      const free = await sessionHours(tx, pctx, target, from, 14, 8);
+      if (!free.length) {
+        await tx.update(chat).set({ status: 'staff', reason: `No open times for ${proc ?? 'a procedure'} session` }).where(eq(chat.id, c.id)); status = 'staff';
+        fresh(); return send(L.sNone);
+      }
+      const rows = free.map((h) => ({ id: `ph:${h.date}|${h.hour}`, title: `${shortDay(h.date)} ${h.time}`, description: undefined as string | undefined }));
+      if (free.length === 8) rows.push({ id: `pl:${addDays(free[7].date, 1)}`, title: L.later, description: undefined });
+      return send(L.sTimes(proc ?? ''), { kind: 'list', button: L.timesBtn, options: rows });
+    };
+    /** Everything this phone has coming: visits, procedure sessions, and courses with a session still to book. */
+    const showMine = async () => {
+      fresh();
+      const visits = await myVisits(tx, t, c.phone); const { sessions, to_book } = await mineS();
+      const n = visits.length + sessions.length + to_book.length;
+      if (!n) return send(L.noVisit, { kind: 'buttons', options: [{ id: 'm:book', title: L.book }, ask] });
+      if (n === 1) return visits.length ? card(visits[0]) : sessions.length ? sessionCard(sessions[0]) : startSessionBooking(to_book[0].course_id);
+      return send(L.which, { kind: 'list', button: L.choose, options: [
+        ...visits.map((v) => ({ id: `v:${v.appointment_id}`, title: v.patient, description: `${dayLabel(v.date)}, ${win(v.window)}` })),
+        ...sessions.map((s) => ({ id: `pv:${s.sitting_id}`, title: s.procedure, description: `${s.patient}, ${dayLabel(s.date)}, ${s.time}` })),
+        ...to_book.map((x) => ({ id: `pb:${x.course_id}`, title: L.sBookRow(x), description: `${x.patient}, ${part(x)}` })),
+      ].slice(0, 10) });
+    };
+    const startSessionBooking = (courseId: string) => { fresh({ bookingCourse: courseId }); return sendSessionTimes(); };
+
     const bookIt = (windowId: string) => attempt(async (sp) => {
       const v = await noteVisit(sp, t, c.id, 'Booked', await bookFromChat(sp, t, c.phone, windowId, { patientId: flow.patientId, newName: flow.newName, another: flow.another }, origin));
       fresh({ step: 'note', noteFor: v.appointment_id });
@@ -203,6 +276,9 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
         else if (/WINDOW/.test(e.message)) { await send(L.full); await sendTimes(); }
         else if (e.message === 'IN_CLINIC_NOW') { fresh(); await send(L.inClinic); }
         else if (e.message === 'NAME_NEEDED') { flow.step = 'name'; await send(L.name); }
+        else if (['NO_FIT', 'TOO_SOON', 'CONFLICT'].includes(e.message) && (flow.movingSession || flow.bookingCourse)) { await send(L.full); await sendSessionTimes(); }
+        else if (e.message === 'SESSION_BOOKED' && e.extra?.sitting_id) { fresh(); const s = await sessionView(String(e.extra.sitting_id)); if (s) await sessionCard(s); else await send(L.sLocked); }
+        else if (['TOO_LATE', 'NOT_CHANGEABLE', 'COURSE_CLOSED'].includes(e.message)) { fresh(); await send(L.sLocked); }
         else { fresh(); await send(L.locked); } // NOT_YOURS, too close to change, already cancelled…
         return false;
       }
@@ -213,8 +289,16 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
       fresh();
       const me = family.length === 1 ? family[0] : null;
       const theirs = me ? (await myVisits(tx, t, c.phone)).filter((v) => v.patient_id === me.id) : [];
+      const procs = me ? await mineS() : { sessions: [], to_book: [] };
+      const sess = procs.sessions.filter((s) => s.patient_id === me?.id); const toBook = procs.to_book.filter((x) => x.patient_id === me?.id);
       if (family.length > 1) await send(`${L.hello(null, t.name, true)} ${L.help}`, { kind: 'buttons', options: [{ id: 'm:book', title: L.book }, { id: 'm:visit', title: L.visit }, ask] });
-      else if (me && theirs.length) await send(`${L.hello(me.fullName, t.name, true)}\n${L.yourVisit(theirs[0], dayLabel(theirs[0].date))}`, { kind: 'buttons', options: [{ id: `v:${theirs[0].appointment_id}`, title: L.visit }, { id: `ba:${me.id}`, title: L.another }, ask] });
+      else if (me && (theirs.length || sess.length || toBook.length)) {
+        // what they have coming, in one message: the visit, the next procedure session, a session still to book
+        const lines = [L.hello(me.fullName, t.name, true), ...(theirs.length ? [L.yourVisit(theirs[0], dayLabel(theirs[0].date))] : []), ...(sess.length ? [L.sNext(sess[0], dayLabel(sess[0].date))] : []), ...(toBook.length ? [L.sToBook(toBook[0])] : [])];
+        const visitBtn = theirs.length + sess.length === 1 && !toBook.length ? { id: theirs.length ? `v:${theirs[0].appointment_id}` : `pv:${sess[0].sitting_id}`, title: L.visit } : { id: 'm:visit', title: L.visit };
+        const bookBtn = theirs.length ? { id: `ba:${me.id}`, title: L.another } : { id: `p:${me.id}`, title: L.book };
+        await send(lines.join('\n'), { kind: 'buttons', options: toBook.length ? [{ id: `pb:${toBook[0].course_id}`, title: L.sBook }, visitBtn, bookBtn] : [visitBtn, bookBtn, ask] });
+      }
       else { flow.patientId = me?.id; flow.newName = me ? undefined : profile; await sendNext(`${L.hello(me?.fullName ?? profile ?? null, t.name, !!me)}\n`); }
     } else if (!inp.action && flow.step === 'name') {
       const name = inp.text.replace(NAME_LEAD, '').replace(/[.!]+$/, '').trim();
@@ -231,13 +315,8 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
     } else if (kind === 'ns') { fresh(); await send(L.seeYou); }
     else if (kind === 'm' && arg === 'book') await startBooking();
     else if (kind === 'm' && arg === 'ask') { fresh(); await send(L.askQ); }
-    else if (kind === 'm' && arg === 'visit') {
-      fresh();
-      const visits = await myVisits(tx, t, c.phone);
-      if (!visits.length) await send(L.noVisit, { kind: 'buttons', options: [{ id: 'm:book', title: L.book }, ask] });
-      else if (visits.length === 1) await card(visits[0]);
-      else await send(L.which, { kind: 'list', button: L.choose, options: visits.slice(0, 10).map((v) => ({ id: `v:${v.appointment_id}`, title: v.patient, description: `${dayLabel(v.date)}, ${win(v.window)}` })) });
-    } else if (kind === 'p' && arg === 'new') { fresh({ step: 'name' }); await send(L.name); }
+    else if (kind === 'm' && arg === 'visit') await showMine();
+    else if (kind === 'p' && arg === 'new') { fresh({ step: 'name' }); await send(L.name); }
     else if (kind === 'p') {
       if (!family.some((p) => p.id === arg)) await startBooking();
       else {
@@ -272,6 +351,38 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
     else if (kind === 'xy') await attempt(async (sp) => { await cancelByPatient(sp, await mine(sp, t, c.phone, arg), 'Cancelled on WhatsApp', 'whatsapp'); await noteVisit(sp, t, c.id, 'Cancelled', visitOut((await appointmentView(sp, t.id, arg))!)); fresh(); await send(L.cancelled, { kind: 'buttons', options: [{ id: 'm:book', title: L.book }] }); });
     else if (kind === 'k') await send(L.kept);
     else if (kind === 'mv') { fresh({ moving: arg }); if (await attempt(async (sp) => { await mine(sp, t, c.phone, arg); })) await sendTimes(); }
+    // procedure sessions (pc / pm also come from the day-before reminder's buttons)
+    else if (kind === 'pv') await attempt(async (sp) => { await sessionOf(sp, t.id, c.phone, arg); const s = await sessionView(arg); if (s) await sessionCard(s); else await send(L.sLocked); });
+    else if (kind === 'pc') await attempt(async (sp) => {
+      await confirmSessionByPatient(sp, pctx, await sessionOf(sp, t.id, c.phone, arg));
+      const s = (await sessionView(arg))!; await noteSession(sp, 'Confirmed', s); fresh(); await send(L.sConfirmed(s, dayLabel(s.date)));
+    });
+    else if (kind === 'pm') { fresh({ movingSession: arg }); await attempt(async (sp) => { const ps = await sessionOf(sp, t.id, c.phone, arg); if (ps.state !== 'confirmed' || !(await sessionView(arg))?.can_change) throw new HttpError(409, 'TOO_LATE'); await sendSessionTimes(); }); }
+    else if (kind === 'pb') await attempt(async () => { await startSessionBooking(arg); });
+    else if (kind === 'pl') await attempt(async () => { await sendSessionTimes(/^\d{4}-\d{2}-\d{2}$/.test(arg) ? arg : today); });
+    else if (kind === 'ph') {
+      const [day, h] = arg.split('|'); const hour = Number(h);
+      if (flow.movingSession) {
+        const id = flow.movingSession;
+        await attempt(async (sp) => {
+          const row = await moveSessionByPatient(sp, pctx, await sessionOf(sp, t.id, c.phone, id), day, hour);
+          const s = (await sessionView(id))!; await noteSession(sp, row.approval === 'approved' ? 'Moved' : 'Moved (waiting for the doctor)', s); fresh();
+          await send(`${L.sMoved(s, dayLabel(s.date))}${row.approval === 'approved' ? '' : ` ${L.sWait}`}`);
+        });
+      } else if (flow.bookingCourse) {
+        const rec = flow.bookingCourse;
+        await attempt(async (sp) => {
+          const row = await bookSessionByPatient(sp, pctx, c.phone, rec, day, hour);
+          const s = (await sessionView(row.id))!; await noteSession(sp, row.approval === 'approved' ? 'Booked' : 'Booked (waiting for the doctor)', s); fresh();
+          await send(`${L.sBooked(s, dayLabel(s.date))}${row.approval === 'approved' ? '' : ` ${L.sWait}`}`);
+        });
+      } else await showMine(); // the steps before were lost (over 2 hours ago)
+    }
+    else if (kind === 'px') await attempt(async (sp) => { await sessionOf(sp, t.id, c.phone, arg); const s = await sessionView(arg); if (!s?.can_change) throw new HttpError(409, 'TOO_LATE'); await send(`${L.sCancelAsk}\n${L.sCard(s, dayLabel(s.date))}`, { kind: 'buttons', options: [{ id: `pxy:${arg}`, title: L.yesCancel }, { id: 'k:', title: L.keep }] }); });
+    else if (kind === 'pxy') await attempt(async (sp) => {
+      const s = await sessionView(arg); await cancelSessionByPatient(sp, pctx, await sessionOf(sp, t.id, c.phone, arg));
+      if (s) await noteSession(sp, 'Cancelled', s); fresh(); await send(L.sCancelled);
+    });
     else return null; // an old or unknown button: the assistant reads its title
 
     await tx.update(chat).set({ flow }).where(eq(chat.id, c.id));
