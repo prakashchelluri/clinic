@@ -264,7 +264,10 @@ const OFF_REPLY = 'Thank you for your message. Our front desk will reply here so
  * One line from a patient (WhatsApp or the test chat). Kept once (WhatsApp resends), then answered by the assistant
  * unless the chat is with the front desk. Any failure hands the chat to the front desk: a patient is never left unanswered.
  */
-export async function handleIncoming(t: Tenant, inp: { phone: string; text: string; action?: string; ref?: string; origin: string; simulate?: boolean }) {
+/** A message WhatsApp delivers this late (Meta retries a refused delivery for hours) is kept for staff but not answered: the reply would come out of order. */
+const LATE_MS = 10 * 60_000;
+
+export async function handleIncoming(t: Tenant, inp: { phone: string; text: string; action?: string; ref?: string; origin: string; simulate?: boolean; sentAt?: number }) {
   const phone = tenDigits(inp.phone);
   if (phone.length !== 10) throw new HttpError(400, 'BAD_PHONE');
   const text = inp.text.trim().slice(0, 2000);
@@ -279,6 +282,7 @@ export async function handleIncoming(t: Tenant, inp: { phone: string; text: stri
   });
   if (!got) return { duplicate: true as const };
   if (got.status === 'staff') return { chatId: got.id, status: 'staff' };
+  if (inp.sentAt && Date.now() - inp.sentAt > LATE_MS) return { chatId: got.id, status: got.status, late: true as const };
   // Taps, greetings and the booking steps are answered by the fixed menu, without the AI; anything else typed goes on below
   const menuStatus = await menuTurn(t, got, { text, action: inp.action }, !!inp.simulate, inp.origin);
   if (menuStatus) return { chatId: got.id, status: menuStatus };

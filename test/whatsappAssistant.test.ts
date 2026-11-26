@@ -171,6 +171,12 @@ test('tap-to-book: greeting menu, problem, name, day list, time list, booked; My
   assert.equal((await inT((tx) => tx.select().from(schema.appointment).where(eq(schema.appointment.id, appt.id))))[0].status, 'cancelled');
   const events = (await linesOf(c.id)).filter((l: any) => l.direction === 'event').map((l: any) => l.body.split(' ')[0]);
   assert.deepEqual(events, ['Booked', 'Cancelled'], 'staff see what was done from the menu');
+  // Meta retries a refused delivery much later: a "Hi" sent 30 minutes ago is kept for staff, but gets no menu out of order
+  const late = Math.floor((Date.now() - 30 * 60_000) / 1000);
+  await hook({ entry: [{ changes: [{ value: { metadata: { phone_number_id: 'pn-123' }, messages: [{ from: '919848077777', id: 'wamid.late1', timestamp: String(late), type: 'text', text: { body: 'Hi' } }] } }] }] });
+  await until(async () => !!(await chatOf('9848077777')));
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual((await linesOf((await chatOf('9848077777')).id)).map((l: any) => l.direction), ['in'], 'kept, not answered');
   // a question typed while the menu waits for an answer goes to the assistant (here: off, so the front desk)
   await tap((await last()).options, (x) => x.id === 'm:book');
   await R('POST', '/chats/simulate', { phone, text: 'How much is the fee?' });

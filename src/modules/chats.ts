@@ -60,7 +60,7 @@ export function chatRoutes(app: FastifyInstance) {
         if (!v.messages?.length) continue; // delivery receipts: nothing to do yet
         const t = await clinicFor(String(v.metadata?.phone_number_id ?? ''));
         if (!t) { req.log.warn({ id: v.metadata?.phone_number_id }, 'whatsapp message for an unknown number'); continue; }
-        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), action: actionOf(m), ref: m.id, origin }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
+        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), action: actionOf(m), ref: m.id, origin, sentAt: Number(m.timestamp) * 1000 || undefined }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
       }
       // Meta wants a quick 200 and resends otherwise; the replies are worked out after answering (lines are kept once by their WhatsApp id)
       void Promise.all(work);
