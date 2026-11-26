@@ -59,7 +59,9 @@ function Lines({ lines }: { lines: any[] }) {
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [lines.length]);
   return (
     <div className="space-y-2">
-      {lines.map((l) => <div key={l.id} className={`flex ${l.direction === 'in' ? 'justify-start' : 'justify-end'}`}>
+      {lines.map((l) => l.direction === 'event'
+        ? <div key={l.id} className="text-center text-[12px] text-muted">{l.body} · {when(l.createdAt)}</div>
+        : <div key={l.id} className={`flex ${l.direction === 'in' ? 'justify-start' : 'justify-end'}`}>
         <div className={`max-w-[85%] rounded-[12px] px-3 py-2 text-[13.5px] ${l.direction === 'in' ? 'bg-paper-2 border border-line' : l.by === 'WhatsApp assistant' ? 'bg-sage-soft' : 'bg-clay-soft'}`}>
           <div className="whitespace-pre-wrap">{l.body}</div>
           <div className="mt-1 text-[11px] text-muted">{l.direction === 'in' ? 'Patient' : l.by === 'WhatsApp assistant' ? 'Assistant' : l.by} · {when(l.createdAt)}</div>

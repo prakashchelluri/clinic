@@ -82,6 +82,11 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
     try { return JSON.stringify(await inTenant(t, (tx) => fn(tx, input))); }
     catch (e: any) { if (e instanceof HttpError) return JSON.stringify({ error: e.message, ...e.extra }); throw e; }
   };
+  // What the assistant changed is kept as a line in the chat: staff see it, and the assistant's next reply is told it did it
+  const noted = async (tx: Tx, done: string, v: ReturnType<typeof visitOut>) => {
+    await tx.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'event', by: BY, body: `${done} ${v.patient}'s visit: ${v.date}, ${v.window}` });
+    return v;
+  };
   return [
     betaTool({
       name: 'my_visits', description: 'The patients registered on this WhatsApp number and their upcoming visits, with what each visit allows (confirm, cancel, move).',
@@ -102,36 +107,42 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
         if (!/^\d{4}-\d{2}-\d{2}$/.test(i.from)) throw new HttpError(400, 'BAD_DATE');
         const v = i.appointment_id ? await mine(tx, t, c.phone, i.appointment_id) : null;
         const days = await openSlots(tx, t, i.from, Math.min(i.days ?? 3, 7), v?.svc ?? null, v?.s.practitionerId);
-        return days.map((d) => ({ date: d.day, windows: d.slots.filter((x) => x.id !== v?.a.sessionId).map((x) => ({ window_id: x.id, time: `${x.startTime}-${x.endTime}`, doctor: x.doctor })) }));
+        const early = bookingSettings(t.settings).arriveEarlyMinutes;
+        const arriveBy = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); const x = h * 60 + m - early; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+        return days.map((d) => ({ date: d.day, windows: d.slots.filter((x) => x.id !== v?.a.sessionId).map((x) => ({ window_id: x.id, time: `${x.startTime}-${x.endTime}`, arrive_by: arriveBy(x.startTime), doctor: x.doctor })) }));
       }),
     }),
     betaTool({
       name: 'book_visit', description: 'Book a new visit in a window from open_times. Use patient_id for a patient on this number, or new_patient_name for someone new.',
       inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string', description: 'In English letters, as the clinic register keeps names (write a Telugu or Hindi name in English letters, e.g. Lakshmi)' }, reason: { type: 'string', description: 'Why the patient is coming, in a few English words for the front desk and doctor (e.g. "pimples on face, 2 months", "review after acne treatment")' } }, required: ['window_id'], additionalProperties: false } as const,
-      run: run((tx, i: { window_id: string; patient_id?: string; new_patient_name?: string; reason?: string }) => bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name, reason: i.reason }, origin)),
+      run: run(async (tx, i: { window_id: string; patient_id?: string; new_patient_name?: string; reason?: string }) => noted(tx, 'Booked', await bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name, reason: i.reason }, origin))),
     }),
     betaTool({
       name: 'confirm_visit', description: 'Mark an upcoming visit as confirmed by the patient.',
       inputSchema: { type: 'object', properties: { appointment_id: { type: 'string' } }, required: ['appointment_id'], additionalProperties: false } as const,
-      run: run(async (tx, i: { appointment_id: string }) => { await confirmByPatient(tx, await mine(tx, t, c.phone, i.appointment_id), 'whatsapp'); return visitOut((await appointmentView(tx, t.id, i.appointment_id))!); }),
+      run: run(async (tx, i: { appointment_id: string }) => { await confirmByPatient(tx, await mine(tx, t, c.phone, i.appointment_id), 'whatsapp'); return noted(tx, 'Confirmed', visitOut((await appointmentView(tx, t.id, i.appointment_id))!)); }),
     }),
     betaTool({
       name: 'cancel_visit', description: 'Cancel an upcoming visit.',
       inputSchema: { type: 'object', properties: { appointment_id: { type: 'string' }, reason: { type: 'string' } }, required: ['appointment_id'], additionalProperties: false } as const,
-      run: run(async (tx, i: { appointment_id: string; reason?: string }) => { await cancelByPatient(tx, await mine(tx, t, c.phone, i.appointment_id), i.reason?.slice(0, 300), 'whatsapp'); return visitOut((await appointmentView(tx, t.id, i.appointment_id))!); }),
+      run: run(async (tx, i: { appointment_id: string; reason?: string }) => { await cancelByPatient(tx, await mine(tx, t, c.phone, i.appointment_id), i.reason?.slice(0, 300), 'whatsapp'); return noted(tx, 'Cancelled', visitOut((await appointmentView(tx, t.id, i.appointment_id))!)); }),
     }),
     betaTool({
       name: 'move_visit', description: 'Move an upcoming visit to another window from open_times (called with that appointment_id).',
       inputSchema: { type: 'object', properties: { appointment_id: { type: 'string' }, window_id: { type: 'string' } }, required: ['appointment_id', 'window_id'], additionalProperties: false } as const,
       run: run(async (tx, i: { appointment_id: string; window_id: string }) => {
         if (!/^[0-9a-f-]{36}$/i.test(i.window_id)) throw new HttpError(404, 'WINDOW_NOT_FOUND');
-        await moveByPatient(tx, await mine(tx, t, c.phone, i.appointment_id), i.window_id, origin, 'whatsapp'); return visitOut((await appointmentView(tx, t.id, i.appointment_id))!);
+        await moveByPatient(tx, await mine(tx, t, c.phone, i.appointment_id), i.window_id, origin, 'whatsapp'); return noted(tx, 'Moved', visitOut((await appointmentView(tx, t.id, i.appointment_id))!));
       }),
     }),
     betaTool({
       name: 'hand_over', description: 'Pass this chat to the front desk. They reply from their Inbox. Use it for anything you must not or cannot handle.',
       inputSchema: { type: 'object', properties: { reason: { type: 'string', description: 'One short line for the front desk' } }, required: ['reason'], additionalProperties: false } as const,
-      run: run(async (tx, i: { reason: string }) => { await tx.update(chat).set({ status: 'staff', reason: i.reason.slice(0, 200) }).where(eq(chat.id, c.id)); return { handed_over: true }; }),
+      run: run(async (tx, i: { reason: string }) => {
+        await tx.update(chat).set({ status: 'staff', reason: i.reason.slice(0, 200) }).where(eq(chat.id, c.id));
+        await tx.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'event', by: BY, body: `Handed to the front desk: ${i.reason.slice(0, 200)}` });
+        return { handed_over: true };
+      }),
     }),
   ];
 }
@@ -141,16 +152,21 @@ function systemPrompt(t: Tenant) {
   const phone = t.settings?.print?.phone ?? ''; const address = t.settings?.print?.address ?? '';
   return `You are the WhatsApp front desk of ${t.name}, a clinic in India.${phone ? ` Clinic phone: ${phone}.` : ''}${address ? ` Address: ${address}.` : ''}
 
-Reply in the language and script the patient writes in (English, Telugu or Hindi, including Telugu or Hindi typed in English letters). Keep replies to one to three short sentences of plain text: no markdown, no lists unless offering times.
+Reply in the language and script the patient writes in (English, Telugu or Hindi, including Telugu or Hindi typed in English letters). Keep replies to one to three short sentences of plain text: no markdown, no lists unless offering times. Everything you write is sent to the patient as it is, so write only the message itself: no notes to yourself, no drafts, no "wait" or "correction".
 
 How a conversation goes:
 1. First find out why they are writing. If the message is only a greeting ("hi", "hello", "namaste") or does not say what they need, greet them and ask how you can help. A registered patient (see "Who is writing") is greeted by name; someone new gets a welcome to the clinic. Do not offer times yet.
-2. If they want a visit, ask what the problem is if they have not said (one short question, e.g. "What would you like to see the doctor about?"), and for someone new their name. Then ask which day suits them, and only then offer times.
+2. If they want a visit, collect what is missing, one reply per item, in this order, skipping what they already said:
+   a) the problem: "What would you like to see the doctor about?"
+   b) only for someone new, after they answered (a): their name
+   c) the day that suits them
+   Then offer times.
 3. If they ask about an existing visit, call my_visits (it gives the appointment ids you need) and help with it. Do not call my_visits just to greet: "Who is writing" already says who they are and whether a visit is booked.
-Never ask more than one question in a reply. Never ask for anything the patient already told you.
-Your earlier replies in this chat were based on tool results that are not shown again: trust what you told the patient, never tell them to ignore it. Times can fill up, so before booking or moving call open_times again for the window ids.
+4. When the patient says thanks or ok after things are done, reply with a short goodbye only; do not repeat the visit details.
+Ask exactly one thing per reply: never join two requests ("what is it about, and your name?"). Never ask for anything the patient already told you.
+Your earlier replies in this chat were based on tool results that are not shown again: trust what you told the patient. Never "correct" or take back an earlier reply, never say a booking you made did not happen; "Done by you earlier in this chat" lists your actions. If the patient says yes again after a visit is booked, just confirm it is booked. Times can fill up, so before booking or moving call open_times again for the window ids.
 
-You can look up the patient's visits, offer open times, and book, move, confirm or cancel visits with your tools. Visits are booked in hourly windows: say the window and the arrive-by time, for example "between 10:00 and 11:00, please come by 09:25". Offer at most three windows at a time. Only use window ids and appointment ids your tools returned.
+You can look up the patient's visits, offer open times, and book, move, confirm or cancel visits with your tools. Visits are booked in hourly windows: say the window and its arrive_by time from the tool (never work it out yourself), for example "between 10:00 and 11:00, please come by 09:25". Offer at most three windows at a time. Only use window ids and appointment ids your tools returned.
 
 Before you book, move or cancel, say exactly what you will do and wait for a yes, unless the patient already asked for that exact change (a "Yes" or "Confirm" reply to a reminder confirms their visit). If several patients share this number, ask which one. For someone new you need the patient's name before booking: whatever name they give (a first name alone is fine) is enough, so never ask again for a surname or full name. If they gave a name and chose a time, book it.
 
@@ -160,7 +176,7 @@ When you book, pass the patient's reason for the visit in book_visit's reason.`;
 }
 
 /** Who is writing (the patients registered on this number, with their last and next visit) and the date: changes per chat, so kept out of the cached block. */
-async function aboutChat(t: Tenant, c: Chat) {
+async function aboutChat(t: Tenant, c: Chat, done: string[] = []) {
   const today = todayIn(t.timezone);
   const people = await inTenant(t, async (tx) => {
     const family = await patientsOn(tx, t, c.phone);
@@ -176,6 +192,8 @@ async function aboutChat(t: Tenant, c: Chat) {
   const day = new Intl.DateTimeFormat('en-IN', { timeZone: t.timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
   return `Who is writing: ${people.length ? `this WhatsApp number is registered for:\n${people.join('\n')}\nIf more than one, find out which person the message is about.` : 'a number not registered with the clinic (a new patient, or an existing one writing from another number).'}
 
+Done by you earlier in this chat: ${done.length ? `\n${done.map((d) => `- ${d}`).join('\n')}\nThese were your own actions and they succeeded; the visits listed above already include them.` : 'nothing yet.'}
+
 Today is ${day}. It is now ${nowHHMM(t.timezone).slice(0, 2)}:xx (open_times only offers windows that can still be booked).`;
 }
 
@@ -184,6 +202,7 @@ async function askClaude(t: Tenant, c: Chat, lines: { direction: string; body: s
   const client = new Anthropic();
   const messages: Anthropic.Beta.BetaMessageParam[] = [];
   for (const l of lines) {
+    if (l.direction === 'event') continue; // actions go in "Done by you" below
     const role = l.direction === 'in' ? 'user' as const : 'assistant' as const;
     if (!messages.length && role === 'assistant') continue; // must start with the patient
     messages.push({ role, content: l.body });
@@ -192,9 +211,10 @@ async function askClaude(t: Tenant, c: Chat, lines: { direction: string; body: s
   const lastMsg = messages[messages.length - 1];
   if (lastMsg) lastMsg.content = [{ type: 'text', text: lastMsg.content as string, cache_control: { type: 'ephemeral' } }];
   const runner = client.beta.messages.toolRunner({
-    // Sonnet 5.5: as good as Opus 5.5 on the front-desk test chats at half the price; Haiku 5.5 was cheaper but contradicted itself
-    model: process.env.ASSISTANT_MODEL || 'claude-sonnet-5-5', max_tokens: 4000, max_iterations: 8,
-    system: [{ type: 'text', text: systemPrompt(t), cache_control: { type: 'ephemeral' } }, { type: 'text', text: await aboutChat(t, c) }],
+    // Haiku 5.5 passes the 17 test chats in scripts/whatsapp-eval.mjs (so do Sonnet 5.5 and Opus 5.5, at ~10x and ~20x the price).
+    // After changing these instructions or the tools, run that script on the model in use before going live.
+    model: process.env.ASSISTANT_MODEL || 'claude-haiku-5-5', max_tokens: 4000, max_iterations: 8,
+    system: [{ type: 'text', text: systemPrompt(t), cache_control: { type: 'ephemeral' } }, { type: 'text', text: await aboutChat(t, c, lines.filter((l) => l.direction === 'event').map((l) => l.body)) }],
     messages, tools: chatTools(t, c, origin),
     output_config: { effort: (process.env.ASSISTANT_EFFORT as 'low' | 'medium' | 'high' | undefined) ?? 'medium' },
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
@@ -208,7 +228,9 @@ async function askClaude(t: Tenant, c: Chat, lines: { direction: string; body: s
     used.cacheRead += m.usage?.cache_read_input_tokens ?? 0; used.cacheWrite += m.usage?.cache_creation_input_tokens ?? 0;
   }
   if (!final || final.stop_reason === 'refusal') return { text: null, used };
-  return { text: final.content.flatMap((b: any) => (b.type === 'text' ? [b.text] : [])).join('\n').trim() || null, used };
+  // only the last text block: a model that drafts and then corrects itself in the same turn sends just the corrected reply
+  const texts = final.content.flatMap((b: any) => (b.type === 'text' && b.text.trim() ? [b.text.trim()] : []));
+  return { text: texts.at(-1) ?? null, used };
 }
 
 export type Usage = { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number };

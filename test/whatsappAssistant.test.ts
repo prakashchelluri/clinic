@@ -105,10 +105,13 @@ test('assistant tools: only the visits on this number; book, move, confirm, canc
   assert.equal((await call(c, 'book_visit', { window_id: windows[0].window_id, patient_id: other.id })).error, 'NOT_YOURS');
   assert.deepEqual((await call(c, 'my_visits', {})).upcoming_visits, []);
 
-  const booked = await call(c, 'book_visit', { window_id: windows[0].window_id, patient_id: mine.id });
+  assert.match(windows[0].arrive_by, /^\d\d:\d\d$/, 'open times carry the arrive-by time, so the assistant never works it out');
+  const booked = await call(c, 'book_visit', { window_id: windows[0].window_id, patient_id: mine.id, reason: 'itching on hands' });
   assert.ok(booked.appointment_id, JSON.stringify(booked)); assert.equal(booked.status, 'booked');
   const row = await inT((tx) => tx.select().from(schema.appointment).where(eq(schema.appointment.id, booked.appointment_id)).then((r: any[]) => r[0]));
-  assert.equal(row.source, 'whatsapp');
+  assert.equal(row.source, 'whatsapp'); assert.equal(row.note, 'itching on hands', 'the reason is kept for the front desk and doctor');
+  const events = await inT((tx) => tx.select().from(schema.chatMessage).where(and(eq(schema.chatMessage.chatId, c.id), eq(schema.chatMessage.direction, 'event'))));
+  assert.equal(events.length, 1); assert.match(events[0].body, /^Booked .+'s visit: /, 'what the assistant did is kept in the chat');
   assert.equal((await call(c, 'book_visit', { window_id: windows[1].window_id, patient_id: mine.id })).error, 'ALREADY_BOOKED', 'one upcoming visit at a time');
 
   const moveTo = (await call(c, 'open_times', { from: tomorrow(), days: 3, appointment_id: booked.appointment_id })).flatMap((d: any) => d.windows)[0];
