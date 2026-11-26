@@ -21,7 +21,8 @@ type Result = { status: 'sent' | 'logged' | 'failed'; ref?: string; error?: stri
 
 /**
  * WhatsApp Cloud API. Business-initiated messages need a Meta-approved template: when the clinic maps a kind to a
- * template name, it is sent with body parameters patient, date, time, doctor, link (in that order). Without a
+ * template name, it is sent with body parameters patient, date, time, doctor, link (in that order; a session reminder: patient,
+ * procedure, date, time, then its Confirm / Change time quick replies). Without a
  * template the plain text is sent, which Meta only delivers inside a 24-hour customer-service window.
  */
 async function sendWhatsapp(m: Outgoing, providerTemplates: Record<string, string>, language: string): Promise<Result> {
@@ -31,7 +32,7 @@ async function sendWhatsapp(m: Outgoing, providerTemplates: Record<string, strin
   const lang = m.params?.lang ?? language; // the language the message was written in for this patient
   const menu = m.params?.interactive ? JSON.parse(m.params.interactive) : null; // a chat reply with buttons or a list (lib/chatMenu.ts)
   const payload = tpl
-    ? { messaging_product: 'whatsapp', to, type: 'template', template: { name: tpl, language: { code: ['te', 'hi'].includes(lang) ? lang : 'en' }, components: [{ type: 'body', parameters: ['patient', 'date', 'time', 'doctor', 'link'].map((k) => ({ type: 'text', text: m.params[k] || '-' })) },
+    ? { messaging_product: 'whatsapp', to, type: 'template', template: { name: tpl, language: { code: ['te', 'hi'].includes(lang) ? lang : 'en' }, components: [{ type: 'body', parameters: (m.kind === 'sitting_reminder' ? ['patient', 'procedure', 'date', 'time'] : ['patient', 'date', 'time', 'doctor', 'link']).map((k) => ({ type: 'text', text: m.params[k] || '-' })) },
       // the template's quick-reply buttons carry what a tap does (e.g. Confirm / Change time on a session reminder)
       ...(m.params.buttons ? (JSON.parse(m.params.buttons) as string[]).map((payload, index) => ({ type: 'button', sub_type: 'quick_reply', index: String(index), parameters: [{ type: 'payload', payload }] })) : [])] } }
     : menu ? { messaging_product: 'whatsapp', to, type: 'interactive', interactive: interactiveOf(m.body, menu) }

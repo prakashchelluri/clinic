@@ -79,7 +79,7 @@ export async function planSittingReminder(tx: Tx, t: string, sittingId: string) 
   const status = !cfg.enabled || cfg.channel === 'none' || noPhone || r.p.noWhatsapp ? 'skipped' : 'pending';
   const [row] = await tx.insert(message).values({ tenantId: t, patientId: r.p.id, procedureSessionId: sittingId, kind: 'sitting_reminder', channel: cfg.channel, toPhone: r.p.phone, body,
     // Confirm / Change time buttons (lib/chatMenu.ts answers the taps); `buttons` fills a template's quick replies, in this order
-    params: { patient: r.p.fullName, date, time: r.ps.startTime, doctor: '', link: '', lang, buttons: JSON.stringify([`pc:${sittingId}`, `pm:${sittingId}`]),
+    params: { patient: r.p.fullName, procedure: `${r.proc ?? 'procedure'}${part ? ` (${part})` : ''}`, date, time: r.ps.startTime, doctor: '', link: '', lang, buttons: JSON.stringify([`pc:${sittingId}`, `pm:${sittingId}`]),
       interactive: JSON.stringify({ kind: 'buttons', options: [{ id: `pc:${sittingId}`, title: lang === 'te' ? 'కన్ఫర్మ్' : 'Confirm' }, { id: `pm:${sittingId}`, title: lang === 'te' ? 'సమయం మార్చండి' : 'Change time' }] }) }, status, sendAfter: at.toISOString(),
     error: status === 'skipped' ? (noPhone ? 'no mobile number' : r.p.noWhatsapp ? 'patient asked for no WhatsApp messages' : 'messages are switched off') : null }).returning();
   return row;
