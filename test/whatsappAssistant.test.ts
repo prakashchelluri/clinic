@@ -134,13 +134,15 @@ test('assistant tools: only the visits on this number; book, move, confirm, canc
 test('sender: two runs at once send each message once; a reminder long overdue is dropped, not sent', async () => {
   const p = (await as(await login('reception@demo.clinic'))('POST', '/patients', { fullName: 'Send Once', phone: '9848055555' })).body;
   const old = new Date(Date.now() - 7 * 3_600_000).toISOString();
-  const [a, late] = await inT((tx) => tx.insert(schema.message).values([
+  const [a, late, staleReply] = await inT((tx) => tx.insert(schema.message).values([
     { tenantId: T.id, patientId: p.id, kind: 'chat', channel: 'whatsapp', toPhone: '9848055555', body: 'one', status: 'pending' },
     { tenantId: T.id, patientId: p.id, kind: 'reminder', channel: 'whatsapp', toPhone: '9848055555', body: 'late', status: 'pending', sendAfter: old },
+    { tenantId: T.id, patientId: p.id, kind: 'chat', channel: 'whatsapp', toPhone: '9848055555', body: 'stale', status: 'pending', createdAt: new Date(Date.now() - 20 * 60_000).toISOString() },
   ]).returning());
   await Promise.all([dispatchDue(), dispatchDue()]);
   const rows = await inT((tx) => tx.select().from(schema.message).where(eq(schema.message.toPhone, '9848055555')));
   const one = rows.find((r: any) => r.id === a.id); const gone = rows.find((r: any) => r.id === late.id);
   assert.equal(one.status, 'logged', 'not connected: kept as logged'); assert.equal(one.attempts, 1, 'handled once');
   assert.equal(gone.status, 'skipped'); assert.equal(gone.error, 'too late to send');
+  assert.equal(rows.find((r: any) => r.id === staleReply.id).status, 'skipped', 'a chat reply 20 minutes late would arrive out of order: dropped');
 });

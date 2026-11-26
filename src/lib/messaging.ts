@@ -46,6 +46,9 @@ export async function dispatchDue(now = new Date()) {
     const due = await withTenant(t.id, SYSTEM_USER, async (tx) => {
       await tx.update(message).set({ status: 'skipped', error: 'too late to send' })
         .where(and(eq(message.tenantId, t.id), eq(message.kind, 'reminder'), inArray(message.status, ['pending', 'sending']), lte(message.sendAfter, new Date(now.getTime() - REMINDER_LATE_MS).toISOString())));
+      // a chat reply that could not go out within 15 minutes would arrive out of order; staff see it on the WhatsApp page instead
+      await tx.update(message).set({ status: 'skipped', error: 'too late to send' })
+        .where(and(eq(message.tenantId, t.id), eq(message.kind, 'chat'), inArray(message.status, ['pending', 'sending']), lte(message.createdAt, new Date(now.getTime() - 15 * 60_000).toISOString())));
       const ids = (await tx.select({ id: message.id }).from(message).where(and(eq(message.tenantId, t.id), inArray(message.status, ['pending', 'sending']), lte(message.sendAfter, now.toISOString())))
         .orderBy(asc(message.sendAfter)).limit(50).for('update', { skipLocked: true })).map((r) => r.id);
       return ids.length ? tx.update(message).set({ status: 'sending', sendAfter: new Date(now.getTime() + LEASE_MS).toISOString() }).where(inArray(message.id, ids)).returning() : [];
