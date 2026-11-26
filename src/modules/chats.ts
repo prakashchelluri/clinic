@@ -33,6 +33,8 @@ function textOf(m: any): string {
   if (m.type === 'interactive') return m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? '';
   return `[${m.type ?? 'unknown'} message: not readable yet]`; // ponytail: voice notes need speech-to-text; until then the assistant hands these over
 }
+/** The id of a tapped button or list row (the tap-to-book menu acts on it; lib/chatMenu.ts). */
+const actionOf = (m: any): string | undefined => m.interactive?.button_reply?.id ?? m.interactive?.list_reply?.id ?? undefined;
 
 export function chatRoutes(app: FastifyInstance) {
   // A staff reply goes out once its transaction has committed, not at the next minute's run.
@@ -58,7 +60,7 @@ export function chatRoutes(app: FastifyInstance) {
         if (!v.messages?.length) continue; // delivery receipts: nothing to do yet
         const t = await clinicFor(String(v.metadata?.phone_number_id ?? ''));
         if (!t) { req.log.warn({ id: v.metadata?.phone_number_id }, 'whatsapp message for an unknown number'); continue; }
-        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), ref: m.id, origin }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
+        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), action: actionOf(m), ref: m.id, origin }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
       }
       // Meta wants a quick 200 and resends otherwise; the replies are worked out after answering (lines are kept once by their WhatsApp id)
       void Promise.all(work);
@@ -116,9 +118,9 @@ export function chatRoutes(app: FastifyInstance) {
   /** Test chat: type as a patient from inside the app. The same code as real WhatsApp, but nothing is sent to a phone. */
   app.post('/chats/simulate', async (req) => {
     if (!can(req.perms, PERM)) throw new HttpError(403, `FORBIDDEN:${PERM}`);
-    const b = z.object({ phone: z.string().trim(), text: z.string().trim().min(1).max(2000) }).parse(req.body);
+    const b = z.object({ phone: z.string().trim(), text: z.string().trim().min(1).max(2000), action: z.string().max(200).optional() }).parse(req.body);
     const t = (await db.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)))[0];
-    const r = await handleIncoming(t as any, { phone: b.phone, text: b.text, origin: originOf(req), simulate: true });
+    const r = await handleIncoming(t as any, { phone: b.phone, text: b.text, action: b.action, origin: originOf(req), simulate: true });
     return r;
   });
 }

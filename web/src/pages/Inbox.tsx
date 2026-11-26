@@ -53,8 +53,23 @@ export function Inbox() {
   );
 }
 
+/** Buttons or list rows sent with a line, as the patient sees them. In Test chat they can be tapped. */
+function Options({ o, onTap }: { o: any; onTap?: (id: string, title: string) => void }) {
+  return (
+    <div className={`mt-2 ${o.kind === 'list' ? 'space-y-1' : 'flex flex-wrap gap-1.5'}`}>
+      {o.kind === 'list' && <div className="text-[11.5px] font-medium text-muted">{o.button}</div>}
+      {o.options.map((x: any) => {
+        const label = <><span className="font-medium">{x.title}</span>{x.description && <span className="ml-1.5 text-muted">{x.description}</span>}</>;
+        return onTap
+          ? <button key={x.id} type="button" className={`rounded-[8px] border border-line bg-white px-2.5 py-1 text-left text-[12.5px] hover:border-ink-2 ${o.kind === 'list' ? 'block w-full' : ''}`} onClick={() => onTap(x.id, x.title)}>{label}</button>
+          : <div key={x.id} className={`rounded-[8px] border border-line bg-white/70 px-2.5 py-1 text-[12.5px] ${o.kind === 'list' ? '' : 'inline-block'}`}>{label}</div>;
+      })}
+    </div>
+  );
+}
+
 /** The lines of one chat, newest at the bottom. */
-function Lines({ lines }: { lines: any[] }) {
+function Lines({ lines, onTap }: { lines: any[]; onTap?: (id: string, title: string) => void }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [lines.length]);
   return (
@@ -64,6 +79,7 @@ function Lines({ lines }: { lines: any[] }) {
         : <div key={l.id} className={`flex ${l.direction === 'in' ? 'justify-start' : 'justify-end'}`}>
         <div className={`max-w-[85%] rounded-[12px] px-3 py-2 text-[13.5px] ${l.direction === 'in' ? 'bg-paper-2 border border-line' : l.by === 'WhatsApp assistant' ? 'bg-sage-soft' : 'bg-clay-soft'}`}>
           <div className="whitespace-pre-wrap">{l.body}</div>
+          {l.options && <Options o={l.options} onTap={onTap} />}
           <div className="mt-1 text-[11px] text-muted">{l.direction === 'in' ? 'Patient' : l.by === 'WhatsApp assistant' ? 'Assistant' : l.by} · {when(l.createdAt)}</div>
         </div></div>)}
       <div ref={end} />
@@ -110,8 +126,8 @@ function TestChat({ onClose }: { onClose: () => void }) {
   const [chatId, setChatId] = useState<string | null>(null);
   const lines = useQuery({ queryKey: ['chats', chatId], queryFn: () => get(`/chats/${chatId}`), enabled: !!chatId, refetchInterval: 4000 });
   const send = useMutation({
-    mutationFn: () => post('/chats/simulate', { phone, text }),
-    onSuccess: (r: any) => { setText(''); if (r.chatId) { setChatId(r.chatId); qc.invalidateQueries({ queryKey: ['chats', r.chatId] }); } if (r.status === 'staff') toast('This chat is now with the front desk', 'info'); },
+    mutationFn: (tap?: { id: string; title: string }) => post('/chats/simulate', tap ? { phone, text: tap.title, action: tap.id } : { phone, text }),
+    onSuccess: (r: any, tap) => { if (!tap) setText(''); if (r.chatId) { setChatId(r.chatId); qc.invalidateQueries({ queryKey: ['chats', r.chatId] }); } if (r.status === 'staff') toast('This chat is now with the front desk', 'info'); },
     onError: (e) => toast(errText(e), 'err'),
   });
   const ok = /^\d{10}$/.test(phone.replace(/\D/g, '').slice(-10));
@@ -121,10 +137,10 @@ function TestChat({ onClose }: { onClose: () => void }) {
         <label className="block text-sm"><span className="text-muted">Patient's mobile number</span>
           <input className="input mt-1 w-full tabular-nums" value={phone} inputMode="numeric" onChange={(e) => { setPhone(e.target.value); setChatId(null); }} />
           <span className="mt-1 block text-[12.5px] text-muted">Use a patient's number to see their visits; any other number is a new patient.</span></label>
-        {chatId && <Lines lines={lines.data?.lines ?? []} />}
+        {chatId && <Lines lines={lines.data?.lines ?? []} onTap={(id, title) => { if (!send.isPending) send.mutate({ id, title }); }} />}
         {send.isPending && <div className="text-[13px] text-muted">The assistant is replying…</div>}
-        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim() && ok) send.mutate(); }}>
-          <input className="input flex-1" placeholder="e.g. Can I come tomorrow evening?" value={text} onChange={(e) => setText(e.target.value)} />
+        <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim() && ok) send.mutate(undefined); }}>
+          <input className="input flex-1" placeholder="e.g. Hi, or Can I come tomorrow evening?" value={text} onChange={(e) => setText(e.target.value)} />
           <button type="submit" className="btn btn-primary" disabled={!text.trim() || !ok || send.isPending}>Send</button>
         </form>
       </div>

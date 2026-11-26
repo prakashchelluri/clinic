@@ -7,9 +7,10 @@ import { HttpError } from './auth.js';
 import { emit, nextNumber, todayIn } from './core.js';
 import { appointmentView, bookingSettings, newToken, planReminders } from './booking.js';
 import { cancelByPatient, confirmByPatient, ctxFor, moveByPatient, openSlots, patientView } from '../modules/public.js';
+import { menuTurn } from './chatMenu.js';
 
 const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
-const BY = 'WhatsApp assistant';
+export const BY = 'WhatsApp assistant';
 type Tenant = { id: string; name: string; slug: string; timezone: string; kind: string; settings: any };
 type Chat = typeof chat.$inferSelect;
 
@@ -21,22 +22,22 @@ export const tenDigits = (p: string) => String(p ?? '').replace(/\D/g, '').slice
 
 const nowHHMM = (tz: string) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 const sameName = sql`lower(regexp_replace(trim(${patient.fullName}), '\\s+', ' ', 'g'))`;
-const inTenant = <T>(t: Tenant, fn: (tx: Tx) => Promise<T>) => withTenant(t.id, SYSTEM_USER, fn);
+export const inTenant = <T>(t: Tenant, fn: (tx: Tx) => Promise<T>) => withTenant(t.id, SYSTEM_USER, fn);
 
 /** Patients whose record carries this phone (families share one). The assistant may act for these and no one else. */
-const patientsOn = (tx: Tx, t: Tenant, phone: string) =>
+export const patientsOn = (tx: Tx, t: Tenant, phone: string) =>
   tx.select({ id: patient.id, fullName: patient.fullName, patientNo: patient.patientNo }).from(patient)
     .where(and(eq(patient.tenantId, t.id), eq(patient.phone, phone), isNull(patient.mergedInto))).orderBy(asc(patient.createdAt));
 
 /** A booking of a patient on this phone, else NOT_YOURS: a patient can never reach someone else's visit, whatever they type. */
-async function mine(tx: Tx, t: Tenant, phone: string, appointmentId: string) {
+export async function mine(tx: Tx, t: Tenant, phone: string, appointmentId: string) {
   if (!/^[0-9a-f-]{36}$/i.test(appointmentId)) throw new HttpError(404, 'NOT_FOUND');
   const v = await appointmentView(tx, t.id, appointmentId);
   if (!v || v.p.phone !== phone) throw new HttpError(404, 'NOT_YOURS');
   return v;
 }
 
-const visitOut = (v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>) => {
+export const visitOut = (v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>) => {
   const pv = patientView(v);
   return { appointment_id: v.a.id, patient: v.p.fullName, date: v.s.day, window: `${v.s.startTime}-${v.s.endTime}`, arrive_by: pv.arriveBy, doctor: v.doc, visit_type: v.svc?.name ?? null,
     status: v.a.status, can_confirm: pv.canConfirm, can_cancel: pv.canCancel, can_move: pv.canReschedule };
@@ -76,41 +77,48 @@ export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: s
   return visitOut((await appointmentView(tx, t.id, row.id))!);
 }
 
+/** What was changed from the chat (by the assistant or the tap menu) is kept as a line in it: staff see it, and the assistant's next reply is told it was done. */
+export async function noteVisit(tx: Tx, t: Tenant, chatId: string, done: string, v: ReturnType<typeof visitOut>) {
+  await tx.insert(chatMessage).values({ tenantId: t.id, chatId, direction: 'event', by: BY, body: `${done} ${v.patient}'s visit: ${v.date}, ${v.window}` });
+  return v;
+}
+
+/** Upcoming visits of the patients on this phone. */
+export async function myVisits(tx: Tx, t: Tenant, phone: string) {
+  const family = await patientsOn(tx, t, phone);
+  const today = todayIn(t.timezone);
+  const ids = family.length ? await tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+    .where(and(eq(appointment.tenantId, t.id), inArray(appointment.patientId, family.map((p) => p.id)), inArray(appointment.status, [...OPEN_STATUSES]), sql`${session.day} >= ${today}`)).orderBy(asc(session.day), asc(session.startTime)) : [];
+  const visits = []; for (const r of ids) visits.push(visitOut((await appointmentView(tx, t.id, r.id))!));
+  return visits;
+}
+
+/** Windows with room left from a day, for a new visit or for moving one of this phone's visits (same doctor and visit type). */
+export async function openWindows(tx: Tx, t: Tenant, phone: string, from: string, days: number, appointmentId?: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) throw new HttpError(400, 'BAD_DATE');
+  const v = appointmentId ? await mine(tx, t, phone, appointmentId) : null;
+  const open = await openSlots(tx, t, from, days, v?.svc ?? null, v?.s.practitionerId);
+  return open.map((d) => ({ date: d.day, windows: d.slots.filter((x) => x.id !== v?.a.sessionId).map((x) => ({ window_id: x.id, time: `${x.startTime}-${x.endTime}`, doctor: x.doctor })) }))
+    .filter((d) => d.windows.length);
+}
+
 /** What the assistant may do, each in its own short transaction and always limited to the patients on this chat's phone. */
 export function chatTools(t: Tenant, c: Chat, origin: string) {
   const run = <I>(fn: (tx: Tx, input: I) => Promise<unknown>) => async (input: I) => {
     try { return JSON.stringify(await inTenant(t, (tx) => fn(tx, input))); }
     catch (e: any) { if (e instanceof HttpError) return JSON.stringify({ error: e.message, ...e.extra }); throw e; }
   };
-  // What the assistant changed is kept as a line in the chat: staff see it, and the assistant's next reply is told it did it
-  const noted = async (tx: Tx, done: string, v: ReturnType<typeof visitOut>) => {
-    await tx.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'event', by: BY, body: `${done} ${v.patient}'s visit: ${v.date}, ${v.window}` });
-    return v;
-  };
+  const noted = (tx: Tx, done: string, v: ReturnType<typeof visitOut>) => noteVisit(tx, t, c.id, done, v);
   return [
     betaTool({
       name: 'my_visits', description: 'The patients registered on this WhatsApp number and their upcoming visits, with what each visit allows (confirm, cancel, move).',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false } as const,
-      run: run(async (tx) => {
-        const family = await patientsOn(tx, t, c.phone);
-        const today = todayIn(t.timezone);
-        const ids = family.length ? await tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
-          .where(and(eq(appointment.tenantId, t.id), inArray(appointment.patientId, family.map((p) => p.id)), inArray(appointment.status, [...OPEN_STATUSES]), sql`${session.day} >= ${today}`)).orderBy(asc(session.day), asc(session.startTime)) : [];
-        const visits = []; for (const r of ids) visits.push(visitOut((await appointmentView(tx, t.id, r.id))!));
-        return { patients: family.map((p) => ({ patient_id: p.id, name: p.fullName })), upcoming_visits: visits };
-      }),
+      run: run(async (tx) => ({ patients: (await patientsOn(tx, t, c.phone)).map((p) => ({ patient_id: p.id, name: p.fullName })), upcoming_visits: await myVisits(tx, t, c.phone) })),
     }),
     betaTool({
       name: 'open_times', description: 'Hourly windows with room left, from a date for up to 7 days. Give appointment_id when moving an existing visit (keeps its doctor and visit type).',
       inputSchema: { type: 'object', properties: { from: { type: 'string', description: 'YYYY-MM-DD' }, days: { type: 'integer', minimum: 1, maximum: 7 }, appointment_id: { type: 'string' } }, required: ['from'], additionalProperties: false } as const,
-      run: run(async (tx, i: { from: string; days?: number; appointment_id?: string }) => {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(i.from)) throw new HttpError(400, 'BAD_DATE');
-        const v = i.appointment_id ? await mine(tx, t, c.phone, i.appointment_id) : null;
-        const days = await openSlots(tx, t, i.from, Math.min(i.days ?? 3, 7), v?.svc ?? null, v?.s.practitionerId);
-        const early = bookingSettings(t.settings).arriveEarlyMinutes;
-        const arriveBy = (hhmm: string) => { const [h, m] = hhmm.split(':').map(Number); const x = h * 60 + m - early; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
-        return days.map((d) => ({ date: d.day, windows: d.slots.filter((x) => x.id !== v?.a.sessionId).map((x) => ({ window_id: x.id, time: `${x.startTime}-${x.endTime}`, arrive_by: arriveBy(x.startTime), doctor: x.doctor })) }));
-      }),
+      run: run((tx, i: { from: string; days?: number; appointment_id?: string }) => openWindows(tx, t, c.phone, i.from, Math.min(i.days ?? 3, 7), i.appointment_id)),
     }),
     betaTool({
       name: 'book_visit', description: 'Book a new visit in a window from open_times. Use patient_id for a patient on this number, or new_patient_name for someone new.',
@@ -166,7 +174,7 @@ How a conversation goes:
 Ask exactly one thing per reply: never join two requests ("what is it about, and your name?"). Never ask for anything the patient already told you.
 Your earlier replies in this chat were based on tool results that are not shown again: trust what you told the patient. Never "correct" or take back an earlier reply, never say a booking you made did not happen; "Done by you earlier in this chat" lists your actions. If the patient says yes again after a visit is booked, just confirm it is booked. Times can fill up, so before booking or moving call open_times again for the window ids.
 
-You can look up the patient's visits, offer open times, and book, move, confirm or cancel visits with your tools. Visits are booked in hourly windows: say the window and its arrive_by time from the tool (never work it out yourself), for example "between 10:00 and 11:00, please come by 09:25". Offer at most three windows at a time. Only use window ids and appointment ids your tools returned.
+You can look up the patient's visits, offer open times, and book, move, confirm or cancel visits with your tools. Visits are booked in hourly windows. When offering times, list only the windows ("10:00 to 11:00"), with no arrival time per window. Once a visit is booked or moved, say once: please come ${bookingSettings(t.settings).arriveEarlyMinutes} minutes before your time. Offer at most three windows at a time. Only use window ids and appointment ids your tools returned.
 
 Before you book, move or cancel, say exactly what you will do and wait for a yes, unless the patient already asked for that exact change (a "Yes" or "Confirm" reply to a reminder confirms their visit). If several patients share this number, ask which one. For someone new you need the patient's name before booking: whatever name they give (a first name alone is fine) is enough, so never ask again for a surname or full name. If they gave a name and chose a time, book it.
 
@@ -237,14 +245,16 @@ export type Usage = { calls: number; input: number; output: number; cacheRead: n
 const addUsage = (a: Partial<Usage> | null | undefined, b: Usage): Usage & { replies: number } =>
   ({ replies: ((a as any)?.replies ?? 0) + 1, calls: (a?.calls ?? 0) + b.calls, input: (a?.input ?? 0) + b.input, output: (a?.output ?? 0) + b.output, cacheRead: (a?.cacheRead ?? 0) + b.cacheRead, cacheWrite: (a?.cacheWrite ?? 0) + b.cacheWrite });
 
-/** Write an outgoing line: kept on the chat, and queued for WhatsApp unless this is the in-app test chat. */
-export async function say(tx: Tx, t: Tenant, c: Chat, body: string, by: string, simulate: boolean) {
-  await tx.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'out', by, body });
+export type Menu = { kind: 'buttons' | 'list'; button?: string; options: { id: string; title: string; description?: string }[] };
+
+/** Write an outgoing line (with buttons or a list when `menu` is given): kept on the chat, and queued for WhatsApp unless this is the in-app test chat. */
+export async function say(tx: Tx, t: Tenant, c: Chat, body: string, by: string, simulate: boolean, menu?: Menu) {
+  await tx.insert(chatMessage).values({ tenantId: t.id, chatId: c.id, direction: 'out', by, body, options: menu ?? null });
   await tx.update(chat).set({ lastAt: new Date().toISOString() }).where(eq(chat.id, c.id));
   if (simulate) return;
   const cfg = bookingSettings(t.settings).messages;
   const family = await patientsOn(tx, t, c.phone);
-  await tx.insert(message).values({ tenantId: t.id, patientId: family.length === 1 ? family[0].id : null, kind: 'chat', channel: 'whatsapp', toPhone: c.phone, body,
+  await tx.insert(message).values({ tenantId: t.id, patientId: family.length === 1 ? family[0].id : null, kind: 'chat', channel: 'whatsapp', toPhone: c.phone, body, params: menu ? { interactive: JSON.stringify(menu) } : {},
     status: cfg.enabled && cfg.channel !== 'none' ? 'pending' : 'skipped', error: cfg.enabled && cfg.channel !== 'none' ? null : 'messages are switched off' });
 }
 
@@ -254,7 +264,7 @@ const OFF_REPLY = 'Thank you for your message. Our front desk will reply here so
  * One line from a patient (WhatsApp or the test chat). Kept once (WhatsApp resends), then answered by the assistant
  * unless the chat is with the front desk. Any failure hands the chat to the front desk: a patient is never left unanswered.
  */
-export async function handleIncoming(t: Tenant, inp: { phone: string; text: string; ref?: string; origin: string; simulate?: boolean }) {
+export async function handleIncoming(t: Tenant, inp: { phone: string; text: string; action?: string; ref?: string; origin: string; simulate?: boolean }) {
   const phone = tenDigits(inp.phone);
   if (phone.length !== 10) throw new HttpError(400, 'BAD_PHONE');
   const text = inp.text.trim().slice(0, 2000);
@@ -269,7 +279,10 @@ export async function handleIncoming(t: Tenant, inp: { phone: string; text: stri
   });
   if (!got) return { duplicate: true as const };
   if (got.status === 'staff') return { chatId: got.id, status: 'staff' };
-  const handOff = (reason: string) => inTenant(t, async (tx) => {
+  // Taps, greetings and the booking steps are answered by the fixed menu, without the AI; anything else typed goes on below
+  const menuStatus = await menuTurn(t, got, { text, action: inp.action }, !!inp.simulate, inp.origin);
+  if (menuStatus) return { chatId: got.id, status: menuStatus };
+  const handOff =(reason: string) => inTenant(t, async (tx) => {
     await tx.update(chat).set({ status: 'staff', reason }).where(eq(chat.id, got.id));
     await say(tx, t, got, OFF_REPLY, BY, !!inp.simulate);
   });

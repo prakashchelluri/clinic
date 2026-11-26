@@ -56,7 +56,8 @@ const scenarios = [
   { name: 'new patient books step by step', msgs: ['Hi', 'I want to see the doctor', 'I have pimples on my face for 2 months', 'Anjali', 'Tomorrow', 'Evening please', 'The first evening one', 'Ok thank you'],
     async end(p, turns) { const c = await chatOf(p); const pt = c.patients[0]; const v = pt ? await open(pt.id) : [];
       return [['one booking made', v.length === 1], ['reason saved', /pimple/i.test(v[0]?.note ?? '')], ['name saved', pt?.fullName === 'Anjali'],
-        ['asks reason before times', !TIME.test(turns[1][1].reply)], ['booking confirmed with arrive-by', /come by|arrive|reach/i.test(turns.slice(5).map((x) => x[1].reply).join(' '))],
+        ['asks reason before times', !TIME.test(turns[1][1].reply)], ['booking says once to come early', /minutes before/i.test(turns.slice(5).map((x) => x[1].reply).join(' '))],
+        ['times listed without arrive-by each', !/come by/i.test(turns.slice(4, 6).map((x) => x[1].reply).join(' '))],
         ['goodbye does not repeat details', !TIME.test(turns[7][1].reply)]]; } },
   { name: 'everything in one message', msgs: ['Hello, I am Kiran. Hair fall for 3 months. I need an appointment tomorrow morning'],
     async end(p, turns) { const r = turns[0][1].reply; return [['does not ask the name again', !/your name|patient's name|name, please/i.test(r)], ['does not ask the problem again', !/what would you like|about\?|problem\?|reason/i.test(r)], ['offers morning times', TIME.test(r)]]; } },

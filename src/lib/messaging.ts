@@ -8,6 +8,14 @@ const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
 /** Is a real WhatsApp sender configured? Without it messages are kept as "logged" in the outbox, never lost. */
 export const whatsappReady = () => !!(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
 
+/** WhatsApp's own shapes: up to 3 reply buttons (title 20 characters), or a list of up to 10 rows (title 24, description 72). */
+export function interactiveOf(body: string, menu: { kind: 'buttons' | 'list'; button?: string; options: { id: string; title: string; description?: string }[] }) {
+  const cut = (s: string, n: number) => [...s].slice(0, n).join('');
+  if (menu.kind === 'buttons') return { type: 'button', body: { text: cut(body, 1024) }, action: { buttons: menu.options.slice(0, 3).map((o) => ({ type: 'reply', reply: { id: o.id, title: cut(o.title, 20) } })) } };
+  return { type: 'list', body: { text: cut(body, 1024) }, action: { button: cut(menu.button ?? 'Choose', 20),
+    sections: [{ title: cut(menu.button ?? 'Choose', 24), rows: menu.options.slice(0, 10).map((o) => ({ id: o.id, title: cut(o.title, 24), ...(o.description ? { description: cut(o.description, 72) } : {}) })) }] } };
+}
+
 type Outgoing = { toPhone: string | null; body: string; kind: string; params: Record<string, string> };
 type Result = { status: 'sent' | 'logged' | 'failed'; ref?: string; error?: string };
 
@@ -21,8 +29,10 @@ async function sendWhatsapp(m: Outgoing, providerTemplates: Record<string, strin
   const to = '91' + m.toPhone;
   const tpl = providerTemplates[m.kind];
   const lang = m.params?.lang ?? language; // the language the message was written in for this patient
+  const menu = m.params?.interactive ? JSON.parse(m.params.interactive) : null; // a chat reply with buttons or a list (lib/chatMenu.ts)
   const payload = tpl
     ? { messaging_product: 'whatsapp', to, type: 'template', template: { name: tpl, language: { code: ['te', 'hi'].includes(lang) ? lang : 'en' }, components: [{ type: 'body', parameters: ['patient', 'date', 'time', 'doctor', 'link'].map((k) => ({ type: 'text', text: m.params[k] || '-' })) }] } }
+    : menu ? { messaging_product: 'whatsapp', to, type: 'interactive', interactive: interactiveOf(m.body, menu) }
     : { messaging_product: 'whatsapp', to, type: 'text', text: { body: m.body } };
   try {
     const r = await fetch(`https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {

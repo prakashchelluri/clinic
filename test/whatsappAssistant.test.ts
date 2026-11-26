@@ -105,7 +105,7 @@ test('assistant tools: only the visits on this number; book, move, confirm, canc
   assert.equal((await call(c, 'book_visit', { window_id: windows[0].window_id, patient_id: other.id })).error, 'NOT_YOURS');
   assert.deepEqual((await call(c, 'my_visits', {})).upcoming_visits, []);
 
-  assert.match(windows[0].arrive_by, /^\d\d:\d\d$/, 'open times carry the arrive-by time, so the assistant never works it out');
+  assert.equal(windows[0].arrive_by, undefined, 'open times list only the windows; the arrive-early note comes once, after booking');
   const booked = await call(c, 'book_visit', { window_id: windows[0].window_id, patient_id: mine.id, reason: 'itching on hands' });
   assert.ok(booked.appointment_id, JSON.stringify(booked)); assert.equal(booked.status, 'booked');
   const row = await inT((tx) => tx.select().from(schema.appointment).where(eq(schema.appointment.id, booked.appointment_id)).then((r: any[]) => r[0]));
@@ -129,6 +129,52 @@ test('assistant tools: only the visits on this number; book, move, confirm, canc
 
   await call(c, 'hand_over', { reason: 'Asks about fees' });
   assert.equal((await chatOf('9848033333')).status, 'staff');
+});
+
+test('tap-to-book: greeting menu, problem, name, day list, time list, booked; My visit, cancel; all without the AI', async () => {
+  const R = as(await login('reception@demo.clinic'));
+  const phone = '9848066666';
+  const last = async () => { const c = await chatOf(phone); const ls = await linesOf(c.id); return ls.filter((l: any) => l.direction === 'out').at(-1); };
+  const tap = (o: any, pick: (x: any) => boolean) => { const x = o.options.find(pick); assert.ok(x, JSON.stringify(o)); return R('POST', '/chats/simulate', { phone, text: x.title, action: x.id }); };
+
+  await R('POST', '/chats/simulate', { phone, text: 'Hi' });
+  let out = await last();
+  assert.match(out.body, /welcome/i); assert.deepEqual(out.options.options.map((x: any) => x.id), ['m:book', 'm:visit', 'm:ask']);
+  await tap(out.options, (x) => x.id === 'm:book');
+  assert.match((await last()).body, /see the doctor about/);
+  await R('POST', '/chats/simulate', { phone, text: 'Itching on arms' });
+  assert.match((await last()).body, /name/);
+  await R('POST', '/chats/simulate', { phone, text: 'My name is Kavya' });
+  out = await last();
+  assert.equal(out.options.kind, 'list'); assert.ok(out.options.options.length >= 1 && out.options.options.every((x: any) => /^d:\d{4}-\d{2}-\d{2}$/.test(x.id)), 'a list of days');
+  // the time list arrives through the real webhook, as a WhatsApp list reply
+  const day = out.options.options.at(-1);
+  await hook({ entry: [{ changes: [{ value: { metadata: { phone_number_id: 'pn-123' }, messages: [{ from: '91' + phone, id: 'wamid.tap1', type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: day.id, title: day.title } } }] } }] }] });
+  await until(async () => (await last()).options?.options?.[0]?.id?.startsWith('s:'));
+  out = await last();
+  assert.ok(out.options.options.every((x: any) => /^\d\d:\d\d–\d\d:\d\d$/.test(x.title) && !/come by/i.test(x.description ?? '')), 'times only, no arrive-by per slot');
+  await tap(out.options, () => true);
+  out = await last();
+  assert.match(out.body, /^Booked: Kavya, .* Please come \d+ minutes before your time\.$/);
+  const c = await chatOf(phone);
+  const p = (await inT((tx) => tx.select().from(schema.patient).where(and(eq(schema.patient.tenantId, T.id), eq(schema.patient.phone, phone)))))[0];
+  assert.equal(p.fullName, 'Kavya', '"My name is" is not part of the name');
+  const appt = (await inT((tx) => tx.select().from(schema.appointment).where(eq(schema.appointment.patientId, p.id))))[0];
+  assert.equal(appt.note, 'Itching on arms'); assert.equal(appt.source, 'whatsapp');
+  assert.equal(c.status, 'assistant', 'nothing went to the front desk'); assert.equal(c.usage, null, 'no AI used');
+
+  await tap((await R('POST', '/chats/simulate', { phone, text: 'hello' }), (await last()).options), (x) => x.id === 'm:visit');
+  out = await last();
+  assert.match(out.body, /^Kavya: /); assert.ok(out.options.options.some((x: any) => x.id === `x:${appt.id}`));
+  await tap(out.options, (x) => x.id === `x:${appt.id}`);
+  await tap((await last()).options, (x) => x.id === `xy:${appt.id}`);
+  assert.equal((await inT((tx) => tx.select().from(schema.appointment).where(eq(schema.appointment.id, appt.id))))[0].status, 'cancelled');
+  const events = (await linesOf(c.id)).filter((l: any) => l.direction === 'event').map((l: any) => l.body.split(' ')[0]);
+  assert.deepEqual(events, ['Booked', 'Cancelled'], 'staff see what was done from the menu');
+  // a question typed while the menu waits for an answer goes to the assistant (here: off, so the front desk)
+  await tap((await last()).options, (x) => x.id === 'm:book');
+  await R('POST', '/chats/simulate', { phone, text: 'How much is the fee?' });
+  assert.equal((await chatOf(phone)).status, 'staff');
 });
 
 test('sender: two runs at once send each message once; a reminder long overdue is dropped, not sent', async () => {

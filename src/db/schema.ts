@@ -234,14 +234,16 @@ export const chat = pgTable('chat', {
   lastAt: ts('last_at').notNull().defaultNow(),
   unread: integer('unread').notNull().default(0),       // patient lines since staff last opened it
   usage: jsonb('usage'),                                // AI tokens so far: { replies, calls, input, output, cacheRead, cacheWrite }
+  flow: jsonb('flow'),                                  // where the patient is in the tap-to-book menu (see lib/chatMenu.ts)
 }, (t) => [uniqueIndex('chat_phone').on(t.tenantId, t.phone), index('chat_last').on(t.tenantId, t.lastAt)]);
 export const chatMessage = pgTable('chat_message', {
   ...tenantCols,
   chatId: uuid('chat_id').notNull().references(() => chat.id),
-  direction: text('direction').notNull(), // in | out
+  direction: text('direction').notNull(), // in | out | event (what the assistant did: booked, moved…)
   by: text('by').notNull(),               // patient | assistant | the staff member's name
   body: text('body').notNull(),
   providerRef: text('provider_ref'),      // WhatsApp's id for an incoming line: Meta resends, we keep one
+  options: jsonb('options'),              // buttons or a list sent with this line: { kind, button?, options: [{ id, title, description? }] }
 }, (t) => [index('chatmsg_chat').on(t.chatId, t.createdAt), uniqueIndex('chatmsg_ref').on(t.tenantId, t.providerRef)]);
 
 // A bulk message to many patients: what was said, to whom (as messages), by whom. Demo until WhatsApp is connected.
