@@ -49,7 +49,9 @@ declare module 'fastify' {
 
 export async function buildApp() {
   // TRUST_PROXY: set when running behind a proxy (e.g. 1 for one hop) so the real client address is used; never trust a forwarded address otherwise.
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 15 * 1024 * 1024, trustProxy: process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY === 'true') as any : false });
+  // Meta's webhook check carries the verify token in the address: keep it out of the logs
+  const logger = process.env.NODE_ENV !== 'test' && { serializers: { req: (r: any) => ({ method: r.method, url: String(r.url).replace(/(hub[._]verify_token=)[^&]*/g, '$1[hidden]'), host: r.host, remoteAddress: r.ip, remotePort: r.socket?.remotePort }) } };
+  const app = Fastify({ logger, bodyLimit: 15 * 1024 * 1024, trustProxy: process.env.TRUST_PROXY ? (/^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY === 'true') as any : false });
   // the session cookie is signed with this: a known value would let anyone forge a sign-in, so production refuses to start without one
   if (process.env.NODE_ENV === 'production' && !process.env.COOKIE_SECRET) throw new Error('COOKIE_SECRET is not set');
   await app.register(cookie, { secret: process.env.COOKIE_SECRET ?? 'dev-secret-change-me' });
