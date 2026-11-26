@@ -217,6 +217,15 @@ test('tap-to-book: no WhatsApp name → asked once, then that time is booked; a 
   await q.say('Hi'); await q.tap((x) => x.id.startsWith('s:'));
   await q.say('How much is the fee?');
   assert.equal((await chatOf('9848067778')).status, 'staff');
+  // with the front desk: "Hi" and taps still get the menu (never silent); typed text waits for staff
+  const outs = async () => (await linesOf((await chatOf('9848067778')).id)).filter((l: any) => l.direction === 'out').length;
+  const before = await outs();
+  await q.say('Hi');
+  assert.match((await q.last()).body, /^Hello, welcome to .+\.\nNext free time: /);
+  assert.equal(await outs(), before + 1);
+  await q.say('Is parking available near the clinic');
+  assert.equal(await outs(), before + 1, 'typed text is left for staff');
+  assert.equal((await chatOf('9848067778')).status, 'staff', 'still with the front desk until they hand it back');
 });
 
 test('tap-to-book with a visit already booked: Book another (not on the same day), and a son booked from his mother\'s phone', async () => {

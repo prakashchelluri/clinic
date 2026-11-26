@@ -98,6 +98,9 @@ const win = (w: string) => w.replace('-', ' to ');
 /** One window per hour, in time order. */
 const hours = <W extends { time: string }>(ws: W[]) => [...ws].sort((a, b) => a.time.localeCompare(b.time)).filter((w, i, all) => all.findIndex((x) => x.time === w.time) === i);
 
+/** A greeting or a button tap: unambiguous, so the menu answers it even while the front desk holds the chat. */
+export const tapOrGreeting = (inp: { text: string; action?: string }) => !!inp.action || GREETING.test(inp.text);
+
 /** Is this line for the menu? A tap, a greeting, or the answer to a step the menu asked. Everything else goes to the assistant. */
 export function forMenu(c: Chat, inp: { text: string; action?: string }) {
   if (inp.action) return true;

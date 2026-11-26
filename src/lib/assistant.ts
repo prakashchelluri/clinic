@@ -7,7 +7,7 @@ import { HttpError } from './auth.js';
 import { emit, nextNumber, todayIn } from './core.js';
 import { appointmentView, bookingSettings, checkOneADay, newToken, planReminders } from './booking.js';
 import { cancelByPatient, confirmByPatient, ctxFor, moveByPatient, openSlots, patientView } from '../modules/public.js';
-import { menuTurn } from './chatMenu.js';
+import { menuTurn, tapOrGreeting } from './chatMenu.js';
 
 const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
 export const BY = 'WhatsApp assistant';
@@ -280,8 +280,13 @@ export async function handleIncoming(t: Tenant, inp: { phone: string; text: stri
     return upd;
   });
   if (!got) return { duplicate: true as const };
-  if (got.status === 'staff') return { chatId: got.id, status: 'staff' };
   if (inp.sentAt && Date.now() - inp.sentAt > LATE_MS) return { chatId: got.id, status: got.status, late: true as const };
+  if (got.status === 'staff') {
+    // With the front desk: typed messages wait for staff, but "Hi" and button taps still get the menu, so a patient is
+    // never left silent (the chat stays with the front desk until they hand it back or close it)
+    if (tapOrGreeting({ text, action: inp.action })) await menuTurn(t, got, { text, action: inp.action, profileName: inp.profileName }, !!inp.simulate, inp.origin);
+    return { chatId: got.id, status: 'staff' };
+  }
   // Taps, greetings and the booking steps are answered by the fixed menu, without the AI; anything else typed goes on below
   const menuStatus = await menuTurn(t, got, { text, action: inp.action, profileName: inp.profileName }, !!inp.simulate, inp.origin);
   if (menuStatus) return { chatId: got.id, status: menuStatus };
