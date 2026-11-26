@@ -122,11 +122,12 @@ function ChatDrawer({ id, canWrite, onClose }: { id: string; canWrite: boolean; 
 /** Type as a patient: the same path as a real WhatsApp message, but nothing goes to a phone. Use a patient's number to act as them. */
 function TestChat({ onClose }: { onClose: () => void }) {
   const [phone, setPhone] = useState('9000000001');
+  const [waName, setWaName] = useState(''); // the name on their WhatsApp profile, which WhatsApp sends with every message
   const [text, setText] = useState('');
   const [chatId, setChatId] = useState<string | null>(null);
   const lines = useQuery({ queryKey: ['chats', chatId], queryFn: () => get(`/chats/${chatId}`), enabled: !!chatId, refetchInterval: 4000 });
   const send = useMutation({
-    mutationFn: (tap?: { id: string; title: string }) => post('/chats/simulate', tap ? { phone, text: tap.title, action: tap.id } : { phone, text }),
+    mutationFn: (tap?: { id: string; title: string }) => post('/chats/simulate', { phone, profileName: waName.trim() || undefined, ...(tap ? { text: tap.title, action: tap.id } : { text }) }),
     onSuccess: (r: any, tap) => { if (!tap) setText(''); if (r.chatId) { setChatId(r.chatId); qc.invalidateQueries({ queryKey: ['chats', r.chatId] }); } if (r.status === 'staff') toast('This chat is now with the front desk', 'info'); },
     onError: (e) => toast(errText(e), 'err'),
   });
@@ -137,6 +138,9 @@ function TestChat({ onClose }: { onClose: () => void }) {
         <label className="block text-sm"><span className="text-muted">Patient's mobile number</span>
           <input className="input mt-1 w-full tabular-nums" value={phone} inputMode="numeric" onChange={(e) => { setPhone(e.target.value); setChatId(null); }} />
           <span className="mt-1 block text-[12.5px] text-muted">Use a patient's number to see their visits; any other number is a new patient.</span></label>
+        <label className="block text-sm"><span className="text-muted">Their WhatsApp name (optional)</span>
+          <input className="input mt-1 w-full" maxLength={60} placeholder="e.g. Prakash" value={waName} onChange={(e) => setWaName(e.target.value)} />
+          <span className="mt-1 block text-[12.5px] text-muted">WhatsApp sends it with each message; a new patient is booked under it.</span></label>
         {chatId && <Lines lines={lines.data?.lines ?? []} onTap={(id, title) => { if (!send.isPending) send.mutate({ id, title }); }} />}
         {send.isPending && <div className="text-[13px] text-muted">The assistant is replying…</div>}
         <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); if (text.trim() && ok) send.mutate(undefined); }}>

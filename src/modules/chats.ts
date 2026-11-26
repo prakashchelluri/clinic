@@ -60,7 +60,9 @@ export function chatRoutes(app: FastifyInstance) {
         if (!v.messages?.length) continue; // delivery receipts: nothing to do yet
         const t = await clinicFor(String(v.metadata?.phone_number_id ?? ''));
         if (!t) { req.log.warn({ id: v.metadata?.phone_number_id }, 'whatsapp message for an unknown number'); continue; }
-        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), action: actionOf(m), ref: m.id, origin, sentAt: Number(m.timestamp) * 1000 || undefined }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
+        // the sender's WhatsApp profile name: a new patient is booked under it instead of being asked to type a name
+        const nameOf = (from: string) => (v.contacts ?? []).find((x: any) => x.wa_id === from)?.profile?.name;
+        for (const m of v.messages) work.push(handleIncoming(t as any, { phone: m.from, text: textOf(m), action: actionOf(m), ref: m.id, origin, sentAt: Number(m.timestamp) * 1000 || undefined, profileName: nameOf(m.from) }).then(sendNow).catch((e) => req.log.error(e, 'whatsapp message failed')));
       }
       // Meta wants a quick 200 and resends otherwise; the replies are worked out after answering (lines are kept once by their WhatsApp id)
       void Promise.all(work);
@@ -118,9 +120,9 @@ export function chatRoutes(app: FastifyInstance) {
   /** Test chat: type as a patient from inside the app. The same code as real WhatsApp, but nothing is sent to a phone. */
   app.post('/chats/simulate', async (req) => {
     if (!can(req.perms, PERM)) throw new HttpError(403, `FORBIDDEN:${PERM}`);
-    const b = z.object({ phone: z.string().trim(), text: z.string().trim().min(1).max(2000), action: z.string().max(200).optional() }).parse(req.body);
+    const b = z.object({ phone: z.string().trim(), text: z.string().trim().min(1).max(2000), action: z.string().max(200).optional(), profileName: z.string().max(100).optional() }).parse(req.body);
     const t = (await db.select().from(tenant).where(eq(tenant.id, req.ctx.tenantId)))[0];
-    const r = await handleIncoming(t as any, { phone: b.phone, text: b.text, action: b.action, origin: originOf(req), simulate: true });
+    const r = await handleIncoming(t as any, { phone: b.phone, text: b.text, action: b.action, profileName: b.profileName, origin: originOf(req), simulate: true });
     return r;
   });
 }

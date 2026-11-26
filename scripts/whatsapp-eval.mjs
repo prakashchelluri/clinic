@@ -50,9 +50,10 @@ const always = [
 ];
 
 const scenarios = [
-  { name: 'hi from a new number', async run(p) { const a = await say(p, 'Hi'); return { turns: [['Hi', a]], checks: [['no times offered', !TIME.test(a.reply)], ['asks how to help', /help|assist|need/i.test(a.reply)]] }; } },
+  // a greeting is answered by the tap menu (welcome + the next free time with Book this / Other times), not the AI
+  { name: 'hi from a new number', async run(p) { const a = await say(p, 'Hi'); return { turns: [['Hi', a]], checks: [['welcome with the next free time', /welcome/i.test(a.reply) && /Next free time/.test(a.reply)]] }; } },
   { name: 'hi from a registered patient', async setup() { return registered('Ravi Teja'); },
-    async run(p) { const a = await say(p, 'Hello'); return { turns: [['Hello', a]], checks: [['greets by name', /Ravi/i.test(a.reply)], ['no times offered', !TIME.test(a.reply)]] }; } },
+    async run(p) { const a = await say(p, 'Hello'); return { turns: [['Hello', a]], checks: [['greets by name', /Ravi/i.test(a.reply)]] }; } },
   { name: 'new patient books step by step', msgs: ['Hi', 'I want to see the doctor', 'I have pimples on my face for 2 months', 'Anjali', 'Tomorrow', 'Evening please', 'The first evening one', 'Ok thank you'],
     async end(p, turns) { const c = await chatOf(p); const pt = c.patients[0]; const v = pt ? await open(pt.id) : [];
       return [['one booking made', v.length === 1], ['reason saved', /pimple/i.test(v[0]?.note ?? '')], ['name saved', pt?.fullName === 'Anjali'],
