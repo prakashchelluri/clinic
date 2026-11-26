@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { post, qc, errText } from './api';
+import { useQuery } from '@tanstack/react-query';
+import { get, post, qc, errText } from './api';
 import { Icon, Modal, toast } from './ui';
 
 /* Signed consent: the patient reads the wording and signs on the tablet, or staff confirm the paper form is filed.
@@ -17,9 +18,24 @@ export const photoConsentText = (name: string) =>
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });
 
 /** How a consent was given, next to its chip: a signature on the tablet is a link that opens the signed page. */
-export function ConsentNote({ c }: { c: { grantedAt: string; by: string; how?: string; documentId?: string } }) {
-  if (c.documentId) return <a className="text-xs font-semibold text-clay underline" href={`/api/documents/${c.documentId}/file`} target="_blank" rel="noreferrer">Signed {shortDay(c.grantedAt)}{c.by ? ` · ${c.by}` : ''}</a>;
+export function ConsentNote({ c }: { c: { grantedAt: string; by: string; how?: string; documentId?: string; wording?: string } }) {
+  if (c.documentId) return <span className="inline-flex flex-wrap items-baseline gap-x-1.5">
+    <a className="text-xs font-semibold text-clay underline" href={`/api/documents/${c.documentId}/file`} target="_blank" rel="noreferrer" title={c.wording ? `Wording signed:
+
+${c.wording}` : undefined}>Signed {shortDay(c.grantedAt)}{c.by ? ` · ${c.by}` : ''}</a>
+    <PageCheck id={c.documentId} />
+  </span>;
   return <span className="text-xs text-muted">{c.grantedAt ? `${c.how ?? 'recorded'} · ${c.by} · ${new Date(c.grantedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : c.how}</span>;
+}
+
+/** Whether the signed page is still the one saved at signing (its fingerprint, also kept in the audit log). */
+function PageCheck({ id }: { id: string }) {
+  const q = useQuery({ queryKey: ['doc-check', id], queryFn: () => get<{ state: 'unchanged' | 'changed' | 'unknown' | 'missing' }>(`/documents/${id}/check`), staleTime: 5 * 60e3, retry: false });
+  const s = q.data?.state;
+  if (s === 'unchanged') return <span className="text-xs text-muted" title="The signed page matches the fingerprint taken when it was signed">· Unchanged since signing</span>;
+  if (s === 'changed') return <span className="text-xs font-semibold text-rose">· Page changed since signing</span>;
+  if (s === 'missing') return <span className="text-xs font-semibold text-rose">· Signed page missing</span>;
+  return null; // checking, or signed before the check began
 }
 
 /** A plain signature pad: draw with a finger, stylus or mouse. Calls onInk(true) after the first stroke. */

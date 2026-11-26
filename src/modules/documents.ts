@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, desc, gte, inArray, isNotNull, isNull } from 'drizzle-orm';
 import path from 'node:path';
-import { document, recommendation, patient, procedureSession, procedureCatalog, practitioner, tenant } from '../db/schema.js';
+import { createHash } from 'node:crypto';
+import { document, domainEvent, recommendation, patient, procedureSession, procedureCatalog, practitioner, tenant } from '../db/schema.js';
 import { route } from '../lib/route.js';
 import { emit, sent } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
@@ -47,18 +48,19 @@ export function documentRoutes(app: FastifyInstance) {
   route(app, 'post', '/patients/:id/consents', null, async (req, tx) => {
     if (!can(req.perms, 'patient.write') && !can(req.perms, 'document.write')) throw new HttpError(403, 'FORBIDDEN:document.write');
     // granting takes proof: the signed page saved as the patient's document, or paper: true when the paper form is filed
-    const body = z.object({ key: z.enum(['photos']), granted: z.boolean(), documentId: z.string().uuid().optional(), paper: z.literal(true).optional() }).parse(req.body); const t = req.ctx.tenantId; const id = (req.params as any).id;
+    const body = z.object({ key: z.enum(['photos']), granted: z.boolean(), documentId: z.string().uuid().optional(), paper: z.literal(true).optional(), wording: z.string().trim().max(8000).optional() }).parse(req.body); const t = req.ctx.tenantId; const id = (req.params as any).id;
     const p = await tx.select().from(patient).where(and(eq(patient.id, id), eq(patient.tenantId, t))).then((r) => r[0]);
     if (!p) throw new HttpError(404, 'NOT_FOUND');
     if (body.granted && !body.documentId && !body.paper) throw new HttpError(400, 'CONSENT_PROOF_REQUIRED');
+    let doc: { id: string; sha256: string | null } | undefined;
     if (body.documentId) {
-      const doc = await tx.select({ id: document.id }).from(document).where(and(eq(document.id, body.documentId), eq(document.tenantId, t), eq(document.patientId, id), eq(document.kind, 'consent'))).then((r) => r[0]);
+      doc = await tx.select({ id: document.id, sha256: document.sha256 }).from(document).where(and(eq(document.id, body.documentId), eq(document.tenantId, t), eq(document.patientId, id), eq(document.kind, 'consent'))).then((r) => r[0]);
       if (!doc) throw new HttpError(400, 'CONSENT_NOT_FOR_PATIENT');
     }
     const consents = { ...(p.consents ?? {}) };
-    if (body.granted) consents[body.key] = { grantedAt: new Date().toISOString(), by: req.ctx.name, ...(body.documentId ? { how: 'signed', documentId: body.documentId } : { how: 'signed paper form filed' }) }; else delete consents[body.key];
+    if (body.granted) consents[body.key] = { grantedAt: new Date().toISOString(), by: req.ctx.name, ...(doc ? signedRecord(doc, body.wording) : { how: 'signed paper form filed' }) }; else delete consents[body.key];
     await tx.update(patient).set({ consents }).where(eq(patient.id, id));
-    await emit(tx, req.ctx, body.granted ? 'consent.granted' : 'consent.withdrawn', 'patient', id, { key: body.key });
+    await emit(tx, req.ctx, body.granted ? 'consent.granted' : 'consent.withdrawn', 'patient', id, { key: body.key, ...(doc ? { documentId: doc.id, sha256: doc.sha256, wordingSha256: body.wording ? sha256(body.wording) : null } : {}) });
     return { consents };
   });
 
@@ -83,15 +85,16 @@ export function documentRoutes(app: FastifyInstance) {
     if (recs.length !== recIds.length) throw new HttpError(400, 'TEST_NOT_FOR_PATIENT');
     const bytes = Buffer.from(body.dataBase64.replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (bytes.length > 10 * 1024 * 1024) throw new HttpError(413, 'TOO_LARGE');
+    const hash = sha256(bytes);
     const ext = body.mime === 'application/pdf' ? 'pdf' : body.mime.split('/')[1];
     const [row] = await tx.insert(document).values({ tenantId: t, patientId: body.patientId, encounterId: body.encounterId, recommendationId: recIds[0], recommendationIds: recIds, kind: body.kind,
-      title: body.title, mime: body.mime, sizeBytes: bytes.length, storageKey: 'pending', note: body.note, uploadedBy: req.ctx.userId,
+      title: body.title, mime: body.mime, sizeBytes: bytes.length, storageKey: 'pending', sha256: hash, note: body.note, uploadedBy: req.ctx.userId,
       area: body.kind === 'photo' ? body.area ?? null : null, view: body.kind === 'photo' ? body.view ?? null : null, procedureSessionId: body.procedureSessionId ?? null }).returning();
     const key = path.posix.join(t, body.patientId, `${row.id}.${ext}`);
     await putFile(key, bytes, body.mime); // inside the transaction: if storage fails, no record is left pointing at nothing
     await tx.update(document).set({ storageKey: key }).where(eq(document.id, row.id));
     for (const r of recs) if (r.status !== 'done') await tx.update(recommendation).set({ status: 'done', receivedAt: new Date().toISOString(), contactLog: [...r.contactLog, { at: new Date().toISOString(), by: req.ctx.name, outcome: 'Result received', note: body.note || body.title }] }).where(eq(recommendation.id, r.id));
-    await emit(tx, req.ctx, 'document.uploaded', 'document', row.id, { patientId: body.patientId, kind: body.kind, mime: body.mime, sizeBytes: bytes.length, area: body.area, procedureSessionId: body.procedureSessionId });
+    await emit(tx, req.ctx, 'document.uploaded', 'document', row.id, { patientId: body.patientId, kind: body.kind, mime: body.mime, sizeBytes: bytes.length, sha256: hash, area: body.area, procedureSessionId: body.procedureSessionId });
     return { ...row, storageKey: key };
   });
 
@@ -131,6 +134,22 @@ export function documentRoutes(app: FastifyInstance) {
     return row;
   });
 
+  /** Is the stored file still the one that was saved? Compares it with the fingerprint taken on upload, also kept in the audit log, which nobody can edit.
+   *  unchanged | changed | unknown (saved before fingerprints began) | missing (file gone). */
+  route(app, 'get', '/documents/:id/check', 'document.read', async (req, tx) => {
+    const id = (req.params as any).id;
+    const doc = await tx.select().from(document).where(and(eq(document.id, id), eq(document.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (!doc) throw new HttpError(404, 'NOT_FOUND');
+    const ev = await tx.select({ payload: domainEvent.payload }).from(domainEvent).where(and(eq(domainEvent.tenantId, req.ctx.tenantId), eq(domainEvent.aggregateId, id), eq(domainEvent.type, 'document.uploaded'))).then((r) => r[0]);
+    const logged = (ev?.payload as any)?.sha256 as string | undefined;
+    if (!logged && !doc.sha256) return { state: 'unknown' };
+    const file = await getFile(doc.storageKey);
+    if (!file) return { state: 'missing' };
+    const h = createHash('sha256'); for await (const c of file) h.update(c as Buffer);
+    const now = h.digest('hex');
+    return { state: now === doc.sha256 && (!logged || now === logged) ? 'unchanged' : 'changed' };
+  });
+
   app.get('/documents/:id/file', async (req, reply) => {
     const { withTenant } = await import('../db/index.js');
     const doc = await withTenant(req.ctx.tenantId, req.ctx.userId, (tx) =>
@@ -142,6 +161,8 @@ export function documentRoutes(app: FastifyInstance) {
   });
 
   route(app, 'delete', '/documents/:id', 'document.write', async (req, tx) => {
+    const k = await tx.select({ kind: document.kind }).from(document).where(and(eq(document.id, (req.params as any).id), eq(document.tenantId, req.ctx.tenantId))).then((r) => r[0]);
+    if (k?.kind === 'consent') throw new HttpError(409, 'CONSENT_DOCUMENT_KEPT'); // a signed consent is the record of what was agreed
     const [row] = await tx.delete(document).where(and(eq(document.id, (req.params as any).id), eq(document.tenantId, req.ctx.tenantId))).returning();
     if (!row) throw new HttpError(404, 'NOT_FOUND');
     await emit(tx, req.ctx, 'document.deleted', 'document', row.id, { patientId: row.patientId });
@@ -149,3 +170,8 @@ export function documentRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 }
+
+const sha256 = (x: Buffer | string) => createHash('sha256').update(x).digest('hex');
+/** A consent signed on the tablet: the signed page, its fingerprint, and the exact wording the patient read. */
+export const signedRecord = (doc: { id: string; sha256: string | null }, wording?: string) =>
+  ({ how: 'signed', documentId: doc.id, ...(doc.sha256 ? { sha256: doc.sha256 } : {}), ...(wording ? { wording } : {}) });

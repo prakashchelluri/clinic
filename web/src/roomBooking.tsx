@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { get, post, patch, del, qc, errText } from './api';
+import { get, post, patch, del, qc, errText, today } from './api';
 import { Drawer, Segmented, ask, toast } from './ui';
 import { ScheduleProcedure } from './pages/Worklist';
 
@@ -38,7 +38,7 @@ export function RoomBooking({ cfg, at, booking, onClose }: { cfg: any; at: { roo
         <div><label className="label">Purpose</label>
           <div className="flex flex-wrap gap-1.5">{PURPOSES.map((x) => <button key={x} type="button" className={`toggle-opt ${purpose === x ? 'on' : ''}`} aria-pressed={purpose === x} onClick={() => setPurpose(x)}>{x}</button>)}</div></div>
         <div className="grid grid-cols-3 gap-3">
-          <div><label className="label" htmlFor="rb-day">Date</label><input id="rb-day" type="date" className="input" value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></div>
+          <div><label className="label" htmlFor="rb-day">Date</label><input id="rb-day" type="date" className="input" min={today()} value={day} onChange={(e) => e.target.value && setDay(e.target.value)} /></div>
           <div><label className="label" htmlFor="rb-s">Start</label><input id="rb-s" type="time" step={900} className="input" value={start} onChange={(e) => setStart(e.target.value)} /></div>
           <div><label className="label" htmlFor="rb-e">End</label><input id="rb-e" type="time" step={900} className="input" value={end} onChange={(e) => setEnd(e.target.value)} /></div>
         </div>

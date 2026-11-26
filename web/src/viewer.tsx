@@ -83,7 +83,7 @@ function Viewer({ v }: { v: View }) {
       {list.length > 1 && <div className="mt-3 flex flex-wrap items-center gap-1.5"><span className="text-xs text-muted">Other documents</span>{list.map((x, j) => <button key={x.id} className={`toggle-opt !py-1 !text-xs ${j === i ? 'on' : ''}`} onClick={() => setI(j)}>{x.title.length > 26 ? x.title.slice(0, 24) + '…' : x.title}</button>)}</div>}
       <div className="modal-foot">
         {isImg && <div className="mr-auto flex gap-1"><button className="btn btn-ghost btn-sm" onClick={() => setZoom(0)}>Fit</button><button className="btn btn-ghost btn-sm" aria-label="Zoom out" onClick={() => setZoom((z) => Math.max(1, (z || 1) - 0.5))}>−</button><button className="btn btn-ghost btn-sm" aria-label="Zoom in" onClick={() => setZoom((z) => Math.min(4, (z || 1) + 0.5))}>+</button></div>}
-        {v.canDelete && <button className="btn btn-ghost btn-sm text-rose" onClick={remove}>Delete</button>}
+        {v.canDelete && d.kind !== 'consent' && <button className="btn btn-ghost btn-sm text-rose" onClick={remove}>Delete</button>}
         <a className={`btn btn-sm ${url ? '' : 'pointer-events-none opacity-50'}`} href={url || undefined} download={d.title}><Icon name="download" className="h-3.5 w-3.5" />Download</a>
         <button className="btn btn-primary btn-sm" disabled={!url} onClick={print}><Icon name="print" className="h-3.5 w-3.5" />Print</button>
       </div>

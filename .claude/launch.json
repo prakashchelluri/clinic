@@ -2,6 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "cubott-whatsapp",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "cd /d ..\\clinic-whatsapp && npx tsx --env-file=.env src/server.ts"],
+      "port": 3130,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-whatsapp",
+        "PORT": "3130"
+      }
+    },
+    {
       "name": "cubott",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
@@ -165,6 +176,64 @@
       "env": {
         "PGLITE_DIR": "./data/pglite-procform",
         "PORT": "3090"
+      }
+    },
+    {
+      "name": "cubott-billqa",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d C:/Users/satv1214/Desktop/My_Projects/clinic/.claude/worktrees/patient-billing && npx tsx src/server.ts"
+      ],
+      "port": 3130,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-billqa",
+        "PORT": "3130",
+        "ALLOW_TEST_RESET": "1"
+      }
+    },
+    {
+      "name": "cubott-qa5",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": [
+        "/c",
+        "cd /d C:/Users/satv1214/Desktop/My_Projects/clinic/.claude/worktrees/patient-billing && npx tsx src/server.ts"
+      ],
+      "port": 3140,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-qa5",
+        "PORT": "3140"
+      }
+    },
+    {
+      "name": "cubott-seed",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3150,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-seed",
+        "PORT": "3150"
+      }
+    },
+    {
+      "name": "cubott-audit",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "src/server.ts"
+      ],
+      "port": 3160,
+      "autoPort": false,
+      "env": {
+        "PGLITE_DIR": "./data/pglite-audit2",
+        "PORT": "3160",
+        "UPLOAD_DIR": "./data/uploads-audit2"
       }
     }
   ]

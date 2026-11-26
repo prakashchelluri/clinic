@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, sql, asc, gte, lte, inArray, desc } from 'drizzle-orm';
 import { procedureSession, procedureWeek, course, calendarBlock, recommendation, procedureCatalog, room, practitioner, patient, encounter, document, message, tenant, formDefinition, medicine, type FormSchema, type SupplyAsk } from '../db/schema.js';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { missingRequired, cleanValues } from '../lib/procForm.js';
 import { bookingSettings, localToUtc } from '../lib/booking.js';
 import { MSG, patientLang } from '../lib/patientText.js';
@@ -12,11 +12,12 @@ import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, todayIn, addDays } from '../lib/core.js';
 import { HttpError, can, type Ctx } from '../lib/auth.js';
-import { toMin, toHHMM } from './scheduling.js';
+import { toMin, toHHMM, nowHHMM } from './scheduling.js';
 import { drawSitting, reverseSitting, sittingMoney, standing } from './courses.js';
 import { sessionDef } from '../lib/procPrice.js';
+import { signedRecord } from './documents.js';
 
-type Consent = { grantedAt: string; by: string; how?: string; documentId?: string };
+type Consent = { grantedAt: string; by: string; how?: string; documentId?: string; sha256?: string; wording?: string };
 const consentKey = (procedureId: string) => `procedure:${procedureId}`;
 /** The patient's consent for this procedure, kept on the patient (one per procedure type, recorded at the first Start).
  *  It lasts the procedure's consentMonths (empty = for good); after that Start asks for it again (consentExpired).
@@ -91,14 +92,15 @@ export const weekOf = (day: string) => addDays(day, -((new Date(day + 'T00:00:00
 
 /**
  * The doctor's say on a sitting someone books or moves. Its own doctor booking or moving it approves it. Anyone else's goes to
- * that doctor: straight away when its week was already sent, otherwise it waits as a draft (this week too) until
+ * that doctor: a new booking, or one not sent yet that is moved or given another doctor, waits as a draft until it is sent; a sent one that is moved or changed goes straight away when its week was already sent, otherwise it waits as a draft until
  * the coordinator sends the week. Every sitting has a doctor (required since 15 Nov 2026; older ones were given their course's).
  */
-export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string) {
+export async function approvalFor(tx: Tx, ctx: Ctx, practitionerId: string | null | undefined, day: string, notSent = false) {
   const now = new Date().toISOString();
   const set = (approval: 'approved' | 'sent' | 'draft', changed: boolean) => ({ approval, approvalNote: null, approvedBy: approval === 'approved' ? ctx.name : null, approvedAt: approval === 'approved' ? now : null, changed, bookedBy: ctx.userId });
   if (!practitionerId) return set('draft', false);
   if (practitionerId === ctx.practitionerId) return set('approved', false);
+  if (notSent) return set('draft', false); // new, or never sent: waits to be sent (Today or Week plan), even in a week already sent
   const wk = weekOf(day);
   const sent = await tx.select({ id: procedureWeek.id }).from(procedureWeek).where(and(eq(procedureWeek.tenantId, ctx.tenantId), eq(procedureWeek.weekStart, wk))).then((r) => r[0]);
   return sent ? set('sent', true) : set('draft', false);
@@ -153,7 +155,7 @@ async function bookNextByPlan(tx: Tx, ctx: Ctx, done: typeof procedureSession.$i
       if ((await conflicts(tx, t, day, startTime, endTime, done.roomId, doctor)).length) continue;
       const [{ n }] = await tx.select({ n: sql<number>`coalesce(max(${procedureSession.sittingNo}), 0)::int` }).from(procedureSession).where(and(eq(procedureSession.recommendationId, done.recommendationId), sql`${procedureSession.state} <> 'cancelled'`));
       const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: done.recommendationId, patientId: done.patientId, procedureId: done.procedureId, practitionerId: doctor, roomId: done.roomId,
-        sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, doctor, day)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
+        sittingNo: n + 1, day, startTime, endTime, autoBooked: true, ...(await approvalFor(tx, { ...ctx, practitionerId: null } as Ctx, doctor, day, true)), bookedBy: ctx.userId }).returning(); // never approved just because a doctor marked theirs done
       await planSittingReminder(tx, t, ps.id);
       if (doctor) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: doctor, roomId: done.roomId, day, startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
       await emit(tx, ctx, 'procedure_session.scheduled', 'procedure_session', ps.id, { day, startTime, endTime, roomId: done.roomId, practitionerId: doctor, byPlan: true });
@@ -173,7 +175,11 @@ export function procedureRoutes(app: FastifyInstance) {
     const minutes = q.minutes ?? proc.typicalMinutes;
     const rooms = (await tx.select().from(room).where(and(eq(room.tenantId, t), eq(room.active, true)))).filter((r) => !proc.requiredCapability || r.capabilities.includes(proc.requiredCapability));
     const slots: any[] = [];
+    // no slot that has already started: none on a past day, and today only from now on
+    const today = todayIn(req.ctx.timezone);
+    const from = q.day < today ? Infinity : q.day === today ? toMin(nowHHMM(req.ctx.timezone)) : 0;
     for (const r of rooms) for (let m = 9 * 60; m + minutes <= 20 * 60; m += 30) {
+      if (m < from) continue;
       const c = await conflicts(tx, t, q.day, toHHMM(m), toHHMM(m + minutes), r.id, q.practitionerId ?? null);
       if (!c.length) slots.push({ roomId: r.id, room: r.name, startTime: toHHMM(m), endTime: toHHMM(m + minutes) });
     }
@@ -185,9 +191,15 @@ export function procedureRoutes(app: FastifyInstance) {
   const ScheduleIn = z.object({ recommendationId: z.string().uuid(), day: DAY, startTime: HHMM, minutes: z.number().int().min(5).max(480), autoMinutes: z.boolean().optional(), roomId: z.string().uuid().nullable().optional(), practitionerId: z.string().uuid().nullable().optional(), notes: z.string().optional(), force: z.boolean().default(false),
     // planned: placed on the coordinator's week, not booked with the patient, so it does not count as the patient's yes
     planned: z.boolean().default(false) });
+  /** A session cannot be booked or moved into a time that has already started (the manual time too). */
+  const notPast = (ctx: Ctx, day: string, startTime: string) => {
+    const today = todayIn(ctx.timezone);
+    if (day < today || (day === today && startTime < nowHHMM(ctx.timezone))) throw new HttpError(409, 'PAST_TIME');
+  };
   /** Schedule a sitting. Blocks the doctor's OP time when a doctor is assigned, so booking capacity drops automatically. */
   const book = async (req: { ctx: Ctx; body: unknown }, tx: Tx) => {
     const body = ScheduleIn.parse(req.body); const t = req.ctx.tenantId;
+    if (!body.force) notPast(req.ctx, body.day, body.startTime); // force (API only; the drawer sends it just after a clash) may record one already done
     const rec = await tx.select().from(recommendation).where(and(eq(recommendation.id, body.recommendationId), eq(recommendation.tenantId, t))).then((r) => r[0]);
     if (!rec || rec.kind !== 'procedure') throw new HttpError(404, 'RECOMMENDATION_NOT_FOUND');
     const proc = rec.procedureId ? await tx.select().from(procedureCatalog).where(eq(procedureCatalog.id, rec.procedureId)).then((r) => r[0]) : null;
@@ -205,7 +217,7 @@ export function procedureRoutes(app: FastifyInstance) {
     // booked with the patient (at the desk or on the phone): that confirms the date for the calls already inside the time left
     const ahead = daysFrom(todayIn(req.ctx.timezone), body.day); const now = new Date().toISOString();
     const [ps] = await tx.insert(procedureSession).values({ tenantId: t, recommendationId: rec.id, patientId: rec.patientId, procedureId: rec.procedureId, practitionerId: body.practitionerId ?? null, roomId: body.roomId ?? null,
-      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).returning();
+      sittingNo: n + 1, day: body.day, startTime: body.startTime, endTime, notes: body.notes, weekConfirmedAt: ahead <= 7 && !body.planned ? now : null, patientConfirmedAt: ahead <= 1 && !body.planned ? now : null, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, true)) }).returning();
     await planSittingReminder(tx, t, ps.id);
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${n + 1}`, procedureSessionId: ps.id });
     await tx.update(recommendation).set({ status: 'scheduled', dueOn: body.day }).where(eq(recommendation.id, rec.id));
@@ -248,7 +260,7 @@ export function procedureRoutes(app: FastifyInstance) {
       if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     }
     if (body.supervisorId && body.supervisorId === body.practitionerId) throw new HttpError(400, 'SUPERVISOR_IS_THE_DOCTOR');
-    const who = body.practitionerId !== ps.practitionerId ? await approvalFor(tx, req.ctx, body.practitionerId, ps.day) : {};
+    const who = body.practitionerId !== ps.practitionerId ? await approvalFor(tx, req.ctx, body.practitionerId, ps.day, ps.approval === 'draft') : {};
     const [row] = await tx.update(procedureSession).set({ practitionerId: body.practitionerId, ...who, ...(body.supervisorId !== undefined ? { supervisorId: body.supervisorId } : {}) }).where(eq(procedureSession.id, id)).returning();
     await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
@@ -308,6 +320,7 @@ export function procedureRoutes(app: FastifyInstance) {
   /** Move an upcoming sitting (or one postponed or missed) to another day, time, room or doctor. The doctor's blocked time moves with it; the reason goes in the contact log. */
   const move = async (req: { ctx: Ctx; body: unknown; params: unknown }, tx: Tx) => {
     const body = ScheduleIn.omit({ recommendationId: true }).extend({ reason: z.string().trim().max(200).optional() }).parse(req.body);
+    if (!body.force) notPast(req.ctx, body.day, body.startTime); // force (API only; the drawer sends it just after a clash) may record one already done
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const ps = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
     if (!ps) throw new HttpError(404, 'NOT_FOUND');
@@ -323,7 +336,7 @@ export function procedureRoutes(app: FastifyInstance) {
     if (c.length && !body.force) throw new HttpError(409, 'CONFLICT', { conflicts: c });
     // a move inside the week counts as the week's confirmation; the day-before call is still made (the clinic may have moved it)
     const ahead = daysFrom(todayIn(req.ctx.timezone), body.day);
-    const [moved] = await tx.update(procedureSession).set({ autoBooked: false, day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 && !body.planned ? new Date().toISOString() : null, notes: body.notes ?? ps.notes, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day)) }).where(eq(procedureSession.id, id)).returning();
+    const [moved] = await tx.update(procedureSession).set({ autoBooked: false, day: body.day, startTime: body.startTime, endTime, roomId: body.roomId ?? null, practitionerId: body.practitionerId ?? null, state: 'confirmed', stateReason: null, patientConfirmedAt: null, weekConfirmedAt: ahead <= 7 && !body.planned ? new Date().toISOString() : null, notes: body.notes ?? ps.notes, ...(await approvalFor(tx, req.ctx, body.practitionerId, body.day, ps.approval === 'draft')) }).where(eq(procedureSession.id, id)).returning();
     await planSittingReminder(tx, t, id);
     await tx.delete(calendarBlock).where(eq(calendarBlock.procedureSessionId, id));
     if (body.practitionerId) await tx.insert(calendarBlock).values({ tenantId: t, practitionerId: body.practitionerId, roomId: body.roomId ?? null, day: body.day, startTime: body.startTime, endTime, kind: 'procedure', note: `${proc?.name ?? 'Procedure'} · session ${ps.sittingNo}`, procedureSessionId: id });
@@ -401,6 +414,15 @@ export function procedureRoutes(app: FastifyInstance) {
     return { start, sent: rows.length };
   });
 
+  /** Send chosen drafts to their doctors now (from Today's sessions), without sending the rest of the week. */
+  route(app, 'post', '/procedure-sessions/send', 'worklist.write', async (req, tx) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }).parse(req.body); const t = req.ctx.tenantId;
+    const rows = await tx.update(procedureSession).set({ approval: 'sent' })
+      .where(and(eq(procedureSession.tenantId, t), inArray(procedureSession.id, ids), eq(procedureSession.approval, 'draft'), eq(procedureSession.state, 'confirmed'), sql`${procedureSession.practitionerId} is not null`)).returning({ id: procedureSession.id });
+    for (const r of rows) await emit(tx, req.ctx, 'procedure_session.sent', 'procedure_session', r.id, {});
+    return { sent: rows.length };
+  });
+
   /** The doctor's sittings waiting for their approval, with the rest of those weeks around them, the course behind each, and their leave. */
   route(app, 'get', '/procedure-approvals', 'encounter.complete', async (req, tx) => {
     const me = req.ctx.practitionerId; const t = req.ctx.tenantId;
@@ -445,7 +467,7 @@ export function procedureRoutes(app: FastifyInstance) {
   route(app, 'patch', '/procedure-sessions/:id', null, async (req, tx) => {
     // consent: on starting, true when the patient signed the procedure consent form (sent only when none is on file for this procedure)
     // consentDocumentId: the patient signed on the tablet; the signature was first saved as one of this patient's documents
-    const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional(), consent: z.boolean().optional(), consentDocumentId: z.string().uuid().optional() }).parse(req.body);
+    const body = z.object({ state: z.enum(['confirmed', 'in_progress', 'completed', 'missed', 'cancelled', 'postponed']), reason: z.string().optional(), outcome: z.record(z.string(), z.any()).optional(), consent: z.boolean().optional(), consentDocumentId: z.string().uuid().optional(), consentWording: z.string().trim().max(8000).optional() }).parse(req.body);
     const t = req.ctx.tenantId; const id = (req.params as any).id;
     const cur = await tx.select().from(procedureSession).where(and(eq(procedureSession.id, id), eq(procedureSession.tenantId, t))).then((r) => r[0]);
     if (!cur) throw new HttpError(404, 'NOT_FOUND');
@@ -466,15 +488,16 @@ export function procedureRoutes(app: FastifyInstance) {
       if ((await procedureConsent(tx, t, cur)).consentNeeded) {
         if (body.consent !== true) throw new HttpError(409, 'CONSENT_NEEDED');
         // a signature from the tablet must be a document of this same patient, in this clinic
+        let doc: { id: string; sha256: string | null } | undefined;
         if (body.consentDocumentId) {
-          const doc = await tx.select({ id: document.id }).from(document).where(and(eq(document.id, body.consentDocumentId), eq(document.tenantId, t), eq(document.patientId, cur.patientId))).then((r) => r[0]);
+          doc = await tx.select({ id: document.id, sha256: document.sha256 }).from(document).where(and(eq(document.id, body.consentDocumentId), eq(document.tenantId, t), eq(document.patientId, cur.patientId), eq(document.kind, 'consent'))).then((r) => r[0]);
           if (!doc) throw new HttpError(400, 'CONSENT_NOT_FOR_PATIENT');
         }
         const p = await tx.select({ consents: patient.consents }).from(patient).where(eq(patient.id, cur.patientId)).then((r) => r[0]);
         const key = consentKey(cur.procedureId); const at = new Date().toISOString();
-        const rec: Consent = body.consentDocumentId ? { grantedAt: at, by: req.ctx.name, how: 'signed', documentId: body.consentDocumentId } : { grantedAt: at, by: req.ctx.name, how: 'signed paper form filed' };
+        const rec: Consent = { grantedAt: at, by: req.ctx.name, ...(doc ? signedRecord(doc, body.consentWording) : { how: 'signed paper form filed' }) };
         await tx.update(patient).set({ consents: { ...(p?.consents ?? {}), [key]: rec } }).where(eq(patient.id, cur.patientId));
-        await emit(tx, req.ctx, 'consent.granted', 'patient', cur.patientId, { key, procedureSessionId: id, ...(body.consentDocumentId ? { documentId: body.consentDocumentId } : {}) });
+        await emit(tx, req.ctx, 'consent.granted', 'patient', cur.patientId, { key, procedureSessionId: id, ...(doc ? { documentId: doc.id, sha256: doc.sha256, wordingSha256: body.consentWording ? createHash('sha256').update(body.consentWording).digest('hex') : null } : {}) });
       }
     }
     const form = ['in_progress', 'completed'].includes(body.state) ? await procForm(tx, t, cur.procedureId, cur.formDefinitionId) : null;

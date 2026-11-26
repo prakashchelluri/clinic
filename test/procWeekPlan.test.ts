@@ -101,11 +101,15 @@ test('week plan: draft, send, approve, change after sending, send back, own move
   assert.equal((await pending(s2.id)).length, 1);
   assert.equal((await D2('POST', '/procedure-sessions/place', { sittingId: s2.id, day: addDays(mon, 2), hour: 17 })).status, 403, 'another doctor cannot move it');
 
-  // this week waits for a send too, unless it was already sent
+  // a new booking waits as Not sent, this week too, even in a week already sent; sending the week again sends just it
   const c = await course('Week Plan Three', '9848012203');
+  const late = await C('POST', '/procedure-sessions/place', { recommendationId: c.rec.id, day: addDays(mon, 3), hour: 12 });
+  assert.equal(late.status, 200, JSON.stringify(late.body)); assert.equal(late.body.approval, 'draft', 'sent week: the new booking still waits');
+  assert.equal((await C('POST', `/procedure-weeks/${mon}/send`)).body.sent, 1);
+  assert.equal((await C('GET', `/procedure-sessions/${late.body.id}`)).body.approval, 'sent');
   const soon = addDays(today(), 1);
   const s3 = await C('POST', '/procedure-sessions/place', { recommendationId: c.rec.id, day: soon, hour: 19 });
-  if (s3.status === 200) assert.equal(s3.body.approval, (await C('GET', `/procedure-weeks/${weekOf(soon)}`)).body.sent ? 'sent' : 'draft');
+  if (s3.status === 200) assert.equal(s3.body.approval, 'draft');
 
   // unscheduling puts the course back in Pending schedules
   assert.equal((await C('PATCH', `/procedure-sessions/${s1.id}`, { state: 'cancelled', reason: 'Unscheduled' })).status, 200);
@@ -157,6 +161,24 @@ test('every session needs a doctor, and only its own doctor booking it counts as
   assert.equal((await R('GET', '/followups/menu-counts')).body.toSend.n, before, 'sent: off the to-do');
   assert.equal((await C('GET', `/procedure-sessions/${old.id}`)).body.approval, 'draft');
   assert.equal((await C('GET', `/procedure-sessions/${s.id}`)).body.approval, 'sent');
-  // the coordinator picks the doctor: it goes to them straight away, as the week was sent
-  assert.equal((await C('POST', `/procedure-sessions/${old.id}/assign`, { practitionerId: drMain, force: true })).body.approval, 'sent');
+  // the coordinator picks the doctor: never sent, so it still waits to be sent (even though the week was sent)
+  assert.equal((await C('POST', `/procedure-sessions/${old.id}/assign`, { practitionerId: drMain, force: true })).body.approval, 'draft');
+
+  // Today's sessions sends one draft on its own: the rest of its week stays a draft and the week is not marked sent
+  const wk2 = addDays(mon, 7);
+  const a = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: wk2, startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  const b = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(wk2, 1), startTime: '10:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  assert.equal((await R('POST', '/procedure-sessions/send', { ids: [a.id, own.id] })).body.sent, 1, 'only drafts go');
+  assert.equal((await C('GET', `/procedure-sessions/${a.id}`)).body.approval, 'sent');
+  assert.equal((await C('GET', `/procedure-sessions/${b.id}`)).body.approval, 'draft');
+  assert.equal((await C('GET', `/procedure-weeks/${wk2}`)).body.sent, false);
+  assert.equal((await as(await login('doctor2@demo.clinic'))('POST', '/procedure-sessions/send', { ids: [b.id] })).status, 403, 'needs worklist.write');
+
+  // a draft moved before it was sent stays a draft, even in a week already sent (mon was sent above); once sent, a move goes straight to the doctor
+  const d = (await R('POST', '/procedure-sessions', { recommendationId: rec.id, day: addDays(mon, 3), startTime: '13:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  assert.equal(d.approval, 'draft');
+  const moved = (await R('POST', `/procedure-sessions/${d.id}/reschedule`, { day: addDays(mon, 3), startTime: '14:00', minutes: 30, practitionerId: drMain, force: true })).body;
+  assert.equal(moved.approval, 'draft', 'not sent yet: the move does not send it');
+  await R('POST', '/procedure-sessions/send', { ids: [d.id] });
+  assert.equal((await R('POST', `/procedure-sessions/${d.id}/reschedule`, { day: addDays(mon, 3), startTime: '15:00', minutes: 30, practitionerId: drMain, force: true })).body.approval, 'sent');
 });

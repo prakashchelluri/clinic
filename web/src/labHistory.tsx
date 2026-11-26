@@ -161,7 +161,7 @@ export function ReportList({ docs, patientId, encounterId, who, onDelete }: { do
                 {d.note && <div className="truncate text-[11.5px] text-ink-2">{d.note}</div>}
               </div>
               {outN > 0 ? <Chip tone="rose">{outN} out of range</Chip> : v.length > 0 ? <Chip tone="sage">all normal</Chip> : null}
-              {onDelete && <button aria-label={`Remove ${d.title}`} className="btn btn-ghost btn-icon opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={(e) => { e.stopPropagation(); onDelete(d.id); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
+              {onDelete && d.kind !== 'consent' && <button aria-label={`Remove ${d.title}`} className="btn btn-ghost btn-icon opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={(e) => { e.stopPropagation(); onDelete(d.id); }}><Icon name="x" className="h-3.5 w-3.5" /></button>}
             </div>); })}</div>
         </div>))}
       {list.length === 0 && <div className="text-sm text-muted">No files of this kind.</div>}

@@ -59,7 +59,7 @@ export function ProcWeek() {
 
   const q = useQuery({ queryKey: ['psessions', 'week', mon], queryFn: () => get(`/procedure-sessions?from=${mon}&to=${addDay(mon, 6)}&active=1`), refetchInterval: 20000 });
   const wk = useQuery({ queryKey: ['pweek', mon], queryFn: () => get(`/procedure-weeks/${mon}`) });
-  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval. From now on, a change in this week reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
+  const send = useMutation({ mutationFn: () => post(`/procedure-weeks/${mon}/send`), onSuccess: (r: any) => { setReview(false); refreshProcedures(); toast(`Sent ${r.sent} session${r.sent === 1 ? '' : 's'} for approval. A new booking in this week waits as Not sent until you send it; a move reaches the doctor straight away.`); }, onError: (e) => toast(errText(e), 'err') });
   const confirm = useMutation({ mutationFn: ({ id, confirmed }: any) => post(`/procedure-sessions/${id}/confirm`, { confirmed }), onSuccess: () => { refreshProcedures(); toast('Noted: the patient said yes', 'info'); }, onError: (e) => toast(errText(e), 'err') });
 
   const all: any[] = q.data ?? [];
@@ -141,7 +141,7 @@ export function ProcWeek() {
               {byPlan > 0 && <Chip>{`Booked by the plan ${byPlan}`}</Chip>}
             </span>
             {canWrite && <button type="button" className="btn btn-primary" disabled={!sendable.length} title={sendWhy || undefined} onClick={() => setReview(true)}><Icon name="check" />{sendable.length ? `Send ${sendable.length} for doctor approval` : 'Send for doctor approval'}</button>}
-            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent ? '. A change in this week reaches the doctor straight away.' : ''}</span>}
+            {canWrite && sendWhy && <span className="w-full text-right text-[12.5px] text-muted">{sendWhy}{wk.data?.sent ? '. New bookings wait as Not sent; a move reaches the doctor straight away.' : ''}</span>}
           </div>
           {q.isLoading ? <div className="p-4"><Skeleton rows={6} /></div> : q.isError && !q.data ? <div className="p-4"><LoadError onRetry={() => q.refetch()} /></div> : (
             <div className="overflow-x-auto">
@@ -179,7 +179,7 @@ export function ProcWeek() {
               <span className="min-w-[34px] text-right text-[26px] font-extrabold leading-none">{d.list.length}</span>
               <span className="min-w-0 flex-1"><b className="text-[15px]">{d.name}</b><span className="block text-[13px] text-muted">{d.list.map((s) => `${s.patient.fullName} (${fmt(s.day, { weekday: 'short' })} ${t12(s.startTime)})`).join(', ')}</span></span>
             </div>))}
-          <div className="text-[13px] text-muted">Each doctor sees only their own sessions, on Today under “Needs your attention”. After this, any change you make in this week reaches the doctor straight away.</div>
+          <div className="text-[13px] text-muted">Each doctor sees only their own sessions, on Today under “Needs your attention”. After this, a new booking in this week waits as Not sent until you send it again; moving or changing the doctor of a session reaches the doctor straight away.</div>
           <div className="modal-foot"><button className="btn btn-ghost" onClick={() => setReview(false)}>Back</button>
             <button className="btn btn-primary" disabled={send.isPending || !byDoc.length} onClick={() => send.mutate()}><Icon name="check" />{byDoc.length > 1 ? `Send to ${byDoc.length} doctors` : `Send to ${byDoc[0]?.name ?? 'the doctor'}`}</button></div>
         </div>
