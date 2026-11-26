@@ -29,8 +29,9 @@ export function sitStatus(s: any, week = false, doctor = false): { word: string;
   if (s.approval === 'draft') return { word: 'Not sent', cls: 'draft' };
   if (s.approval === 'sent') return { word: doctor ? (s.changed ? 'Changed · to approve' : 'To approve') : s.changed ? 'Changed · approval pending' : 'Approval pending', cls: 'sent amber' };
   if (s.approval === 'change') return { word: 'Change asked', cls: 'change' };
-  if (s.patientConfirmedAt) return { word: 'Confirmed', cls: '' };
-  return week ? { word: 'Approved', cls: '' } : { word: 'Not confirmed', cls: 'warn' };
+  // approved: say so, and whether the patient has said yes (Today; Week plan just says Approved)
+  if (week) return { word: 'Approved', cls: '' };
+  return s.patientConfirmedAt ? { word: 'Approved · Confirmed', cls: '' } : { word: 'Approved · Not confirmed', cls: 'warn' };
 }
 /** A sitting that can still be moved by drag: booked and not over. */
 export const movable = (s: any, today: string) => s.state === 'confirmed' && s.day >= today;

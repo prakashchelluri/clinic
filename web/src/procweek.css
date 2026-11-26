@@ -8,7 +8,7 @@
 .pw-blk:focus-visible { outline: 2px solid var(--color-clay); outline-offset: 2px; }
 .pw-blk b { font-size: 14.5px; font-weight: 700; color: var(--color-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pw-blk span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pw-blk .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; color: var(--color-muted); }
+.pw-blk .top { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 8px; row-gap: 0; font-size: 12px; font-weight: 600; color: var(--color-muted); } /* a long status goes under the time, never cuts it */
 .pw-blk .st { font-weight: 700; flex-shrink: 0; }
 .pw-blk.warn .st { color: var(--color-rose); }
 .pw-blk.amber .st { color: var(--color-amber); }

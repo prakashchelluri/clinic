@@ -29,11 +29,15 @@ export function ConsentDialog({ s, onClose, onStart }: { s: { id: string; proced
   return <ConsentForm title={`Consent for ${what}`} subtitle={s.consentExpired ? `${s.patient.fullName} · the last consent has run out, so it is signed again` : undefined} text={text} patient={s.patient} procedureSessionId={s.id} okLabel="Save and start" onClose={onClose}
     onDone={(id) => onStart({ state: 'in_progress', consent: true, ...(id ? { consentDocumentId: id, consentWording: text } : {}) })} />;
 }
-/** Marking done makes the charge, so say what it will be first. */
+/** Marking done makes the charge, so the desk is told what it will be first. */
 export async function confirmDone(s: { procedure?: string | null; sittingNo: number; of?: number | null; patient: { fullName: string }; money?: Money }) {
-  const m = s.money;
-  const pay = !m ? '' : m.kind === 'on_done' ? ` ${money(m.amountPaise)} not invoiced yet is invoiced now; the patient's advance pays it first, as far as it goes.` : m.kind === 'due' ? ` ${money(m.amountPaise)} will be due.` : m.kind === 'invoiced' ? ' It is on the treatment\'s invoice: nothing more is billed.' : m.kind === 'paid' ? ' It is already paid.' : ' No price is agreed, so nothing is charged.';
-  return !!(await ask({ title: `Mark ${s.procedure ?? 'procedure'} session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?${pay}`, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
+  // billing is the desk's business: a doctor just gets the question
+  const m = (qc.getQueryData(['me']) as any)?.practitionerId ? null : s.money; const what = s.procedure ?? 'the procedure';
+  const body = !m ? undefined : m.kind === 'on_done' ? <>An invoice of <b>{money(m.amountPaise)}</b> for {what} is made now. Any advance the patient has paid is used first; the rest is due at the desk.</>
+    : m.kind === 'due' ? <><b>{money(m.amountPaise)}</b> becomes due for this session.</>
+    : m.kind === 'invoiced' ? <>Already on the patient's invoice. Nothing new is charged.</>
+    : m.kind === 'paid' ? <>Already paid. Nothing new is charged.</> : <>No price is set, so nothing is charged.</>;
+  return !!(await ask({ title: `Mark ${what} session ${s.sittingNo}${s.of ? ` of ${s.of}` : ''} done for ${s.patient.fullName.split(' ')[0]}?`, body, confirmLabel: 'Mark done', cancelLabel: 'Not yet' }));
 }
 
 const STATE: Record<string, { label: string; tone: '' | 'sage' | 'amber' | 'rose' | 'sky' }> = {
@@ -87,7 +91,11 @@ export function ProcedureDrawer({ id, canAct, onClose, extra }: { id: string; ca
           <div>
             <div className="flex flex-wrap items-center gap-1.5 [&_.chip]:whitespace-nowrap">
               {overdue ? <Chip tone="rose">No show</Chip> : <Chip tone={STATE[s.state]?.tone ?? ''}>{STATE[s.state]?.label ?? s.state}</Chip>}
-              {s.patientConfirmedAt && <Chip tone="sage">Patient confirmed</Chip>}
+              {/* the doctor's approval and the patient's yes are two separate things: show both while it is booked */}
+              {s.state === 'confirmed' && !overdue && (s.approval === 'approved' ? <Chip tone="sage">{s.approvedBy ? `Approved by ${s.approvedBy}` : 'Approved'}</Chip>
+                : s.approval === 'sent' ? <Chip tone="amber">{toApprove ? 'To approve' : s.changed ? 'Changed · approval pending' : 'Approval pending'}</Chip>
+                : s.approval === 'change' ? <Chip tone="rose">Change asked</Chip> : <Chip>Not sent for approval</Chip>)}
+              {s.patientConfirmedAt ? <Chip tone="sage">Patient confirmed</Chip> : s.state === 'confirmed' && !overdue && <Chip tone="amber">Patient not confirmed</Chip>}
               <MoneyChip m={s.money} />
             </div>
           </div>
