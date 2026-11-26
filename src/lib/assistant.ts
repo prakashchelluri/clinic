@@ -43,7 +43,7 @@ const visitOut = (v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>) =
 };
 
 /** Book a new visit from WhatsApp: the same rules as the front desk without its overrides (no overbooking, one upcoming visit per patient). */
-export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: string, who: { patientId?: string; newName?: string }, origin: string) {
+export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: string, who: { patientId?: string; newName?: string; reason?: string }, origin: string) {
   if (!/^[0-9a-f-]{36}$/i.test(windowId)) throw new HttpError(404, 'WINDOW_NOT_FOUND');
   const s = await tx.select().from(session).where(and(eq(session.id, windowId), eq(session.tenantId, t.id))).for('update').then((r) => r[0]);
   if (!s) throw new HttpError(404, 'WINDOW_NOT_FOUND');
@@ -68,7 +68,7 @@ export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: s
   if (upcoming.length) throw new HttpError(409, 'ALREADY_BOOKED', { appointment_id: upcoming[0].id });
   const seen = await tx.select({ id: visit.id }).from(visit).where(and(eq(visit.tenantId, t.id), eq(visit.patientId, patientId), eq(visit.day, today), inArray(visit.status, ['waiting', 'intake', 'in_consult']))).limit(1);
   if (seen.length) throw new HttpError(409, 'IN_CLINIC_NOW');
-  const [row] = await tx.insert(appointment).values({ tenantId: t.id, patientId, sessionId: s.id, source: 'whatsapp', publicToken: newToken() }).returning();
+  const [row] = await tx.insert(appointment).values({ tenantId: t.id, patientId, sessionId: s.id, source: 'whatsapp', publicToken: newToken(), note: who.reason?.trim().slice(0, 200) || null }).returning();
   await emit(tx, ctxFor(t, BY), 'appointment.booked', 'appointment', row.id, { patientId, sessionId: s.id, day: s.day, window: [s.startTime, s.endTime], by: 'whatsapp' });
   await tx.update(waitlist).set({ status: 'booked' }).where(and(eq(waitlist.tenantId, t.id), eq(waitlist.patientId, patientId), inArray(waitlist.status, ['waiting', 'offered'])));
   await tx.update(recommendation).set({ status: 'scheduled' }).where(and(eq(recommendation.tenantId, t.id), eq(recommendation.patientId, patientId), eq(recommendation.kind, 'followup'), inArray(recommendation.status, ['open', 'contacted'])));
@@ -107,8 +107,8 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
     }),
     betaTool({
       name: 'book_visit', description: 'Book a new visit in a window from open_times. Use patient_id for a patient on this number, or new_patient_name for someone new.',
-      inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string', description: 'In English letters, as the clinic register keeps names (write a Telugu or Hindi name in English letters, e.g. Lakshmi)' } }, required: ['window_id'], additionalProperties: false } as const,
-      run: run((tx, i: { window_id: string; patient_id?: string; new_patient_name?: string }) => bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name }, origin)),
+      inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string', description: 'In English letters, as the clinic register keeps names (write a Telugu or Hindi name in English letters, e.g. Lakshmi)' }, reason: { type: 'string', description: 'Why the patient is coming, in a few English words for the front desk and doctor (e.g. "pimples on face, 2 months", "review after acne treatment")' } }, required: ['window_id'], additionalProperties: false } as const,
+      run: run((tx, i: { window_id: string; patient_id?: string; new_patient_name?: string; reason?: string }) => bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name, reason: i.reason }, origin)),
     }),
     betaTool({
       name: 'confirm_visit', description: 'Mark an upcoming visit as confirmed by the patient.',
@@ -136,13 +136,19 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
   ];
 }
 
+/** The fixed part of the instructions (cached by the API across calls); who is writing and the time follow in a second block. */
 function systemPrompt(t: Tenant) {
   const phone = t.settings?.print?.phone ?? ''; const address = t.settings?.print?.address ?? '';
-  const now = new Date();
-  const day = new Intl.DateTimeFormat('en-IN', { timeZone: t.timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(now);
   return `You are the WhatsApp front desk of ${t.name}, a clinic in India.${phone ? ` Clinic phone: ${phone}.` : ''}${address ? ` Address: ${address}.` : ''}
 
 Reply in the language and script the patient writes in (English, Telugu or Hindi, including Telugu or Hindi typed in English letters). Keep replies to one to three short sentences of plain text: no markdown, no lists unless offering times.
+
+How a conversation goes:
+1. First find out why they are writing. If the message is only a greeting ("hi", "hello", "namaste") or does not say what they need, greet them and ask how you can help. A registered patient (see "Who is writing") is greeted by name; someone new gets a welcome to the clinic. Do not offer times yet.
+2. If they want a visit, ask what the problem is if they have not said (one short question, e.g. "What would you like to see the doctor about?"), and for someone new their name. Then ask which day suits them, and only then offer times.
+3. If they ask about an existing visit, call my_visits (it gives the appointment ids you need) and help with it. Do not call my_visits just to greet: "Who is writing" already says who they are and whether a visit is booked.
+Never ask more than one question in a reply. Never ask for anything the patient already told you.
+Your earlier replies in this chat were based on tool results that are not shown again: trust what you told the patient, never tell them to ignore it. Times can fill up, so before booking or moving call open_times again for the window ids.
 
 You can look up the patient's visits, offer open times, and book, move, confirm or cancel visits with your tools. Visits are booked in hourly windows: say the window and the arrive-by time, for example "between 10:00 and 11:00, please come by 09:25". Offer at most three windows at a time. Only use window ids and appointment ids your tools returned.
 
@@ -150,7 +156,27 @@ Before you book, move or cancel, say exactly what you will do and wait for a yes
 
 Never give medical advice, a diagnosis, medicine or dose advice, test results, prices or fees, and never discuss payments or refunds. For those, for complaints, for anything about another person's records, and whenever you are unsure, call hand_over and tell the patient the front desk will reply here soon. In an emergency tell them to call ${phone || 'the clinic'} or go to the nearest hospital, and call hand_over.
 
-Today is ${day}. The time now is ${nowHHMM(t.timezone)}.`;
+When you book, pass the patient's reason for the visit in book_visit's reason.`;
+}
+
+/** Who is writing (the patients registered on this number, with their last and next visit) and the date: changes per chat, so kept out of the cached block. */
+async function aboutChat(t: Tenant, c: Chat) {
+  const today = todayIn(t.timezone);
+  const people = await inTenant(t, async (tx) => {
+    const family = await patientsOn(tx, t, c.phone);
+    const out = [];
+    for (const p of family) {
+      const last = (await tx.select({ day: sql<string>`max(${visit.day})` }).from(visit).where(and(eq(visit.tenantId, t.id), eq(visit.patientId, p.id))))[0]?.day;
+      const next = (await tx.select({ day: session.day, from: session.startTime }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
+        .where(and(eq(appointment.tenantId, t.id), eq(appointment.patientId, p.id), inArray(appointment.status, [...OPEN_STATUSES]), sql`${session.day} >= ${today}`)).orderBy(asc(session.day)).limit(1))[0];
+      out.push(`- ${p.fullName} (patient_id ${p.id})${last ? `, last visited ${last}` : ', no visit yet'}${next ? `, next visit booked on ${next.day} at ${next.from}` : ''}`);
+    }
+    return out;
+  });
+  const day = new Intl.DateTimeFormat('en-IN', { timeZone: t.timezone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  return `Who is writing: ${people.length ? `this WhatsApp number is registered for:\n${people.join('\n')}\nIf more than one, find out which person the message is about.` : 'a number not registered with the clinic (a new patient, or an existing one writing from another number).'}
+
+Today is ${day}. It is now ${nowHHMM(t.timezone).slice(0, 2)}:xx (open_times only offers windows that can still be booked).`;
 }
 
 /** Ask Claude for the reply to the latest patient line. The conversation so far is replayed as user/assistant turns. */
@@ -162,15 +188,32 @@ async function askClaude(t: Tenant, c: Chat, lines: { direction: string; body: s
     if (!messages.length && role === 'assistant') continue; // must start with the patient
     messages.push({ role, content: l.body });
   }
-  const final = await client.beta.messages.toolRunner({
-    model: process.env.ASSISTANT_MODEL ?? 'claude-opus-5-5', max_tokens: 4000, max_iterations: 8,
-    system: systemPrompt(t), messages, tools: chatTools(t, c, origin),
-    output_config: { effort: 'medium' },
+  // cache the conversation so far: the tool rounds of this reply, and the next reply, read it at a twentieth of the price
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg) lastMsg.content = [{ type: 'text', text: lastMsg.content as string, cache_control: { type: 'ephemeral' } }];
+  const runner = client.beta.messages.toolRunner({
+    // Sonnet 5.5: as good as Opus 5.5 on the front-desk test chats at half the price; Haiku 5.5 was cheaper but contradicted itself
+    model: process.env.ASSISTANT_MODEL || 'claude-sonnet-5-5', max_tokens: 4000, max_iterations: 8,
+    system: [{ type: 'text', text: systemPrompt(t), cache_control: { type: 'ephemeral' } }, { type: 'text', text: await aboutChat(t, c) }],
+    messages, tools: chatTools(t, c, origin),
+    output_config: { effort: (process.env.ASSISTANT_EFFORT as 'low' | 'medium' | 'high' | undefined) ?? 'medium' },
     betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default',
   });
-  if (final.stop_reason === 'refusal') return null;
-  return final.content.flatMap((b: any) => (b.type === 'text' ? [b.text] : [])).join('\n').trim() || null;
+  // every model call of this reply (one per tool round) is counted, so the clinic can see what a conversation costs
+  const used: Usage = { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let final: Anthropic.Beta.BetaMessage | undefined;
+  for await (const m of runner) {
+    final = m as Anthropic.Beta.BetaMessage;
+    used.calls++; used.input += m.usage?.input_tokens ?? 0; used.output += m.usage?.output_tokens ?? 0;
+    used.cacheRead += m.usage?.cache_read_input_tokens ?? 0; used.cacheWrite += m.usage?.cache_creation_input_tokens ?? 0;
+  }
+  if (!final || final.stop_reason === 'refusal') return { text: null, used };
+  return { text: final.content.flatMap((b: any) => (b.type === 'text' ? [b.text] : [])).join('\n').trim() || null, used };
 }
+
+export type Usage = { calls: number; input: number; output: number; cacheRead: number; cacheWrite: number };
+const addUsage = (a: Partial<Usage> | null | undefined, b: Usage): Usage & { replies: number } =>
+  ({ replies: ((a as any)?.replies ?? 0) + 1, calls: (a?.calls ?? 0) + b.calls, input: (a?.input ?? 0) + b.input, output: (a?.output ?? 0) + b.output, cacheRead: (a?.cacheRead ?? 0) + b.cacheRead, cacheWrite: (a?.cacheWrite ?? 0) + b.cacheWrite });
 
 /** Write an outgoing line: kept on the chat, and queued for WhatsApp unless this is the in-app test chat. */
 export async function say(tx: Tx, t: Tenant, c: Chat, body: string, by: string, simulate: boolean) {
@@ -209,10 +252,13 @@ export async function handleIncoming(t: Tenant, inp: { phone: string; text: stri
     await say(tx, t, got, OFF_REPLY, BY, !!inp.simulate);
   });
   if (!assistantReady(t)) { await handOff('Assistant is off'); return { chatId: got.id, status: 'staff' }; }
-  const lines = await inTenant(t, (tx) => tx.select({ direction: chatMessage.direction, body: chatMessage.body }).from(chatMessage).where(eq(chatMessage.chatId, got.id)).orderBy(desc(chatMessage.createdAt)).limit(20));
-  let reply: string | null;
-  try { reply = await askClaude(t, got, lines.reverse(), inp.origin); }
-  catch (e) { console.warn('assistant failed', (e as Error).message); reply = null; }
+  // Only this conversation: lines from the last 12 hours. Older ones speak of another "today" and "tomorrow"; the patient record carries what lasts.
+  const since = new Date(Date.now() - 12 * 3600_000).toISOString();
+  const lines = await inTenant(t, (tx) => tx.select({ direction: chatMessage.direction, body: chatMessage.body }).from(chatMessage).where(and(eq(chatMessage.chatId, got.id), gt(chatMessage.createdAt, since))).orderBy(desc(chatMessage.createdAt)).limit(20));
+  let reply: string | null = null; let used: Usage | null = null;
+  try { ({ text: reply, used } = await askClaude(t, got, lines.reverse(), inp.origin)); }
+  catch (e) { console.warn('assistant failed', (e as Error).message); }
+  if (used) { const u = used; await inTenant(t, async (tx) => { const c = (await tx.select({ usage: chat.usage }).from(chat).where(eq(chat.id, got.id)))[0]; await tx.update(chat).set({ usage: addUsage(c?.usage as any, u) }).where(eq(chat.id, got.id)); }); }
   if (!reply) { await handOff('The assistant could not answer'); return { chatId: got.id, status: 'staff' }; }
   const status = await inTenant(t, async (tx) => {
     const c = (await tx.select().from(chat).where(eq(chat.id, got.id)))[0];

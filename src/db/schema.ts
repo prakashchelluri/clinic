@@ -233,6 +233,7 @@ export const chat = pgTable('chat', {
   reason: text('reason'),                               // why the front desk is needed
   lastAt: ts('last_at').notNull().defaultNow(),
   unread: integer('unread').notNull().default(0),       // patient lines since staff last opened it
+  usage: jsonb('usage'),                                // AI tokens so far: { replies, calls, input, output, cacheRead, cacheWrite }
 }, (t) => [uniqueIndex('chat_phone').on(t.tenantId, t.phone), index('chat_last').on(t.tenantId, t.lastAt)]);
 export const chatMessage = pgTable('chat_message', {
   ...tenantCols,
