@@ -46,14 +46,22 @@ test('booking: not into a time that is over, not into an hour the doctor is away
   await owner('POST', '/calendar/blocks', { practitionerId: doc, day: later, startTime: '06:00', endTime: '07:00', kind: 'leave', note: 'leave' });
   assert.equal((await owner('POST', '/appointments', { sessionId: away.id, patientId: p1, overbook: true })).body.code, 'DOCTOR_AWAY');
 
-  // one upcoming booking at a time: the second is refused and says where the first one is
+  // a second visit on another day: the desk is told where the first one is, and books it only on "Book another visit"
   const open = (await owner('POST', '/sessions', { branchId, practitionerId: doc, day: later, startTime: '07:00', endTime: '08:00', capacity: 5 })).body;
   const open2 = (await owner('POST', '/sessions', { branchId, practitionerId: doc, day: addDays(later, 1), startTime: '07:00', endTime: '08:00', capacity: 5 })).body;
-  assert.equal((await desk('POST', '/appointments', { sessionId: open.id, patientId: p1 })).status, 200);
+  const sameDay = (await owner('POST', '/sessions', { branchId, practitionerId: doc, day: later, startTime: '08:00', endTime: '09:00', capacity: 5 })).body;
+  const first = await desk('POST', '/appointments', { sessionId: open.id, patientId: p1 }); assert.equal(first.status, 200);
   const twice = await desk('POST', '/appointments', { sessionId: open2.id, patientId: p1 });
   assert.equal(twice.status, 409); assert.equal(twice.body.code, 'ALREADY_BOOKED');
-  assert.equal(twice.body.day, later); assert.equal(twice.body.startTime, '07:00');
-  // a known caller booked as "new" (same mobile and name) is the same patient: refused too
+  assert.equal(twice.body.day, later); assert.equal(twice.body.startTime, '07:00'); assert.equal(twice.body.id, first.body.id);
+  const second = await desk('POST', '/appointments', { sessionId: open2.id, patientId: p1, another: true });
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  // never two on one day, even when asked: neither booked nor moved there
+  const sameDayBook = await desk('POST', '/appointments', { sessionId: sameDay.id, patientId: p1, another: true });
+  assert.equal(sameDayBook.body.code, 'BOOKED_THAT_DAY'); assert.equal(sameDayBook.body.id, first.body.id);
+  assert.equal((await desk('PATCH', `/appointments/${second.body.id}`, { sessionId: sameDay.id })).body.code, 'BOOKED_THAT_DAY');
+  assert.equal((await desk('PATCH', `/appointments/${first.body.id}`, { sessionId: sameDay.id })).status, 200, 'a visit moves within its own day');
+  // a known caller booked as "new" (same mobile and name) is the same patient: asked too
   const p2 = (await desk('POST', '/patients?force=1', { fullName: 'Caller Rules', phone: '9000011122' })).body.id;
   assert.equal((await desk('POST', '/appointments', { sessionId: open.id, patientId: p2 })).status, 200);
   assert.equal((await desk('POST', '/appointments', { sessionId: open2.id, newPatient: { fullName: 'caller rules', phone: '9000011122' } })).body.code, 'ALREADY_BOOKED');

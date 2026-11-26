@@ -5,7 +5,7 @@ import { db, withTenant, type Tx } from '../db/index.js';
 import { tenant, appointment, patient, practitioner, service, session, visit, OPEN_STATUSES, HOLDS_PLACE } from '../db/schema.js';
 import { HttpError, type Ctx } from '../lib/auth.js';
 import { emit, nextNumber, todayIn, addDays } from '../lib/core.js';
-import { bookingSettings, hoursUntil, newToken, queueMessage, planReminders, dropReminders, originOf, appointmentView } from '../lib/booking.js';
+import { bookingSettings, hoursUntil, newToken, queueMessage, planReminders, dropReminders, originOf, appointmentView, checkOneADay } from '../lib/booking.js';
 import { windowsForDay } from './scheduling.js';
 import { patientLang } from '../lib/patientText.js';
 
@@ -80,6 +80,7 @@ export async function moveByPatient(tx: Tx, v: View, sessionId: string, origin: 
   if (s.practitionerId !== v.s.practitionerId) throw new HttpError(409, 'SLOT_TAKEN'); // a patient keeps their doctor; reception can hand over
   const day = (await openSlots(tx, v.t, s.day, 1, v.svc, s.practitionerId)).find((d) => d.day === s.day);
   if (!day?.slots.some((x) => x.id === s.id)) throw new HttpError(409, 'SLOT_TAKEN');
+  await checkOneADay(tx, v.t.timezone, v.t.id, v.a.patientId, s.day, true, v.a.id);
   await tx.update(appointment).set({ sessionId: s.id }).where(eq(appointment.id, v.a.id));
   await emit(tx, ctxFor(v.t), 'appointment.moved', 'appointment', v.a.id, { from: v.a.sessionId, to: s.id, by });
   await planReminders(tx, v.t.id, v.a.id, origin);

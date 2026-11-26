@@ -15,7 +15,7 @@ type Chat = typeof chat.$inferSelect;
 type Visit = ReturnType<typeof visitOut>;
 type Lang = 'en' | 'te';
 /** Where the patient is in the menu; kept on the chat for 2 hours. */
-type Flow = { lang: Lang; at: number; step?: 'who' | 'problem' | 'name'; patientId?: string; newName?: string; problem?: string; moving?: string };
+type Flow = { lang: Lang; at: number; step?: 'who' | 'problem' | 'name'; patientId?: string; newName?: string; problem?: string; moving?: string; another?: boolean };
 
 const FLOW_MS = 2 * 3_600_000;
 const TELUGU = /[ఀ-౿]/;
@@ -36,6 +36,8 @@ const TXT = {
     moved: (v: Visit, d: string, early: number) => `Changed: ${v.patient}, now ${d}, ${win(v.window)} with ${v.doctor}. Please come ${early} minutes before your time.`,
     full: 'Sorry, that time has just filled up. Please choose another.',
     already: (v: Visit, d: string) => `${v.patient} already has a visit on ${d}, ${win(v.window)}.`,
+    hasVisit: (v: Visit, d: string) => `${v.patient} already has a visit on ${d}, ${win(v.window)}. Book another visit, or change this one?`,
+    another: 'Book another', thatDay: 'There is already a visit on that day. Please choose another day.',
     card: (v: Visit, d: string) => `${v.patient}: ${d}, ${win(v.window)} with ${v.doctor}.`,
     confirm: 'Confirm', move: 'Change time', cancel: 'Cancel visit',
     noVisit: 'You have no upcoming visit.', which: 'Which visit?',
@@ -59,6 +61,8 @@ const TXT = {
     moved: (v: Visit, d: string, early: number) => `మార్చాము: ${v.patient}, ఇప్పుడు ${d}, ${win(v.window)}, ${v.doctor}. దయచేసి మీ సమయానికి ${early} నిమిషాల ముందు రండి.`,
     full: 'క్షమించండి, ఆ సమయం ఇప్పుడే నిండిపోయింది. దయచేసి మరొకటి ఎంచుకోండి.',
     already: (v: Visit, d: string) => `${v.patient} గారికి ఇప్పటికే ${d}, ${win(v.window)} అపాయింట్‌మెంట్ ఉంది.`,
+    hasVisit: (v: Visit, d: string) => `${v.patient} గారికి ఇప్పటికే ${d}, ${win(v.window)} అపాయింట్‌మెంట్ ఉంది. ఇంకొకటి బుక్ చేయాలా, లేదా దీన్ని మార్చాలా?`,
+    another: 'ఇంకొకటి బుక్', thatDay: 'ఆ రోజు ఇప్పటికే అపాయింట్‌మెంట్ ఉంది. దయచేసి మరో రోజు ఎంచుకోండి.',
     card: (v: Visit, d: string) => `${v.patient}: ${d}, ${win(v.window)}, ${v.doctor}.`,
     confirm: 'కన్ఫర్మ్', move: 'సమయం మార్చండి', cancel: 'రద్దు చేయండి',
     noVisit: 'మీకు రాబోయే అపాయింట్‌మెంట్ లేదు.', which: 'ఏ అపాయింట్‌మెంట్?',
@@ -104,7 +108,10 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
     const family = await patientsOn(tx, t, c.phone);
 
     const sendDays = async () => {
-      const days = await openWindows(tx, t, c.phone, today, 7, flow.moving);
+      // days this person already has a visit are left out: never two on one day
+      const pid = flow.moving ? (await view(flow.moving)).patient_id : flow.patientId;
+      const taken = new Set(pid ? (await myVisits(tx, t, c.phone)).filter((v) => v.patient_id === pid && v.appointment_id !== flow.moving).map((v) => v.date) : []);
+      const days = (await openWindows(tx, t, c.phone, today, 7, flow.moving)).filter((d) => !taken.has(d.date));
       if (!days.length) {
         await tx.update(chat).set({ status: 'staff', reason: 'No open times in the next 7 days' }).where(eq(chat.id, c.id)); status = 'staff';
         flow = { lang, at: Date.now() };
@@ -120,18 +127,27 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
       ];
       return opts.length ? send(L.card(v, dayLabel(v.date)), { kind: 'buttons', options: opts }) : send(`${L.card(v, dayLabel(v.date))} ${L.locked}`);
     };
+    /** This person already has a visit: book another (a different day), or change or cancel that one. */
+    const hasVisit = (v: Visit) => send(L.hasVisit(v, dayLabel(v.date)), { kind: 'buttons', options: [
+      { id: `ba:${v.patient_id}`, title: L.another },
+      ...(v.can_move ? [{ id: `mv:${v.appointment_id}`, title: L.move }] : []),
+      ...(v.can_cancel ? [{ id: `x:${v.appointment_id}`, title: L.cancel }] : []),
+    ] });
+    /** For whom? Asked whenever the number has someone registered: a parent books for a child from the same phone. */
     const startBooking = async () => {
       flow = { lang, at: Date.now() };
-      if (family.length > 1) { flow.step = 'who'; return send(L.who, { kind: 'list', button: L.choose, options: [...family.map((p) => ({ id: `p:${p.id}`, title: p.fullName })), { id: 'p:new', title: L.someoneElse }] }); }
-      flow.step = 'problem'; flow.patientId = family[0]?.id;
-      return send(L.problem);
+      if (!family.length) { flow.step = 'problem'; return send(L.problem); }
+      const opts = [...family.map((p) => ({ id: `p:${p.id}`, title: p.fullName })), { id: 'p:new', title: L.someoneElse }];
+      flow.step = 'who';
+      return send(L.who, opts.length <= 3 ? { kind: 'buttons', options: opts } : { kind: 'list', button: L.choose, options: opts.slice(0, 10) });
     };
     /** A change from a tap; the clinic's rules refuse it with an HttpError, which becomes a plain answer. */
     const attempt = async (fn: (sp: Tx) => Promise<unknown>): Promise<boolean> => {
       try { await tx.transaction(fn); return true; }
       catch (e: any) {
         if (!(e instanceof HttpError)) throw e;
-        if (e.message === 'ALREADY_BOOKED' && e.extra?.appointment_id) { const v = await view(String(e.extra.appointment_id)); flow = { lang, at: Date.now() }; await send(L.already(v, dayLabel(v.date))); await card(v); }
+        if (e.message === 'ALREADY_BOOKED' && e.extra?.appointment_id) { const v = await view(String(e.extra.appointment_id)); flow = { lang, at: Date.now(), problem: flow.problem }; await hasVisit(v); }
+        else if (e.message === 'BOOKED_THAT_DAY') { await send(L.thatDay); await sendDays(); }
         else if (/WINDOW/.test(e.message)) { await send(L.full); await sendDays(); }
         else if (e.message === 'IN_CLINIC_NOW') { flow = { lang, at: Date.now() }; await send(L.inClinic); }
         else if (e.message === 'NAME_NEEDED') { flow.step = 'name'; await send(L.name); }
@@ -160,8 +176,17 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
       else if (visits.length === 1) await card(visits[0]);
       else await send(L.which, { kind: 'list', button: L.choose, options: visits.slice(0, 10).map((v) => ({ id: `v:${v.appointment_id}`, title: v.patient, description: `${dayLabel(v.date)}, ${win(v.window)}` })) });
     } else if (kind === 'p') {
-      flow.patientId = arg !== 'new' && family.some((p) => p.id === arg) ? arg : undefined; flow.step = 'problem';
-      await send(L.problem);
+      flow.patientId = arg !== 'new' && family.some((p) => p.id === arg) ? arg : undefined;
+      const theirs = flow.patientId ? (await myVisits(tx, t, c.phone)).filter((v) => v.patient_id === flow.patientId) : [];
+      if (theirs.length) { flow.step = undefined; await hasVisit(theirs[0]); }
+      else { flow.step = 'problem'; await send(L.problem); }
+    } else if (kind === 'ba') {
+      // "Book another": a second visit on another day for this person (the problem, if already given, is kept)
+      if (!family.some((p) => p.id === arg)) await startBooking();
+      else {
+        flow = { lang, at: Date.now(), patientId: arg, another: true, problem: flow.problem };
+        if (flow.problem) await sendDays(); else { flow.step = 'problem'; await send(L.problem); }
+      }
     } else if (kind === 'd') {
       const day = (await openWindows(tx, t, c.phone, arg, 1, flow.moving))[0];
       if (!day) { await send(L.full); await sendDays(); }
@@ -175,7 +200,7 @@ export async function menuTurn(t: Tenant, c: Chat, inp: { text: string; action?:
       } else if (!flow.patientId && !flow.newName) await startBooking(); // the steps before were lost (over 2 hours ago)
       else {
         await attempt(async (sp) => {
-          const v = await noteVisit(sp, t, c.id, 'Booked', await bookFromChat(sp, t, c.phone, arg, { patientId: flow.patientId, newName: flow.newName, reason: flow.problem }, origin));
+          const v = await noteVisit(sp, t, c.id, 'Booked', await bookFromChat(sp, t, c.phone, arg, { patientId: flow.patientId, newName: flow.newName, reason: flow.problem, another: flow.another }, origin));
           flow = { lang, at: Date.now() }; await send(L.booked(v, dayLabel(v.date), early));
         });
       }

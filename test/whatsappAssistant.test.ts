@@ -112,7 +112,16 @@ test('assistant tools: only the visits on this number; book, move, confirm, canc
   assert.equal(row.source, 'whatsapp'); assert.equal(row.note, 'itching on hands', 'the reason is kept for the front desk and doctor');
   const events = await inT((tx) => tx.select().from(schema.chatMessage).where(and(eq(schema.chatMessage.chatId, c.id), eq(schema.chatMessage.direction, 'event'))));
   assert.equal(events.length, 1); assert.match(events[0].body, /^Booked .+'s visit: /, 'what the assistant did is kept in the chat');
-  assert.equal((await call(c, 'book_visit', { window_id: windows[1].window_id, patient_id: mine.id })).error, 'ALREADY_BOOKED', 'one upcoming visit at a time');
+  // never two on one day; another day only when the patient chose to add it
+  const sameDay = times.find((d: any) => d.date === booked.date).windows.find((w: any) => w.window_id !== windows[0].window_id);
+  if (sameDay) assert.equal((await call(c, 'book_visit', { window_id: sameDay.window_id, patient_id: mine.id, another: true })).error, 'BOOKED_THAT_DAY');
+  const otherDay = times.find((d: any) => d.date !== booked.date)?.windows[0];
+  assert.ok(otherDay, 'a second open day: ' + JSON.stringify(times.map((d: any) => d.date)));
+  const asked = await call(c, 'book_visit', { window_id: otherDay.window_id, patient_id: mine.id });
+  assert.equal(asked.error, 'ALREADY_BOOKED'); assert.equal(asked.appointment_id, booked.appointment_id, 'names the visit they have');
+  const second = await call(c, 'book_visit', { window_id: otherDay.window_id, patient_id: mine.id, another: true });
+  assert.ok(second.appointment_id, JSON.stringify(second)); assert.equal(second.date, otherDay && times.find((d: any) => d.windows.includes(otherDay)).date);
+  assert.equal((await call(c, 'cancel_visit', { appointment_id: second.appointment_id })).status, 'cancelled');
 
   const moveTo = (await call(c, 'open_times', { from: tomorrow(), days: 3, appointment_id: booked.appointment_id })).flatMap((d: any) => d.windows)[0];
   const moved = await call(c, 'move_visit', { appointment_id: booked.appointment_id, window_id: moveTo.window_id });
@@ -181,6 +190,48 @@ test('tap-to-book: greeting menu, problem, name, day list, time list, booked; My
   await tap((await last()).options, (x) => x.id === 'm:book');
   await R('POST', '/chats/simulate', { phone, text: 'How much is the fee?' });
   assert.equal((await chatOf(phone)).status, 'staff');
+});
+
+test('tap-to-book with a visit already booked: "who is it for?", Book another (not on the same day), and a family member on the same phone', async () => {
+  const R = as(await login('reception@demo.clinic'));
+  const phone = '9848088888';
+  const last = async () => { const c = await chatOf(phone); return (await linesOf(c.id)).filter((l: any) => l.direction === 'out').at(-1); };
+  const tap = async (pick: (x: any) => boolean) => { const o = (await last()).options; const x = o?.options.find(pick); assert.ok(x, JSON.stringify(o)); await R('POST', '/chats/simulate', { phone, text: x.title, action: x.id }); };
+  const say = (text: string) => R('POST', '/chats/simulate', { phone, text });
+  const visitsOf = (pid: string) => inT((tx) => tx.select({ id: schema.appointment.id, day: schema.session.day, status: schema.appointment.status }).from(schema.appointment)
+    .innerJoin(schema.session, eq(schema.session.id, schema.appointment.sessionId)).where(eq(schema.appointment.patientId, pid)));
+
+  // Mother is registered and already booked through the desk
+  const mother = (await R('POST', '/patients', { fullName: 'Sita Devi', phone })).body;
+  const free = (await R('GET', '/calendar/free?days=7')).body;
+  const firstDay = free[0];
+  assert.equal((await R('POST', '/appointments', { sessionId: firstDay.sessionId, patientId: mother.id, notify: false })).status, 200);
+
+  await say('Hi'); await tap((x) => x.id === 'm:book');
+  let out = await last();
+  assert.match(out.body, /Who is the visit for/); assert.deepEqual(out.options.options.map((x: any) => x.title), ['Sita Devi', 'Someone else'], 'asked even with one person on the number');
+  await tap((x) => x.title === 'Sita Devi');
+  out = await last();
+  assert.match(out.body, /^Sita Devi already has a visit on .+ Book another visit, or change this one\?$/);
+  assert.ok(out.options.options[0].id.startsWith('ba:'), JSON.stringify(out.options));
+  await tap((x) => x.id.startsWith('ba:'));
+  assert.match((await last()).body, /see the doctor about/);
+  await say('Follow-up for the rash');
+  out = await last();
+  const bookedDay = (await visitsOf(mother.id))[0].day;
+  assert.ok(!out.options.options.some((x: any) => x.id === `d:${bookedDay}`), 'the day she is already booked is not offered');
+  await tap((x) => x.id.startsWith('d:'));
+  await tap((x) => x.id.startsWith('s:'));
+  assert.match((await last()).body, /^Booked: Sita Devi, /);
+  assert.equal((await visitsOf(mother.id)).filter((v: any) => ['booked', 'confirmed'].includes(v.status)).length, 2, 'two visits on two days');
+
+  // her son, from the same phone
+  await say('Hi'); await tap((x) => x.id === 'm:book'); await tap((x) => x.id === 'p:new');
+  await say('Fever and spots'); await say('Ravi');
+  await tap((x) => x.id.startsWith('d:')); await tap((x) => x.id.startsWith('s:'));
+  assert.match((await last()).body, /^Booked: Ravi, /);
+  const people = await inT((tx) => tx.select().from(schema.patient).where(and(eq(schema.patient.tenantId, T.id), eq(schema.patient.phone, phone))));
+  assert.deepEqual(people.map((p: any) => p.fullName).sort(), ['Ravi', 'Sita Devi']);
 });
 
 test('sender: two runs at once send each message once; a reminder long overdue is dropped, not sent', async () => {

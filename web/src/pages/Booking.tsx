@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { get, post, today, uuid, ApiError, errText, useConfig } from '../api';
+import { get, post, patch, today, uuid, ApiError, errText, useConfig } from '../api';
 import { Drawer, Avatar, Chip, Empty, Icon, Skeleton, toast, NumInput, ask } from '../ui';
 import { FlagChips } from '../flags';
 import { normPhone, searchText, looksLikePhone } from '../phone';
@@ -116,18 +116,26 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
   const repeatBad = repeat && (!Number.isInteger(countN) || countN < 2 || countN > 26);
   const phoneBad = !patientId && phone !== '' && !/^\d{10}$/.test(phone);
   const [pFlags, setPFlags] = useState<any>(null);
-  const pickP = (p: any) => { setPatientId(p.id); setName(p.fullName); setPFlags(p.flags); setNewOk(false); };
+  const pickP = (p: any) => { setPatientId(p.id); setName(p.fullName); setPFlags(p.flags); setNewOk(false); setErr(null); setAnother(false); };
+  const [another, setAnother] = useState(false); // the patient has a visit on another day and the desk chose "Book another visit"
   const book = useMutation({
-    mutationFn: (overbook: boolean) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: newName, phone: newPhone || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined,
-      repeat: repeat ? { everyWeeks, count: countN } : undefined, notify, overbook, idempotencyKey: uuid() }),
+    mutationFn: (opt: { overbook?: boolean; another?: boolean }) => post('/appointments', { sessionId: session.id, patientId, newPatient: patientId ? undefined : { fullName: newName, phone: newPhone || undefined }, serviceId: svcId || undefined, note: note.trim() || undefined,
+      repeat: repeat ? { everyWeeks, count: countN } : undefined, notify, overbook: !!opt.overbook, another: !!(opt.another ?? another), idempotencyKey: uuid() }),
     onSuccess: (r: any) => {
       const extra = r.series ? ` · ${r.series.created.length} repeat${r.series.created.length === 1 ? '' : 's'} booked${r.series.skipped.length ? `, ${r.series.skipped.length} not booked (${r.series.skipped.map((s: any) => dayLabel(s.day)).join(', ')})` : ''}` : '';
       toast(`Booked ${r.window.startTime}–${r.window.endTime} · arrive by ${minus(r.window.startTime, r.arriveEarlyMinutes)}${extra}${r.reusedPatient ? ' · on the existing profile' : ''}. ${told(r.whatsapp)}`);
-      setErr(null); setQ(''); setName(''); setPhone(''); setNote(''); setPatientId(undefined); setRepeat(false); setNewOk(false); onDone();
+      setErr(null); setQ(''); setName(''); setPhone(''); setNote(''); setPatientId(undefined); setRepeat(false); setNewOk(false); setAnother(false); onDone();
     },
     onError: (e: any) => setErr(e instanceof ApiError ? e.body : { code: e.message }),
   });
-  const addAnyway = async () => { if (await ask({ title: 'This time is full', body: `Add ${newName || 'this patient'} anyway? It goes over the places set for ${session.startTime}.`, confirmLabel: 'Add anyway', cancelLabel: 'Leave it' })) book.mutate(true); };
+  const addAnyway = async () => { if (await ask({ title: 'This time is full', body: `Add ${newName || 'this patient'} anyway? It goes over the places set for ${session.startTime}.`, confirmLabel: 'Add anyway', cancelLabel: 'Leave it' })) book.mutate({ overbook: true }); };
+  // The patient already has a visit: move that one to this time instead of booking (also the way out when it is on this same day)
+  const moveHere = useMutation({
+    mutationFn: () => patch(`/appointments/${err.id}`, { sessionId: session.id }),
+    onSuccess: () => { toast(`Moved ${name || 'the visit'} to ${dayLabel(session.day)}, ${session.startTime}–${session.endTime}.`); setErr(null); setAnother(false); onDone(); },
+    onError: (e: any) => setErr(e instanceof ApiError ? e.body : { code: e.message }),
+  });
+  const hasVisit = err?.code === 'ALREADY_BOOKED' || err?.code === 'BOOKED_THAT_DAY';
   const arriveBy = minus(session.startTime, arriveEarly);
   return (
     <div className="space-y-3">
@@ -138,11 +146,11 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
           {services.map((s) => <button key={s.id} type="button" role="radio" aria-checked={svcId === s.id} onClick={() => setServiceId(s.id)} className={`toggle-opt inline-flex items-center gap-1.5 ${svcId === s.id ? 'on' : ''}`}><i className="h-2.5 w-2.5 rounded-[3px]" style={{ background: s.color }} />{s.name}</button>)}
         </div>
       )}
-      <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone number or name" className="input !pl-10" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setPatientId(undefined); setNewOk(false); }} /></div>
+      <div className="relative"><Icon name="search" className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" /><input autoFocus aria-label="Phone number or name" className="input !pl-10" maxLength={60} placeholder="Phone number or name" value={q} onChange={(e) => { setQ(e.target.value); setPatientId(undefined); setNewOk(false); setErr(null); setAnother(false); }} /></div>
       {searchErr && <div className="rounded-xl bg-rose-soft px-3 py-2 text-sm text-rose" role="alert">{SEARCH_FAILED}</div>}
       {!patientId && hits.length > 0 && <div className="card-flat overflow-hidden max-h-44 overflow-y-auto anim-fade-up">{hits.map((p: any) => <button key={p.id} className="row w-full text-left" onClick={() => pickP(p)}><Avatar name={p.fullName} size="h-7 w-7 text-[10px]" /><span className="flex-1 text-sm">{whoLine(p)} <FlagChips flags={p.flags} /> <span className="text-muted text-xs">{[p.phone, p.patientNo].filter(Boolean).join(' · ')}</span></span><Icon name="chevR" className="text-muted h-4 w-4" /></button>)}
         <button type="button" aria-pressed={newOk} className={`row w-full text-left text-sm font-semibold ${newOk ? 'bg-sage-soft text-sage' : ''}`} onClick={() => setNewOk(true)}><Icon name="plus" className="h-4 w-4" />{typedPhone ? 'Someone new on this number' : 'Someone new (not in this list)'}</button></div>}
-      {patientId ? <div className="flex items-center gap-2 text-sm bg-sage-soft text-sage rounded-xl px-3 py-2 anim-fade-in"><Icon name="check" className="h-4 w-4" />Booking for <b>{name}</b><FlagChips flags={pFlags} /><button className="btn btn-ghost btn-sm ml-auto" onClick={() => setPatientId(undefined)}>Change</button></div>
+      {patientId ? <div className="flex items-center gap-2 text-sm bg-sage-soft text-sage rounded-xl px-3 py-2 anim-fade-in"><Icon name="check" className="h-4 w-4" />Booking for <b>{name}</b><FlagChips flags={pFlags} /><button className="btn btn-ghost btn-sm ml-auto" onClick={() => { setPatientId(undefined); setErr(null); setAnother(false); }}>Change</button></div>
         : !searchErr && <div className="grid gap-2 sm:grid-cols-[1fr_160px]">
             {typedName ? <div className="input !bg-paper text-muted">New patient: {typedName}</div>
               : <input aria-label="New patient name" className="input" maxLength={100} placeholder="New patient: name" value={name} onChange={(e) => setName(e.target.value)} />}
@@ -159,7 +167,13 @@ export function BookForm({ session, arriveEarly, onDone, initialPatient }: { ses
       </div>
       {repeatBad && <div className="text-xs text-rose -mt-1">Repeat between 2 and 26 visits.</div>}
       {err && <div className="text-xs text-rose anim-fade-in">{err.code === 'WINDOW_FULL' ? <>This time is full. Free times: {err.alternatives.map((a: any) => `${a.startTime} (${a.free})`).join(', ') || 'none today'}.</> : errText({ body: err })}</div>}
-      <div className="modal-foot">{err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={addAnyway}>Add anyway (over the limit)</button>}<button className="btn btn-primary" disabled={book.isPending || (!patientId && (newName.length < 2 || needChoice || searchErr || checking)) || phoneBad || repeatBad} onClick={() => book.mutate(false)}><Icon name="check" />{needChoice ? 'Pick a patient or “Someone new”' : 'Book'}</button></div>
+      <div className="modal-foot">
+        {err?.code === 'WINDOW_FULL' && <button className="btn anim-fade-in" onClick={addAnyway}>Add anyway (over the limit)</button>}
+        {hasVisit && err?.id && <button className="btn anim-fade-in" disabled={moveHere.isPending} onClick={() => moveHere.mutate()}><Icon name="calendar" />Move that visit to this time</button>}
+        {err?.code === 'ALREADY_BOOKED'
+          ? <button className="btn btn-primary anim-fade-in" disabled={book.isPending} onClick={() => { setAnother(true); book.mutate({ another: true }); }}><Icon name="plus" />Book another visit</button>
+          : <button className="btn btn-primary" disabled={book.isPending || err?.code === 'BOOKED_THAT_DAY' || (!patientId && (newName.length < 2 || needChoice || searchErr || checking)) || phoneBad || repeatBad} onClick={() => book.mutate({})}><Icon name="check" />{needChoice ? 'Pick a patient or “Someone new”' : 'Book'}</button>}
+      </div>
     </div>
   );
 }

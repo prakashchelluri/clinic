@@ -56,15 +56,15 @@ test('booking a "new" caller with the same mobile and name reuses the patient; a
   assert.equal(a.body.reusedPatient, false);
   assert.equal(a.body.whatsapp, 'not_connected', 'confirmation is queued but WhatsApp is not connected in tests');
 
-  // same phone + same name → the same record, which already has a booking: refused, pointing at that booking
+  // same phone + same name → the same record, which already has a visit that day: refused, pointing at that booking
   const b = await reception('POST', '/appointments', { sessionId: ws[1].id, newPatient: { fullName: '  meena   RAO ', phone: '098765 11111' } });
   assert.equal(b.status, 409, JSON.stringify(b.body));
-  assert.equal(b.body.code, 'ALREADY_BOOKED');
+  assert.equal(b.body.code, 'BOOKED_THAT_DAY');
   assert.equal(b.body.id, a.body.id, 'the existing booking of the same patient');
 
-  const twice = await reception('POST', '/appointments', { sessionId: ws[0].id, newPatient: { fullName: 'Meena Rao', phone: '9876511111' } });
+  const twice = await reception('POST', '/appointments', { sessionId: ws[0].id, newPatient: { fullName: 'Meena Rao', phone: '9876511111' }, another: true });
   assert.equal(twice.status, 409, 'already booked in that window');
-  assert.equal(twice.body.code, 'ALREADY_BOOKED');
+  assert.equal(twice.body.code, 'BOOKED_THAT_DAY');
 
   const c = await reception('POST', '/appointments', { sessionId: ws[2].id, newPatient: { fullName: 'Arjun Rao', phone: '9876511111' } });
   assert.equal(c.status, 200, JSON.stringify(c.body));

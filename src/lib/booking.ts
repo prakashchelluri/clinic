@@ -1,7 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, ne, or } from 'drizzle-orm';
 import type { Tx } from '../db/index.js';
-import { appointment, message, patient, practitioner, service, session, tenant } from '../db/schema.js';
+import { appointment, message, patient, practitioner, service, session, tenant, OPEN_STATUSES } from '../db/schema.js';
+import { HttpError } from './auth.js';
+import { todayIn } from './core.js';
 import { FALLBACK, TRANSLATED_TEMPLATES, patientLang, type Lang } from './patientText.js';
 
 /** Clinic booking settings with defaults, so a clinic that never opened Settings still works sensibly. */
@@ -54,6 +56,24 @@ export function localToUtc(day: string, time: string, tz: string): Date {
 export const hoursUntil = (day: string, time: string, tz: string, now = new Date()) => (localToUtc(day, time, tz).getTime() - now.getTime()) / 3_600_000;
 
 /** Everything a message or the patient page shows about one appointment. */
+/**
+ * More than one visit per patient, never two on one day. The desk, the patient link and WhatsApp all book through this rule:
+ * a second visit the same day is refused (BOOKED_THAT_DAY: almost always a mistake); one on another day needs `another`
+ * (the desk's "Book another visit", the patient's "Book another"), otherwise ALREADY_BOOKED names the visit they have.
+ * `exceptId` is the visit being moved, so moving it within its own day is fine.
+ */
+export async function checkOneADay(tx: Tx, timezone: string, tenantId: string, patientId: string, day: string, another: boolean, exceptId?: string) {
+  const tz = { today: todayIn(timezone), now: new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()) };
+  const open = await tx.select({ id: appointment.id, day: session.day, startTime: session.startTime, endTime: session.endTime, doctor: practitioner.name })
+    .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(practitioner, eq(practitioner.id, session.practitionerId))
+    .where(and(eq(appointment.tenantId, tenantId), eq(appointment.patientId, patientId), inArray(appointment.status, [...OPEN_STATUSES]),
+      or(gt(session.day, tz.today), and(eq(session.day, tz.today), gt(session.endTime, tz.now))), exceptId ? ne(appointment.id, exceptId) : undefined))
+    .orderBy(asc(session.day), asc(session.startTime));
+  const sameDay = open.find((o) => o.day === day);
+  if (sameDay) throw new HttpError(409, 'BOOKED_THAT_DAY', sameDay);
+  if (open.length && !another) throw new HttpError(409, 'ALREADY_BOOKED', { ...open[0], others: open.length });
+}
+
 export async function appointmentView(tx: Tx, tenantId: string, appointmentId: string) {
   const r = await tx.select({ a: appointment, s: session, p: patient, svc: service, doc: practitioner.name, t: tenant })
     .from(appointment).innerJoin(session, eq(session.id, appointment.sessionId)).innerJoin(patient, eq(patient.id, appointment.patientId))

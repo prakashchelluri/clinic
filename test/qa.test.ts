@@ -102,7 +102,7 @@ test('input rules, duplicates and error hygiene', async () => {
   assert.equal((await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: p.body.id })).body.code, 'IN_VISIT');
   const q = await reception('POST', '/patients', { fullName: 'QA Booker', phone: '9111111122' });
   const b1 = await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: q.body.id }); assert.equal(b1.status, 200, JSON.stringify(b1.body));
-  assert.equal((await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: q.body.id })).body.code, 'ALREADY_BOOKED');
+  assert.equal((await reception('POST', '/appointments', { sessionId: win.sessionId, patientId: q.body.id, another: true })).body.code, 'BOOKED_THAT_DAY', 'never two visits on one day');
   // a broken fee rule is refused on save, and a bad stored rule can never break suggestions
   assert.equal((await owner('POST', '/admin/fee-categories', { code: 'ZZ', name: 'Bad rule', amountPaise: 100, eligibility: { zzz: [1] } })).body.code, 'BAD_RULE');
   assert.equal((await owner('POST', '/admin/fee-categories', { code: 'OK1', name: 'Good rule', amountPaise: 100, eligibility: { '==': [1, 1] } })).status, 200);

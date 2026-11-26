@@ -6,7 +6,7 @@ import type { Tx } from '../db/index.js';
 import { route } from '../lib/route.js';
 import { emit, sent, todayIn, nextNumber, addDays, OPTED_OUT } from '../lib/core.js';
 import { HttpError, can } from '../lib/auth.js';
-import { newToken, queueMessage, planReminders, dropReminders, originOf, bookingSettings } from '../lib/booking.js';
+import { newToken, queueMessage, planReminders, dropReminders, originOf, bookingSettings, checkOneADay } from '../lib/booking.js';
 import { whatsappReady } from '../lib/messaging.js';
 
 /** Same rule as web/src/phone.ts: "+91 98765 43210" or "098765 43210" → "9876543210". */
@@ -407,7 +407,8 @@ export function schedulingRoutes(app: FastifyInstance) {
 
   const ApptIn = z.object({ sessionId: z.string().uuid(), patientId: z.string().uuid().optional(), newPatient: z.object({ fullName: z.string().trim().min(2).max(100), phone: z.preprocess((v) => (typeof v === 'string' ? normPhone(v) || undefined : v), z.string().regex(/^\d{10}$/).optional()) }).optional(),
     serviceId: z.string().uuid().nullable().optional(), note: z.string().trim().max(500).optional(), source: z.enum(['phone', 'walk_in', 'online', 'repeat']).default('phone'), overbook: z.boolean().default(false), idempotencyKey: z.string().max(100).optional(),
-    repeat: z.object({ everyWeeks: z.number().int().min(1).max(12), count: z.number().int().min(2).max(26) }).optional(), notify: z.boolean().default(true) });
+    repeat: z.object({ everyWeeks: z.number().int().min(1).max(12), count: z.number().int().min(2).max(26) }).optional(), notify: z.boolean().default(true),
+    another: z.boolean().default(false) }); // the patient already has a visit on another day and the desk chose "Book another visit"
 
   /** Check a window has room for one more booking of this visit type; throws WINDOW_FULL (with free alternatives) unless overbooking is allowed. */
   async function takePlace(tx: Tx, req: any, s: any, places: number, overbook: boolean) {
@@ -450,13 +451,9 @@ export function schedulingRoutes(app: FastifyInstance) {
       const same = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.tenantId, t), eq(patient.phone, body.newPatient.phone), sql`${sameName} = ${nm}`)).orderBy(asc(patient.createdAt)).limit(1);
       if (same.length) { patientId = same[0].id; reusedPatient = true; }
     }
-    // One booking at a time: a patient with an upcoming booking is moved, not booked again; one being seen today is booked after the visit.
+    // Never two visits on one day; another day only when the desk chose "Book another visit". One being seen today is booked after the visit.
     if (patientId) {
-      const upcoming = await tx.select({ id: appointment.id, day: session.day, startTime: session.startTime, endTime: session.endTime, doctor: practitioner.name }).from(appointment)
-        .innerJoin(session, eq(session.id, appointment.sessionId)).leftJoin(practitioner, eq(practitioner.id, session.practitionerId))
-        .where(and(eq(appointment.tenantId, t), eq(appointment.patientId, patientId), inArray(appointment.status, [...OPEN_STATUSES]), or(sql`${session.day} > ${today}`, and(eq(session.day, today), sql`${session.endTime} > ${now}`))))
-        .orderBy(asc(session.day), asc(session.startTime)).limit(1);
-      if (upcoming.length) throw new HttpError(409, 'ALREADY_BOOKED', upcoming[0]);
+      await checkOneADay(tx, req.ctx.timezone, t, patientId, s.day, body.another);
       const seen = await tx.select({ opNumber: visit.opNumber }).from(visit).where(and(eq(visit.tenantId, t), eq(visit.patientId, patientId), eq(visit.day, today), inArray(visit.status, ['waiting', 'intake', 'in_consult']))).limit(1);
       if (seen.length) throw new HttpError(409, 'IN_VISIT', { opNumber: seen[0].opNumber });
     }
@@ -512,6 +509,8 @@ export function schedulingRoutes(app: FastifyInstance) {
       if (!s) throw new HttpError(404, 'SESSION_NOT_FOUND');
       const today = todayIn(req.ctx.timezone);
       if (s.day < today || (s.day === today && s.endTime <= nowHHMM(req.ctx.timezone))) throw new HttpError(409, 'PAST_WINDOW');
+      // moved onto a day the patient already has another visit: refused, like booking it (the visit itself is left out of the check)
+      await checkOneADay(tx, req.ctx.timezone, t, cur.patientId, s.day, true, cur.id);
       const svc = cur.serviceId ? await tx.select().from(service).where(eq(service.id, cur.serviceId)).then((r) => r[0]) : null;
       const { full } = await takePlace(tx, req, s, svc?.places ?? 1, body.overbook);
       changes.sessionId = s.id; changes.overbooked = full; moved = true;

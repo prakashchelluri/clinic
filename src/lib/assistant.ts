@@ -5,7 +5,7 @@ import { withTenant, type Tx } from '../db/index.js';
 import { appointment, chat, chatMessage, message, patient, practitioner, recommendation, session, visit, waitlist, OPEN_STATUSES } from '../db/schema.js';
 import { HttpError } from './auth.js';
 import { emit, nextNumber, todayIn } from './core.js';
-import { appointmentView, bookingSettings, newToken, planReminders } from './booking.js';
+import { appointmentView, bookingSettings, checkOneADay, newToken, planReminders } from './booking.js';
 import { cancelByPatient, confirmByPatient, ctxFor, moveByPatient, openSlots, patientView } from '../modules/public.js';
 import { menuTurn } from './chatMenu.js';
 
@@ -39,12 +39,12 @@ export async function mine(tx: Tx, t: Tenant, phone: string, appointmentId: stri
 
 export const visitOut = (v: NonNullable<Awaited<ReturnType<typeof appointmentView>>>) => {
   const pv = patientView(v);
-  return { appointment_id: v.a.id, patient: v.p.fullName, date: v.s.day, window: `${v.s.startTime}-${v.s.endTime}`, arrive_by: pv.arriveBy, doctor: v.doc, visit_type: v.svc?.name ?? null,
+  return { appointment_id: v.a.id, patient_id: v.a.patientId, patient: v.p.fullName, date: v.s.day, window: `${v.s.startTime}-${v.s.endTime}`, arrive_by: pv.arriveBy, doctor: v.doc, visit_type: v.svc?.name ?? null,
     status: v.a.status, can_confirm: pv.canConfirm, can_cancel: pv.canCancel, can_move: pv.canReschedule };
 };
 
 /** Book a new visit from WhatsApp: the same rules as the front desk without its overrides (no overbooking, one upcoming visit per patient). */
-export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: string, who: { patientId?: string; newName?: string; reason?: string }, origin: string) {
+export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: string, who: { patientId?: string; newName?: string; reason?: string; another?: boolean }, origin: string) {
   if (!/^[0-9a-f-]{36}$/i.test(windowId)) throw new HttpError(404, 'WINDOW_NOT_FOUND');
   const s = await tx.select().from(session).where(and(eq(session.id, windowId), eq(session.tenantId, t.id))).for('update').then((r) => r[0]);
   if (!s) throw new HttpError(404, 'WINDOW_NOT_FOUND');
@@ -63,10 +63,9 @@ export async function bookFromChat(tx: Tx, t: Tenant, phone: string, windowId: s
       patientId = (await tx.insert(patient).values({ tenantId: t.id, patientNo: `P${String(num).padStart(5, '0')}`, fullName: name, phone }).returning())[0].id;
     }
   }
-  const today = todayIn(t.timezone); const now = nowHHMM(t.timezone);
-  const upcoming = await tx.select({ id: appointment.id }).from(appointment).innerJoin(session, eq(session.id, appointment.sessionId))
-    .where(and(eq(appointment.tenantId, t.id), eq(appointment.patientId, patientId), inArray(appointment.status, [...OPEN_STATUSES]), or(gt(session.day, today), and(eq(session.day, today), gt(session.endTime, now))))).limit(1);
-  if (upcoming.length) throw new HttpError(409, 'ALREADY_BOOKED', { appointment_id: upcoming[0].id });
+  const today = todayIn(t.timezone);
+  try { await checkOneADay(tx, t.timezone, t.id, patientId, s.day, !!who.another); }
+  catch (e: any) { if (e instanceof HttpError && e.extra?.id) e.extra = { appointment_id: e.extra.id, date: e.extra.day }; throw e; } // the ids the assistant and menu use
   const seen = await tx.select({ id: visit.id }).from(visit).where(and(eq(visit.tenantId, t.id), eq(visit.patientId, patientId), eq(visit.day, today), inArray(visit.status, ['waiting', 'intake', 'in_consult']))).limit(1);
   if (seen.length) throw new HttpError(409, 'IN_CLINIC_NOW');
   const [row] = await tx.insert(appointment).values({ tenantId: t.id, patientId, sessionId: s.id, source: 'whatsapp', publicToken: newToken(), note: who.reason?.trim().slice(0, 200) || null }).returning();
@@ -121,9 +120,9 @@ export function chatTools(t: Tenant, c: Chat, origin: string) {
       run: run((tx, i: { from: string; days?: number; appointment_id?: string }) => openWindows(tx, t, c.phone, i.from, Math.min(i.days ?? 3, 7), i.appointment_id)),
     }),
     betaTool({
-      name: 'book_visit', description: 'Book a new visit in a window from open_times. Use patient_id for a patient on this number, or new_patient_name for someone new.',
-      inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string', description: 'In English letters, as the clinic register keeps names (write a Telugu or Hindi name in English letters, e.g. Lakshmi)' }, reason: { type: 'string', description: 'Why the patient is coming, in a few English words for the front desk and doctor (e.g. "pimples on face, 2 months", "review after acne treatment")' } }, required: ['window_id'], additionalProperties: false } as const,
-      run: run(async (tx, i: { window_id: string; patient_id?: string; new_patient_name?: string; reason?: string }) => noted(tx, 'Booked', await bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name, reason: i.reason }, origin))),
+      name: 'book_visit', description: 'Book a new visit in a window from open_times. Use patient_id for a patient on this number, or new_patient_name for someone new. ALREADY_BOOKED means that person has a visit on another day (given): tell the patient and ask whether to move that one or keep it and add this one; only after they say add, call again with another: true. BOOKED_THAT_DAY means they already have a visit that day: offer another day.',
+      inputSchema: { type: 'object', properties: { window_id: { type: 'string' }, patient_id: { type: 'string' }, new_patient_name: { type: 'string', description: 'In English letters, as the clinic register keeps names (write a Telugu or Hindi name in English letters, e.g. Lakshmi)' }, reason: { type: 'string', description: 'Why the patient is coming, in a few English words for the front desk and doctor (e.g. "pimples on face, 2 months", "review after acne treatment")' }, another: { type: 'boolean', description: 'True only when the patient chose to keep their other visit and add this one' } }, required: ['window_id'], additionalProperties: false } as const,
+      run: run(async (tx, i: { window_id: string; patient_id?: string; new_patient_name?: string; reason?: string; another?: boolean }) => noted(tx, 'Booked', await bookFromChat(tx, t, c.phone, i.window_id, { patientId: i.patient_id, newName: i.new_patient_name, reason: i.reason, another: i.another }, origin))),
     }),
     betaTool({
       name: 'confirm_visit', description: 'Mark an upcoming visit as confirmed by the patient.',
